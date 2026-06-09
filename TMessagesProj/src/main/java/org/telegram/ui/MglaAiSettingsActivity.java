@@ -5,15 +5,23 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.drawable.GradientDrawable;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 public class MglaAiSettingsActivity extends BaseFragment {
 
@@ -56,7 +64,8 @@ public class MglaAiSettingsActivity extends BaseFragment {
         LinearLayout block2 = createBlock(context);
         addSwitchRow(block2, "Краткая Сводка", "ai_summary", true);
         addSwitchRow(block2, "Пересказ сообщений", "ai_retell", true);
-        addSwitchRow(block2, "AI-редактор", "ai_editor", false);
+        addSwitchRow(block2, "AI-редактор", "ai_editor", true);
+        addLimitRow(block2, "Лимит AI-редактора", 50);
         rootLayout.addView(block2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         fragmentView = rootLayout;
@@ -83,5 +92,32 @@ public class MglaAiSettingsActivity extends BaseFragment {
             cell.setChecked(newValue);
         });
         block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
+
+    private void addLimitRow(LinearLayout block, String title, int maxRequests) {
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+        String savedDate = prefs.getString("ai_editor_date", "");
+        int used = today.equals(savedDate) ? prefs.getInt("ai_editor_count", 0) : 0;
+        int remaining = Math.max(0, maxRequests - used);
+
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(21), 0, dp(21), dp(4));
+        row.setMinimumHeight(dp(50));
+
+        TextView titleView = new TextView(getContext());
+        titleView.setText(title);
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        row.addView(titleView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL));
+
+        TextView valueView = new TextView(getContext());
+        valueView.setText(used + " / " + maxRequests);
+        valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        row.addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        block.addView(row);
     }
 }

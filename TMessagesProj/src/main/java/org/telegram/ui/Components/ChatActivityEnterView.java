@@ -157,6 +157,7 @@ import org.telegram.tgnet.tl.TL_account;
 import org.telegram.tgnet.tl.TL_bots;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.AiAssistant;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
 import org.telegram.ui.ActionBar.ActionBarPopupWindow;
 import org.telegram.ui.ActionBar.AdjustPanLayoutHelper;
@@ -587,6 +588,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     private ActionBarPopupWindow.ActionBarPopupWindowLayout sendPopupLayout;
     private ImageView cancelBotButton;
     private ChatActivityEnterViewAnimatedIconView emojiButton;
+    private ImageView aiEditorButton;
     @Nullable
     private ImageView expandStickersButton;
     private boolean emojiViewFrozen;
@@ -2704,6 +2706,63 @@ public class ChatActivityEnterView extends FrameLayout implements
         });
         messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 2, 0, 0, 0));
         setEmojiButtonImage(false, false);
+
+        // AI Editor robot button (to the right of emoji)
+        boolean aiEditorEnabled = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_editor", false);
+        if (aiEditorEnabled) {
+            aiEditorButton = new ImageView(context);
+            aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
+            aiEditorButton.setImageResource(R.drawable.input_bot2);
+            aiEditorButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
+            aiEditorButton.setBackground(Theme.createInsetRoundRectDrawable(getThemedColor(Theme.key_listSelector), dp(19), dp(1), dp(3)));
+            int aiBtnPadding = dp(10);
+            aiEditorButton.setPadding(aiBtnPadding, aiBtnPadding, aiBtnPadding, aiBtnPadding);
+            aiEditorButton.setContentDescription("AI-редактор");
+            aiEditorButton.setClickable(true);
+            aiEditorButton.setFocusable(true);
+            aiEditorButton.setOnClickListener(v -> {
+                if (messageEditText == null || parentFragment == null) return;
+                String text = messageEditText.getText().toString();
+                if (TextUtils.isEmpty(text.trim())) return;
+
+                AlertDialog.Builder menu = new AlertDialog.Builder(parentFragment.getParentActivity());
+                menu.setTitle("AI-редактор");
+                menu.setItems(new CharSequence[]{"Исправить ошибки", "Укоротить", "Переделать в спокойное"}, new int[]{R.drawable.menu_proofread, R.drawable.msg_forward, R.drawable.menu_rewrite}, (dialog, which) -> {
+                    String prompt;
+                    switch (which) {
+                        case 0: prompt = "Исправь орфографические и грамматические ошибки в следующем тексте. Не ставь точку в конце. Верни ТОЛЬКО исправленный текст:\n\n"; break;
+                        case 1: prompt = "Сократи следующий текст, сделав его более кратким, но сохранив основной смысл. Не ставь точку в конце. Верни ТОЛЬКО сокращённый текст:\n\n"; break;
+                        case 2: prompt = "Перепиши следующий текст в спокойном, доброжелательном тоне. Убери любую агрессию, негатив, раздражение. Пиши неформально, разговорно, как в обычной дружеской переписке. Не ставь точку в конце. Верни ТОЛЬКО переписанный текст:\n\n"; break;
+                        default: return;
+                    }
+                    if (!checkAiLimit()) return;
+                    aiEditorButton.setEnabled(false);
+                    aiEditorButton.setAlpha(0.5f);
+
+                    AiAssistant.getInstance().sendMessage(prompt + text,
+                        new AiAssistant.AiCallback() {
+                            @Override
+                            public void onResponse(String edited) {
+                                if (messageEditText != null) {
+                                    messageEditText.setText(edited.trim());
+                                    messageEditText.setSelection(messageEditText.length());
+                                }
+                                aiEditorButton.setEnabled(true);
+                                aiEditorButton.setAlpha(1.0f);
+                            }
+
+                            @Override
+                            public void onError(String error) {
+                                aiEditorButton.setEnabled(true);
+                                aiEditorButton.setAlpha(1.0f);
+                            }
+                        }
+                    );
+                });
+                parentFragment.showDialog(menu.create());
+            });
+            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 58, 0, 0, 0));
+        }
 
         if (isChat) {
             attachLayout = new LinearLayout(context) {
@@ -5614,7 +5673,14 @@ public class ChatActivityEnterView extends FrameLayout implements
         messageEditText.setHintTextColor(getThemedColor(Theme.key_chat_messagePanelHint));
         messageEditText.setCursorColor(getThemedColor(Theme.key_chat_messagePanelCursor));
         messageEditText.setHandlesColor(getThemedColor(Theme.key_chat_TextSelectionCursor));
-        messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, 52, 0, isChat ? 50 : 2, 1.5f));
+        int msgLeftMargin = 52;
+        if (aiEditorButton != null) {
+            msgLeftMargin += DEFAULT_HEIGHT + dp(12) + dp(1) - dp(3);
+        }
+        messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, isChat ? 50 : 2, 1.5f));
+        if (aiEditorButton != null) {
+            aiEditorButton.bringToFront();
+        }
         messageEditText.setOnKeyListener(new OnKeyListener() {
 
             @Override
@@ -12285,6 +12351,45 @@ public class ChatActivityEnterView extends FrameLayout implements
         return "" + dialog_id;
     }
 
+    private static final int AI_EDITOR_DAILY_LIMIT = 50;
+
+    private boolean checkAiLimit() {
+        SharedPreferences prefs = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date());
+        String savedDate = prefs.getString("ai_editor_date", "");
+        int count;
+        if (!today.equals(savedDate)) {
+            count = 1;
+            prefs.edit().putString("ai_editor_date", today).putInt("ai_editor_count", 1).apply();
+        } else {
+            count = prefs.getInt("ai_editor_count", 0) + 1;
+            if (count > AI_EDITOR_DAILY_LIMIT) {
+                if (parentFragment != null && parentFragment.getParentActivity() != null) {
+                    java.util.Calendar now = java.util.Calendar.getInstance();
+                    java.util.Calendar midnight = java.util.Calendar.getInstance();
+                    midnight.set(java.util.Calendar.HOUR_OF_DAY, 0);
+                    midnight.set(java.util.Calendar.MINUTE, 0);
+                    midnight.set(java.util.Calendar.SECOND, 0);
+                    midnight.set(java.util.Calendar.MILLISECOND, 0);
+                    midnight.add(java.util.Calendar.DAY_OF_MONTH, 1);
+                    long diffMs = midnight.getTimeInMillis() - now.getTimeInMillis();
+                    long hours = diffMs / (1000 * 60 * 60);
+                    long minutes = (diffMs / (1000 * 60)) % 60;
+                    String timeLeft = hours + " ч " + minutes + " мин";
+
+                    new AlertDialog.Builder(parentFragment.getParentActivity())
+                        .setTitle("Запросы закончились")
+                        .setMessage("Достигнут лимит: " + AI_EDITOR_DAILY_LIMIT + " запросов.\nДо сброса: " + timeLeft)
+                        .setPositiveButton("OK", null)
+                        .show();
+                }
+                return false;
+            }
+            prefs.edit().putInt("ai_editor_count", count).apply();
+        }
+        return true;
+    }
+
     private void setEmojiButtonImage(boolean byOpen, boolean animated) {
         if (emojiButton == null) {
             return;
@@ -13828,23 +13933,42 @@ public class ChatActivityEnterView extends FrameLayout implements
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int wasHeight = textFieldContainer.getMeasuredHeight();
+        int leftGap = dp(12), rightGap = (int) dpf2(1);
         if (botCommandsMenuButton != null && botCommandsMenuButton.getTag() != null) {
             botCommandsMenuButton.measure(widthMeasureSpec, heightMeasureSpec);
-            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = dp(10) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
+            int emojiMargin = dp(10) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
+            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = emojiMargin;
             if (messageEditText != null) {
-                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = dp(57) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
+                int mlm = dp(57) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
+                if (aiEditorButton != null) mlm += DEFAULT_HEIGHT + leftGap + rightGap - dp(3);
+                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = mlm;
+            }
+            if (aiEditorButton != null) {
+                ((MarginLayoutParams) aiEditorButton.getLayoutParams()).leftMargin = emojiMargin + DEFAULT_HEIGHT + leftGap;
             }
         } else if (senderSelectView != null && senderSelectView.getVisibility() == View.VISIBLE) {
             int width = senderSelectView.getLayoutParams().width, height = senderSelectView.getLayoutParams().height;
             senderSelectView.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
-            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = dp(16) + width;
+            int emojiMargin = dp(16) + width;
+            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = emojiMargin;
             if (messageEditText != null) {
-                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = dp(63) + width;
+                int mlm = dp(63) + width;
+                if (aiEditorButton != null) mlm += DEFAULT_HEIGHT + leftGap + rightGap - dp(3);
+                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = mlm;
+            }
+            if (aiEditorButton != null) {
+                ((MarginLayoutParams) aiEditorButton.getLayoutParams()).leftMargin = emojiMargin + DEFAULT_HEIGHT + leftGap;
             }
         } else {
-            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = dp(3);
+            int emojiMargin = dp(3);
+            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = emojiMargin;
             if (messageEditText != null) {
-                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = dp(50);
+                int mlm = dp(50);
+                if (aiEditorButton != null) mlm += DEFAULT_HEIGHT + leftGap + rightGap - dp(3);
+                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = mlm;
+            }
+            if (aiEditorButton != null) {
+                ((MarginLayoutParams) aiEditorButton.getLayoutParams()).leftMargin = emojiMargin + DEFAULT_HEIGHT + leftGap;
             }
         }
         updateBotCommandsMenuContainerTopPadding();
