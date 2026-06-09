@@ -62,7 +62,6 @@ android {
             debuggable true
             jniDebuggable true
             signingConfig signingConfigs.debug
-            applicationIdSuffix ".beta"
             minifyEnabled false
             shrinkResources false
             multiDexEnabled true
@@ -74,7 +73,6 @@ android {
             debuggable false
             jniDebuggable false
             signingConfig signingConfigs.release
-            applicationIdSuffix ".web"
             minifyEnabled true
             shrinkResources false
             multiDexEnabled true
@@ -174,7 +172,7 @@ android {
         minSdkVersion 21
         targetSdkVersion 35
         versionName APP_VERSION_NAME
-        ndkVersion "27.2.12479018"
+        ndkVersion "29.0.14206865"
 
         multiDexEnabled true
 

@@ -615,6 +615,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
 
         items.add(UItem.asCustomShadow(topView, 200 - 12));
 
+        items.add(SettingCell.Factory.of(100, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, "Настройки Mgla"));
+        items.add(UItem.asShadow(null));
+
         accountNumbers.clear();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (UserConfig.getInstance(a).isClientActivated() && currentAccount != a) {
@@ -811,6 +814,10 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 break;
             case 10:
                 presentFragment(new LanguageSelectActivity());
+                break;
+
+            case 100:
+                presentFragment(new MglaSettingsActivity());
                 break;
 
             case 11:
