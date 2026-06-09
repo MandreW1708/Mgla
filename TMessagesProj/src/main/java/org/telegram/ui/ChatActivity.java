@@ -74,6 +74,8 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.style.CharacterStyle;
 import android.text.style.ClickableSpan;
+import android.text.style.StyleSpan;
+import android.text.style.TypefaceSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
 import android.text.style.URLSpan;
@@ -200,6 +202,7 @@ import org.telegram.tgnet.tl.TL_bots;
 import org.telegram.tgnet.tl.TL_phone;
 import org.telegram.tgnet.tl.TL_stats;
 import org.telegram.tgnet.tl.TL_stories;
+import org.telegram.ui.AiAssistant;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarLayout;
 import org.telegram.ui.ActionBar.ActionBarMenu;
@@ -1168,6 +1171,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_REPORT_AD = 34;
     public final static int OPTION_REMOVE_ADS = 35;
     public final static int OPTION_SEND_NOW = 100;
+    public final static int OPTION_AI_SUMMARY = 200;
     public final static int OPTION_EDIT_SCHEDULE_TIME = 102;
     public final static int OPTION_SPEED_PROMO = 103;
     public final static int OPTION_OPEN_PROFILE = 104;
@@ -1566,6 +1570,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int change_colors = 27;
     private final static int tag_message = 28;
     private final static int boost_group = 29;
+    private final static int ai_summary_action = 35;
 
     private final static int bot_help = 30;
     private final static int bot_settings = 31;
@@ -3665,6 +3670,18 @@ public class ChatActivity extends BaseFragment implements
                         undoView.showWithAction(0, UndoView.ACTION_TEXT_COPIED, null);
                     }
                     clearSelectionMode();
+                } else if (id == ai_summary_action) {
+                    MessageObject msg = null;
+                    for (int a = 1; a >= 0 && msg == null; a--) {
+                        for (int b = 0; b < selectedMessagesCanCopyIds[a].size(); b++) {
+                            msg = selectedMessagesCanCopyIds[a].valueAt(b);
+                            break;
+                        }
+                    }
+                    if (msg == null || TextUtils.isEmpty(msg.messageOwner.message)) return;
+                    String messageText = msg.messageOwner.message;
+                    clearSelectionMode();
+                    showAiSummaryDialog(messageText);
                 } else if (id == delete) {
                     if (getParentActivity() == null) {
                         return;
@@ -10031,11 +10048,13 @@ public class ChatActivity extends BaseFragment implements
             }
             actionModeViews.add(actionMode.addItemWithWidth(share, R.drawable.msg_shareout, AndroidUtilities.dp(54), LocaleController.getString(R.string.ShareFile)));
             actionModeViews.add(actionMode.addItemWithWidth(delete, R.drawable.msg_delete, AndroidUtilities.dp(54), LocaleController.getString(R.string.Delete)));
+            actionModeViews.add(actionMode.addItemWithWidth(ai_summary_action, R.drawable.msg_translate, AndroidUtilities.dp(54), "Сводка"));
         } else {
             actionModeViews.add(actionMode.addItemWithWidth(edit, R.drawable.msg_edit, AndroidUtilities.dp(54), LocaleController.getString(R.string.Edit)));
             actionModeViews.add(actionMode.addItemWithWidth(star, R.drawable.msg_fave, AndroidUtilities.dp(54), LocaleController.getString(R.string.AddToFavorites)));
             actionModeViews.add(actionMode.addItemWithWidth(copy, R.drawable.msg_copy, AndroidUtilities.dp(54), LocaleController.getString(R.string.Copy)));
             actionModeViews.add(actionMode.addItemWithWidth(delete, R.drawable.msg_delete, AndroidUtilities.dp(54), LocaleController.getString(R.string.Delete)));
+            actionModeViews.add(actionMode.addItemWithWidth(ai_summary_action, R.drawable.msg_translate, AndroidUtilities.dp(54), "Сводка"));
         }
         actionMode.setItemVisibility(edit, canEditMessagesCount == 1 && selectedMessagesIds[0].size() + selectedMessagesIds[1].size() == 1 ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(copy, !isPeerNoForwards() && selectedMessagesCanCopyIds[0].size() + selectedMessagesCanCopyIds[1].size() != 0 ? View.VISIBLE : View.GONE);
@@ -10043,6 +10062,10 @@ public class ChatActivity extends BaseFragment implements
         actionMode.setItemVisibility(delete, cantDeleteMessagesCount == 0 ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(tag_message, getUserConfig().isPremium() ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(share, View.GONE);
+        actionMode.setItemVisibility(ai_summary_action,
+            getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)
+            && selectedMessagesIds[0].size() + selectedMessagesIds[1].size() == 1
+            ? View.VISIBLE : View.GONE);
     }
 
     private void hideTagSelector() {
@@ -32559,6 +32582,119 @@ public class ChatActivity extends BaseFragment implements
         MediaController.saveFile(path, getParentActivity(), messageObject.isVideo() ? 1 : 0, null, null);
     }
 
+    private void showAiSummaryDialog(String messageText) {
+        if (getParentActivity() == null) return;
+
+        Context ctx = getParentActivity();
+        LinearLayout content = new LinearLayout(ctx);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(24), dp(12), dp(24), dp(16));
+
+        TextView titleView = new TextView(ctx);
+        titleView.setText("Краткая Сводка");
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        titleView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        titleView.setTypeface(AndroidUtilities.bold());
+        content.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 12, 0));
+
+        EffectsTextView textView = new EffectsTextView(ctx);
+        textView.setText("Ожидайте...");
+        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        textView.setMinHeight(dp(60));
+        textView.setMovementMethod(new AndroidUtilities.LinkMovementMethodMy());
+        content.addView(textView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 16, 0));
+
+        TextView cancelBtn = new TextView(ctx);
+        cancelBtn.setText("Отмена");
+        cancelBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        cancelBtn.setTextColor(Theme.getColor(Theme.key_dialogTextGray2));
+        cancelBtn.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        cancelBtn.setPadding(0, dp(8), 0, 0);
+        cancelBtn.setClickable(true);
+        content.addView(cancelBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        AlertDialog dialog = new AlertDialog.Builder(getParentActivity())
+            .setView(content)
+            .create();
+        dialog.setCancelable(false);
+        dialog.show();
+
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+
+        AiAssistant.getInstance().sendMessage(
+            "Сделай краткую сводку следующего текста:\n\n" + messageText,
+            new AiAssistant.AiCallback() {
+                @Override
+                public void onResponse(String text) {
+                    if (getParentActivity() == null) return;
+                    textView.setText(formatMarkdown(text));
+                    cancelBtn.setText("Закрыть");
+                }
+
+                @Override
+                public void onError(String error) {
+                    if (getParentActivity() == null) return;
+                    String msg = "Ошибка AI";
+                    if (error != null && !error.isEmpty()) {
+                        if (error.contains("429") || error.contains("rate")) {
+                            msg = "AI перегружен. Попробуйте позже.";
+                        } else {
+                            msg = "Ошибка AI: " + error;
+                        }
+                    }
+                    textView.setText(msg);
+                    cancelBtn.setText("Закрыть");
+                }
+            }
+        );
+    }
+
+    private CharSequence formatMarkdown(String text) {
+        // Convert basic Markdown to formatted SpannableString
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        int len = text.length();
+        int i = 0;
+        while (i < len) {
+            // Bold: **text**
+            if (i + 2 < len && text.charAt(i) == '*' && text.charAt(i + 1) == '*' && !(i > 0 && text.charAt(i - 1) == '*')) {
+                int end = text.indexOf("**", i + 2);
+                if (end > i + 2) {
+                    int startPos = sb.length();
+                    sb.append(text, i + 2, end);
+                    sb.setSpan(new StyleSpan(Typeface.BOLD), startPos, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 2;
+                    continue;
+                }
+            }
+            // Italic: *text* (single asterisk)
+            if (text.charAt(i) == '*' && !(i > 0 && text.charAt(i - 1) == '*') && !(i + 1 < len && text.charAt(i + 1) == '*')) {
+                int end = text.indexOf('*', i + 1);
+                if (end > i + 1) {
+                    int startPos = sb.length();
+                    sb.append(text, i + 1, end);
+                    sb.setSpan(new StyleSpan(Typeface.ITALIC), startPos, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 1;
+                    continue;
+                }
+            }
+            // Code: `text`
+            if (text.charAt(i) == '`') {
+                int end = text.indexOf('`', i + 1);
+                if (end > i + 1) {
+                    int startPos = sb.length();
+                    sb.append(text, i + 1, end);
+                    sb.setSpan(new TypefaceSpan("monospace"), startPos, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 1;
+                    continue;
+                }
+            }
+            sb.append(text.charAt(i));
+            i++;
+        }
+        return sb;
+    }
+
     private void processSelectedOption(int option) {
         if (selectedObject == null || getParentActivity() == null) {
             return;
@@ -32642,6 +32778,14 @@ public class ChatActivity extends BaseFragment implements
                     return;
                 }
                 undoView.showWithAction(0, UndoView.ACTION_MESSAGE_COPIED, null);
+                break;
+            }
+            case OPTION_AI_SUMMARY: {
+                String messageText = selectedObject.messageOwner.message;
+                if (TextUtils.isEmpty(messageText)) {
+                    break;
+                }
+                showAiSummaryDialog(messageText);
                 break;
             }
             case OPTION_SAVE_TO_GALLERY: {
@@ -44755,6 +44899,12 @@ public class ChatActivity extends BaseFragment implements
                     options.add(OPTION_TRANSLATE);
                     icons.add(R.drawable.msg_translate);
                 }
+                if (selectedObject != null && selectedObject.contentType == 0 && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice()
+                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
+                    items.add("Краткая Сводка");
+                    options.add(OPTION_AI_SUMMARY);
+                    icons.add(R.drawable.msg_translate);
+                }
                 if (message.canEditMessage(currentChat) && message.type != MessageObject.TYPE_POLL) {
                     items.add(LocaleController.getString(R.string.Edit));
                     options.add(OPTION_EDIT);
@@ -44831,6 +44981,12 @@ public class ChatActivity extends BaseFragment implements
                     items.add(LocaleController.getString(R.string.Copy));
                     options.add(OPTION_COPY);
                     icons.add(R.drawable.msg_copy);
+                }
+                if (selectedObject.contentType == 0 && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice()
+                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
+                    items.add("Краткая Сводка");
+                    options.add(OPTION_AI_SUMMARY);
+                    icons.add(R.drawable.msg_translate);
                 }
                 if (!isThreadChat() && chatMode != MODE_SCHEDULED && currentChat != null && primaryMessage != null && (currentChat.has_link || primaryMessage.hasReplies()) && currentChat.megagroup && primaryMessage.canViewThread()) {
                     if (primaryMessage.hasReplies()) {
