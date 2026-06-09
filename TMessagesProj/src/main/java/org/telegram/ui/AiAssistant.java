@@ -1,8 +1,11 @@
 package org.telegram.ui;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 
 import java.io.BufferedReader;
@@ -59,6 +62,20 @@ public class AiAssistant {
             }
             return;
         }
+
+        // Anti-spam: 10-second cooldown
+        SharedPreferences prefs = ApplicationLoader.applicationContext
+            .getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+        long now = System.currentTimeMillis();
+        long last = prefs.getLong("ai_last_request", 0);
+        if (now - last < 30_000) {
+            long remain = 30 - (now - last) / 1000;
+            if (callback != null) {
+                AndroidUtilities.runOnUIThread(() -> callback.onError("Подождите " + remain + " сек."));
+            }
+            return;
+        }
+        prefs.edit().putLong("ai_last_request", now).apply();
 
         new Thread(() -> {
             try {
