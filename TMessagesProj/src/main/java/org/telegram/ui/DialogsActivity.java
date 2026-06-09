@@ -501,6 +501,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private ActionBarMenuItem doneItem;
     private ProxyDrawable proxyDrawable;
     private ActionBarMenuSubItem proxyMenuSubItem;
+    private ActionBarMenuItem proxyHeaderItem;
     private HintView2 storyHint;
     private HintView2 storyPremiumHint;
     private boolean canShowStoryHint;
@@ -3214,6 +3215,15 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             downloadsItem.setVisibility(View.GONE);
 
             updateProxyButton(false, false);
+
+            // Mgla: proxy button in header
+            proxyHeaderItem = menu.addItem(100, R.drawable.outline_shield_plain_24);
+            proxyHeaderItem.setContentDescription("Proxy");
+            proxyHeaderItem.setOnClickListener(v -> presentFragment(new ProxyListActivity()));
+            boolean showProxy = ApplicationLoader.applicationContext.getSharedPreferences("mgla_config", Context.MODE_PRIVATE)
+                .getBoolean("proxy_in_header", false);
+            proxyHeaderItem.setVisibility(showProxy ? View.VISIBLE : View.GONE);
+            updateProxyHeaderIcon();
         }
 
         fragmentSearchField = new FragmentSearchField(context, resourceProvider) {
@@ -10003,6 +10013,16 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
         proxyMenuSubItem.setSubtext(getString(proxyEnabled ? (connected ? R.string.MenuProxyConnected : R.string.MenuProxyConnecting) : R.string.MenuProxyDisabled));
         proxyDrawable.setConnected(proxyEnabled, connected, animated);
+
+        updateProxyHeaderIcon();
+    }
+
+    private void updateProxyHeaderIcon() {
+        if (proxyHeaderItem == null) return;
+        final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
+        boolean proxyEnabled = preferences.getBoolean("proxy_enabled", false);
+        final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
+        proxyHeaderItem.setIcon(proxyEnabled && connected ? R.drawable.outline_shield_check : R.drawable.outline_shield_plain_24);
     }
 
     private AnimatorSet doneItemAnimator;
