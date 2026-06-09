@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10.2)
 
-set(CMAKE_CXX_FLAGS "-std=c++14 -DANDROID -g")
+set(CMAKE_CXX_FLAGS "-std=c++14 -DANDROID -g -Wno-ignored-attributes")
 set(CMAKE_C_FLAGS "-w -std=c11 -DANDROID -D_LARGEFILE_SOURCE=1 -g -Wno-error=implicit-function-declaration")
 set(CMAKE_ASM_FLAGS "${CFLAGS} -x assembler-with-cpp")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=full")

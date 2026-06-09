@@ -82,7 +82,7 @@ def isWindows = String.valueOf(DefaultNativePlatform.currentOperatingSystem.toFa
 android {
     compileSdkVersion 35
     buildToolsVersion '35.0.0'
-    ndkVersion "27.2.12479018"
+    ndkVersion "29.0.14206865"
 
     sourceSets.main.jniLibs.srcDirs = ['./jni/']
 
@@ -250,10 +250,7 @@ task checkVisibility {
     }
     doLast {
         if (project.gradle.startParameter.taskNames.find { it.contains("HA_public") }) {
-            def privateBuild = file("${projectDir}_AppHockeyApp/afat/HA_private/Telegram-Beta.apk")
-            if (privateBuild.exists()) {
-                privateBuild.delete()
-            }
+            // private build cleanup removed (AppHockeyApp module deleted)
         }
     }
 }
