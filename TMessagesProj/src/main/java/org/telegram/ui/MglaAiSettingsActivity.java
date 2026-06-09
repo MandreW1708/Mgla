@@ -3,26 +3,24 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Components.IconBackgroundColors;
+import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.ui.Components.UItem;
-import org.telegram.ui.Components.UniversalAdapter;
-import org.telegram.ui.Components.UniversalRecyclerView;
-
-import java.util.ArrayList;
 
 public class MglaAiSettingsActivity extends BaseFragment {
 
-    private UniversalRecyclerView listView;
+    private SharedPreferences prefs;
 
     public MglaAiSettingsActivity() {
         this(null);
@@ -34,6 +32,8 @@ public class MglaAiSettingsActivity extends BaseFragment {
 
     @Override
     public View createView(Context context) {
+        prefs = context.getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
         actionBar.setTitle("AI");
@@ -46,39 +46,31 @@ public class MglaAiSettingsActivity extends BaseFragment {
             }
         });
 
-        fragmentView = new FrameLayout(context);
-        fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        FrameLayout rootLayout = new FrameLayout(context);
+        rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        listView = new UniversalRecyclerView(this, this::fillItems, this::onClick, this::onLongClick);
-        listView.adapter.setApplyBackground(false);
-        listView.setSections();
-        listView.setPadding(0, dp(8), 0, AndroidUtilities.navigationBarHeight);
-        ((FrameLayout) fragmentView).addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Белый блок со скруглениями
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable blockBg = new GradientDrawable();
+        blockBg.setCornerRadius(dp(10));
+        blockBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        block.setBackground(blockBg);
 
-        listView.adapter.update(false);
+        // Стандартная телеграм-ячейка: текст + переключатель
+        TextCheckCell cell = new TextCheckCell(context);
+        cell.setBackground(null);
+        cell.setTextAndCheck("Включение AI", prefs.getBoolean("ai_enabled", false), false);
+        cell.setOnClickListener(v -> {
+            boolean newValue = !prefs.getBoolean("ai_enabled", false);
+            prefs.edit().putBoolean("ai_enabled", newValue).apply();
+            cell.setChecked(newValue);
+        });
+        block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(50)));
+
+        rootLayout.addView(block, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 8, 16, 0));
+
+        fragmentView = rootLayout;
         return fragmentView;
-    }
-
-    private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
-
-        items.add(MglaSettingsActivity.SettingCell.Factory.of(1, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, "AI Чат"));
-        items.add(MglaSettingsActivity.SettingCell.Factory.of(2, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_chat, "AI Настройки"));
-
-        items.add(UItem.asShadow(null));
-    }
-
-    private void onClick(UItem item, View view, int position, float x, float y) {
-        switch (item.id) {
-            case 1:
-                // TODO: AI Chat
-                break;
-            case 2:
-                // TODO: AI Settings
-                break;
-        }
-    }
-
-    private boolean onLongClick(UItem item, View view, int position, float x, float y) {
-        return false;
     }
 }

@@ -24,6 +24,7 @@ import androidx.annotation.Nullable;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.R;
+import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -31,6 +32,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.Switch;
 import org.telegram.ui.Components.UItem;
 import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
@@ -95,6 +97,7 @@ public class MglaSettingsActivity extends BaseFragment {
                 break;
             case 1:
                 android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(getParentActivity());
+                builder.setIcon(R.drawable.ic_mgla_foreground);
                 builder.setTitle("О приложении Mgla");
                 builder.setMessage("Mgla v" + BuildVars.BUILD_VERSION_STRING + "\n\nКастомный клиент Telegram.\n\nApplication ID: org.telegram.mgla");
                 builder.setPositiveButton(getString(R.string.OK), null);
@@ -123,6 +126,7 @@ public class MglaSettingsActivity extends BaseFragment {
         private final TextView titleView;
         private final TextView subtitleView;
         private final TextView valueView;
+        private final Switch switchView;
 
         public SettingCell(Context context, Theme.ResourcesProvider resourcesProvider) {
             super(context);
@@ -151,9 +155,13 @@ public class MglaSettingsActivity extends BaseFragment {
             valueView = new TextView(context);
             valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
 
+            switchView = new Switch(context);
+            switchView.setVisibility(View.GONE);
+
             addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.LEFT, 18, 0, 0, 0));
             addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 18, 0, 20, 0));
             addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 20, 0));
+            addView(switchView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 20, 0));
             updateColors();
         }
 
@@ -167,11 +175,23 @@ public class MglaSettingsActivity extends BaseFragment {
 
         private boolean twoLines;
 
+        private Object object;
+
         public void set(
             int iconColorTop, int iconColorBottom, int icon,
             CharSequence title,
             CharSequence subtitle,
             CharSequence value
+        ) {
+            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, false);
+        }
+
+        public void set(
+            int iconColorTop, int iconColorBottom, int icon,
+            CharSequence title,
+            CharSequence subtitle,
+            CharSequence value,
+            boolean checked
         ) {
             iconLayout.setVisibility(icon != 0 ? View.VISIBLE : View.GONE);
             titleView.setTranslationX(icon == 0 ? dp(2) : 0);
@@ -182,8 +202,21 @@ public class MglaSettingsActivity extends BaseFragment {
             titleView.setText(title);
             subtitleView.setVisibility((twoLines = !TextUtils.isEmpty(subtitle)) ? View.VISIBLE : View.GONE);
             subtitleView.setText(subtitle);
-            valueView.setVisibility(!TextUtils.isEmpty(value) ? View.VISIBLE : View.GONE);
-            valueView.setText(value);
+            valueView.setVisibility(View.GONE);
+            switchView.setVisibility(View.GONE);
+            if ("__switch__".equals(value)) {
+                switchView.setOnCheckedChangeListener(null);
+                switchView.setChecked(checked, false);
+                switchView.setVisibility(View.VISIBLE);
+                switchView.setOnCheckedChangeListener((v, c) -> {
+                    if (object instanceof Utilities.Callback) {
+                        ((Utilities.Callback<Boolean>) object).run(c);
+                    }
+                });
+            } else {
+                valueView.setVisibility(!TextUtils.isEmpty(value) ? View.VISIBLE : View.GONE);
+                valueView.setText(value);
+            }
         }
 
         @Override
@@ -252,11 +285,14 @@ public class MglaSettingsActivity extends BaseFragment {
             public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
                 int iconColorTop    = (int) item.longValue;
                 int iconColorBottom = (int) (item.longValue >>> 32);
-                ((SettingCell) view).set(
+                SettingCell cell = (SettingCell) view;
+                cell.object = item.object;
+                cell.set(
                     iconColorTop, iconColorBottom, item.iconResId,
                     item.text,
                     item.subtext,
-                    item.textValue
+                    item.textValue,
+                    item.checked
                 );
             }
 
@@ -273,6 +309,18 @@ public class MglaSettingsActivity extends BaseFragment {
                 item.text = title;
                 item.subtext = subtitle;
                 item.textValue = value;
+                item.longValue = ((long) iconColorBottom << 32) | (iconColorTop & 0xFFFFFFFFL);
+                return item;
+            }
+
+            public static UItem aiSwitch(int id, int iconColorTop, int iconColorBottom, int icon, CharSequence title, boolean checked, Utilities.Callback<Boolean> callback) {
+                final UItem item = UItem.ofFactory(Factory.class);
+                item.id = id;
+                item.iconResId = icon;
+                item.text = title;
+                item.textValue = "__switch__";
+                item.checked = checked;
+                item.object = callback;
                 item.longValue = ((long) iconColorBottom << 32) | (iconColorTop & 0xFFFFFFFFL);
                 return item;
             }
