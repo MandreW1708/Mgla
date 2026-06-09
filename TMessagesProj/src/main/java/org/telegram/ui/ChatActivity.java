@@ -1571,6 +1571,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int tag_message = 28;
     private final static int boost_group = 29;
     private final static int ai_summary_action = 35;
+    private final static int ai_retell_menu = 37;
 
     private final static int bot_help = 30;
     private final static int bot_settings = 31;
@@ -3751,6 +3752,55 @@ public class ChatActivity extends BaseFragment implements
                             BulletinFactory.of(ChatActivity.this).createDownloadBulletin(isMusic ? BulletinFactory.FileType.AUDIOS : BulletinFactory.FileType.UNKNOWNS, count, themeDelegate).show();
                         }
                     });
+                } else if (id == ai_retell_menu) {
+                    if (getParentActivity() == null) return;
+                    AlertDialog.Builder input = new AlertDialog.Builder(getParentActivity());
+                    input.setTitle("Пересказ сообщений");
+                    final android.widget.EditText editText = new android.widget.EditText(getParentActivity());
+                    editText.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                    editText.setText("10");
+                    editText.setBackground(Theme.createRoundRectDrawable(dp(8), Theme.getColor(Theme.key_windowBackgroundWhite)));
+                    editText.setPadding(dp(12), dp(8), dp(12), dp(8));
+                    editText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+                    editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+                    LinearLayout inputWrap = new LinearLayout(getParentActivity());
+                    inputWrap.setOrientation(LinearLayout.VERTICAL);
+                    inputWrap.setPadding(dp(24), dp(12), dp(24), 0);
+                    TextView hint = new TextView(getParentActivity());
+                    hint.setText("Введите количество сообщений (2–100):");
+                    hint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+                    hint.setTextColor(Theme.getColor(Theme.key_dialogTextGray2));
+                    inputWrap.addView(hint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
+                    inputWrap.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(42)));
+                    input.setView(inputWrap);
+                    input.setPositiveButton("OK", (d, w) -> {
+                        String s = editText.getText().toString();
+                        int count;
+                        try { count = Integer.parseInt(s); } catch (NumberFormatException e) { return; }
+                        if (count < 2) count = 2;
+                        if (count > 100) count = 100;
+
+                        if (chatAdapter == null || chatAdapter.getMessages() == null) return;
+                        ArrayList<MessageObject> msgs = new ArrayList<>(chatAdapter.getMessages());
+                        int total = msgs.size();
+                        if (count > total) count = total;
+                        if (count < 2) return;
+
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = total - count; i < total; i++) {
+                            MessageObject m = msgs.get(i);
+                            String txt = m.messageOwner.message;
+                            if (!TextUtils.isEmpty(txt)) {
+                                sb.append(txt).append("\n---\n");
+                            }
+                        }
+                        String textToRetell = sb.toString().trim();
+                        if (TextUtils.isEmpty(textToRetell)) return;
+
+                        showAiSummaryDialogForRetell(textToRetell);
+                    });
+                    input.setNegativeButton("Отмена", null);
+                    showDialog(input.create());
                 } else if (id == chat_enc_timer) {
                     if (getParentActivity() == null) {
                         return;
@@ -4319,6 +4369,9 @@ public class ChatActivity extends BaseFragment implements
             }
             translateItem = headerItem.lazilyAddSubItem(translate, R.drawable.msg_translate, LocaleController.getString(R.string.TranslateMessage));
             updateTranslateItemVisibility();
+            if (getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", false)) {
+                headerItem.lazilyAddSubItem(ai_retell_menu, R.drawable.menu_rewrite, "Пересказ сообщ.");
+            }
             if (currentChat != null && !currentChat.creator && !ChatObject.hasAdminRights(currentChat)) {
                 headerItem.lazilyAddSubItem(report, R.drawable.msg_report, LocaleController.getString(R.string.ReportChat));
             }
@@ -32584,6 +32637,16 @@ public class ChatActivity extends BaseFragment implements
 
     private void showAiSummaryDialog(String messageText) {
         if (getParentActivity() == null) return;
+        showAiDialog("Краткая Сводка", "Сделай краткую сводку следующего текста:\n\n" + messageText);
+    }
+
+    private void showAiSummaryDialogForRetell(String messageText) {
+        if (getParentActivity() == null) return;
+        showAiDialog("Пересказ сообщений", "Сделай короткий общий пересказ следующих сообщений в 3-5 предложениях. Опиши только основную суть, без деталей по каждому сообщению:\n\n" + messageText);
+    }
+
+    private void showAiDialog(String title, String prompt) {
+        if (getParentActivity() == null) return;
 
         Context ctx = getParentActivity();
         LinearLayout content = new LinearLayout(ctx);
@@ -32591,7 +32654,7 @@ public class ChatActivity extends BaseFragment implements
         content.setPadding(dp(24), dp(12), dp(24), dp(16));
 
         TextView titleView = new TextView(ctx);
-        titleView.setText("Краткая Сводка");
+        titleView.setText(title);
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         titleView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
         titleView.setTypeface(AndroidUtilities.bold());
@@ -32622,8 +32685,7 @@ public class ChatActivity extends BaseFragment implements
 
         cancelBtn.setOnClickListener(v -> dialog.dismiss());
 
-        AiAssistant.getInstance().sendMessage(
-            "Сделай краткую сводку следующего текста:\n\n" + messageText,
+        AiAssistant.getInstance().sendMessage(prompt,
             new AiAssistant.AiCallback() {
                 @Override
                 public void onResponse(String text) {
@@ -32635,13 +32697,17 @@ public class ChatActivity extends BaseFragment implements
                 @Override
                 public void onError(String error) {
                     if (getParentActivity() == null) return;
-                    String msg = "Ошибка AI";
-                    if (error != null && !error.isEmpty()) {
+                    String msg;
+                    if (error != null && error.startsWith("Подождите")) {
+                        msg = error;
+                    } else if (error != null && !error.isEmpty()) {
                         if (error.contains("429") || error.contains("rate")) {
                             msg = "AI перегружен. Попробуйте позже.";
                         } else {
                             msg = "Ошибка AI: " + error;
                         }
+                    } else {
+                        msg = "Ошибка AI";
                     }
                     textView.setText(msg);
                     cancelBtn.setText("Закрыть");

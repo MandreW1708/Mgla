@@ -170,6 +170,7 @@ import org.telegram.ui.BasePermissionsActivity;
 import org.telegram.ui.Business.BusinessLinksController;
 import org.telegram.ui.Business.QuickRepliesController;
 import org.telegram.ui.ChatActivity;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.Components.Premium.PremiumFeatureBottomSheet;
 import org.telegram.ui.Components.Premium.boosts.BoostRepository;
@@ -2755,6 +2756,9 @@ public class ChatActivityEnterView extends FrameLayout implements
                             public void onError(String error) {
                                 aiEditorButton.setEnabled(true);
                                 aiEditorButton.setAlpha(1.0f);
+                                if (error != null && parentFragment != null) {
+                                    BulletinFactory.of(parentFragment).createErrorBulletin(error).show();
+                                }
                             }
                         }
                     );
