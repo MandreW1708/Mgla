@@ -27,6 +27,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.IconBackgroundColors;
@@ -80,11 +81,11 @@ public class MglaSettingsActivity extends BaseFragment {
 
     private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
 
-        items.add(SettingCell.Factory.of(4, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_chat, "AI", "Искусственный интеллект"));
+        items.add(SettingCell.Factory.of(4, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_chat, "AI"));
+        items.add(SettingCell.Factory.of(5, IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_features, "Основные настройки"));
         items.add(UItem.asShadow(null));
 
         items.add(SettingCell.Factory.of(1, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, "О приложении", "Mgla v" + BuildVars.BUILD_VERSION_STRING));
-        items.add(SettingCell.Factory.of(2, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_chat, "Проверить обновления"));
         items.add(SettingCell.Factory.of(3, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Помощь"));
 
         items.add(UItem.asShadow(null));
@@ -95,16 +96,15 @@ public class MglaSettingsActivity extends BaseFragment {
             case 4:
                 presentFragment(new MglaAiSettingsActivity());
                 break;
+            case 5:
+                presentFragment(new MglaMainSettingsActivity());
+                break;
             case 1:
-                android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(getParentActivity());
-                builder.setIcon(R.drawable.ic_mgla_foreground);
+                AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
                 builder.setTitle("О приложении Mgla");
-                builder.setMessage("Mgla v" + BuildVars.BUILD_VERSION_STRING + "\n\nКастомный клиент Telegram.\n\nApplication ID: org.telegram.mgla");
+                builder.setMessage("Mgla v" + BuildVars.BUILD_VERSION_STRING + "\n\nКастомный клиент Telegram.");
                 builder.setPositiveButton(getString(R.string.OK), null);
                 showDialog(builder.create());
-                break;
-            case 2:
-                Browser.openUrl(getParentActivity(), "https://telegram.org");
                 break;
             case 3:
                 Browser.openUrl(getParentActivity(), "https://telegram.org/faq");

@@ -8,6 +8,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -68,6 +69,11 @@ public class MglaAiSettingsActivity extends BaseFragment {
         addLimitRow(block2, "Лимит AI-редактора", 50);
         rootLayout.addView(block2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
+        // === Блок 3: ИИ-расшифровка ===
+        LinearLayout block3 = createBlock(context);
+        addNavRow(block3, "ИИ-расшифровка", () -> presentFragment(new MglaAiTranscribeActivity()));
+        rootLayout.addView(block3, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         fragmentView = rootLayout;
         return fragmentView;
     }
@@ -117,6 +123,33 @@ public class MglaAiSettingsActivity extends BaseFragment {
         valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         row.addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        block.addView(row);
+    }
+
+    private void addNavRow(LinearLayout block, String title, Runnable onClick) {
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(21), 0, dp(18), 0);
+        row.setMinimumHeight(dp(50));
+        row.setClickable(true);
+        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 0));
+        row.setOnClickListener(v -> onClick.run());
+
+        TextView titleView = new TextView(getContext());
+        titleView.setText(title);
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        row.addView(titleView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL));
+
+        TextView arrow = new TextView(getContext());
+        arrow.setText("›");
+        arrow.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        arrow.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        arrow.setGravity(Gravity.CENTER);
+        arrow.setIncludeFontPadding(false);
+        row.addView(arrow, LayoutHelper.createLinear(dp(24), dp(24), Gravity.CENTER_VERTICAL));
 
         block.addView(row);
     }

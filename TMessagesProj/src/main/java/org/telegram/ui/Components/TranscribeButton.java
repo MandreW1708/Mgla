@@ -46,6 +46,7 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.ChatMessageCell;
+import org.telegram.ui.GeminiTranscriber;
 import org.telegram.ui.PremiumPreviewFragment;
 
 import java.util.ArrayList;
@@ -662,6 +663,29 @@ public class TranscribeButton {
             return;
         }
         int account = messageObject.currentAccount;
+
+        // Mgla: use Gemini for transcription if enabled
+        android.content.SharedPreferences prefs = org.telegram.messenger.ApplicationLoader.applicationContext
+            .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE);
+        if (prefs.getBoolean("ai_transcribe_enabled", false)) {
+            if (open) {
+                if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
+                    // Collapse: toggle open state
+                    messageObject.messageOwner.voiceTranscriptionOpen = !messageObject.messageOwner.voiceTranscriptionOpen;
+                    AndroidUtilities.runOnUIThread(() -> {
+                        NotificationCenter.getInstance(account).postNotificationName(
+                            NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null,
+                            (Boolean) messageObject.messageOwner.voiceTranscriptionOpen, (Boolean) true);
+                    });
+                } else {
+                    GeminiTranscriber.transcribe(messageObject, account);
+                }
+            } else {
+                GeminiTranscriber.transcribe(messageObject, account);
+            }
+            return;
+        }
+
         final long start = SystemClock.elapsedRealtime(), minDuration = 350;
         TLRPC.InputPeer peer = MessagesController.getInstance(account).getInputPeer(messageObject.messageOwner.peer_id);
         long dialogId = DialogObject.getPeerDialogId(peer);
