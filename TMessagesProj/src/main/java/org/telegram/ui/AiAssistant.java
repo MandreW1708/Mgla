@@ -21,7 +21,7 @@ public class AiAssistant {
     private static final String API_KEY = "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";
 
     private static final String OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-    private static final String MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+    private static final String MODEL = "nvidia/nemotron-3-nano-30b-a3b:free";
 
     private static volatile AiAssistant instance;
 
@@ -50,31 +50,29 @@ public class AiAssistant {
      * Отправляет запрос к OpenRouter и возвращает ответ.
      *
      * @param userMessage сообщение пользователя
-     * @param callback    вызывается с ответом (в фоновом потоке) или null при ошибке
+     * @param callback    вызывается с ответом (на UI-потоке) или ошибкой
      */
     public void sendMessage(String userMessage, AiCallback callback) {
         if (!isConfigured()) {
             if (callback != null) {
-                callback.onError("API ключ не задан. Вставьте ключ в AiAssistant.API_KEY");
+                AndroidUtilities.runOnUIThread(() -> callback.onError("API ключ не задан"));
             }
             return;
         }
 
-        AndroidUtilities.runOnUIThread(() -> {
-            new Thread(() -> {
-                try {
-                    String response = callOpenRouter(userMessage);
-                    if (callback != null) {
-                        AndroidUtilities.runOnUIThread(() -> callback.onResponse(response));
-                    }
-                } catch (Exception e) {
-                    FileLog.e(e);
-                    if (callback != null) {
-                        AndroidUtilities.runOnUIThread(() -> callback.onError(e.getMessage()));
-                    }
+        new Thread(() -> {
+            try {
+                String response = callOpenRouter(userMessage);
+                if (callback != null) {
+                    AndroidUtilities.runOnUIThread(() -> callback.onResponse(response));
                 }
-            }).start();
-        });
+            } catch (Exception e) {
+                FileLog.e("AiAssistant", e);
+                if (callback != null) {
+                    AndroidUtilities.runOnUIThread(() -> callback.onError(e.getMessage() != null ? e.getMessage() : "Ошибка сети"));
+                }
+            }
+        }).start();
     }
 
     private String callOpenRouter(String userMessage) throws Exception {

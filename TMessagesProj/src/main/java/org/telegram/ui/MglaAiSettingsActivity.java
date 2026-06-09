@@ -5,12 +5,9 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.drawable.GradientDrawable;
-import android.view.Gravity;
 import android.view.View;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
-import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -46,31 +43,45 @@ public class MglaAiSettingsActivity extends BaseFragment {
             }
         });
 
-        FrameLayout rootLayout = new FrameLayout(context);
+        LinearLayout rootLayout = new LinearLayout(context);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        // Белый блок со скруглениями
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable blockBg = new GradientDrawable();
-        blockBg.setCornerRadius(dp(10));
-        blockBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(blockBg);
+        // === Блок 1: Включение AI ===
+        LinearLayout block1 = createBlock(context);
+        addSwitchRow(block1, "Включение AI", "ai_enabled", false);
+        rootLayout.addView(block1, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
-        // Стандартная телеграм-ячейка: текст + переключатель
-        TextCheckCell cell = new TextCheckCell(context);
-        cell.setBackground(null);
-        cell.setTextAndCheck("Включение AI", prefs.getBoolean("ai_enabled", false), false);
-        cell.setOnClickListener(v -> {
-            boolean newValue = !prefs.getBoolean("ai_enabled", false);
-            prefs.edit().putBoolean("ai_enabled", newValue).apply();
-            cell.setChecked(newValue);
-        });
-        block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(50)));
-
-        rootLayout.addView(block, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 8, 16, 0));
+        // === Блок 2: дополнительные функции ===
+        LinearLayout block2 = createBlock(context);
+        addSwitchRow(block2, "Краткая Сводка", "ai_summary", true);
+        addSwitchRow(block2, "Пересказ сообщений", "ai_retell", true);
+        addSwitchRow(block2, "AI-редактор", "ai_editor", false);
+        rootLayout.addView(block2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         fragmentView = rootLayout;
         return fragmentView;
+    }
+
+    private LinearLayout createBlock(Context context) {
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        block.setBackground(bg);
+        return block;
+    }
+
+    private void addSwitchRow(LinearLayout block, String title, String key, boolean divider) {
+        TextCheckCell cell = new TextCheckCell(getContext());
+        cell.setBackground(null);
+        cell.setTextAndCheck(title, prefs.getBoolean(key, false), divider);
+        cell.setOnClickListener(v -> {
+            boolean newValue = !prefs.getBoolean(key, false);
+            prefs.edit().putBoolean(key, newValue).apply();
+            cell.setChecked(newValue);
+        });
+        block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
     }
 }
