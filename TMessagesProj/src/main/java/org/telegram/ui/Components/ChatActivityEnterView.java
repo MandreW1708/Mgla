@@ -158,6 +158,7 @@ import org.telegram.tgnet.tl.TL_bots;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.AiAssistant;
+import org.telegram.ui.MglaHapticManager;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
 import org.telegram.ui.ActionBar.ActionBarPopupWindow;
 import org.telegram.ui.ActionBar.AdjustPanLayoutHelper;
@@ -3441,6 +3442,11 @@ public class ChatActivityEnterView extends FrameLayout implements
                 super.setAlpha(alpha);
                 updateAttachButtonTranslationX();
             }
+
+            @Override
+            public boolean performHapticFeedback(int feedbackConstant, int flags) {
+                return false;
+            }
         };
         sendButton.setVisibility(INVISIBLE);
         sendButton.setContentDescription(getString(R.string.Send));
@@ -3448,11 +3454,13 @@ public class ChatActivityEnterView extends FrameLayout implements
         sendButton.setScaleX(0.1f);
         sendButton.setScaleY(0.1f);
         sendButton.setAlpha(0.0f);
+        sendButton.setHapticFeedbackEnabled(false);
         sendButtonContainer.addView(sendButton, LayoutHelper.createFrame(100, DEFAULT_HEIGHT, Gravity.RIGHT | Gravity.BOTTOM));
         sendButton.setOnClickListener(view -> {
             if ((messageSendPreview != null && messageSendPreview.isShowing()) || (runningAnimationAudio != null && runningAnimationAudio.isRunning()) || moveToSendStateRunnable != null) {
                 return;
             }
+            MglaHapticManager.vibrate();
             sendMessage();
         });
         sendButton.setOnLongClickListener(this::onSendLongClick);
