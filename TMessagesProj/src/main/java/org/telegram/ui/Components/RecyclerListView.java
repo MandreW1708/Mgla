@@ -68,6 +68,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.GenericProvider;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.ui.MglaHapticManager;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
@@ -1133,6 +1134,7 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
                                 view.playSoundEffect(SoundEffectConstants.CLICK);
                             } catch (Exception ignore) {}
                             view.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
+                            MglaHapticManager.vibrate();
                             if (onItemClickListener != null) {
                                 onItemClickListener.onItemClick(view, position);
                             } else if (onItemClickListenerExtended != null) {
@@ -1152,6 +1154,7 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
                                             view.playSoundEffect(SoundEffectConstants.CLICK);
                                         } catch (Exception ignore) {}
                                         view.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
+                                        MglaHapticManager.vibrate();
                                         if (position != -1) {
                                             if (onItemClickListener != null) {
                                                 onItemClickListener.onItemClick(view, position);

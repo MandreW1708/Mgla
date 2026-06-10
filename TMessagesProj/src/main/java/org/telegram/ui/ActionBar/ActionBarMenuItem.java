@@ -79,6 +79,7 @@ import org.telegram.ui.Components.LinkSpanDrawable;
 import org.telegram.ui.Components.RLottieDrawable;
 import org.telegram.ui.Components.RLottieImageView;
 import org.telegram.ui.Components.Reactions.ReactionsLayoutInBubble;
+import org.telegram.ui.MglaHapticManager;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -1648,6 +1649,12 @@ public class ActionBarMenuItem extends FrameLayout {
     @Override
     public void setOnClickListener(@Nullable OnClickListener l) {
         super.setOnClickListener(onClickListener = l);
+    }
+
+    @Override
+    public boolean performClick() {
+        MglaHapticManager.vibrate();
+        return super.performClick();
     }
 
     private void checkClearButton() {
