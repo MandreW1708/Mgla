@@ -203,6 +203,7 @@ import org.telegram.tgnet.tl.TL_phone;
 import org.telegram.tgnet.tl.TL_stats;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.AiAssistant;
+import org.telegram.ui.MglaHapticManager;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarLayout;
 import org.telegram.ui.ActionBar.ActionBarMenu;
@@ -19201,6 +19202,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void processRowSelect(View view, boolean outside, float touchX, float touchY) {
+        view.setHapticFeedbackEnabled(false);
         MessageObject message = null;
         if (view instanceof ChatMessageCell) {
             ChatMessageCell cell = (ChatMessageCell) view;
@@ -19222,6 +19224,7 @@ public class ChatActivity extends BaseFragment implements
             return;
         }
         addToSelectedMessages(message, outside);
+        MglaHapticManager.vibrate();
         updateActionModeTitle();
         updateVisibleRows();
     }
@@ -21548,6 +21551,7 @@ public class ChatActivity extends BaseFragment implements
                     return;
                 }
                 processNewMessages(arr);
+                MglaHapticManager.vibrate();
             } else if (ChatObject.isChannel(currentChat) && !currentChat.megagroup && chatInfo != null && did == -chatInfo.linked_chat_id) {
                 for (int a = 0, N = arr.size(); a < N; a++) {
                     MessageObject messageObject = arr.get(a);
@@ -30083,6 +30087,9 @@ public class ChatActivity extends BaseFragment implements
     private boolean createMenu(View v, boolean single, boolean listView, float x, float y, boolean searchGroup, boolean longpress, boolean suggestEdit) {
         if (actionBar.isActionModeShowed() || isReport()) {
             return false;
+        }
+        if (!longpress) {
+            MglaHapticManager.vibrate();
         }
         if (chatActivityEnterView != null) {
             chatActivityEnterView.hideHints();
@@ -39467,6 +39474,7 @@ public class ChatActivity extends BaseFragment implements
                     selectedObject = null;
                     selectedObjectGroup = null;
                 });
+                MglaHapticManager.vibrate();
                 menu.show();
                 return true;
             }
@@ -39724,6 +39732,7 @@ public class ChatActivity extends BaseFragment implements
             scrimViewTask = task.id;
             scrimViewReactionAnimated = false;
             dimBehindView(cell, false, true);
+            MglaHapticManager.vibrate();
             hideHints(false);
             if (topUndoView != null) {
                 topUndoView.hide(true, 1);
@@ -39770,6 +39779,7 @@ public class ChatActivity extends BaseFragment implements
                 selectedObject = null;
                 selectedObjectGroup = null;
             });
+            MglaHapticManager.vibrate();
             menu.show();
 
             return true;

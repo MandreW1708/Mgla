@@ -87,6 +87,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private boolean useProxySettings;
     private boolean useProxyForCalls;
 
+
     private int rowCount;
     @Keep
     private int useProxyRow;
@@ -1124,4 +1125,5 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
         return themeDescriptions;
     }
+
 }
