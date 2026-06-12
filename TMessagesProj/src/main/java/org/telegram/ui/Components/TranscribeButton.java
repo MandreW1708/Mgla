@@ -671,7 +671,11 @@ public class TranscribeButton {
             if (open) {
                 if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
                     // Collapse: toggle open state
+                    TranscribeButton.openVideoTranscription(messageObject);
                     messageObject.messageOwner.voiceTranscriptionOpen = !messageObject.messageOwner.voiceTranscriptionOpen;
+                    MessagesStorage.getInstance(account).updateMessageVoiceTranscriptionOpen(
+                        DialogObject.getPeerDialogId(MessagesController.getInstance(account).getInputPeer(messageObject.messageOwner.peer_id)),
+                        messageObject.messageOwner.id, messageObject.messageOwner);
                     AndroidUtilities.runOnUIThread(() -> {
                         NotificationCenter.getInstance(account).postNotificationName(
                             NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null,

@@ -37,7 +37,7 @@ public class GeminiTranscriber {
 
         File audioFile = getAudioFile(messageObject);
         if (audioFile == null || !audioFile.exists()) {
-            updateTranscription(messageObject, "Ошибка: аудиофайл не найден", account);
+            updateTranscription(messageObject, "Ошибка: файл не найден", account);
             return;
         }
 
@@ -64,20 +64,31 @@ public class GeminiTranscriber {
     }
 
     private static String callGemini(String apiKey, String model, File audioFile) throws Exception {
-        // Read audio file as base64
+        // Read file as base64
         byte[] audioBytes = new byte[(int) audioFile.length()];
         try (FileInputStream fis = new FileInputStream(audioFile)) {
             fis.read(audioBytes);
         }
         String base64Audio = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP);
 
-        // Determine MIME type (voice messages in Telegram are usually OGG/OPUS)
-        String mimeType = "audio/ogg";
+        // Detect MIME type: video messages are MP4, voice messages are OGG/OPUS
+        String fileName = audioFile.getName().toLowerCase();
+        String mimeType;
+        if (fileName.endsWith(".mp4") || fileName.endsWith(".m4v")) {
+            mimeType = "video/mp4";
+        } else if (fileName.endsWith(".ogg") || fileName.endsWith(".opus")) {
+            mimeType = "audio/ogg";
+        } else if (fileName.endsWith(".mp3")) {
+            mimeType = "audio/mp3";
+        } else {
+            mimeType = "audio/ogg"; // fallback
+        }
 
+        boolean isVideo = mimeType.startsWith("video");
         String jsonBody = "{"
             + "\"contents\":[{"
             +   "\"parts\":["
-            +     "{\"text\":\"Transcribe the following audio accurately. Return ONLY the transcribed text, no additional commentary.\"},"
+            +     "{\"text\":\"Transcribe the following " + (isVideo ? "video" : "audio") + " accurately. Return ONLY the transcribed text in Russian, no additional commentary.\"},"
             +     "{\"inline_data\":{\"mime_type\":\"" + mimeType + "\",\"data\":\"" + base64Audio + "\"}}"
             +   "]"
             + "}],"
@@ -153,6 +164,10 @@ public class GeminiTranscriber {
         msg.messageOwner.voiceTranscriptionId = -1;
         msg.messageOwner.voiceTranscriptionOpen = true;
         msg.messageOwner.voiceTranscriptionFinal = true;
+        // Для кружков нужно явно зарегистрировать открытую расшифровку
+        if (msg.isRoundVideo()) {
+            org.telegram.ui.Components.TranscribeButton.openVideoTranscription(msg);
+        }
         AndroidUtilities.runOnUIThread(() -> {
             NotificationCenter.getInstance(account).postNotificationName(
                 NotificationCenter.voiceTranscriptionUpdate, msg, null, null, (Boolean) true, (Boolean) true);
