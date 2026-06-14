@@ -51,14 +51,7 @@ public class MglaMainSettingsActivity extends BaseFragment {
         rootLayout.setOrientation(LinearLayout.VERTICAL);
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        LinearLayout block = createBlock(context);
 
         // Прокси в шапке
         TextCheckCell proxyCell = new TextCheckCell(context);
@@ -90,8 +83,38 @@ public class MglaMainSettingsActivity extends BaseFragment {
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
+        LinearLayout popupBlock = createBlock(context);
+        TextCheckCell popupCell = new TextCheckCell(context);
+        popupCell.setBackground(null);
+        popupCell.setTextAndCheck("Всплывающие уведомления", prefs.getBoolean("mgla_popup_notifications_enabled", false), true);
+        popupCell.setOnClickListener(v -> {
+            boolean newVal = !prefs.getBoolean("mgla_popup_notifications_enabled", false);
+            prefs.edit().putBoolean("mgla_popup_notifications_enabled", newVal).apply();
+            popupCell.setChecked(newVal);
+        });
+        popupBlock.addView(popupCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView[] durationValueRef = new TextView[1];
+        addSelectRow(popupBlock, "Время отображения", getPopupDurationName(), () -> showPopupDurationDialog(durationValueRef[0]), durationValueRef);
+
+        TextView[] alphaValueRef = new TextView[1];
+        addSelectRow(popupBlock, "Прозрачность", getPopupAlphaName(), () -> showPopupAlphaDialog(alphaValueRef[0]), alphaValueRef);
+        rootLayout.addView(popupBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         fragmentView = rootLayout;
         return fragmentView;
+    }
+
+    private LinearLayout createBlock(Context context) {
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        block.setBackground(bg);
+        block.setClipToOutline(true);
+        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        return block;
     }
 
     private void showStrengthDialog(TextView valueView) {
@@ -104,6 +127,44 @@ public class MglaMainSettingsActivity extends BaseFragment {
                 valueView.setText(MglaHapticManager.STRENGTH_NAMES[which]);
             }
             MglaHapticManager.previewPattern(MglaHapticManager.getPatternForAction(MglaHapticManager.ACTION_DEFAULT));
+        });
+        showDialog(dlg.create());
+    }
+
+    private String getPopupDurationName() {
+        return (prefs.getInt("mgla_popup_duration_ms", 4000) / 1000) + " сек.";
+    }
+
+    private String getPopupAlphaName() {
+        return prefs.getInt("mgla_popup_alpha", 90) + "%";
+    }
+
+    private void showPopupDurationDialog(TextView valueView) {
+        if (getParentActivity() == null) return;
+        String[] names = {"2 сек.", "3 сек.", "4 сек.", "5 сек.", "7 сек.", "10 сек."};
+        int[] values = {2000, 3000, 4000, 5000, 7000, 10000};
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Время отображения");
+        dlg.setItems(names, (dialog, which) -> {
+            prefs.edit().putInt("mgla_popup_duration_ms", values[which]).apply();
+            if (valueView != null) {
+                valueView.setText(names[which]);
+            }
+        });
+        showDialog(dlg.create());
+    }
+
+    private void showPopupAlphaDialog(TextView valueView) {
+        if (getParentActivity() == null) return;
+        String[] names = {"60%", "70%", "80%", "90%", "100%"};
+        int[] values = {60, 70, 80, 90, 100};
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Прозрачность");
+        dlg.setItems(names, (dialog, which) -> {
+            prefs.edit().putInt("mgla_popup_alpha", values[which]).apply();
+            if (valueView != null) {
+                valueView.setText(names[which]);
+            }
         });
         showDialog(dlg.create());
     }
