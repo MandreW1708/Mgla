@@ -19224,7 +19224,7 @@ public class ChatActivity extends BaseFragment implements
             return;
         }
         addToSelectedMessages(message, outside);
-        MglaHapticManager.vibrate();
+        MglaHapticManager.vibrate(MglaHapticManager.ACTION_CLICK);
         updateActionModeTitle();
         updateVisibleRows();
     }
@@ -30089,7 +30089,7 @@ public class ChatActivity extends BaseFragment implements
             return false;
         }
         if (!longpress) {
-            MglaHapticManager.vibrate();
+            MglaHapticManager.vibrate(MglaHapticManager.ACTION_MENU);
         }
         if (chatActivityEnterView != null) {
             chatActivityEnterView.hideHints();
@@ -39474,7 +39474,7 @@ public class ChatActivity extends BaseFragment implements
                     selectedObject = null;
                     selectedObjectGroup = null;
                 });
-                MglaHapticManager.vibrate();
+                MglaHapticManager.vibrate(MglaHapticManager.ACTION_MENU);
                 menu.show();
                 return true;
             }
@@ -39732,7 +39732,7 @@ public class ChatActivity extends BaseFragment implements
             scrimViewTask = task.id;
             scrimViewReactionAnimated = false;
             dimBehindView(cell, false, true);
-            MglaHapticManager.vibrate();
+            MglaHapticManager.vibrate(MglaHapticManager.ACTION_MENU);
             hideHints(false);
             if (topUndoView != null) {
                 topUndoView.hide(true, 1);
@@ -39779,7 +39779,7 @@ public class ChatActivity extends BaseFragment implements
                 selectedObject = null;
                 selectedObjectGroup = null;
             });
-            MglaHapticManager.vibrate();
+            MglaHapticManager.vibrate(MglaHapticManager.ACTION_MENU);
             menu.show();
 
             return true;

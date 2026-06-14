@@ -2,6 +2,7 @@ package org.telegram.ui.Components;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
@@ -12,6 +13,7 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.os.SystemClock;
@@ -20,7 +22,13 @@ import android.text.TextUtils;
 import android.text.style.ImageSpan;
 import android.util.Log;
 import android.util.StateSet;
+import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -44,7 +52,9 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.AiAssistant;
 import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.GeminiTranscriber;
 import org.telegram.ui.PremiumPreviewFragment;
@@ -211,10 +221,14 @@ public class TranscribeButton {
             return;
         }
         clickedToOpen = false;
+        MessageObject currentMessageObject = parent.getMessageObject();
         boolean processClick, toOpen = !shouldBeOpen;
+        boolean mglaTranscribeEnabled = isMglaTranscribeEnabled();
+        boolean hasFinalTranscription = currentMessageObject != null && currentMessageObject.messageOwner != null &&
+            currentMessageObject.messageOwner.voiceTranscription != null && currentMessageObject.messageOwner.voiceTranscriptionFinal;
         if (!shouldBeOpen) {
             processClick = !loading;
-            if ((premium || canTranscribeTrial(parent.getMessageObject())) && parent.getMessageObject().isSent()) {
+            if (!hasFinalTranscription && currentMessageObject != null && (mglaTranscribeEnabled || premium || canTranscribeTrial(currentMessageObject)) && currentMessageObject.isSent()) {
                 setLoading(true, true);
             }
         } else {
@@ -228,9 +242,9 @@ public class TranscribeButton {
         }
         pressed = false;
         if (processClick) {
-            if (!premium && toOpen) {
-                if (canTranscribeTrial(parent.getMessageObject()) || parent.getMessageObject() != null && parent.getMessageObject().messageOwner != null && !TextUtils.isEmpty(parent.getMessageObject().messageOwner.voiceTranscription)) {
-                    transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
+            if (!mglaTranscribeEnabled && !premium && toOpen) {
+                if (canTranscribeTrial(currentMessageObject) || currentMessageObject != null && currentMessageObject.messageOwner != null && !TextUtils.isEmpty(currentMessageObject.messageOwner.voiceTranscription)) {
+                    transcribePressed(parent.getContext(), currentMessageObject, toOpen, parent.getDelegate());
                 } else {
                     if (parent.getDelegate() != null) {
                         if (MessagesController.getInstance(parent.currentAccount).transcribeAudioTrialWeeklyNumber > 0) {
@@ -241,10 +255,10 @@ public class TranscribeButton {
                     }
                 }
             } else {
-                if (toOpen) {
+                if (toOpen && !mglaTranscribeEnabled) {
                     clickedToOpen = true;
                 }
-                transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
+                transcribePressed(parent.getContext(), currentMessageObject, toOpen, parent.getDelegate());
             }
         }
     }
@@ -507,6 +521,12 @@ public class TranscribeButton {
         );
     }
 
+    private static boolean isMglaTranscribeEnabled() {
+        return org.telegram.messenger.ApplicationLoader.applicationContext
+            .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE)
+            .getBoolean("ai_transcribe_enabled", false);
+    }
+
     private void addCorner(
         Path path,
         int x1,
@@ -658,7 +678,7 @@ public class TranscribeButton {
         );
     }
 
-    private static void transcribePressed(MessageObject messageObject, boolean open, ChatMessageCell.ChatMessageCellDelegate delegate) {
+    private static void transcribePressed(Context context, MessageObject messageObject, boolean open, ChatMessageCell.ChatMessageCellDelegate delegate) {
         if (messageObject == null || messageObject.messageOwner == null || !messageObject.isSent()) {
             return;
         }
@@ -668,28 +688,72 @@ public class TranscribeButton {
         android.content.SharedPreferences prefs = org.telegram.messenger.ApplicationLoader.applicationContext
             .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE);
         if (prefs.getBoolean("ai_transcribe_enabled", false)) {
+            long dialogId = messageObject.getDialogId();
+            int messageId = messageObject.messageOwner.id;
             if (open) {
                 if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
-                    // Collapse: toggle open state
-                    TranscribeButton.openVideoTranscription(messageObject);
-                    messageObject.messageOwner.voiceTranscriptionOpen = !messageObject.messageOwner.voiceTranscriptionOpen;
-                    MessagesStorage.getInstance(account).updateMessageVoiceTranscriptionOpen(
-                        DialogObject.getPeerDialogId(MessagesController.getInstance(account).getInputPeer(messageObject.messageOwner.peer_id)),
-                        messageObject.messageOwner.id, messageObject.messageOwner);
-                    AndroidUtilities.runOnUIThread(() -> {
-                        NotificationCenter.getInstance(account).postNotificationName(
-                            NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null,
-                            (Boolean) messageObject.messageOwner.voiceTranscriptionOpen, (Boolean) true);
-                    });
+                    if (isGeminiTranscription(messageObject.messageOwner.voiceTranscription)) {
+                        showGeminiTranscriptionSheet(context, messageObject.messageOwner.voiceTranscription);
+                    } else {
+                        transcribePressedTelegram(messageObject, true, delegate);
+                    }
                 } else {
-                    GeminiTranscriber.transcribe(messageObject, account);
+                    if (transcribeOperationsByDialogPosition == null) {
+                        transcribeOperationsByDialogPosition = new HashMap<>();
+                    }
+                    transcribeOperationsByDialogPosition.put((Integer) reqInfoHash(messageObject), messageObject);
+                    GeminiTranscriber.transcribe(messageObject, account, new GeminiTranscriber.Callback() {
+                        @Override
+                        public void onSuccess(String text) {
+                            if (transcribeOperationsByDialogPosition != null) {
+                                transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
+                            }
+                            String finalText = text == null ? "" : text.trim();
+                            messageObject.messageOwner.voiceTranscription = finalText + "\n\n•Gemini";
+                            messageObject.messageOwner.voiceTranscriptionId = -1;
+                            messageObject.messageOwner.voiceTranscriptionOpen = false;
+                            messageObject.messageOwner.voiceTranscriptionFinal = true;
+                            MessagesStorage.getInstance(account).updateMessageVoiceTranscription(dialogId, messageId, messageObject.messageOwner.voiceTranscription, messageObject.messageOwner);
+                            NotificationCenter.getInstance(account).postNotificationName(
+                                NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null,
+                                (Boolean) false, (Boolean) true);
+                            showGeminiTranscriptionSheet(context, finalText);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            if (transcribeOperationsByDialogPosition != null) {
+                                transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
+                            }
+                            NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject);
+                            if (prefs.getBoolean("ai_transcribe_fallback_telegram", true)) {
+                                transcribePressedTelegram(messageObject, true, delegate);
+                            } else {
+                                showGeminiTranscriptionSheet(context, "Ошибка Gemini: " + (error != null ? error : "неизвестно"));
+                            }
+                        }
+                    });
                 }
             } else {
-                GeminiTranscriber.transcribe(messageObject, account);
+                if (transcribeOperationsByDialogPosition != null) {
+                    transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
+                }
+                messageObject.messageOwner.voiceTranscriptionOpen = false;
+                MessagesStorage.getInstance(account).updateMessageVoiceTranscriptionOpen(dialogId, messageId, messageObject.messageOwner);
+                AndroidUtilities.runOnUIThread(() -> {
+                    NotificationCenter.getInstance(account).postNotificationName(
+                        NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null,
+                        (Boolean) false, null);
+                });
             }
             return;
         }
 
+        transcribePressedTelegram(messageObject, open, delegate);
+    }
+
+    private static void transcribePressedTelegram(MessageObject messageObject, boolean open, ChatMessageCell.ChatMessageCellDelegate delegate) {
+        int account = messageObject.currentAccount;
         final long start = SystemClock.elapsedRealtime(), minDuration = 350;
         TLRPC.InputPeer peer = MessagesController.getInstance(account).getInputPeer(messageObject.messageOwner.peer_id);
         long dialogId = DialogObject.getPeerDialogId(peer);
@@ -791,6 +855,170 @@ public class TranscribeButton {
                 NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) false, null);
             });
         }
+    }
+
+    private static void showGeminiTranscriptionSheet(Context context, String text) {
+        if (context == null || !AndroidUtilities.isSafeToShow(context)) {
+            return;
+        }
+        String cleanText = cleanGeminiTranscription(text);
+        if (TextUtils.isEmpty(cleanText)) {
+            cleanText = "Gemini не вернул текст расшифровки.";
+        }
+        final String transcriptionText = cleanText;
+
+        BottomSheet[] sheetRef = new BottomSheet[1];
+
+        LinearLayout card = new LinearLayout(context);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(12), dp(18), dp(10));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Theme.getColor(Theme.key_dialogBackground));
+        background.setCornerRadius(dp(24));
+        card.setBackground(background);
+
+        FrameLayout header = new FrameLayout(context);
+        LinearLayout titleRow = new LinearLayout(context);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView titleView = new TextView(context);
+        titleView.setText("Gemini AI");
+        titleView.setTextSize(20);
+        titleView.setTypeface(AndroidUtilities.bold());
+        titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        titleRow.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        TextView betaView = new TextView(context);
+        betaView.setText("BETA");
+        betaView.setTextSize(10);
+        betaView.setTypeface(AndroidUtilities.bold());
+        betaView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        betaView.setPadding(dp(8), dp(2), dp(8), dp(2));
+        GradientDrawable betaBg = new GradientDrawable();
+        betaBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 55));
+        betaBg.setCornerRadius(dp(8));
+        betaView.setBackground(betaBg);
+        titleRow.addView(betaView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 6, 1, 0, 0));
+
+        header.addView(titleRow, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+        TextView closeView = new TextView(context);
+        closeView.setText("⌄");
+        closeView.setTextSize(28);
+        closeView.setGravity(Gravity.CENTER);
+        closeView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        closeView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 1));
+        closeView.setOnClickListener(v -> {
+            if (sheetRef[0] != null) {
+                sheetRef[0].dismiss();
+            }
+        });
+        header.addView(closeView, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+        card.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 38));
+
+        TextView subtitleView = new TextView(context);
+        subtitleView.setText("Распознавание голоса");
+        subtitleView.setTextSize(12);
+        subtitleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        subtitleView.setPadding(dp(7), dp(2), dp(7), dp(3));
+        GradientDrawable subtitleBg = new GradientDrawable();
+        subtitleBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 45));
+        subtitleBg.setCornerRadius(dp(6));
+        subtitleView.setBackground(subtitleBg);
+        card.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 10));
+
+        int maxSheetHeight = AndroidUtilities.displaySize.y / 2 + dp(56);
+        int maxTextHeight = Math.max(dp(120), maxSheetHeight - dp(86));
+        FrameLayout textContainer = new FrameLayout(context);
+        MaxHeightScrollView scrollView = new MaxHeightScrollView(context, maxTextHeight);
+        scrollView.setFillViewport(false);
+        scrollView.setClipToPadding(false);
+        scrollView.setPadding(0, 0, 0, dp(64));
+        scrollView.setVerticalScrollBarEnabled(cleanText.length() > 280);
+        TextView textView = new TextView(context);
+        textView.setText(cleanText);
+        textView.setTextSize(16);
+        textView.setLineSpacing(dp(2), 1.0f);
+        textView.setTextIsSelectable(true);
+        textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        scrollView.addView(textView, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        textContainer.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+
+        TextView summaryButton = new TextView(context);
+        summaryButton.setText("Кратко");
+        summaryButton.setGravity(Gravity.CENTER);
+        summaryButton.setTextSize(15);
+        summaryButton.setTypeface(AndroidUtilities.bold());
+        summaryButton.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
+        summaryButton.setPadding(dp(26), 0, dp(26), 0);
+        summaryButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), Theme.getColor(Theme.key_featuredStickers_addButton), Theme.getColor(Theme.key_featuredStickers_addButtonPressed)));
+        summaryButton.setOnClickListener(v -> {
+            summaryButton.setEnabled(false);
+            summaryButton.setAlpha(0.65f);
+            summaryButton.setText("...");
+            String prompt = "Сделай краткую сводку этой голосовой расшифровки в 1-2 предложениях. Верни только сводку, без комментариев:\n\n" + transcriptionText;
+            AiAssistant.getInstance().sendMessage(prompt, new AiAssistant.AiCallback() {
+                @Override
+                public void onResponse(String text) {
+                    String summary = text == null ? "" : text.trim();
+                    textView.setText(TextUtils.isEmpty(summary) ? "Не удалось получить сводку." : summary);
+                    summaryButton.setText("Кратко");
+                    summaryButton.setAlpha(1.0f);
+                    summaryButton.setEnabled(true);
+                    scrollView.scrollTo(0, 0);
+                }
+
+                @Override
+                public void onError(String error) {
+                    textView.setText("Ошибка сводки: " + (error != null ? error : "неизвестно"));
+                    summaryButton.setText("Кратко");
+                    summaryButton.setAlpha(1.0f);
+                    summaryButton.setEnabled(true);
+                    scrollView.scrollTo(0, 0);
+                }
+            });
+        });
+        FrameLayout.LayoutParams summaryButtonLayoutParams = LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 48, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        summaryButtonLayoutParams.bottomMargin = dp(4);
+        textContainer.addView(summaryButton, summaryButtonLayoutParams);
+        card.addView(textContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        sheetRef[0] = new BottomSheet.Builder(context)
+            .setCustomView(card)
+            .create();
+        sheetRef[0].setCanDismissWithSwipe(false);
+        sheetRef[0].show();
+    }
+
+    private static class MaxHeightScrollView extends ScrollView {
+        private final int maxHeight;
+
+        public MaxHeightScrollView(Context context, int maxHeight) {
+            super(context);
+            this.maxHeight = maxHeight;
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int cappedHeightSpec = View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST);
+            super.onMeasure(widthMeasureSpec, cappedHeightSpec);
+        }
+    }
+
+    private static boolean isGeminiTranscription(String text) {
+        return text != null && text.trim().endsWith("•Gemini");
+    }
+
+    private static String cleanGeminiTranscription(String text) {
+        if (text == null) {
+            return "";
+        }
+        String cleanText = text.trim();
+        if (cleanText.endsWith("•Gemini")) {
+            cleanText = cleanText.substring(0, cleanText.length() - "•Gemini".length()).trim();
+        }
+        return cleanText;
     }
 
     public static boolean finishTranscription(MessageObject messageObject, long transcription_id, String text) {

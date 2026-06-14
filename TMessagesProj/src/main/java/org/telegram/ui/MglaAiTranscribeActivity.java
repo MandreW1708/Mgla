@@ -83,9 +83,28 @@ public class MglaAiTranscribeActivity extends BaseFragment {
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
+        // === Блок: fallback ===
+        LinearLayout fallbackBlock = new LinearLayout(context);
+        fallbackBlock.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable fallbackBg = new GradientDrawable();
+        fallbackBg.setCornerRadius(dp(10));
+        fallbackBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        fallbackBlock.setBackground(fallbackBg);
+
+        TextCheckCell fallbackCell = new TextCheckCell(context);
+        fallbackCell.setBackground(null);
+        fallbackCell.setTextAndCheck("Fallback на Telegram", prefs.getBoolean("ai_transcribe_fallback_telegram", true), false);
+        fallbackCell.setOnClickListener(v -> {
+            boolean newVal = !prefs.getBoolean("ai_transcribe_fallback_telegram", true);
+            prefs.edit().putBoolean("ai_transcribe_fallback_telegram", newVal).apply();
+            fallbackCell.setChecked(newVal);
+        });
+        fallbackBlock.addView(fallbackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(fallbackBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         // Подсказка
         TextView hint = new TextView(context);
-        hint.setText("При включении голосовые сообщения будут расшифровываться через Gemini (даже если у вас нет Telegram Premium)");
+        hint.setText("При включении голосовые и видеосообщения будут расшифровываться через Gemini в отдельном окне. Если fallback включён, при ошибке Gemini будет использована обычная расшифровка Telegram.");
         hint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         hint.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         hint.setPadding(dp(18), dp(8), dp(18), 0);

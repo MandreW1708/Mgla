@@ -204,7 +204,7 @@ public class ActionBar extends FrameLayout implements Theme.Colorable {
         addView(backButtonImageView, LayoutHelper.createFrame(54, 54, Gravity.LEFT | Gravity.TOP));
 
         backButtonImageView.setOnClickListener(v -> {
-            MglaHapticManager.vibrate();
+            MglaHapticManager.vibrate(MglaHapticManager.ACTION_BACK);
             if (!actionModeVisible && isSearchFieldVisible) {
                 closeSearchField();
                 return;

@@ -1134,7 +1134,7 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
                                 view.playSoundEffect(SoundEffectConstants.CLICK);
                             } catch (Exception ignore) {}
                             view.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
-                            MglaHapticManager.vibrate();
+                            MglaHapticManager.vibrate(MglaHapticManager.ACTION_CLICK);
                             if (onItemClickListener != null) {
                                 onItemClickListener.onItemClick(view, position);
                             } else if (onItemClickListenerExtended != null) {
@@ -1154,7 +1154,7 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
                                             view.playSoundEffect(SoundEffectConstants.CLICK);
                                         } catch (Exception ignore) {}
                                         view.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
-                                        MglaHapticManager.vibrate();
+                                        MglaHapticManager.vibrate(MglaHapticManager.ACTION_CLICK);
                                         if (position != -1) {
                                             if (onItemClickListener != null) {
                                                 onItemClickListener.onItemClick(view, position);

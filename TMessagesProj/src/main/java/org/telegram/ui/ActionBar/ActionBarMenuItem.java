@@ -1653,7 +1653,7 @@ public class ActionBarMenuItem extends FrameLayout {
 
     @Override
     public boolean performClick() {
-        MglaHapticManager.vibrate();
+        MglaHapticManager.vibrate(MglaHapticManager.ACTION_CLICK);
         return super.performClick();
     }
 
