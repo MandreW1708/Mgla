@@ -3,7 +3,6 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
@@ -23,7 +22,6 @@ import org.telegram.ui.Components.LayoutHelper;
 public class MglaMainSettingsActivity extends BaseFragment {
 
     private SharedPreferences prefs;
-    private TextView effectValueView;
 
     public MglaMainSettingsActivity() {
         this(null);
@@ -84,19 +82,11 @@ public class MglaMainSettingsActivity extends BaseFragment {
         });
         block.addView(hapticCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // Эффект вибрации
-        int effect = prefs.getInt("haptic_effect", MglaHapticManager.EFFECT_LIGHT);
-        addSelectRow(block, "Эффект вибрации", MglaHapticManager.EFFECT_NAMES[effect], () -> {
-            AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
-            dlg.setTitle("Эффект вибрации");
-            dlg.setItems(MglaHapticManager.EFFECT_NAMES, (dialog, which) -> {
-                prefs.edit().putInt("haptic_effect", which).apply();
-                if (effectValueView != null) {
-                    effectValueView.setText(MglaHapticManager.EFFECT_NAMES[which]);
-                }
-            });
-            showDialog(dlg.create());
-        });
+        // Сила вибрации
+        TextView[] strengthValueRef = new TextView[1];
+        addSelectRow(block, "Сила вибрации", MglaHapticManager.STRENGTH_NAMES[MglaHapticManager.getStrength()], () -> {
+            showStrengthDialog(strengthValueRef[0]);
+        }, strengthValueRef);
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
@@ -104,7 +94,21 @@ public class MglaMainSettingsActivity extends BaseFragment {
         return fragmentView;
     }
 
-    private void addSelectRow(LinearLayout block, String title, String value, Runnable onClick) {
+    private void showStrengthDialog(TextView valueView) {
+        if (getParentActivity() == null) return;
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Сила вибрации");
+        dlg.setItems(MglaHapticManager.STRENGTH_NAMES, (dialog, which) -> {
+            prefs.edit().putInt("haptic_strength", which).apply();
+            if (valueView != null) {
+                valueView.setText(MglaHapticManager.STRENGTH_NAMES[which]);
+            }
+            MglaHapticManager.previewPattern(MglaHapticManager.getPatternForAction(MglaHapticManager.ACTION_DEFAULT));
+        });
+        showDialog(dlg.create());
+    }
+
+    private void addSelectRow(LinearLayout block, String title, String value, Runnable onClick, TextView[] valueRef) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -120,12 +124,20 @@ public class MglaMainSettingsActivity extends BaseFragment {
         titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         row.addView(titleView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL));
 
-        effectValueView = new TextView(getContext());
-        effectValueView.setText(value);
-        effectValueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        effectValueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        row.addView(effectValueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 4, 0));
+        TextView valueView = new TextView(getContext());
+        valueView.setText(value);
+        valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        row.addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 4, 0));
+
+        if (valueRef != null) {
+            valueRef[0] = valueView;
+        }
 
         block.addView(row);
+    }
+
+    private void addSelectRow(LinearLayout block, String title, String value, Runnable onClick) {
+        addSelectRow(block, title, value, onClick, null);
     }
 }

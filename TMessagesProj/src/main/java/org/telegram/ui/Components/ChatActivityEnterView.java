@@ -3460,7 +3460,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             if ((messageSendPreview != null && messageSendPreview.isShowing()) || (runningAnimationAudio != null && runningAnimationAudio.isRunning()) || moveToSendStateRunnable != null) {
                 return;
             }
-            MglaHapticManager.vibrate();
+            MglaHapticManager.vibrate(MglaHapticManager.ACTION_SEND);
             sendMessage();
         });
         sendButton.setOnLongClickListener(this::onSendLongClick);

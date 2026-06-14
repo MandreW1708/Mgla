@@ -8,8 +8,6 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
-import org.telegram.messenger.NotificationCenter;
-import org.telegram.tgnet.TLRPC;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -22,7 +20,7 @@ import java.nio.charset.StandardCharsets;
 
 public class GeminiTranscriber {
 
-    public static void transcribe(MessageObject messageObject, int account) {
+    public static void transcribe(MessageObject messageObject, int account, Callback callback) {
         if (messageObject == null || messageObject.messageOwner == null) return;
 
         Context ctx = org.telegram.messenger.ApplicationLoader.applicationContext;
@@ -31,25 +29,37 @@ public class GeminiTranscriber {
         String model = prefs.getString("ai_transcribe_model", "gemini-2.0-flash");
 
         if (TextUtils.isEmpty(apiKey)) {
-            updateTranscription(messageObject, "Ошибка: не задан API ключ Gemini", account);
+            notifyError(callback, "Не задан API ключ Gemini");
             return;
         }
 
         File audioFile = getAudioFile(messageObject);
         if (audioFile == null || !audioFile.exists()) {
-            updateTranscription(messageObject, "Ошибка: файл не найден", account);
+            notifyError(callback, "Файл не найден");
             return;
         }
 
         new Thread(() -> {
             try {
                 String text = callGemini(apiKey, model, audioFile);
-                AndroidUtilities.runOnUIThread(() -> updateTranscription(messageObject, text, account));
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) {
+                        callback.onSuccess(text);
+                    }
+                });
             } catch (Exception e) {
                 FileLog.e("GeminiTranscriber", e);
-                AndroidUtilities.runOnUIThread(() -> updateTranscription(messageObject, "Ошибка расшифровки: " + (e.getMessage() != null ? e.getMessage() : "неизвестно"), account));
+                notifyError(callback, e.getMessage() != null ? e.getMessage() : "Ошибка расшифровки");
             }
         }).start();
+    }
+
+    private static void notifyError(Callback callback, String error) {
+        AndroidUtilities.runOnUIThread(() -> {
+            if (callback != null) {
+                callback.onError(error);
+            }
+        });
     }
 
     private static File getAudioFile(MessageObject msg) {
@@ -158,19 +168,8 @@ public class GeminiTranscriber {
         }
     }
 
-    private static void updateTranscription(MessageObject msg, String text, int account) {
-        if (msg == null || msg.messageOwner == null) return;
-        msg.messageOwner.voiceTranscription = text + "\n\n•Gemini";
-        msg.messageOwner.voiceTranscriptionId = -1;
-        msg.messageOwner.voiceTranscriptionOpen = true;
-        msg.messageOwner.voiceTranscriptionFinal = true;
-        // Для кружков нужно явно зарегистрировать открытую расшифровку
-        if (msg.isRoundVideo()) {
-            org.telegram.ui.Components.TranscribeButton.openVideoTranscription(msg);
-        }
-        AndroidUtilities.runOnUIThread(() -> {
-            NotificationCenter.getInstance(account).postNotificationName(
-                NotificationCenter.voiceTranscriptionUpdate, msg, null, null, (Boolean) true, (Boolean) true);
-        });
+    public interface Callback {
+        void onSuccess(String text);
+        void onError(String error);
     }
 }
