@@ -4,26 +4,45 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
 
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.RecyclerListView;
 
 public class MglaAiTranscribeActivity extends BaseFragment {
 
+    private static final int ROW_ENABLED = 0;
+    private static final int ROW_API_KEY = 1;
+    private static final int ROW_MODEL = 2;
+    private static final int ROW_FALLBACK = 3;
+    private static final int ROW_INFO = 4;
+    private static final int ROW_COUNT = 5;
+
+    private static final int VIEW_TYPE_CHECK = 0;
+    private static final int VIEW_TYPE_TEXT = 1;
+    private static final int VIEW_TYPE_INFO = 2;
+
     private SharedPreferences prefs;
+    private RecyclerListView listView;
 
     public MglaAiTranscribeActivity() {
         this(null);
@@ -49,118 +68,152 @@ public class MglaAiTranscribeActivity extends BaseFragment {
             }
         });
 
-        ScrollView scrollView = new ScrollView(context);
-        scrollView.setFillViewport(true);
+        fragmentView = new FrameLayout(context);
+        fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        LinearLayout rootLayout = new LinearLayout(context);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
-
-        // === Блок: настройки ===
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-
-        // Переключатель включения
-        TextCheckCell enableCell = new TextCheckCell(context);
-        enableCell.setBackground(null);
-        enableCell.setTextAndCheck("Включить расшифровку", prefs.getBoolean("ai_transcribe_enabled", false), true);
-        enableCell.setOnClickListener(v -> {
-            boolean newVal = !prefs.getBoolean("ai_transcribe_enabled", false);
-            prefs.edit().putBoolean("ai_transcribe_enabled", newVal).apply();
-            enableCell.setChecked(newVal);
+        listView = new RecyclerListView(context);
+        listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+        listView.setPadding(0, dp(8), 0, AndroidUtilities.navigationBarHeight);
+        listView.setClipToPadding(false);
+        listView.setSections();
+        listView.setAdapter(new ListAdapter(context));
+        listView.setOnItemClickListener((view, position) -> {
+            if (position == ROW_ENABLED) {
+                toggleSwitch(view, "ai_transcribe_enabled", false);
+            } else if (position == ROW_API_KEY) {
+                showTextInputDialog("API ключ Gemini", "ai_transcribe_api_key", "sk-...", true);
+            } else if (position == ROW_MODEL) {
+                showTextInputDialog("Модель", "ai_transcribe_model", "gemini-2.0-flash", false);
+            } else if (position == ROW_FALLBACK) {
+                toggleSwitch(view, "ai_transcribe_fallback_telegram", true);
+            }
         });
-        block.addView(enableCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // API ключ
-        EditText apiKeyEdit = createEditRow(block, "API ключ Gemini", "ai_transcribe_api_key", "sk-...", true);
-
-        // Модель
-        EditText modelEdit = createEditRow(block, "Модель", "ai_transcribe_model", "gemini-2.0-flash", false);
-
-        View fallbackDivider = new View(context);
-        fallbackDivider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        block.addView(fallbackDivider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 21, 4, 21, 0));
-
-        TextCheckCell fallbackCell = new TextCheckCell(context);
-        fallbackCell.setBackground(null);
-        fallbackCell.setTextAndCheck("Fallback на Telegram", prefs.getBoolean("ai_transcribe_fallback_telegram", true), false);
-        fallbackCell.setOnClickListener(v -> {
-            boolean newVal = !prefs.getBoolean("ai_transcribe_fallback_telegram", true);
-            prefs.edit().putBoolean("ai_transcribe_fallback_telegram", newVal).apply();
-            fallbackCell.setChecked(newVal);
-        });
-        block.addView(fallbackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
-
-        // Подсказка
-        TextView hint = new TextView(context);
-        hint.setText("При включении голосовые и видеосообщения будут расшифровываться через Gemini в отдельном окне. Если fallback включён, при ошибке Gemini будет использована обычная расшифровка Telegram.");
-        hint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        hint.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        hint.setPadding(dp(18), dp(8), dp(18), 0);
-        rootLayout.addView(hint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        scrollView.addView(rootLayout);
-        fragmentView = scrollView;
+        ((FrameLayout) fragmentView).addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         return fragmentView;
     }
 
-    private EditText createEditRow(LinearLayout block, String title, String key, String placeholder, boolean multiline) {
-        LinearLayout row = new LinearLayout(getContext());
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(dp(16), dp(6), dp(16), dp(10));
+    private void toggleSwitch(View view, String key, boolean defaultValue) {
+        boolean enabled = !prefs.getBoolean(key, defaultValue);
+        prefs.edit().putBoolean(key, enabled).apply();
+        if (view instanceof TextCheckCell) {
+            ((TextCheckCell) view).setChecked(enabled);
+        }
+    }
 
-        TextView label = new TextView(getContext());
-        label.setText(title);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        label.setTypeface(org.telegram.messenger.AndroidUtilities.bold());
-        label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        row.addView(label, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 6));
-
-        LinearLayout fieldBox = new LinearLayout(getContext());
-        fieldBox.setOrientation(LinearLayout.VERTICAL);
-        fieldBox.setPadding(dp(12), dp(8), dp(12), dp(8));
-        GradientDrawable fieldBg = new GradientDrawable();
-        fieldBg.setCornerRadius(dp(12));
-        fieldBg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
-        fieldBox.setBackground(fieldBg);
-
-        TextView hintView = new TextView(getContext());
-        hintView.setText(multiline ? "Вставьте ключ Gemini API" : "Название модели Gemini");
-        hintView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-        hintView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        fieldBox.addView(hintView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 4));
-
-        EditText editText = new EditText(getContext());
+    private void showTextInputDialog(String title, String key, String hint, boolean multiline) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        EditText editText = new EditText(getParentActivity());
         editText.setText(prefs.getString(key, ""));
-        editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        editText.setHint(hint);
+        editText.setSingleLine(!multiline);
+        editText.setMaxLines(multiline ? 4 : 1);
+        editText.setSelectAllOnFocus(false);
+        editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         editText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         editText.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
-        editText.setHint(placeholder);
-        editText.setSingleLine(!multiline);
-        editText.setMaxLines(multiline ? 3 : 1);
-        editText.setMinHeight(0);
-        editText.setMinimumHeight(0);
-        editText.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | (multiline ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
-        editText.setBackground(null);
-        editText.setPadding(0, 0, 0, 0);
-        editText.addTextChangedListener(new android.text.TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
-            @Override public void afterTextChanged(android.text.Editable s) {
-                prefs.edit().putString(key, s.toString()).apply();
+        editText.setSelection(editText.length());
+
+        LinearLayout inputWrap = new LinearLayout(getParentActivity());
+        inputWrap.setPadding(dp(24), dp(4), dp(24), 0);
+        inputWrap.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, multiline ? 96 : 48));
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(title);
+        builder.setView(inputWrap);
+        builder.setPositiveButton("OK", (dialog, which) -> {
+            prefs.edit().putString(key, editText.getText().toString().trim()).apply();
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyDataSetChanged();
             }
         });
-        fieldBox.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, multiline ? 58 : 28));
-        row.addView(fieldBox, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        builder.setNegativeButton("Отмена", null);
+        showDialog(builder.create());
+        editText.requestFocus();
+        AndroidUtilities.showKeyboard(editText);
+    }
 
-        block.addView(row);
-        return editText;
+    private String getValuePreview(String key, String emptyValue) {
+        String value = prefs.getString(key, "");
+        if (value == null || value.trim().isEmpty()) {
+            return emptyValue;
+        }
+        value = value.trim();
+        if ("ai_transcribe_api_key".equals(key) && value.length() > 10) {
+            return value.substring(0, 6) + "..." + value.substring(value.length() - 4);
+        } else if (value.length() > 18) {
+            return value.substring(0, 18) + "...";
+        }
+        return value;
+    }
+
+    private class ListAdapter extends RecyclerListView.SelectionAdapter {
+        private final Context context;
+
+        private ListAdapter(Context context) {
+            this.context = context;
+        }
+
+        @Override
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
+            int position = holder.getAdapterPosition();
+            return position == ROW_ENABLED || position == ROW_API_KEY || position == ROW_MODEL || position == ROW_FALLBACK;
+        }
+
+        @Override
+        public int getItemCount() {
+            return ROW_COUNT;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (position == ROW_API_KEY || position == ROW_MODEL) {
+                return VIEW_TYPE_TEXT;
+            } else if (position == ROW_INFO) {
+                return VIEW_TYPE_INFO;
+            }
+            return VIEW_TYPE_CHECK;
+        }
+
+        @NonNull
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            View view;
+            if (viewType == VIEW_TYPE_TEXT) {
+                view = new TextSettingsCell(context);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            } else if (viewType == VIEW_TYPE_INFO) {
+                view = new TextInfoPrivacyCell(context);
+            } else {
+                view = new TextCheckCell(context);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            }
+            return new RecyclerListView.Holder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            if (position == ROW_ENABLED) {
+                TextCheckCell cell = (TextCheckCell) holder.itemView;
+                cell.setTextAndCheck("Включить расшифровку", prefs.getBoolean("ai_transcribe_enabled", false), true);
+            } else if (position == ROW_API_KEY) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("API ключ Gemini", getValuePreview("ai_transcribe_api_key", "Не задан"), true);
+                cell.setCanDisable(false);
+            } else if (position == ROW_MODEL) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Модель", getValuePreview("ai_transcribe_model", "gemini-2.0-flash"), true);
+                cell.setCanDisable(false);
+            } else if (position == ROW_FALLBACK) {
+                TextCheckCell cell = (TextCheckCell) holder.itemView;
+                cell.setTextAndCheck("Fallback на Telegram", prefs.getBoolean("ai_transcribe_fallback_telegram", true), false);
+            } else if (position == ROW_INFO) {
+                TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
+                cell.setText("При включении голосовые и видеосообщения будут расшифровываться через Gemini в отдельном окне. Если fallback включён, при ошибке Gemini будет использована обычная расшифровка Telegram.");
+            }
+        }
     }
 }

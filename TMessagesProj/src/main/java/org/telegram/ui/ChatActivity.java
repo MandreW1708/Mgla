@@ -45516,6 +45516,7 @@ public class ChatActivity extends BaseFragment implements
                 icons.add(deleteIconRes);
             }
         }
+        MglaMessageMenuController.applyToMenu(getContext(), icons, items, options);
     }
 
     private void updateBotforumTabsBottomMargin() {
