@@ -125,6 +125,25 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
         backgroundDrawable.setRadius(dp(BUTTON_SIZE / 2f));
     }
 
+    public void updateVisualSize(int size) {
+        if (backgroundDrawable == null) {
+            return;
+        }
+        backgroundDrawable.setPadding(0);
+        backgroundDrawable.setRadius(dp(size / 2f));
+        setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), Theme.RIPPLE_MASK_CIRCLE_20DP, dp(size / 2f)));
+        if (imageView != null) {
+            final int iconSize = Math.max(dp(24), size - dp(12));
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) imageView.getLayoutParams();
+            if (lp.width != iconSize || lp.height != iconSize) {
+                lp.width = iconSize;
+                lp.height = iconSize;
+                imageView.setLayoutParams(lp);
+            }
+        }
+        invalidate();
+    }
+
     public void showLoading(boolean loading, boolean animated) {
         if (loadingIndicatorView == null) {
             if (!loading) {

@@ -414,6 +414,8 @@ public class ChatActivity extends BaseFragment implements
 
     private FrameLayout chatInputBubbleContainer;
     private FrameLayout chatInputInAppContainer;
+    private float inputBubbleOffsetLeftFromChannel;
+    private float inputBubbleOffsetRightFromChannel;
     private WallpaperBitmapProvider wallpaperBitmapProvider = new WallpaperBitmapProvider();
 
     protected ChatActivityEnterView chatActivityEnterView;
@@ -7695,6 +7697,7 @@ public class ChatActivity extends BaseFragment implements
             @Override
             protected void onChangedIslandTotalHeight(float h) {
                 checkUi_inputIslandHeight();
+                updateInputBubbleOffsets();
             }
 
             @Override
@@ -7954,8 +7957,10 @@ public class ChatActivity extends BaseFragment implements
 
         chatActivityEnterView.setViewParentForEmoji(chatInputInAppContainer);
         checkSendButtonBlockedByTyping(false);
+        chatActivityEnterView.setupStaticAttachButton(glassBackgroundDrawableFactory, blurredBackgroundColorProvider);
 
         chatInputBubbleContainer.addView(chatActivityEnterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 7, 0, 7, 0));
+        updateInputBubbleOffsets();
 
         int chatListIndex = contentView.indexOfChild(chatListView);
         chatListIndex = chatListIndex < 0 ? contentView.getChildCount() : (chatListIndex + 1);
@@ -8306,7 +8311,9 @@ public class ChatActivity extends BaseFragment implements
             }
         });
         bottomChannelButtonsLayout.setOnButtonsTotalWidthChanged((l, r) -> {
-            chatInputViewsContainer.setInputBubbleOffsets(l, r);
+            inputBubbleOffsetLeftFromChannel = l;
+            inputBubbleOffsetRightFromChannel = r;
+            updateInputBubbleOffsets();
         });
 
         chatInputBubbleContainer.addView(bottomChannelButtonsLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 56, Gravity.BOTTOM, 0, 0, 0, (44 - 56) / 2));
@@ -45588,6 +45595,20 @@ public class ChatActivity extends BaseFragment implements
         return inputIslandHeightCurrent;
     }
 
+    private void updateInputBubbleOffsets() {
+        if (chatInputViewsContainer == null) {
+            return;
+        }
+        float attachLeft = 0;
+        if (chatActivityEnterView != null) {
+            attachLeft = dp(7) + chatActivityEnterView.getStaticAttachBubbleLeftOffset();
+        }
+        chatInputViewsContainer.setInputBubbleOffsets(
+            Math.max(inputBubbleOffsetLeftFromChannel, attachLeft),
+            inputBubbleOffsetRightFromChannel
+        );
+    }
+
     private void checkUi_inputIslandHeight() {
         if (contentView == null) {
             return;
@@ -45597,6 +45618,7 @@ public class ChatActivity extends BaseFragment implements
         inputIslandHeightTarget = calculateInputIslandHeight(true);
 
         chatInputViewsContainer.setInputBubbleHeight(inputIslandHeightCurrent);
+        updateInputBubbleOffsets();
         updatePagedownButtonsPosition();
         updateBotforumTabsBottomMargin();
         checkUi_botMenuPosition();
