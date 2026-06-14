@@ -2358,6 +2358,14 @@ public class Theme {
                 return getString(R.string.ThemeDay);
             } else if ("Night".equals(name)) {
                 return getString(R.string.ThemeNight);
+            } else if ("AMOLED".equals(name)) {
+                return "AMOLED";
+            } else if ("Material Light".equals(name)) {
+                return "Material 3 Светлая";
+            } else if ("Material Dark".equals(name)) {
+                return "Material 3 Тёмная";
+            } else if ("Material Black".equals(name)) {
+                return "Material 3 Чёрная";
             }
             return info != null ? info.title : name;
         }
@@ -2474,9 +2482,9 @@ public class Theme {
             if (isDark != UNKNOWN) {
                 return isDark == DARK;
             }
-            if ("Dark Blue".equals(name) || "Night".equals(name)) {
+            if ("Dark Blue".equals(name) || "Night".equals(name) || "AMOLED".equals(name) || "Material Dark".equals(name) || "Material Black".equals(name)) {
                 isDark = DARK;
-            } else if ("Blue".equals(name) || "Arctic Blue".equals(name) || "Day".equals(name)) {
+            } else if ("Blue".equals(name) || "Arctic Blue".equals(name) || "Day".equals(name) || "Material Light".equals(name)) {
                 isDark = LIGHT;
             }
             if (isDark == UNKNOWN) {
@@ -4718,6 +4726,62 @@ public class Theme {
         themes.add(themeInfo);
         themesDict.put("Night", themeInfo);
 
+        themeInfo = new ThemeInfo();
+        themeInfo.name = "AMOLED";
+        themeInfo.assetName = "amoled.attheme";
+        themeInfo.previewBackgroundColor = 0xff000000;
+        themeInfo.previewInColor = 0xff101010;
+        themeInfo.previewOutColor = 0xff1f6feb;
+        themeInfo.sortIndex = 6;
+        themeInfo.setAccentColorOptions(
+                new int[]    {                    0xFF6ABE3F,                    0xFF8D78E3,                    0xFFDE5E7E,                    0xFF5977E8,                    0xFFDBC11A,                    0xff3e88f7,                    0xff4ab5d3,                    0xff4ab841,                    0xffd95576,                    0xffe27d2b,                    0xff936cda,                    0xffd04336,                    0xffe8ae1c,                    0xff7988a3 },
+                new int[]    {                    0xFF8A5294,                    0xFFB46C1B,                    0xFFAF4F6F,                    0xFF266E8D,                    0xFF744EB7,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000 },
+                new int[]    {                    0xFF6855BB,                    0xFFA53B4A,                    0xFF62499C,                    0xFF2F919D,                    0xFF298B95,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000,                    0x00000000 },
+                new int[]    {                    0xFF000000,                    0xFF050505,                    0xFF000000,                    0xFF030303,                    0xFF000000,                    0xff050505,                    0xff080808,                    0xff050505,                    0xff050505,                    0xff080808,                    0xff030303,                    0xff070707,                    0xff080808,                    0xff050505 },
+                new int[]    {                    0xFF080808,                    0xFF050505,                    0xFF080808,                    0xFF060606,                    0xFF050505,                    0xff050505,                    0xff060606,                    0xff040404,                    0xff070707,                    0xff060606,                    0xff080808,                    0xff050505,                    0xff050505,                    0xff030303 },
+                new int[]    {                    0xFF050505,                    0xFF080808,                    0xFF050505,                    0xFF060606,                    0xFF080808,                    0xff070707,                    0xff080808,                    0xff060606,                    0xff050505,                    0xff070707,                    0xff050505,                    0xff060606,                    0xff070707,                    0xff060606 },
+                new int[]    {                    0xFF080808,                    0xFF050505,                    0xFF080808,                    0xFF060606,                    0xFF050505,                    0xff050505,                    0xff040404,                    0xff050505,                    0xff080808,                    0xff050505,                    0xff060606,                    0xff040404,                    0xff050505,                    0xff050505 },
+                new int[]    {                             9,                            10,                            11,                            12,                            13,                             0,                             1,                             2,                             3,                             4,                             5,                             6,                             7,                             8 },
+                new String[] { "YIxYGEALQVADAAAAA3QbEH0AowY", "9LW_RcoOSVACAAAAFTk3DTyXN-M", "O-wmAfBPSFADAAAA4zINVfD_bro", "F5oWoCs7QFACAAAAgf2bD_mg8Bw", "-Xc-np9y2VMCAAAARKr0yNNPYW0", "fqv01SQemVIBAAAApND8LDRUhRU", "F5oWoCs7QFACAAAAgf2bD_mg8Bw", "ptuUd96JSFACAAAATobI23sPpz0", "p-pXcflrmFIBAAAAvXYQk-mCwZU", "Nl8Pg2rBQVACAAAA25Lxtb8SDp0", "dhf9pceaQVACAAAAbzdVo4SCiZA", "9GcNVISdSVADAAAAUcw5BYjELW4", "9LW_RcoOSVACAAAAFTk3DTyXN-M", "dk_wwlghOFACAAAAfz9xrxi6euw" },
+                new int[]    {                            45,                           135,                             0,                           180,                             0,                             0,                             0,                             0,                             0,                             0,                             0,                             0,                             0,                             0 },
+                new int[]    {                            34,                            47,                            52,                            48,                            54,                            50,                            37,                            56,                            48,                            49,                            40,                            64,                            38,                            48 }
+        );
+        sortAccents(themeInfo);
+        themes.add(themeInfo);
+        themesDict.put("AMOLED", themeInfo);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            themeInfo = new ThemeInfo();
+            themeInfo.name = "Material Light";
+            themeInfo.assetName = "day.attheme";
+            themeInfo.previewBackgroundColor = 0xfffffbfe;
+            themeInfo.previewInColor = 0xfff3edf7;
+            themeInfo.previewOutColor = getAndroidSystemColor("system_accent1_100", 0xffeaddff);
+            themeInfo.sortIndex = 7;
+            themes.add(themeInfo);
+            themesDict.put("Material Light", themeInfo);
+
+            themeInfo = new ThemeInfo();
+            themeInfo.name = "Material Dark";
+            themeInfo.assetName = "night.attheme";
+            themeInfo.previewBackgroundColor = 0xff1c1b1f;
+            themeInfo.previewInColor = 0xff211f26;
+            themeInfo.previewOutColor = getAndroidSystemColor("system_accent1_700", 0xff4f378b);
+            themeInfo.sortIndex = 8;
+            themes.add(themeInfo);
+            themesDict.put("Material Dark", themeInfo);
+
+            themeInfo = new ThemeInfo();
+            themeInfo.name = "Material Black";
+            themeInfo.assetName = "amoled.attheme";
+            themeInfo.previewBackgroundColor = 0xff000000;
+            themeInfo.previewInColor = 0xff101010;
+            themeInfo.previewOutColor = getAndroidSystemColor("system_accent1_700", 0xff4f378b);
+            themeInfo.sortIndex = 9;
+            themes.add(themeInfo);
+            themesDict.put("Material Black", themeInfo);
+        }
+
         String themesString = themeConfig.getString("themes2", null);
 
         int remoteVersion = themeConfig.getInt("remote_version", 0);
@@ -6644,6 +6708,8 @@ public class Theme {
         ThemeAccent accent = currentTheme.getAccent(false);
         if (accent != null) {
             shouldDrawGradientIcons = accent.fillAccentColors(currentColorsNoAccent, currentColors);
+        } else if (isMaterialSystemTheme(currentTheme)) {
+            applyMaterialSystemAccent(currentTheme);
         }
         if (!messages) {
             boolean async = !(LaunchActivity.getLastFragment() instanceof ChatActivity);
@@ -6655,6 +6721,76 @@ public class Theme {
         applyChatTheme(false, bg);
         boolean checkNavigationBarColor = !hasPreviousTheme;
         AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.didSetNewTheme, false, checkNavigationBarColor));
+    }
+
+    private static boolean isMaterialSystemTheme(ThemeInfo themeInfo) {
+        return themeInfo != null && ("Material Light".equals(themeInfo.name) || "Material Dark".equals(themeInfo.name) || "Material Black".equals(themeInfo.name));
+    }
+
+    private static void applyMaterialSystemAccent(ThemeInfo themeInfo) {
+        boolean dark = themeInfo != null && themeInfo.isDark();
+        int accent = getAndroidSystemColor(dark ? "system_accent1_200" : "system_accent1_600", dark ? 0xffd0bcff : 0xff6750a4);
+        int accentStrong = getAndroidSystemColor(dark ? "system_accent1_100" : "system_accent1_700", dark ? 0xffeaddff : 0xff4f378b);
+        int accentContainer = getAndroidSystemColor(dark ? "system_accent1_700" : "system_accent1_100", dark ? 0xff4f378b : 0xffeaddff);
+        int accentContainerPressed = getAndroidSystemColor(dark ? "system_accent1_600" : "system_accent1_200", dark ? 0xff6750a4 : 0xffd0bcff);
+        int accentSelector = ColorUtils.setAlphaComponent(accent, dark ? 0x33 : 0x1f);
+
+        currentColors.put(key_windowBackgroundWhiteBlueText, accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText2, accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText3, accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText4, accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText5, accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText7, accent);
+        currentColors.put(key_windowBackgroundWhiteLinkText, accent);
+        currentColors.put(key_dialogTextBlue, accent);
+        currentColors.put(key_dialogTextBlue2, accent);
+        currentColors.put(key_dialogTextBlue4, accent);
+        currentColors.put(key_dialogButton, accent);
+        currentColors.put(key_dialogButtonSelector, accentSelector);
+        currentColors.put(key_dialogInputFieldActivated, accent);
+        currentColors.put(key_actionBarTabActiveText, accent);
+        currentColors.put(key_actionBarTabLine, accent);
+        currentColors.put(key_actionBarDefaultSelector, accentSelector);
+        currentColors.put(key_listSelector, accentSelector);
+        currentColors.put(key_chat_messagePanelSend, accent);
+        currentColors.put(key_chat_inReplyLine, accent);
+        currentColors.put(key_chat_outReplyLine, accent);
+        currentColors.put(key_chat_inReplyNameText, accent);
+        currentColors.put(key_chat_outReplyNameText, accent);
+        currentColors.put(key_chat_messageLinkIn, accent);
+        currentColors.put(key_chat_messageLinkOut, accentStrong);
+        currentColors.put(key_chat_outBubble, accentContainer);
+        currentColors.put(key_chat_outBubbleSelected, accentContainerPressed);
+        currentColors.put(key_chats_unreadCounter, accent);
+        currentColors.put(key_chats_actionBackground, accent);
+        currentColors.put(key_chats_actionPressedBackground, accentStrong);
+        currentColors.put(key_profile_actionBackground, accentContainer);
+        currentColors.put(key_profile_actionPressedBackground, accentContainerPressed);
+        currentColors.put(key_profile_actionIcon, dark ? accentStrong : accent);
+        currentColors.put(key_checkboxSquareBackground, accent);
+        currentColors.put(key_radioBackgroundChecked, accent);
+        currentColors.put(key_switchTrackBlueThumbChecked, accent);
+        currentColors.put(key_switchTrackBlueChecked, accentContainer);
+        currentColors.put(key_featuredStickers_addButton, accent);
+        currentColors.put(key_featuredStickers_addButtonPressed, accentStrong);
+        currentColors.put(key_progressCircle, accent);
+        currentColors.put(key_fastScrollActive, accent);
+    }
+
+    private static int getAndroidSystemColor(String name, int fallback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return fallback;
+        }
+        try {
+            Resources resources = ApplicationLoader.applicationContext.getResources();
+            int id = resources.getIdentifier(name, "color", "android");
+            if (id != 0) {
+                return resources.getColor(id);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        return fallback;
     }
 
     public static boolean hasHue(int color) {
@@ -7671,13 +7807,13 @@ public class Theme {
     public static TLRPC.BaseTheme getBaseThemeByKey(String key) {
         if ("Blue".equals(key)) {
             return new TLRPC.TL_baseThemeClassic();
-        } else if ("Day".equals(key)) {
+        } else if ("Day".equals(key) || "Material Light".equals(key)) {
             return new TLRPC.TL_baseThemeDay();
         } else if ("Dark Blue".equals(key)) {
             return new TLRPC.TL_baseThemeTinted();
         } else if ("Arctic Blue".equals(key)) {
             return new TLRPC.TL_baseThemeArctic();
-        } else if ("Night".equals(key)) {
+        } else if ("Night".equals(key) || "AMOLED".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key)) {
             return new TLRPC.TL_baseThemeNight();
         }
         return null;

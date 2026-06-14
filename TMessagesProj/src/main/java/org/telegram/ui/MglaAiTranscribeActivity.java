@@ -76,20 +76,14 @@ public class MglaAiTranscribeActivity extends BaseFragment {
         block.addView(enableCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         // API ключ
-        EditText apiKeyEdit = createEditRow(block, "API ключ Gemini", "ai_transcribe_api_key", true);
+        EditText apiKeyEdit = createEditRow(block, "API ключ Gemini", "ai_transcribe_api_key", "sk-...", true);
 
         // Модель
-        EditText modelEdit = createEditRow(block, "Модель", "ai_transcribe_model", false);
+        EditText modelEdit = createEditRow(block, "Модель", "ai_transcribe_model", "gemini-2.0-flash", false);
 
-        rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
-
-        // === Блок: fallback ===
-        LinearLayout fallbackBlock = new LinearLayout(context);
-        fallbackBlock.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable fallbackBg = new GradientDrawable();
-        fallbackBg.setCornerRadius(dp(10));
-        fallbackBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        fallbackBlock.setBackground(fallbackBg);
+        View fallbackDivider = new View(context);
+        fallbackDivider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        block.addView(fallbackDivider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 21, 4, 21, 0));
 
         TextCheckCell fallbackCell = new TextCheckCell(context);
         fallbackCell.setBackground(null);
@@ -99,8 +93,9 @@ public class MglaAiTranscribeActivity extends BaseFragment {
             prefs.edit().putBoolean("ai_transcribe_fallback_telegram", newVal).apply();
             fallbackCell.setChecked(newVal);
         });
-        fallbackBlock.addView(fallbackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        rootLayout.addView(fallbackBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        block.addView(fallbackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
         // Подсказка
         TextView hint = new TextView(context);
@@ -115,29 +110,46 @@ public class MglaAiTranscribeActivity extends BaseFragment {
         return fragmentView;
     }
 
-    private EditText createEditRow(LinearLayout block, String hint, String key, boolean divider) {
+    private EditText createEditRow(LinearLayout block, String title, String key, String placeholder, boolean multiline) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(dp(21), dp(2), dp(21), dp(2));
-        row.setMinimumHeight(dp(48));
+        row.setPadding(dp(16), dp(6), dp(16), dp(10));
 
         TextView label = new TextView(getContext());
-        label.setText(hint);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        row.addView(label, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 2, 0));
+        label.setText(title);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        label.setTypeface(org.telegram.messenger.AndroidUtilities.bold());
+        label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        row.addView(label, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 6));
+
+        LinearLayout fieldBox = new LinearLayout(getContext());
+        fieldBox.setOrientation(LinearLayout.VERTICAL);
+        fieldBox.setPadding(dp(12), dp(8), dp(12), dp(8));
+        GradientDrawable fieldBg = new GradientDrawable();
+        fieldBg.setCornerRadius(dp(12));
+        fieldBg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        fieldBox.setBackground(fieldBg);
+
+        TextView hintView = new TextView(getContext());
+        hintView.setText(multiline ? "Вставьте ключ Gemini API" : "Название модели Gemini");
+        hintView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        hintView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        fieldBox.addView(hintView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 4));
 
         EditText editText = new EditText(getContext());
         editText.setText(prefs.getString(key, ""));
-        editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         editText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         editText.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
-        editText.setHint("Введите " + hint.toLowerCase());
-        editText.setSingleLine(true);
+        editText.setHint(placeholder);
+        editText.setSingleLine(!multiline);
+        editText.setMaxLines(multiline ? 3 : 1);
         editText.setMinHeight(0);
         editText.setMinimumHeight(0);
-        editText.setBackground(Theme.createRoundRectDrawable(dp(6), Theme.getColor(Theme.key_windowBackgroundGray)));
-        editText.setPadding(dp(10), dp(3), dp(10), dp(3));
+        editText.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | (multiline ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
+        editText.setBackground(null);
+        editText.setPadding(0, 0, 0, 0);
         editText.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
@@ -145,14 +157,8 @@ public class MglaAiTranscribeActivity extends BaseFragment {
                 prefs.edit().putString(key, s.toString()).apply();
             }
         });
-        row.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 26));
-
-        // Divider
-        if (divider) {
-            View div = new View(getContext());
-            div.setBackgroundColor(Theme.getColor(Theme.key_divider));
-            row.addView(div, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 0, 8, 0, 0));
-        }
+        fieldBox.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, multiline ? 58 : 28));
+        row.addView(fieldBox, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         block.addView(row);
         return editText;
