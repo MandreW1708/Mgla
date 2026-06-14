@@ -1173,6 +1173,10 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_REMOVE_ADS = 35;
     public final static int OPTION_SEND_NOW = 100;
     public final static int OPTION_AI_SUMMARY = 200;
+    public final static int OPTION_AI_REPLY_POLITE = 201;
+    public final static int OPTION_AI_EXPLAIN_SIMPLE = 202;
+    public final static int OPTION_AI_TRANSLATE = 203;
+    public final static int OPTION_AI_TASKS = 204;
     public final static int OPTION_EDIT_SCHEDULE_TIME = 102;
     public final static int OPTION_SPEED_PROMO = 103;
     public final static int OPTION_OPEN_PROFILE = 104;
@@ -32652,6 +32656,27 @@ public class ChatActivity extends BaseFragment implements
         showAiDialog("Пересказ сообщений", "Сделай короткий общий пересказ следующих сообщений в 3-5 предложениях. Опиши только основную суть, без деталей по каждому сообщению:\n\n" + messageText);
     }
 
+    private void generateAiReplyToInput(String messageText) {
+        if (getParentActivity() == null || chatActivityEnterView == null) return;
+        AiAssistant.getInstance().sendMessage(
+            "Напиши короткий вежливый ответ на это сообщение. Верни только текст ответа, без комментариев:\n\n" + messageText,
+            new AiAssistant.AiCallback() {
+                @Override
+                public void onResponse(String text) {
+                    if (chatActivityEnterView == null) return;
+                    chatActivityEnterView.setFieldText(text == null ? "" : text.trim());
+                    chatActivityEnterView.openKeyboard();
+                }
+
+                @Override
+                public void onError(String error) {
+                    if (getParentActivity() == null) return;
+                    BulletinFactory.of(ChatActivity.this).createErrorBulletin(error != null ? error : "Ошибка AI").show();
+                }
+            }
+        );
+    }
+
     private void showAiDialog(String title, String prompt) {
         if (getParentActivity() == null) return;
 
@@ -32859,6 +32884,34 @@ public class ChatActivity extends BaseFragment implements
                     break;
                 }
                 showAiSummaryDialog(messageText);
+                break;
+            }
+            case OPTION_AI_REPLY_POLITE: {
+                String messageText = selectedObject.messageOwner.message;
+                if (!TextUtils.isEmpty(messageText)) {
+                    generateAiReplyToInput(messageText);
+                }
+                break;
+            }
+            case OPTION_AI_EXPLAIN_SIMPLE: {
+                String messageText = selectedObject.messageOwner.message;
+                if (!TextUtils.isEmpty(messageText)) {
+                    showAiDialog("Объяснить проще", "Объясни этот текст проще и короче. Верни только результат:\n\n" + messageText);
+                }
+                break;
+            }
+            case OPTION_AI_TRANSLATE: {
+                String messageText = selectedObject.messageOwner.message;
+                if (!TextUtils.isEmpty(messageText)) {
+                    showAiDialog("AI-перевод", "Переведи этот текст на русский. Если текст уже на русском, переведи его на английский. Верни только перевод:\n\n" + messageText);
+                }
+                break;
+            }
+            case OPTION_AI_TASKS: {
+                String messageText = selectedObject.messageOwner.message;
+                if (!TextUtils.isEmpty(messageText)) {
+                    showAiDialog("Задачи", "Выдели из текста задачи и договорённости списком. Если задач нет, напиши: «Задач не найдено». Верни только результат:\n\n" + messageText);
+                }
                 break;
             }
             case OPTION_SAVE_TO_GALLERY: {
@@ -44980,6 +45033,18 @@ public class ChatActivity extends BaseFragment implements
                     items.add("Краткая Сводка");
                     options.add(OPTION_AI_SUMMARY);
                     icons.add(R.drawable.msg_translate);
+                    items.add("Ответить вежливо");
+                    options.add(OPTION_AI_REPLY_POLITE);
+                    icons.add(R.drawable.menu_reply);
+                    items.add("Объяснить проще");
+                    options.add(OPTION_AI_EXPLAIN_SIMPLE);
+                    icons.add(R.drawable.menu_rewrite);
+                    items.add("AI-перевод");
+                    options.add(OPTION_AI_TRANSLATE);
+                    icons.add(R.drawable.msg_translate);
+                    items.add("Выделить задачи");
+                    options.add(OPTION_AI_TASKS);
+                    icons.add(R.drawable.menu_proofread);
                 }
                 if (message.canEditMessage(currentChat) && message.type != MessageObject.TYPE_POLL) {
                     items.add(LocaleController.getString(R.string.Edit));
@@ -45063,6 +45128,18 @@ public class ChatActivity extends BaseFragment implements
                     items.add("Краткая Сводка");
                     options.add(OPTION_AI_SUMMARY);
                     icons.add(R.drawable.msg_translate);
+                    items.add("Ответить вежливо");
+                    options.add(OPTION_AI_REPLY_POLITE);
+                    icons.add(R.drawable.menu_reply);
+                    items.add("Объяснить проще");
+                    options.add(OPTION_AI_EXPLAIN_SIMPLE);
+                    icons.add(R.drawable.menu_rewrite);
+                    items.add("AI-перевод");
+                    options.add(OPTION_AI_TRANSLATE);
+                    icons.add(R.drawable.msg_translate);
+                    items.add("Выделить задачи");
+                    options.add(OPTION_AI_TASKS);
+                    icons.add(R.drawable.menu_proofread);
                 }
                 if (!isThreadChat() && chatMode != MODE_SCHEDULED && currentChat != null && primaryMessage != null && (currentChat.has_link || primaryMessage.hasReplies()) && currentChat.megagroup && primaryMessage.canViewThread()) {
                     if (primaryMessage.hasReplies()) {
