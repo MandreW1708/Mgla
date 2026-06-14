@@ -73,6 +73,9 @@ public class LocaleController {
 
     private volatile FastDateFormat formatterDay;
     public FastDateFormat getFormatterDay() {
+        if (isMglaTimeWithSecondsEnabled()) {
+            return getFormatterDayWithSeconds();
+        }
         if (formatterDay == null) {
             synchronized (this) {
                 if (formatterDay == null) {
@@ -87,6 +90,10 @@ public class LocaleController {
             }
         }
         return formatterDay;
+    }
+
+    private static boolean isMglaTimeWithSecondsEnabled() {
+        return ApplicationLoader.applicationContext != null && ApplicationLoader.applicationContext.getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("chat_time_seconds", false);
     }
 
     private volatile FastDateFormat formatterDayWithSeconds;
