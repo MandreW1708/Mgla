@@ -18210,15 +18210,18 @@ public class ChatActivity extends BaseFragment implements
                         searchIconItem.setVisibility(View.GONE);
                     }
                 }
-                if (!actionBar.isSearchFieldVisible() && audioCallIconItem != null) {
-                    audioCallIconItem.setVisibility((showAudioCallAsIcon && !showSearchAsIcon) ? View.VISIBLE : View.GONE);
+                if (audioCallIconItem != null) {
+                    audioCallIconItem.setVisibility(View.GONE);
                 }
                 if (headerItem != null) {
                     TLRPC.UserFull userInfo = getCurrentUserInfo();
-                    if (showAudioCallAsIcon) {
-                        headerItem.hideSubItem(call);
-                    } else if (userInfo != null && userInfo.phone_calls_available) {
+                    if (userInfo != null && userInfo.phone_calls_available) {
                         headerItem.showSubItem(call, true);
+                        if (userInfo.video_calls_available) {
+                            headerItem.showSubItem(video_call, true);
+                        } else {
+                            headerItem.hideSubItem(video_call);
+                        }
                     }
                 }
                 globalIgnoreLayout = false;
