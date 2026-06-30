@@ -83,6 +83,7 @@ public class MglaSettingsActivity extends BaseFragment {
 
         items.add(SettingCell.Factory.of(4, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_chat, "AI"));
         items.add(SettingCell.Factory.of(5, IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_features, "Основные настройки"));
+        items.add(SettingCell.Factory.of(7, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.msg_palette, "Внешний вид"));
         items.add(SettingCell.Factory.of(6, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.filled_chatlist2, "Чаты"));
         items.add(UItem.asShadow(null));
 
@@ -99,6 +100,9 @@ public class MglaSettingsActivity extends BaseFragment {
                 break;
             case 5:
                 presentFragment(new MglaMainSettingsActivity());
+                break;
+            case 7:
+                presentFragment(new MglaAppearanceSettingsActivity());
                 break;
             case 6:
                 presentFragment(new MglaChatsSettingsActivity());

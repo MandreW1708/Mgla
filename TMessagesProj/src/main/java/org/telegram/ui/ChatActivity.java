@@ -207,6 +207,7 @@ import org.telegram.tgnet.tl.TL_stats;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.AiAssistant;
 import org.telegram.ui.MglaHapticManager;
+import org.telegram.ui.MglaGlassConfig;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarLayout;
 import org.telegram.ui.ActionBar.ActionBarMenu;
@@ -3575,7 +3576,7 @@ public class ChatActivity extends BaseFragment implements
                 }
 
                 final boolean isThemeLight = themeDelegate != null && !themeDelegate.isDark();
-                if (isThemeLight) {
+                if (isThemeLight && !(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && !MglaGlassConfig.isGlassDarkeningEnabled())) {
                     return ColorUtils.setAlphaComponent(super.getBackgroundColor(), 216);
                 }
                 return super.getBackgroundColor();
@@ -3589,7 +3590,7 @@ public class ChatActivity extends BaseFragment implements
                 }
 
                 final boolean isThemeLight = themeDelegate != null && !themeDelegate.isDark();
-                if (isThemeLight) {
+                if (isThemeLight && !(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && !MglaGlassConfig.isGlassDarkeningEnabled())) {
                     return ColorUtils.setAlphaComponent(super.getBackgroundColor(), 216);
                 }
                 return super.getBackgroundColor();
