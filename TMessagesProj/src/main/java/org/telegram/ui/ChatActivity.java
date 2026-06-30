@@ -434,6 +434,10 @@ public class ChatActivity extends BaseFragment implements
     private ActionBarMenu.LazyItem attachItem;
     private ActionBarMenuItem.Item savedChatsItem, savedChatsGap;;
     private ActionBarMenuItem headerItem;
+    // Mgla: right avatar in the chat/channel header (replaces the "more" three-dots button)
+    private BackupImageView rightAvatar;
+    private AvatarDrawable rightAvatarDrawable;
+
     private ActionBarMenu.LazyItem editTextItem;
     protected ActionBarMenuItem searchItem;
     protected ActionBarMenuItem topicCreateItem;
@@ -2105,6 +2109,7 @@ public class ChatActivity extends BaseFragment implements
                 return;
             }
             ActionBarMenu menu = actionBar.createMenu();
+        menu.setVisibility(View.GONE);
             if (suggestEmojiPanel != null) {
                 suggestEmojiPanel.onTextSelectionChanged(start, end);
             }
@@ -4207,12 +4212,18 @@ public class ChatActivity extends BaseFragment implements
                 openSearchWithText(isSupportedTags() ? "" : null);
             }
         };
-        avatarContainer.setGlassMode();
         avatarContainer.allowShorterStatus = true;
         avatarContainer.premiumIconHiddable = true;
         avatarContainer.allowDrawStories = dialog_id < 0 && !isTopic;
         avatarContainer.setClipChildren(false);
         updateTopicTitleIcon();
+        // Mgla: hide the avatar from the nickname field (it is now shown on the right side of the header).
+        // Keep the topic/bot-forum icon (set just above) for those cases.
+        if (!isTopic && !UserObject.isBotForum(currentUser)) {
+            avatarContainer.getAvatarImageView().setVisibility(View.GONE);
+        }
+        avatarContainer.setGlassMode();
+
         if (inPreviewMode || inBubbleMode || isInsideContainer) {
             avatarContainer.setOccupyStatusBar(false);
         }
@@ -4277,6 +4288,7 @@ public class ChatActivity extends BaseFragment implements
         });
 
         ActionBarMenu menu = actionBar.createMenu();
+        menu.setVisibility(View.GONE);
 
         if (chatMode == MODE_QUICK_REPLIES && !QuickRepliesController.isSpecial(quickReplyShortcut)) {
             menu.addItem(edit_quick_reply, R.drawable.group_edit).setContentDescription(LocaleController.getString(R.string.Edit));
@@ -4337,8 +4349,8 @@ public class ChatActivity extends BaseFragment implements
             if (currentUser != null) {
                 userFull = getMessagesController().getUserFull(currentUser.id);
             }
-            headerItem = menu.addItem(chat_menu_options, otherIcon);
-            otherIcon.addView(headerItem.getIconView());
+            headerItem = menu.addItemWithWidth(chat_menu_options, new ColorDrawable(Color.TRANSPARENT), dp(46), LocaleController.getString(R.string.AccDescrMoreOptions));
+            headerItem.setBackground(null);
             headerItem.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
 
             if (currentUser != null && currentUser.self && chatMode != MODE_SAVED) {
@@ -4558,6 +4570,33 @@ public class ChatActivity extends BaseFragment implements
             attachItem.setVisibility(View.GONE);
         }
 
+        // Replace the right "more" icon with the current peer avatar while keeping the menu item itself.
+        // Materialize the attach item first so it stays to the left of this slot.
+        if (attachItem != null) {
+            attachItem.createView();
+        }
+        if (headerItem != null) {
+            if (rightAvatarDrawable == null) {
+                rightAvatarDrawable = new AvatarDrawable();
+            }
+            if (rightAvatar == null) {
+                rightAvatar = new BackupImageView(context);
+                rightAvatar.setRoundRadius(dp(23));
+                rightAvatar.setSize(dp(46), dp(46));
+                rightAvatar.setClickable(false);
+                rightAvatar.setFocusable(false);
+                rightAvatar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
+            if (rightAvatar.getParent() != headerItem) {
+                if (rightAvatar.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) rightAvatar.getParent()).removeView(rightAvatar);
+                }
+                headerItem.addView(rightAvatar, LayoutHelper.createFrame(46, 46, Gravity.CENTER));
+            }
+            headerItem.getIconView().setVisibility(View.GONE);
+        }
+        updateRightAvatar();
+
         if (inPreviewMode) {
             if (headerItem != null) {
                 headerItem.setAlpha(0.0f);
@@ -4565,6 +4604,10 @@ public class ChatActivity extends BaseFragment implements
             if (attachItem != null) {
                 attachItem.setAlpha(0.0f);
             }
+            if (rightAvatar != null) {
+                rightAvatar.setAlpha(0.0f);
+            }
+
         }
 
         if (BuildConfig.DEBUG_PRIVATE_VERSION && headerItem != null) {
@@ -4597,8 +4640,12 @@ public class ChatActivity extends BaseFragment implements
         contentView.setOccupyStatusBar(!inBubbleMode && !isInsideContainer && !inPreviewMode);
 
         actionBar.setupGlass(glassBackgroundDrawableFactory, blurredBackgroundColorProvider);
-        //actionBar.setChatAvatarContainer(avatarContainer);
-        //avatarContainer.setActionBar(actionBar);
+        actionBar.setChatAvatarContainer(avatarContainer);
+        avatarContainer.setActionBar(actionBar);
+        if (!isTopic && !UserObject.isBotForum(currentUser)) {
+            avatarContainer.setLeftPadding(0);
+        }
+        actionBar.checkAvatarContainerWidth(false);
 
         chatInputViewsContainer = new ChatInputViewsContainer(context);
         chatInputViewsContainer.setClipChildren(false);
@@ -8070,6 +8117,7 @@ public class ChatActivity extends BaseFragment implements
         chatActivityEnterView.setViewParentForEmoji(chatInputInAppContainer);
         checkSendButtonBlockedByTyping(false);
         chatActivityEnterView.setupStaticAttachButton(glassBackgroundDrawableFactory, blurredBackgroundColorProvider);
+        chatActivityEnterView.setupStaticSendButton(glassBackgroundDrawableFactory, blurredBackgroundColorProvider);
 
         chatInputBubbleContainer.addView(chatActivityEnterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 7, 0, 7, 0));
         updateInputBubbleOffsets();
@@ -19587,6 +19635,37 @@ public class ChatActivity extends BaseFragment implements
         }
         if (avatarContainer != null) {
             avatarContainer.checkAndUpdateAvatar();
+        }
+        updateRightAvatar();
+    }
+
+    // Mgla: updates the right header avatar (chat/channel photo) to match the current peer.
+    private void updateRightAvatar() {
+        if (rightAvatar == null || rightAvatarDrawable == null) {
+            return;
+        }
+        TLRPC.User user = currentUser;
+        TLRPC.Chat chat = currentChat;
+        if (chatMode == MODE_SAVED) {
+            long savedDialogId = getSavedDialogId();
+            if (savedDialogId >= 0) {
+                user = getMessagesController().getUser(savedDialogId);
+                chat = null;
+            } else {
+                user = null;
+                chat = getMessagesController().getChat(-savedDialogId);
+            }
+        }
+        if (user != null) {
+            rightAvatar.setVisibility(View.VISIBLE);
+            rightAvatarDrawable.setInfo(currentAccount, user);
+            rightAvatar.setForUserOrChat(user, rightAvatarDrawable);
+        } else if (chat != null) {
+            rightAvatar.setVisibility(View.VISIBLE);
+            rightAvatarDrawable.setInfo(currentAccount, chat);
+            rightAvatar.setForUserOrChat(chat, rightAvatarDrawable);
+        } else {
+            rightAvatar.setVisibility(View.GONE);
         }
     }
 
@@ -46134,12 +46213,14 @@ public class ChatActivity extends BaseFragment implements
             return;
         }
         float attachLeft = 0;
+        float sendRight = 0;
         if (chatActivityEnterView != null) {
             attachLeft = dp(7) + chatActivityEnterView.getStaticAttachBubbleLeftOffset();
+            sendRight = dp(7) + chatActivityEnterView.getStaticSendBubbleRightOffset();
         }
         chatInputViewsContainer.setInputBubbleOffsets(
             Math.max(inputBubbleOffsetLeftFromChannel, attachLeft),
-            inputBubbleOffsetRightFromChannel
+            Math.max(inputBubbleOffsetRightFromChannel, sendRight)
         );
     }
 

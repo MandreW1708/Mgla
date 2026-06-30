@@ -7184,6 +7184,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM) {
             Theme.checkAutoNightThemeConditions();
         }
+        if (Theme.isMaterialSystemTheme(Theme.getCurrentTheme())) {
+            Theme.refreshThemeColors();
+        }
     }
 
     @Override

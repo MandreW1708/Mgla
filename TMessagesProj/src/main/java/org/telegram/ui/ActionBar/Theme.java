@@ -2416,6 +2416,9 @@ public class Theme {
             if (firstAccentIsDefault && currentAccentId == DEFALT_THEME_ACCENT_ID) {
                 return 0xfff0fee0;
             }
+            if (Theme.isMaterialSystemTheme(this)) {
+                return Theme.getMaterialSystemBubbleColor(isDark());
+            }
             return previewOutColor;
         }
 
@@ -4754,13 +4757,13 @@ public class Theme {
         themes.add(themeInfo);
         themesDict.put("AMOLED", themeInfo);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             themeInfo = new ThemeInfo();
             themeInfo.name = "Material Light";
             themeInfo.assetName = "day.attheme";
             themeInfo.previewBackgroundColor = 0xfffffbfe;
             themeInfo.previewInColor = 0xfff3edf7;
-            themeInfo.previewOutColor = getAndroidSystemColor("system_accent1_100", 0xffeaddff);
+            themeInfo.previewOutColor = getMaterialSystemBubbleColor(false);
             themeInfo.sortIndex = 7;
             themes.add(themeInfo);
             themesDict.put("Material Light", themeInfo);
@@ -4770,7 +4773,7 @@ public class Theme {
             themeInfo.assetName = "night.attheme";
             themeInfo.previewBackgroundColor = 0xff1c1b1f;
             themeInfo.previewInColor = 0xff211f26;
-            themeInfo.previewOutColor = getAndroidSystemColor("system_accent1_700", 0xff4f378b);
+            themeInfo.previewOutColor = getMaterialSystemBubbleColor(true);
             themeInfo.sortIndex = 8;
             themes.add(themeInfo);
             themesDict.put("Material Dark", themeInfo);
@@ -4780,7 +4783,7 @@ public class Theme {
             themeInfo.assetName = "amoled.attheme";
             themeInfo.previewBackgroundColor = 0xff000000;
             themeInfo.previewInColor = 0xff101010;
-            themeInfo.previewOutColor = getAndroidSystemColor("system_accent1_700", 0xff4f378b);
+            themeInfo.previewOutColor = getMaterialSystemBubbleColor(true);
             themeInfo.sortIndex = 9;
             themes.add(themeInfo);
             themesDict.put("Material Black", themeInfo);
@@ -4845,6 +4848,9 @@ public class Theme {
                 applyingTheme.currentAccentId = 9;
             } else if (theme != null) {
                 applyingTheme = themesDict.get(theme);
+                if (applyingTheme == null && isMaterialSystemThemeKey(theme)) {
+                    applyingTheme = themesDict.get("Day");
+                }
                 if (applyingTheme != null && !themeConfig.contains("lastDayTheme")) {
                     SharedPreferences.Editor editor = themeConfig.edit();
                     editor.putString("lastDayTheme", applyingTheme.getKey());
@@ -4861,6 +4867,9 @@ public class Theme {
                 themeDarkBlue.currentAccentId = 9;
             } else if (theme != null) {
                 ThemeInfo t = themesDict.get(theme);
+                if (t == null && isMaterialSystemThemeKey(theme)) {
+                    t = themesDict.get("Night");
+                }
                 if (t != null) {
                     currentNightTheme = t;
                 }
@@ -4875,7 +4884,7 @@ public class Theme {
             SharedPreferences.Editor oldEditor = null;
             SharedPreferences.Editor oldEditorNew = null;
             for (ThemeInfo info : themesDict.values()) {
-                if (info.assetName != null && info.accentBaseColor != 0) {
+                if (info.assetName != null && info.accentBaseColor != 0 && !isMaterialSystemTheme(info)) {
                     String accents = themeConfig.getString("accents_" + info.assetName, null);
                     info.currentAccentId = themeConfig.getInt("accent_current_" + info.assetName, info.firstAccentIsDefault ? DEFALT_THEME_ACCENT_ID : 0);
                     ArrayList<ThemeAccent> newAccents = new ArrayList<>();
@@ -6406,6 +6415,12 @@ public class Theme {
         if (themeInfo == null) {
             return;
         }
+        if (isMaterialSystemTheme(themeInfo) && !isMaterialSystemThemeAvailable()) {
+            themeInfo = themesDict.get(themeInfo.isDark() ? "Night" : "Day");
+            if (themeInfo == null) {
+                return;
+            }
+        }
         ThemeEditorView editorView = ThemeEditorView.getInstance();
         if (editorView != null) {
             editorView.destroy();
@@ -6727,69 +6742,74 @@ public class Theme {
         AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.didSetNewTheme, false, checkNavigationBarColor));
     }
 
-    private static boolean isMaterialSystemTheme(ThemeInfo themeInfo) {
+    public static boolean isMaterialSystemThemeAvailable() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+    }
+
+    public static boolean isMaterialSystemTheme(ThemeInfo themeInfo) {
         return themeInfo != null && ("Material Light".equals(themeInfo.name) || "Material Dark".equals(themeInfo.name) || "Material Black".equals(themeInfo.name));
     }
 
-    private static void applyMaterialSystemAccent(ThemeInfo themeInfo) {
-        boolean dark = themeInfo != null && themeInfo.isDark();
-        int accent = getAndroidSystemColor(dark ? "system_accent1_200" : "system_accent1_600", dark ? 0xffd0bcff : 0xff6750a4);
-        int accentStrong = getAndroidSystemColor(dark ? "system_accent1_100" : "system_accent1_700", dark ? 0xffeaddff : 0xff4f378b);
-        int accentContainer = getAndroidSystemColor(dark ? "system_accent1_700" : "system_accent1_100", dark ? 0xff4f378b : 0xffeaddff);
-        int accentContainerPressed = getAndroidSystemColor(dark ? "system_accent1_600" : "system_accent1_200", dark ? 0xff6750a4 : 0xffd0bcff);
-        int accentSelector = ColorUtils.setAlphaComponent(accent, dark ? 0x33 : 0x1f);
+    private static boolean isMaterialSystemThemeKey(String key) {
+        return "Material Light".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key);
+    }
 
-        currentColors.put(key_windowBackgroundWhiteBlueText, accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText2, accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText3, accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText4, accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText5, accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText7, accent);
-        currentColors.put(key_windowBackgroundWhiteLinkText, accent);
-        currentColors.put(key_dialogTextBlue, accent);
-        currentColors.put(key_dialogTextBlue2, accent);
-        currentColors.put(key_dialogTextBlue4, accent);
-        currentColors.put(key_dialogButton, accent);
-        currentColors.put(key_dialogButtonSelector, accentSelector);
-        currentColors.put(key_dialogInputFieldActivated, accent);
-        currentColors.put(key_actionBarTabActiveText, accent);
-        currentColors.put(key_actionBarTabLine, accent);
-        currentColors.put(key_actionBarDefaultSelector, accentSelector);
-        currentColors.put(key_listSelector, accentSelector);
-        currentColors.put(key_chat_messagePanelSend, accent);
-        currentColors.put(key_chat_inReplyLine, accent);
-        currentColors.put(key_chat_outReplyLine, accent);
-        currentColors.put(key_chat_inReplyNameText, accent);
-        currentColors.put(key_chat_outReplyNameText, accent);
-        currentColors.put(key_chat_messageLinkIn, accent);
-        currentColors.put(key_chat_messageLinkOut, accentStrong);
-        currentColors.put(key_chat_outBubble, accentContainer);
-        currentColors.put(key_chat_outBubbleSelected, accentContainerPressed);
-        currentColors.put(key_chats_unreadCounter, accent);
-        currentColors.put(key_chats_actionBackground, accent);
-        currentColors.put(key_chats_actionPressedBackground, accentStrong);
-        currentColors.put(key_profile_actionBackground, accentContainer);
-        currentColors.put(key_profile_actionPressedBackground, accentContainerPressed);
-        currentColors.put(key_profile_actionIcon, dark ? accentStrong : accent);
-        currentColors.put(key_checkboxSquareBackground, accent);
-        currentColors.put(key_radioBackgroundChecked, accent);
-        currentColors.put(key_switchTrackBlueThumbChecked, accent);
-        currentColors.put(key_switchTrackBlueChecked, accentContainer);
-        currentColors.put(key_featuredStickers_addButton, accent);
-        currentColors.put(key_featuredStickers_addButtonPressed, accentStrong);
-        currentColors.put(key_progressCircle, accent);
-        currentColors.put(key_fastScrollActive, accent);
+    public static int getMaterialSystemAccentColor(boolean dark) {
+        return getAndroidSystemColor("system_accent1_500", dark ? 0xffd0bcff : 0xff6750a4);
+    }
+
+    public static int getMaterialSystemBubbleColor(boolean dark) {
+        return getMaterialSystemAccentColor(dark);
+    }
+
+    private static void ensureMaterialAccentBase(ThemeInfo themeInfo) {
+        if (themeInfo.accentBaseColor != 0) {
+            return;
+        }
+        ThemeInfo baseTheme = null;
+        if ("Material Light".equals(themeInfo.name)) {
+            baseTheme = themesDict.get("Day");
+        } else if ("Material Dark".equals(themeInfo.name)) {
+            baseTheme = themesDict.get("Night");
+        } else if ("Material Black".equals(themeInfo.name)) {
+            baseTheme = themesDict.get("AMOLED");
+        }
+        if (baseTheme != null && baseTheme.accentBaseColor != 0) {
+            themeInfo.accentBaseColor = baseTheme.accentBaseColor;
+        } else {
+            themeInfo.accentBaseColor = 0xFF56A2C9;
+        }
+    }
+
+    private static void applyMaterialSystemAccent(ThemeInfo themeInfo) {
+        if (!isMaterialSystemThemeAvailable()) {
+            return;
+        }
+        int accent = getMaterialSystemAccentColor(themeInfo.isDark());
+
+        ensureMaterialAccentBase(themeInfo);
+
+        ThemeAccent accentObj = new ThemeAccent();
+        accentObj.parentTheme = themeInfo;
+        accentObj.accentColor = accent;
+        accentObj.accentColor2 = 0;
+        accentObj.myMessagesAccentColor = accent;
+        accentObj.myMessagesGradientAccentColor1 = 0;
+        accentObj.myMessagesGradientAccentColor2 = 0;
+        accentObj.myMessagesGradientAccentColor3 = 0;
+        accentObj.fillAccentColors(currentColorsNoAccent, currentColors);
     }
 
     private static int getAndroidSystemColor(String name, int fallback) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        if (!isMaterialSystemThemeAvailable()) {
             return fallback;
         }
         try {
-            Resources resources = ApplicationLoader.applicationContext.getResources();
+            Context context = ApplicationLoader.applicationContext;
+            Resources resources = context.getResources();
             int id = resources.getIdentifier(name, "color", "android");
             if (id != 0) {
-                return resources.getColor(id);
+                return resources.getColor(id, context.getTheme());
             }
         } catch (Exception e) {
             FileLog.e(e);
