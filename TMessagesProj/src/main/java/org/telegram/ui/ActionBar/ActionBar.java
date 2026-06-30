@@ -2077,18 +2077,21 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
 
         final boolean hasAvatar = chatAvatarContainer.hasVisibleAvatar();
-        int visualWidth = chatAvatarContainer.getVisualWidth();
+        final int maxAvailable = getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
+        final int targetWidth;
         if (hasAvatar) {
+            int visualWidth = chatAvatarContainer.getVisualWidth();
             visualWidth = Math.max(visualWidth, dp(192));
+            targetWidth = Math.min(maxAvailable, visualWidth);
+        } else {
+            targetWidth = maxAvailable;
         }
-
-        final int width = Math.min(getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6), visualWidth);
         if (animated) {
-            if (animatorAvatarContainerWidth.getToFactor() != width) {
-                animatorAvatarContainerWidth.animateTo(width);
+            if (animatorAvatarContainerWidth.getToFactor() != targetWidth) {
+                animatorAvatarContainerWidth.animateTo(targetWidth);
             }
         } else {
-            animatorAvatarContainerWidth.forceFactor(width);
+            animatorAvatarContainerWidth.forceFactor(targetWidth);
         }
         animatorAvatarContainerHasAvatar.setValue(hasAvatar, animated);
     }

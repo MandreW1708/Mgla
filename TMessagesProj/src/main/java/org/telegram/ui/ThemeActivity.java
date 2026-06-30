@@ -616,6 +616,9 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         darkThemes.clear();
         for (int a = 0, N = Theme.themes.size(); a < N; a++) {
             Theme.ThemeInfo themeInfo = Theme.themes.get(a);
+            if (!Theme.isMaterialSystemThemeAvailable() && Theme.isMaterialSystemTheme(themeInfo)) {
+                continue;
+            }
             if (currentType != THEME_TYPE_BASIC && currentType != THEME_TYPE_THEMES_BROWSER) {
                 if (themeInfo.isLight() || themeInfo.info != null && themeInfo.info.document == null) {
                     continue;

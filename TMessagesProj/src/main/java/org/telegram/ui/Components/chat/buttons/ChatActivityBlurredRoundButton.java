@@ -19,6 +19,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LiteMode;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.CircularProgressDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
@@ -26,6 +27,7 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProvider;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProviderAccent;
 
 import me.vkryl.android.animator.BoolAnimator;
 import me.vkryl.android.animator.FactorAnimator;
@@ -36,6 +38,8 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
 
     public ChatActivityBlurredRoundButton(Context context) {
         super(context);
+        setClipChildren(false);
+        setClipToPadding(false);
     }
 
     private static final int ANIMATOR_ID_LOADING_VISIBILITY = 0;
@@ -48,16 +52,73 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
     private @Nullable ImageView loadingIndicatorView;
     private CircularProgressDrawable loadingIndicatorDrawable;
     private Theme.ResourcesProvider resourcesProvider;
+    private int visualSizeDp = BUTTON_SIZE;
+    private boolean accentFillBackground;
+    private @Nullable BlurredBackgroundColorProviderAccent accentColorProvider;
+
+    public void setAccentFillBackground(boolean accentFillBackground) {
+        if (this.accentFillBackground != accentFillBackground) {
+            this.accentFillBackground = accentFillBackground;
+            if (accentFillBackground) {
+                ensureAccentColorProvider();
+                applyAccentGlassStyle();
+            }
+            invalidate();
+        }
+    }
+
+    private void ensureAccentColorProvider() {
+        if (accentColorProvider == null) {
+            accentColorProvider = new BlurredBackgroundColorProviderAccent(resourcesProvider);
+        }
+    }
+
+    private void applyAccentGlassStyle() {
+        if (!accentFillBackground || backgroundDrawable == null) {
+            return;
+        }
+        ensureAccentColorProvider();
+        accentColorProvider.updateColors();
+        backgroundDrawable.setColorProvider(accentColorProvider);
+        backgroundDrawable.setPadding(0);
+        backgroundDrawable.setRadius(dp(visualSizeDp / 2f));
+        if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+            backgroundDrawable.setThickness(0);
+            backgroundDrawable.setIntensity(0.7f);
+        } else {
+            backgroundDrawable.setThickness(0);
+            backgroundDrawable.setIntensity(0.5f);
+        }
+        updateDrawableBounds(getWidth(), getHeight());
+        final int pressedColor = Theme.multAlpha(0xFFFFFFFF, .15f);
+        setBackground(Theme.createSelectorDrawable(pressedColor, Theme.RIPPLE_MASK_CIRCLE_20DP, dp(visualSizeDp / 2f)));
+    }
+
+    private void updateAccentFillColors() {
+        applyAccentGlassStyle();
+        if (backgroundDrawable != null) {
+            backgroundDrawable.updateColors();
+        }
+    }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        backgroundDrawable.setBounds(0, 0, w, h);
+        updateDrawableBounds(w, h);
+    }
+
+    private void updateDrawableBounds(int width, int height) {
+        if (backgroundDrawable == null || width <= 0 || height <= 0) {
+            return;
+        }
+        backgroundDrawable.setBounds(0, 0, width, height);
     }
 
     @Override
     public void draw(@NonNull Canvas canvas) {
-        backgroundDrawable.draw(canvas);
+        if (backgroundDrawable != null) {
+            backgroundDrawable.draw(canvas);
+        }
         super.draw(canvas);
     }
 
@@ -121,19 +182,30 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
     private BlurredBackgroundDrawable backgroundDrawable;
     public void setBlurredBackgroundDrawable(BlurredBackgroundDrawable drawable) {
         backgroundDrawable = drawable;
-        backgroundDrawable.setPadding(dp(CLICK_ZONE_MARGIN));
-        backgroundDrawable.setRadius(dp(BUTTON_SIZE / 2f));
+        backgroundDrawable.setPadding(accentFillBackground ? 0 : dp(CLICK_ZONE_MARGIN));
+        backgroundDrawable.setRadius(dp(accentFillBackground ? visualSizeDp : BUTTON_SIZE) / 2f);
+        updateDrawableBounds(getWidth(), getHeight());
+        if (accentFillBackground) {
+            applyAccentGlassStyle();
+        }
     }
 
-    public void updateVisualSize(int size) {
-        if (backgroundDrawable == null) {
-            return;
+    public void updateVisualSize(int sizeDp) {
+        updateVisualSize(sizeDp, true);
+    }
+
+    public void updateVisualSize(int sizeDp, boolean useBlurInsetPadding) {
+        visualSizeDp = sizeDp;
+        if (backgroundDrawable != null) {
+            final boolean usePadding = useBlurInsetPadding && !accentFillBackground;
+            backgroundDrawable.setPadding(usePadding ? dp(CLICK_ZONE_MARGIN) : 0);
+            backgroundDrawable.setRadius(dp(sizeDp / 2f));
         }
-        backgroundDrawable.setPadding(0);
-        backgroundDrawable.setRadius(dp(size / 2f));
-        setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), Theme.RIPPLE_MASK_CIRCLE_20DP, dp(size / 2f)));
+        if (!accentFillBackground) {
+            setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), Theme.RIPPLE_MASK_CIRCLE_20DP, dp(sizeDp / 2f)));
+        }
         if (imageView != null) {
-            final int iconSize = Math.max(dp(24), size - dp(12));
+            final int iconSize = Math.max(dp(24), dp(sizeDp) - dp(12));
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) imageView.getLayoutParams();
             if (lp.width != iconSize || lp.height != iconSize) {
                 lp.width = iconSize;
@@ -141,6 +213,11 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
                 imageView.setLayoutParams(lp);
             }
         }
+        updateDrawableBounds(getWidth(), getHeight());
+        if (accentFillBackground) {
+            updateAccentFillColors();
+        }
+        requestLayout();
         invalidate();
     }
 
@@ -188,11 +265,17 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
         final int color = Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider);
         button = new ChatActivityBlurredRoundButton(context);
         button.resourcesProvider = resourcesProvider;
+        if (colorProvider instanceof BlurredBackgroundColorProviderAccent) {
+            button.accentColorProvider = (BlurredBackgroundColorProviderAccent) colorProvider;
+            button.accentFillBackground = true;
+        }
         button.setBlurredBackgroundDrawable(factory.create(button, colorProvider));
         button.setIconColor(color);
         int rad = dp(22);
         int pressedColor = Theme.multAlpha(color, .15f);
-        button.setBackground(Theme.createInsetRoundRectDrawable(pressedColor, rad, dp(6)));
+        if (!button.accentFillBackground) {
+            button.setBackground(Theme.createInsetRoundRectDrawable(pressedColor, rad, dp(6)));
+        }
 
         return button;
     }
@@ -210,17 +293,28 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
         final int color = Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider);
         button = new ChatActivityBlurredRoundButton(context);
         button.resourcesProvider = resourcesProvider;
+        if (colorProvider instanceof BlurredBackgroundColorProviderAccent) {
+            button.accentColorProvider = (BlurredBackgroundColorProviderAccent) colorProvider;
+            button.accentFillBackground = true;
+        }
         button.setBlurredBackgroundDrawable(factory.create(button, colorProvider));
         button.setIcon(res, iconSize);
         button.setIconColor(color);
         int rad = dp(22);
         int pressedColor = Theme.multAlpha(color, .15f);
-        button.setBackground(Theme.createInsetRoundRectDrawable(pressedColor, rad, dp(6)));
+        if (!button.accentFillBackground) {
+            button.setBackground(Theme.createInsetRoundRectDrawable(pressedColor, rad, dp(6)));
+        }
 
         return button;
     }
 
     public void updateColors() {
+        if (accentFillBackground) {
+            updateAccentFillColors();
+            invalidate();
+            return;
+        }
         if (backgroundDrawable != null) {
             backgroundDrawable.updateColors();
             invalidate();
