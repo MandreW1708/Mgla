@@ -16,6 +16,7 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -51,7 +52,7 @@ public class MglaMainSettingsActivity extends BaseFragment {
         rootLayout.setOrientation(LinearLayout.VERTICAL);
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        LinearLayout block = createBlock(context);
+        LinearLayout block = createBlock(context, "Базовые");
 
         // Прокси в шапке
         TextCheckCell proxyCell = new TextCheckCell(context);
@@ -83,7 +84,7 @@ public class MglaMainSettingsActivity extends BaseFragment {
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
-        LinearLayout popupBlock = createBlock(context);
+        LinearLayout popupBlock = createBlock(context, "Уведомления");
         TextCheckCell popupCell = new TextCheckCell(context);
         popupCell.setBackground(null);
         popupCell.setTextAndCheck("Всплывающие уведомления", prefs.getBoolean("mgla_popup_notifications_enabled", false), true);
@@ -105,7 +106,7 @@ public class MglaMainSettingsActivity extends BaseFragment {
         return fragmentView;
     }
 
-    private LinearLayout createBlock(Context context) {
+    private LinearLayout createBlock(Context context, String title) {
         LinearLayout block = new LinearLayout(context);
         block.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
@@ -114,6 +115,12 @@ public class MglaMainSettingsActivity extends BaseFragment {
         block.setBackground(bg);
         block.setClipToOutline(true);
         block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+
+        HeaderCell header = new HeaderCell(context, 22);
+        header.setBackground(null);
+        header.setText(title);
+        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         return block;
     }
 
