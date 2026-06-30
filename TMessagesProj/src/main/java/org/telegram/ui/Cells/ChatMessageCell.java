@@ -124,6 +124,7 @@ import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaChatsConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.RichMessageLayout;
@@ -23632,6 +23633,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
         int timeYOffset;
         if (shouldDrawTimeOnMedia()) {
+            final boolean hideStickerTime = MglaChatsConfig.isStickerTimeHidden()
+                && currentMessageObject != null && currentMessageObject.isAnyKindOfSticker();
             timeYOffset = -(drawCommentButton ? dp(41.3f) : 0);
             Paint paint;
             if (currentMessageObject.shouldDrawWithoutBackground()) {
@@ -23652,6 +23655,17 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             if (currentMessageObject != null && currentMessageObject.sendPreview) {
                 alpha *= effectDrawable == null ? 0f : effectDrawable.isNotEmpty();
             }
+            timeX += (currentMessageObject != null && currentMessageObject.isAnyKindOfSticker() ? dp(-STICKER_STATUS_OFFSET) : 0);
+            if (effectId != 0) {
+                timeX -= dp(14 + 4);
+            }
+            float timeY;
+            if (documentAttachType == DOCUMENT_ATTACH_TYPE_ROUND && (currentMessageObject == null || !currentMessageObject.isRoundOnce())) {
+                timeY = layoutHeight - (dp(drawPinnedBottom ? 4 : 5) + reactionsLayoutInBubble.getCurrentTotalHeight(transitionParams.animateChangeProgress)) * (1f - getVideoTranscriptionProgress());
+            } else {
+                timeY = getPhotoBottom() + additionalTimeOffsetY;
+            }
+            if (!hideStickerTime) {
             paint.setAlpha((int) (oldAlpha * timeAlpha * alpha * .6f));
 
             int r;
@@ -23662,18 +23676,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             } else {
                 r = dp(4) + (currentMessageObject != null && currentMessageObject.isAnyKindOfSticker() ? dp(8) : 0);
             }
-            timeX += (currentMessageObject != null && currentMessageObject.isAnyKindOfSticker() ? dp(-STICKER_STATUS_OFFSET) : 0);
-            if (effectId != 0) {
-                timeX -= dp(14 + 4);
-            }
             float x1 = timeX - dp(bigRadius ? 6 : 4);
             float offsetX = (currentMessageObject != null && currentMessageObject.isAnyKindOfSticker()) ? dp(2) : 0;
-            float timeY;
-            if (documentAttachType == DOCUMENT_ATTACH_TYPE_ROUND && (currentMessageObject == null || !currentMessageObject.isRoundOnce())) {
-                timeY = layoutHeight - (dp(drawPinnedBottom ? 4 : 5) + reactionsLayoutInBubble.getCurrentTotalHeight(transitionParams.animateChangeProgress)) * (1f - getVideoTranscriptionProgress());
-            } else {
-                timeY = getPhotoBottom() + additionalTimeOffsetY;
-            }
             float y1 = timeY - dp(23);
             float timeHeight = Math.max(dp(17), Theme.chat_timePaint.getTextSize() + dp(5));
             rect.set(x1 - offsetX, y1, offsetX + x1 + timeWidth + dp((bigRadius ? 12 : 8) + (currentMessageObject.isOutOwner() ? 20 + (currentMessageObject.type == MessageObject.TYPE_EMOJIS ? 4 : 0) : 0)), y1 + timeHeight);
@@ -23709,6 +23713,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 }
             }
             paint.setAlpha(oldAlpha);
+            }
 
             alpha = oldAlpha3;
 
@@ -23720,7 +23725,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             }
 
             if (ChatObject.isChannel(currentChat) && !currentChat.megagroup || (currentMessageObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_HAS_VIEWS) != 0 || repliesLayout != null || isPinned) {
-                additionalX += this.timeWidth - timeLayout.getLineWidth(0);
+                if (!hideStickerTime) {
+                    additionalX += this.timeWidth - timeLayout.getLineWidth(0);
+                }
                 if (reactionsLayoutInBubble.isSmall && !reactionsLayoutInBubble.isEmpty) {
                     additionalX -= reactionsLayoutInBubble.width;
                 }
@@ -23770,10 +23777,12 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 }
             }
 
+            if (!hideStickerTime) {
             canvas.save();
             canvas.translate(drawTimeX = timeTitleTimeX + additionalX, drawTimeY = timeY - dp(7.3f) - timeLayout.getHeight());
             SpoilerEffect.layoutDrawMaybe(timeLayout, canvas);
             canvas.restore();
+            }
             Theme.chat_timePaint.setAlpha(255);
         } else {
             if (currentMessageObject.isSponsored()) {

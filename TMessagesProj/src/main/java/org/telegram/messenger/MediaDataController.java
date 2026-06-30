@@ -909,7 +909,10 @@ public class MediaDataController extends BaseController {
         if (type == TYPE_PREMIUM_STICKERS) {
             return new ArrayList<>(recentStickers[type]);
         }
-        ArrayList<TLRPC.Document> result = new ArrayList<>(arrayList.subList(0, Math.min(arrayList.size(), 20)));
+        final int limit = type == TYPE_IMAGE
+            ? MglaChatsConfig.getRecentStickersLimit(currentAccount)
+            : getMessagesController().maxRecentStickersCount;
+        ArrayList<TLRPC.Document> result = new ArrayList<>(arrayList.subList(0, Math.min(arrayList.size(), limit)));
         if (firstEmpty && !result.isEmpty() && !StickersAlert.DISABLE_STICKER_EDITOR) {
             result.add(0, new TLRPC.TL_documentEmpty());
         }
@@ -1013,7 +1016,7 @@ public class MediaDataController extends BaseController {
                     }
                 });
             }
-            maxCount = getMessagesController().maxRecentStickersCount;
+            maxCount = type == TYPE_IMAGE ? MglaChatsConfig.getRecentStickersLimit(currentAccount) : getMessagesController().maxRecentStickersCount;
         }
         if (recentStickers[type].size() > maxCount || remove) {
             TLRPC.Document old = remove ? document : recentStickers[type].remove(recentStickers[type].size() - 1);
@@ -1040,7 +1043,7 @@ public class MediaDataController extends BaseController {
             arrayList.add(document);
             processLoadedRecentDocuments(type, arrayList, false, date, false);
         }
-        if (type == TYPE_FAVE || type == TYPE_IMAGE && remove) {
+        if (type == TYPE_FAVE || type == TYPE_IMAGE) {
             getNotificationCenter().postNotificationName(NotificationCenter.recentDocumentsDidLoad, false, type);
         }
     }
@@ -1962,6 +1965,12 @@ public class MediaDataController extends BaseController {
                             recentGifsLoaded = true;
                         } else {
                             recentStickers[type] = arrayList;
+                            if (type == TYPE_IMAGE) {
+                                int mglaLimit = MglaChatsConfig.getRecentStickersLimit(currentAccount);
+                                while (recentStickers[type].size() > mglaLimit) {
+                                    recentStickers[type].remove(recentStickers[type].size() - 1);
+                                }
+                            }
                             loadingRecentStickers[type] = false;
                             recentStickersLoaded[type] = true;
                         }
@@ -2054,6 +2063,9 @@ public class MediaDataController extends BaseController {
                             arrayList = res.stickers;
                         }
                     }
+                    if (type == TYPE_IMAGE && arrayList != null && MglaChatsConfig.hasCustomRecentStickersLimit()) {
+                        arrayList = mergeMglaRecentStickers(arrayList);
+                    }
                     processLoadedRecentDocuments(type, arrayList, false, 0, true);
                 });
             }
@@ -2074,6 +2086,36 @@ public class MediaDataController extends BaseController {
         return result;
     }
 
+    private ArrayList<TLRPC.Document> mergeMglaRecentStickers(ArrayList<TLRPC.Document> serverStickers) {
+        final int limit = MglaChatsConfig.getRecentStickersLimit(currentAccount);
+        ArrayList<TLRPC.Document> merged = new ArrayList<>();
+        LongSparseArray<Boolean> added = new LongSparseArray<>();
+        if (serverStickers != null) {
+            for (int a = 0; a < serverStickers.size(); a++) {
+                if (merged.size() >= limit) {
+                    break;
+                }
+                TLRPC.Document document = serverStickers.get(a);
+                merged.add(document);
+                added.put(document.id, true);
+            }
+        }
+        ArrayList<TLRPC.Document> local = recentStickers[TYPE_IMAGE];
+        if (local != null) {
+            for (int a = 0; a < local.size(); a++) {
+                if (merged.size() >= limit) {
+                    break;
+                }
+                TLRPC.Document document = local.get(a);
+                if (added.get(document.id) == null) {
+                    merged.add(document);
+                    added.put(document.id, true);
+                }
+            }
+        }
+        return merged;
+    }
+
     protected void processLoadedRecentDocuments(int type, ArrayList<TLRPC.Document> documents, boolean gif, int date, boolean replace) {
         if (documents != null) {
             getMessagesStorage().getStorageQueue().postRunnable(() -> {
@@ -2088,7 +2130,7 @@ public class MediaDataController extends BaseController {
                         } else if (type == TYPE_FAVE) {
                             maxCount = getMessagesController().maxFaveStickersCount;
                         } else {
-                            maxCount = getMessagesController().maxRecentStickersCount;
+                            maxCount = type == TYPE_IMAGE ? MglaChatsConfig.getRecentStickersLimit(currentAccount) : getMessagesController().maxRecentStickersCount;
                         }
                     }
                     database.beginTransaction();
@@ -2179,6 +2221,12 @@ public class MediaDataController extends BaseController {
                         recentGifs = documents;
                     } else {
                         recentStickers[type] = documents;
+                        if (type == TYPE_IMAGE) {
+                            int limit = MglaChatsConfig.getRecentStickersLimit(currentAccount);
+                            while (recentStickers[type].size() > limit) {
+                                recentStickers[type].remove(recentStickers[type].size() - 1);
+                            }
+                        }
                     }
                     if (type == TYPE_GREETINGS) {
                         preloadNextGreetingsSticker();
