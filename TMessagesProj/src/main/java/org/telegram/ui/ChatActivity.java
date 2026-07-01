@@ -436,8 +436,6 @@ public class ChatActivity extends BaseFragment implements
     private ActionBarMenuItem.Item savedChatsItem, savedChatsGap;;
     private ActionBarMenuItem headerItem;
     // Mgla: right avatar in the chat/channel header (replaces the "more" three-dots button)
-    private BackupImageView rightAvatar;
-    private AvatarDrawable rightAvatarDrawable;
 
     private ActionBarMenu.LazyItem editTextItem;
     protected ActionBarMenuItem searchItem;
@@ -1380,36 +1378,37 @@ public class ChatActivity extends BaseFragment implements
         });
     }
 
+    private void setHeaderItemVisibility(int visibility) {
+        if (headerItem == null) {
+            return;
+        }
+        final int oldVisibility = headerItem.getVisibility();
+        headerItem.setVisibility(visibility);
+        if (visibility == View.VISIBLE && oldVisibility != View.VISIBLE) {
+            checkAndUpdateAvatar();
+        }
+    }
+
+    // Mgla: header right slot always shows avatar only — no attach/⋮ swap while typing.
+    private void keepHeaderAvatarMenuState() {
+        if (attachItem != null) {
+            attachItem.setVisibility(View.GONE);
+        }
+        setHeaderItemVisibility(View.VISIBLE);
+        if (otherIcon != null) {
+            otherIcon.setIconVisible(false);
+        }
+        ensureRightHeaderAvatarAttached();
+    }
+
     public void showHeaderItem(boolean show) {
         if (show) {
-            if (chatActivityEnterView.hasText() && TextUtils.isEmpty(chatActivityEnterView.getSlowModeTimer())) {
-                if (attachItem != null) {
-                    attachItem.setVisibility(View.VISIBLE);
-                }
-                if (headerItem != null) {
-                    headerItem.setVisibility(View.GONE);
-                }
-                if (otherIcon != null) {
-                    otherIcon.setIconVisible(true);
-                }
-            } else {
-                if (attachItem != null) {
-                    attachItem.setVisibility(View.GONE);
-                }
-                if (headerItem != null) {
-                    headerItem.setVisibility(View.VISIBLE);
-                }
-                if (otherIcon != null) {
-                    otherIcon.setIconVisible(false);
-                }
-            }
+            keepHeaderAvatarMenuState();
         } else {
             if (attachItem != null) {
                 attachItem.setVisibility(View.GONE);
             }
-            if (headerItem != null) {
-                headerItem.setVisibility(View.GONE);
-            }
+            setHeaderItemVisibility(View.GONE);
             if (otherIcon != null) {
                 otherIcon.setIconVisible(false);
             }
@@ -2089,13 +2088,7 @@ public class ChatActivity extends BaseFragment implements
         public void onUpdateSlowModeButton(View button, boolean show, CharSequence time) {
             showSlowModeHint(button, show, time);
             if (headerItem != null && headerItem.getVisibility() != View.VISIBLE) {
-                headerItem.setVisibility(View.VISIBLE);
-                if (attachItem != null) {
-                    attachItem.setVisibility(View.GONE);
-                }
-                if (otherIcon != null) {
-                    otherIcon.setIconVisible(false);
-                }
+                keepHeaderAvatarMenuState();
             }
         }
 
@@ -2110,7 +2103,6 @@ public class ChatActivity extends BaseFragment implements
                 return;
             }
             ActionBarMenu menu = actionBar.createMenu();
-        menu.setVisibility(View.GONE);
             if (suggestEmojiPanel != null) {
                 suggestEmojiPanel.onTextSelectionChanged(start, end);
             }
@@ -2123,7 +2115,7 @@ public class ChatActivity extends BaseFragment implements
                             editTextItem.setVisibility(View.VISIBLE);
                             checkEditTextItemMenu();
                             if (headerItem != null) {
-                                headerItem.setVisibility(View.GONE);
+                                setHeaderItemVisibility(View.GONE);
                             }
                             if (attachItem != null) {
                                 attachItem.setVisibility(View.GONE);
@@ -2163,27 +2155,7 @@ public class ChatActivity extends BaseFragment implements
                         if (chatMode == MODE_SAVED && getSavedDialogId() == getUserConfig().getClientUserId() || chatMode == 0 && (threadMessageId == 0 || isTopic) && !UserObject.isReplyUser(currentUser) && !isReport()) {
                             editTextItem.setVisibility(View.GONE);
 
-                            if (chatActivityEnterView.hasText() && TextUtils.isEmpty(chatActivityEnterView.getSlowModeTimer())) {
-                                if (headerItem != null) {
-                                    headerItem.setVisibility(View.GONE);
-                                }
-                                if (attachItem != null) {
-                                    attachItem.setVisibility(View.VISIBLE);
-                                }
-                                if (otherIcon != null) {
-                                    otherIcon.setIconVisible(true);
-                                }
-                            } else {
-                                if (headerItem != null) {
-                                    headerItem.setVisibility(View.VISIBLE);
-                                }
-                                if (attachItem != null) {
-                                    attachItem.setVisibility(View.GONE);
-                                }
-                                if (otherIcon != null) {
-                                    otherIcon.setIconVisible(false);
-                                }
-                            }
+                            keepHeaderAvatarMenuState();
                         } else {
                             ValueAnimator valueAnimator = ValueAnimator.ofFloat(0, AndroidUtilities.dp(48));
                             valueAnimator.setDuration(220);
@@ -2273,15 +2245,7 @@ public class ChatActivity extends BaseFragment implements
                 editTextItem.setVisibility(View.GONE);
             }
             if (TextUtils.isEmpty(chatActivityEnterView.getSlowModeTimer())) {
-                if (headerItem != null) {
-                    headerItem.setVisibility(View.GONE);
-                }
-                if (attachItem != null) {
-                    attachItem.setVisibility(View.VISIBLE);
-                }
-                if (otherIcon != null) {
-                    otherIcon.setIconVisible(true);
-                }
+                keepHeaderAvatarMenuState();
             }
         }
 
@@ -2290,17 +2254,9 @@ public class ChatActivity extends BaseFragment implements
             if (actionBar.isSearchFieldVisible()) {
                 return;
             }
-            if (headerItem != null) {
-                headerItem.setVisibility(View.VISIBLE);
-            }
+            keepHeaderAvatarMenuState();
             if (editTextItem != null && !isEditTextItemVisibilitySuppressed) {
                 editTextItem.setVisibility(View.GONE);
-            }
-            if (attachItem != null) {
-                attachItem.setVisibility(View.GONE);
-            }
-            if (otherIcon != null) {
-                otherIcon.setIconVisible(false);
             }
         }
 
@@ -4218,11 +4174,6 @@ public class ChatActivity extends BaseFragment implements
         avatarContainer.allowDrawStories = dialog_id < 0 && !isTopic;
         avatarContainer.setClipChildren(false);
         updateTopicTitleIcon();
-        // Mgla: hide the avatar from the nickname field (it is now shown on the right side of the header).
-        // Keep the topic/bot-forum icon (set just above) for those cases.
-        if (!isTopic && !UserObject.isBotForum(currentUser)) {
-            avatarContainer.getAvatarImageView().setVisibility(View.GONE);
-        }
         avatarContainer.setGlassMode();
 
         if (inPreviewMode || inBubbleMode || isInsideContainer) {
@@ -4577,26 +4528,18 @@ public class ChatActivity extends BaseFragment implements
             attachItem.createView();
         }
         if (headerItem != null) {
-            if (rightAvatarDrawable == null) {
-                rightAvatarDrawable = new AvatarDrawable();
-            }
-            if (rightAvatar == null) {
-                rightAvatar = new BackupImageView(context);
-                rightAvatar.setRoundRadius(dp(23));
-                rightAvatar.setSize(dp(46), dp(46));
-                rightAvatar.setClickable(false);
-                rightAvatar.setFocusable(false);
-                rightAvatar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            }
-            if (rightAvatar.getParent() != headerItem) {
-                if (rightAvatar.getParent() instanceof ViewGroup) {
-                    ((ViewGroup) rightAvatar.getParent()).removeView(rightAvatar);
-                }
-                headerItem.addView(rightAvatar, LayoutHelper.createFrame(46, 46, Gravity.CENTER));
-            }
-            headerItem.getIconView().setVisibility(View.GONE);
+            ensureRightHeaderAvatarAttached();
         }
         updateRightAvatar();
+        menu.setOnLayoutListener(() -> {
+            ensureRightHeaderAvatarAttached();
+            if (headerItem != null && headerItem.getVisibility() == View.VISIBLE) {
+                final BackupImageView avatarView = getRightHeaderAvatar();
+                if (avatarView != null && !avatarView.hasBitmapImage()) {
+                    checkAndUpdateAvatar();
+                }
+            }
+        });
 
         if (inPreviewMode) {
             if (headerItem != null) {
@@ -4605,8 +4548,8 @@ public class ChatActivity extends BaseFragment implements
             if (attachItem != null) {
                 attachItem.setAlpha(0.0f);
             }
-            if (rightAvatar != null) {
-                rightAvatar.setAlpha(0.0f);
+            if (getRightHeaderAvatar() != null) {
+                getRightHeaderAvatar().setAlpha(0.0f);
             }
 
         }
@@ -10050,7 +9993,7 @@ public class ChatActivity extends BaseFragment implements
             if (topic != null) {
                 updateTopicTitleIcon();
             } else {
-                avatarContainer.checkAndUpdateAvatar();
+                checkAndUpdateAvatar();
             }
             topicsTabs.setCurrentTopic(getTopicId());
             updateTopPanel(true);
@@ -10158,7 +10101,7 @@ public class ChatActivity extends BaseFragment implements
 
             updateTitle(true);
             avatarContainer.updateSubtitle(true);
-            avatarContainer.checkAndUpdateAvatar();
+            checkAndUpdateAvatar();
             topicsTabs.setCurrentTopic(dialogId);
             updateTopPanel(true);
             updateBottomOverlay(true);
@@ -19623,16 +19566,14 @@ public class ChatActivity extends BaseFragment implements
         }
         if (currentUser != null) {
             TLRPC.User user = getMessagesController().getUser(currentUser.id);
-            if (user == null) {
-                return;
+            if (user != null) {
+                currentUser = user;
             }
-            currentUser = user;
         } else if (currentChat != null) {
             TLRPC.Chat chat = getMessagesController().getChat(currentChat.id);
-            if (chat == null) {
-                return;
+            if (chat != null) {
+                currentChat = chat;
             }
-            currentChat = chat;
         }
         if (avatarContainer != null) {
             avatarContainer.checkAndUpdateAvatar();
@@ -19640,33 +19581,59 @@ public class ChatActivity extends BaseFragment implements
         updateRightAvatar();
     }
 
+    private boolean useHeaderAvatarSlot() {
+        return headerItem != null && !isTopic && !UserObject.isBotForum(currentUser);
+    }
+
+    private BackupImageView getRightHeaderAvatar() {
+        if (!useHeaderAvatarSlot() || avatarContainer == null) {
+            return null;
+        }
+        return avatarContainer.getAvatarImageView();
+    }
+
     // Mgla: updates the right header avatar (chat/channel photo) to match the current peer.
-    private void updateRightAvatar() {
-        if (rightAvatar == null || rightAvatarDrawable == null) {
+    private void ensureRightHeaderAvatarAttached() {
+        if (!useHeaderAvatarSlot()) {
             return;
         }
-        TLRPC.User user = currentUser;
-        TLRPC.Chat chat = currentChat;
-        if (chatMode == MODE_SAVED) {
-            long savedDialogId = getSavedDialogId();
-            if (savedDialogId >= 0) {
-                user = getMessagesController().getUser(savedDialogId);
-                chat = null;
-            } else {
-                user = null;
-                chat = getMessagesController().getChat(-savedDialogId);
-            }
+        final BackupImageView avatarView = getRightHeaderAvatar();
+        if (avatarView == null) {
+            return;
         }
-        if (user != null) {
-            rightAvatar.setVisibility(View.VISIBLE);
-            rightAvatarDrawable.setInfo(currentAccount, user);
-            rightAvatar.setForUserOrChat(user, rightAvatarDrawable);
-        } else if (chat != null) {
-            rightAvatar.setVisibility(View.VISIBLE);
-            rightAvatarDrawable.setInfo(currentAccount, chat);
-            rightAvatar.setForUserOrChat(chat, rightAvatarDrawable);
-        } else {
-            rightAvatar.setVisibility(View.GONE);
+        if (avatarView.getParent() != headerItem) {
+            if (avatarView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) avatarView.getParent()).removeView(avatarView);
+            }
+            headerItem.addView(avatarView, LayoutHelper.createFrame(46, 46, Gravity.CENTER));
+        }
+        avatarView.setRoundRadius(dp(23));
+        avatarView.setSize(dp(46), dp(46));
+        avatarView.setClickable(false);
+        avatarView.setFocusable(false);
+        avatarView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        avatarView.setVisibility(View.VISIBLE);
+        avatarView.bringToFront();
+        if (headerItem.getIconView() != null) {
+            headerItem.getIconView().setVisibility(View.GONE);
+        }
+    }
+
+    private void updateRightAvatar() {
+        updateRightAvatar(false);
+    }
+
+    private void updateRightAvatar(boolean force) {
+        if (!useHeaderAvatarSlot()) {
+            return;
+        }
+        ensureRightHeaderAvatarAttached();
+        final BackupImageView avatarView = getRightHeaderAvatar();
+        if (avatarView != null) {
+            avatarView.setVisibility(View.VISIBLE);
+            if (force) {
+                avatarView.invalidate();
+            }
         }
     }
 
@@ -21925,6 +21892,12 @@ public class ChatActivity extends BaseFragment implements
             }
             if (avatarContainer != null && updateSubtitle) {
                 avatarContainer.updateSubtitle(true);
+                if (headerItem != null && headerItem.getVisibility() == View.VISIBLE) {
+                    final BackupImageView avatarView = getRightHeaderAvatar();
+                    if (avatarView != null && !avatarView.hasBitmapImage()) {
+                        checkAndUpdateAvatar();
+                    }
+                }
             }
             if ((updateMask & (MessagesController.UPDATE_MASK_USER_PHONE | MessagesController.UPDATE_MASK_AVATAR)) != 0) {
                 updateTopPanel(true);
@@ -27951,7 +27924,7 @@ public class ChatActivity extends BaseFragment implements
                     editTextItem.setVisibility(View.GONE);
                 }
                 if (headerItem != null) {
-                    headerItem.setVisibility(View.VISIBLE);
+                    setHeaderItemVisibility(View.VISIBLE);
                 }
             } else {
                 if (botUser != null && currentUser != null && currentUser.bot || currentUser != null && currentUser.id == UserObject.VERIFY || chatMode == MODE_SAVED && getSavedDialogId() != getUserConfig().getClientUserId()) {
@@ -29681,6 +29654,9 @@ public class ChatActivity extends BaseFragment implements
     public void onResume() {
         super.onResume();
         checkShowBlur(false);
+        if (headerItem != null && headerItem.getVisibility() == View.VISIBLE) {
+            checkAndUpdateAvatar();
+        }
         activityResumeTime = System.currentTimeMillis();
         if (openImport && getSendMessagesHelper().getImportingHistory(dialog_id) != null) {
             ImportingAlert alert = new ImportingAlert(getParentActivity(), null, this, themeDelegate);
@@ -35060,7 +35036,7 @@ public class ChatActivity extends BaseFragment implements
         if (!actionBar.isSearchFieldVisible()) {
             animatorSearchFieldVisibility.setValue(true, true);
             if (headerItem != null) {
-                headerItem.setVisibility(View.GONE);
+                                    setHeaderItemVisibility(View.GONE);
             }
             if (attachItem != null) {
                 attachItem.setVisibility(View.GONE);
@@ -35129,7 +35105,7 @@ public class ChatActivity extends BaseFragment implements
         if (!actionBar.isSearchFieldVisible()) {
             animatorSearchFieldVisibility.setValue(true, true);
             if (headerItem != null) {
-                headerItem.setVisibility(View.GONE);
+                                    setHeaderItemVisibility(View.GONE);
             }
             if (attachItem != null) {
                 attachItem.setVisibility(View.GONE);
@@ -35223,7 +35199,7 @@ public class ChatActivity extends BaseFragment implements
         if (!actionBar.isSearchFieldVisible()) {
             animatorSearchFieldVisibility.setValue(true, true);
             if (headerItem != null) {
-                headerItem.setVisibility(View.GONE);
+                                    setHeaderItemVisibility(View.GONE);
             }
             if (attachItem != null) {
                 attachItem.setVisibility(View.GONE);
@@ -35282,7 +35258,7 @@ public class ChatActivity extends BaseFragment implements
         if (!actionBar.isSearchFieldVisible()) {
             animatorSearchFieldVisibility.setValue(true, true);
             if (headerItem != null) {
-                headerItem.setVisibility(View.GONE);
+                                    setHeaderItemVisibility(View.GONE);
             }
             if (attachItem != null) {
                 attachItem.setVisibility(View.GONE);
@@ -38503,7 +38479,7 @@ public class ChatActivity extends BaseFragment implements
             animatorSearchHashtagHistoryVisibility.setValue(false, true);
             if (editTextItem != null && editTextItem.getTag() != null) {
                 if (headerItem != null) {
-                    headerItem.setVisibility(View.GONE);
+                                    setHeaderItemVisibility(View.GONE);
                 }
                 if (editTextItem != null) {
                     editTextItem.setVisibility(View.VISIBLE);
@@ -38525,17 +38501,9 @@ public class ChatActivity extends BaseFragment implements
                     topicCreateItem.setVisibility(View.GONE);
                 }
             } else if (chatActivityEnterView.hasText() && TextUtils.isEmpty(chatActivityEnterView.getSlowModeTimer()) && (currentChat == null || ChatObject.canSendPlain(currentChat))) {
-                if (headerItem != null) {
-                    headerItem.setVisibility(View.GONE);
-                }
+                keepHeaderAvatarMenuState();
                 if (editTextItem != null) {
                     editTextItem.setVisibility(View.GONE);
-                }
-                if (attachItem != null) {
-                    attachItem.setVisibility(View.VISIBLE);
-                }
-                if (otherIcon != null) {
-                    otherIcon.setIconVisible(true);
                 }
                 if (searchIconItem != null && showSearchAsIcon) {
                     searchIconItem.setVisibility(View.GONE);
@@ -38547,9 +38515,7 @@ public class ChatActivity extends BaseFragment implements
                     topicCreateItem.setVisibility(View.GONE);
                 }
             } else {
-                if (headerItem != null) {
-                    headerItem.setVisibility(View.VISIBLE);
-                }
+                keepHeaderAvatarMenuState();
                 if (audioCallIconItem != null && showAudioCallAsIcon) {
                     audioCallIconItem.setVisibility(View.VISIBLE);
                 }
@@ -38561,12 +38527,6 @@ public class ChatActivity extends BaseFragment implements
                 }
                 if (editTextItem != null) {
                     editTextItem.setVisibility(View.GONE);
-                }
-                if (attachItem != null) {
-                    attachItem.setVisibility(View.GONE);
-                }
-                if (otherIcon != null) {
-                    otherIcon.setIconVisible(false);
                 }
             }
             if (searchViewPager != null) {
