@@ -644,9 +644,12 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int maxWidth = MeasureSpec.getSize(widthMeasureSpec) + titleTextView.getPaddingRight();
-        int avatarReserve = avatarImageView.getVisibility() == VISIBLE ? 54 : 0;
+        final boolean avatarInTitle = avatarImageView.getParent() == this && avatarImageView.getVisibility() == VISIBLE;
+        int avatarReserve = avatarInTitle ? 54 : 0;
         int availableWidth = maxWidth - dp(avatarReserve + 16);
-        avatarImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY));
+        if (avatarInTitle) {
+            avatarImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY));
+        }
         titleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(24 + 8) + titleTextView.getPaddingRight(), MeasureSpec.AT_MOST));
         if (subtitleTextView != null) {
             subtitleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
@@ -779,8 +782,10 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
         final int viewTop = (actionBarHeight - avatarImageView.getMeasuredHeight()) / 2 + (occupyStatusBar ? AndroidUtilities.statusBarHeight : 0);
         final int subtitleTop = viewTop + dp(glassMode ? 23.66f : 24);
 
-        avatarImageView.layout(leftPadding, viewTop, leftPadding + avatarImageView.getMeasuredWidth(), viewTop + avatarImageView.getMeasuredHeight());
-        int l = leftPadding + (avatarImageView.getVisibility() == VISIBLE ? dp(glassMode ? 48.66f : 54) : 0) + rightAvatarPadding;
+        if (avatarImageView.getParent() == this) {
+            avatarImageView.layout(leftPadding, viewTop, leftPadding + avatarImageView.getMeasuredWidth(), viewTop + avatarImageView.getMeasuredHeight());
+        }
+        int l = leftPadding + (hasVisibleAvatar() ? dp(glassMode ? 48.66f : 54) : 0) + rightAvatarPadding;
         final boolean glassTitleCentered = glassMode && !hasVisibleAvatar();
         SimpleTextView titleTextLargerCopyView = this.titleTextLargerCopyView.get();
         if (getSubtitleTextView().getVisibility() != GONE) {
@@ -1731,7 +1736,7 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
     }
 
     public boolean hasVisibleAvatar() {
-        return avatarImageView != null && avatarImageView.getVisibility() == VISIBLE;
+        return avatarImageView != null && avatarImageView.getVisibility() == VISIBLE && avatarImageView.getParent() == this;
     }
 
     public int getVisualWidth() {

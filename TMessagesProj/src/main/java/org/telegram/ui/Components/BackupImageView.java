@@ -171,6 +171,19 @@ public class BackupImageView extends View {
         onNewImageSet();
     }
 
+    public void setForUserOrChat(TLObject object, AvatarDrawable avatarDrawable, Object parent, boolean animationEnabled, int vectorType, boolean big) {
+        imageReceiver.setForUserOrChat(object, avatarDrawable, parent, animationEnabled, vectorType, big);
+        onNewImageSet();
+    }
+
+    public boolean hasImageSet() {
+        return imageReceiver.hasImageSet();
+    }
+
+    public boolean hasBitmapImage() {
+        return imageReceiver.hasBitmapImage();
+    }
+
     public void setImageMedia(ImageLocation mediaLocation, String mediaFilter, ImageLocation imageLocation, String imageFilter, Bitmap thumbBitmap, int size, int cacheType, Object parentObject) {
         Drawable thumb = null;
         if (thumbBitmap != null) {
