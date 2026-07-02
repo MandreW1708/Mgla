@@ -19617,6 +19617,9 @@ public class ChatActivity extends BaseFragment implements
         if (headerItem.getIconView() != null) {
             headerItem.getIconView().setVisibility(View.GONE);
         }
+        if (avatarContainer != null) {
+            avatarContainer.updateGlassLayout();
+        }
     }
 
     private void updateRightAvatar() {

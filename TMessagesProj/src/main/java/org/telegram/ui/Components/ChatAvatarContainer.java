@@ -404,7 +404,8 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
     protected void dispatchDraw(Canvas canvas) {
         canvas.save();
         final float s = bounce.getScale(.02f);
-        canvas.scale(s, s, getWidth() / 2f, getHeight() - ActionBar.getCurrentActionBarHeight() / 2f);
+        final float pivotY = (occupyStatusBar ? AndroidUtilities.statusBarHeight : 0) + ActionBar.getCurrentActionBarHeight() / 2f;
+        canvas.scale(s, s, getWidth() / 2f, pivotY);
         super.dispatchDraw(canvas);
         canvas.restore();
     }
@@ -523,7 +524,9 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
         autoDeletePopupWrapper.windowLayout.measure(View.MeasureSpec.makeMeasureSpec(dp(1000), View.MeasureSpec.AT_MOST), View.MeasureSpec.makeMeasureSpec(dp(1000), View.MeasureSpec.AT_MOST));
         scrimPopupWindow[0].setInputMethodMode(ActionBarPopupWindow.INPUT_METHOD_NOT_NEEDED);
         scrimPopupWindow[0].getContentView().setFocusableInTouchMode(true);
-        scrimPopupWindow[0].showAtLocation(avatarImageView, 0, (int) (avatarImageView.getX() + getX()), (int) avatarImageView.getY());
+        final int[] popupLocation = new int[2];
+        avatarImageView.getLocationOnScreen(popupLocation);
+        scrimPopupWindow[0].showAtLocation(avatarImageView.getRootView(), Gravity.NO_GRAVITY, popupLocation[0], popupLocation[1]);
         parentFragment.dimBehindView(true);
         return true;
     }
@@ -714,7 +717,7 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
         subtitleTextLargerCopyView.setTextColor(getThemedColor(Theme.key_actionBarDefaultSubtitle));
         subtitleTextLargerCopyView.setTag(Theme.key_actionBarDefaultSubtitle);
         subtitleTextLargerCopyView.setTextSizePx(dp(glassMode ? 13.5f : 14));
-        subtitleTextLargerCopyView.setGravity(Gravity.LEFT);
+        subtitleTextLargerCopyView.setGravity(glassMode && !hasVisibleAvatar() ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT);
         if (subtitleTextView != null) {
             subtitleTextLargerCopyView.setText(subtitleTextView.getText());
         } else if (animatedSubtitleTextView != null) {
@@ -745,6 +748,11 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
         }
         glassMode = true;
         updateGlassTextGravity();
+    }
+
+    public void updateGlassLayout() {
+        updateGlassTextGravity();
+        requestLayout();
     }
 
     private void updateGlassTextGravity() {
