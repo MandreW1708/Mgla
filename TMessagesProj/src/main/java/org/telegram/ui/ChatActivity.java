@@ -2917,6 +2917,7 @@ public class ChatActivity extends BaseFragment implements
             .add(NotificationCenter.dialogDeleted)
             .add(NotificationCenter.chatAvailableReactionsUpdated)
             .add(NotificationCenter.dialogsUnreadReactionsCounterChanged)
+            .add(NotificationCenter.dialogsUnreadCounterChanged)
             .add(NotificationCenter.dialogsUnreadPollVotesCounterChanged)
             .add(NotificationCenter.groupStickersDidLoad)
             .add(NotificationCenter.dialogTranslate)
@@ -2940,6 +2941,7 @@ public class ChatActivity extends BaseFragment implements
 
         globalObserversGroup
             .add(NotificationCenter.emojiLoaded)
+            .add(NotificationCenter.notificationsCountUpdated)
             .add(NotificationCenter.invalidateMotionBackground)
             .add(NotificationCenter.didSetNewWallpapper)
             .add(NotificationCenter.didApplyNewTheme)
@@ -4595,6 +4597,7 @@ public class ChatActivity extends BaseFragment implements
             avatarContainer.setLeftPadding(0);
         }
         actionBar.checkAvatarContainerWidth(false);
+        updateBackButtonUnreadBadge();
 
         chatInputViewsContainer = new ChatInputViewsContainer(context);
         chatInputViewsContainer.setClipChildren(false);
@@ -22128,6 +22131,7 @@ public class ChatActivity extends BaseFragment implements
                     break;
                 }
             }
+            updateBackButtonUnreadBadge();
         } else if (id == NotificationCenter.historyCleared) {
             long did = (Long) args[0];
             if (did != dialog_id) {
@@ -23309,6 +23313,7 @@ public class ChatActivity extends BaseFragment implements
             });
         } else if (id == NotificationCenter.notificationsSettingsUpdated) {
             updateTitleIcons();
+            updateBackButtonUnreadBadge();
             if (ChatObject.isChannel(currentChat) || UserObject.isReplyUser(currentUser) || currentUser != null && currentUser.id == UserObject.VERIFY) {
                 updateBottomOverlay();
             }
@@ -23990,7 +23995,13 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void didReceivedNotification7(int id, int account, final Object... args) {
-        if (id == NotificationCenter.goingToPreviewTheme) {
+        if (id == NotificationCenter.notificationsCountUpdated) {
+            if (account == currentAccount) {
+                updateBackButtonUnreadBadge();
+            }
+        } else if (id == NotificationCenter.dialogsUnreadCounterChanged) {
+            updateBackButtonUnreadBadge();
+        } else if (id == NotificationCenter.goingToPreviewTheme) {
             isPauseOnThemePreview = true;
             if (chatLayoutManager != null) {
                 scrollToPositionOnRecreate = chatLayoutManager.findFirstVisibleItemPosition();
@@ -29661,6 +29672,7 @@ public class ChatActivity extends BaseFragment implements
     @Override
     public void onResume() {
         super.onResume();
+        updateBackButtonUnreadBadge();
         checkShowBlur(false);
         if (headerItem != null && headerItem.getVisibility() == View.VISIBLE) {
             checkAndUpdateAvatar();
@@ -46175,6 +46187,13 @@ public class ChatActivity extends BaseFragment implements
 
     public float getInputIslandHeightTarget() {
         return inputIslandHeightCurrent;
+    }
+
+    private void updateBackButtonUnreadBadge() {
+        if (actionBar == null || inPreviewMode || inBubbleMode || isInsideContainer) {
+            return;
+        }
+        actionBar.setBackUnreadCount(NotificationsController.getInstance(currentAccount).getTotalUnreadCount());
     }
 
     private void updateInputBubbleOffsets() {
