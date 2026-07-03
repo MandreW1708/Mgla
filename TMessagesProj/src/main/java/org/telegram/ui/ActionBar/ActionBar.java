@@ -60,6 +60,7 @@ import org.telegram.ui.Adapters.FiltersView;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.ChatAvatarContainer;
+import org.telegram.ui.Components.chat.buttons.ActionBarBackUnreadBadge;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EllipsizeSpanAnimator;
 import org.telegram.ui.Components.FireworksEffect;
@@ -94,6 +95,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     private Drawable glassDrawableMenu;
     private INavigationLayout.BackButtonState backButtonState = INavigationLayout.BackButtonState.BACK;
     public ImageView backButtonImageView;
+    private ActionBarBackUnreadBadge backUnreadBadge;
     private BackupImageView avatarSearchImageView;
     private Drawable backButtonDrawable;
     private final SimpleTextView[] titleTextView = new SimpleTextView[2];
@@ -267,6 +269,42 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
         });
         backButtonImageView.setContentDescription(LocaleController.getString(R.string.AccDescrGoBack));
+    }
+
+    public void setBackUnreadCount(int count) {
+        if (!glassMode || backButtonImageView == null || backButtonImageView.getVisibility() == GONE) {
+            if (backUnreadBadge != null) {
+                backUnreadBadge.setCount(0);
+            }
+            return;
+        }
+        ensureBackUnreadBadge();
+        backUnreadBadge.setCount(count);
+        backUnreadBadge.bringToFront();
+    }
+
+    private void ensureBackUnreadBadge() {
+        if (backUnreadBadge != null) {
+            return;
+        }
+        backUnreadBadge = new ActionBarBackUnreadBadge(getContext(), resourcesProvider);
+        backUnreadBadge.setClickable(false);
+        backUnreadBadge.setFocusable(false);
+        backUnreadBadge.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        addView(backUnreadBadge, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
+    }
+
+    private void layoutBackUnreadBadge() {
+        if (backUnreadBadge == null || backUnreadBadge.getVisibility() == GONE) {
+            return;
+        }
+        final int s = dp(46);
+        final int p = dp(6);
+        final int pillTop = getMeasuredHeight() - (getCurrentActionBarHeight() + s) / 2 - p;
+        final int pillHeight = s + p * 2;
+        final int badgeLeft = p + s - dp(4) - backUnreadBadge.getMeasuredWidth();
+        final int badgeTop = pillTop + (pillHeight - backUnreadBadge.getMeasuredHeight()) / 2;
+        backUnreadBadge.layout(badgeLeft, badgeTop, badgeLeft + backUnreadBadge.getMeasuredWidth(), badgeTop + backUnreadBadge.getMeasuredHeight());
     }
 
     public Drawable getBackButtonDrawable() {
@@ -1474,10 +1512,17 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             );
         }
 
+        if (backUnreadBadge != null && backUnreadBadge.getVisibility() != GONE) {
+            backUnreadBadge.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST),
+                MeasureSpec.makeMeasureSpec(getMeasuredHeight(), MeasureSpec.AT_MOST)
+            );
+        }
+
         int childCount = getChildCount();
         for (int i = 0; i < childCount; i++) {
             View child = getChildAt(i);
-            if (child.getVisibility() == GONE || child == titleTextView[0] || child == titleTextView[1] || child == additionalSubTitleOverlayContainer || child == subtitleTextView || child == menu || child == backButtonImageView || child == additionalSubtitleTextView || child == avatarSearchImageView) {
+            if (child.getVisibility() == GONE || child == titleTextView[0] || child == titleTextView[1] || child == additionalSubTitleOverlayContainer || child == subtitleTextView || child == menu || child == backButtonImageView || child == additionalSubtitleTextView || child == avatarSearchImageView || child == backUnreadBadge) {
                 continue;
             }
             measureChildWithMargins(child, widthMeasureSpec, 0, MeasureSpec.makeMeasureSpec(getMeasuredHeight(), MeasureSpec.EXACTLY), 0);
@@ -1501,6 +1546,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         int textLeft;
         if (backButtonImageView != null && backButtonImageView.getVisibility() != GONE) {
             backButtonImageView.layout(0, additionalTop, backButtonImageView.getMeasuredWidth(), additionalTop + backButtonImageView.getMeasuredHeight());
+            layoutBackUnreadBadge();
             textLeft = glassMode ? dp(76) : dp(AndroidUtilities.isTablet() ? 80 : 72);
         } else {
             textLeft = glassMode ? dp(24) : dp(AndroidUtilities.isTablet() ? 26 : 18);
@@ -1552,7 +1598,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         int childCount = getChildCount();
         for (int i = 0; i < childCount; i++) {
             View child = getChildAt(i);
-            if (child.getVisibility() == GONE || child == titleTextView[0] || child == titleTextView[1] || child == additionalSubTitleOverlayContainer || child == subtitleTextView || child == menu || child == backButtonImageView || child == additionalSubtitleTextView || child == avatarSearchImageView) {
+            if (child.getVisibility() == GONE || child == titleTextView[0] || child == titleTextView[1] || child == additionalSubTitleOverlayContainer || child == subtitleTextView || child == menu || child == backButtonImageView || child == additionalSubtitleTextView || child == avatarSearchImageView || child == backUnreadBadge) {
                 continue;
             }
 
@@ -2243,6 +2289,9 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         adaptive_updateColor();
         if (additionalSubTitleOverlayContainer != null) {
             additionalSubTitleOverlayContainer.updateColors();
+        }
+        if (backUnreadBadge != null) {
+            backUnreadBadge.updateColors();
         }
     }
 
