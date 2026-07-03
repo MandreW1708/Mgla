@@ -192,10 +192,18 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     }
 
     private boolean glassMode;
+    private boolean previewGlassMode;
     private ChatAvatarContainer chatAvatarContainer;
 
     public void setChatAvatarContainer(ChatAvatarContainer chatAvatarContainer) {
         this.chatAvatarContainer = chatAvatarContainer;
+    }
+
+    public void setPreviewGlassMode(boolean previewGlassMode) {
+        if (this.previewGlassMode != previewGlassMode) {
+            this.previewGlassMode = previewGlassMode;
+            invalidate();
+        }
     }
 
     public void setupGlass(BlurredBackgroundDrawableViewFactory factory, BlurredBackgroundColorProvider colorProvider) {
@@ -2077,7 +2085,9 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
 
         final boolean hasAvatar = chatAvatarContainer.hasVisibleAvatar();
-        final int maxAvailable = getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
+        final int maxAvailable = previewGlassMode
+            ? getMeasuredWidth() - dp(6) * 2
+            : getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
         final int targetWidth;
         if (hasAvatar) {
             int visualWidth = chatAvatarContainer.getVisualWidth();
@@ -2132,10 +2142,23 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         final int b = t + s + p * 2;
 
         if (glassDrawable != null) {
+            if (previewGlassMode && chatAvatarContainer != null) {
+                final int left = p;
+                final int right = getWidth() - p;
+                chatAvatarContainer.setTranslationX(0);
+                glassDrawable.setBounds(left, t, right, b);
+                glassDrawable.draw(canvas);
+            } else {
             final int menuWidthWithPadding = menuWidth > 0 ? (menuWidth + p) : 0;
             final int rightOffset = lerp(menuWidthWithPadding, Math.max(menuWidthWithPadding, p + s), chatAvatarContainer == null ? 0f : 1f - animatorAvatarContainerHasAvatar.getFloatValue());
 
-            final int leftDefault = lerp(hasBackButton ? s + p : 0, s + p, chatAvatarContainer == null? 0f : 1f - animatorAvatarContainerHasAvatar.getFloatValue());
+            final float noAvatarInTitle = chatAvatarContainer == null ? 0f : 1f - animatorAvatarContainerHasAvatar.getFloatValue();
+            final int leftDefault;
+            if (noAvatarInTitle >= 1f && !hasBackButton) {
+                leftDefault = p;
+            } else {
+                leftDefault = (int) lerp(hasBackButton ? s + p : 0, s + p, noAvatarInTitle);
+            }
             final int rightDefault = getWidth() - rightOffset;
             final int widthDefault = rightDefault - leftDefault;
             final int left, right;
@@ -2154,6 +2177,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
 
             glassDrawable.setBounds(left, t, right, b);
             glassDrawable.draw(canvas);
+            }
         }
         if (glassDrawableBack != null && hasBackButton) {
             glassDrawableBack.setBounds(0, t, s + p * 2, b);
