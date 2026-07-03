@@ -4175,6 +4175,10 @@ public class ChatActivity extends BaseFragment implements
         avatarContainer.setClipChildren(false);
         updateTopicTitleIcon();
         avatarContainer.setGlassMode();
+        if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+            avatarContainer.getAvatarImageView().setVisibility(View.GONE);
+            avatarContainer.updateGlassLayout();
+        }
 
         if (inPreviewMode || inBubbleMode || isInsideContainer) {
             avatarContainer.setOccupyStatusBar(false);
@@ -4232,7 +4236,12 @@ public class ChatActivity extends BaseFragment implements
             });
             getConnectionsManager().bindRequestToGuid(req, classGuid);
         } else {
-            actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, !inPreviewMode ? 53 : 4, 0, 52, 0));
+            if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+                actionBar.setPreviewGlassMode(true);
+                actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, dp(6), 0, dp(6), 0));
+            } else {
+                actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, 53, 0, 52, 0));
+            }
             actionBar.createMenu().bringToFront();
         }
         actionBar.setOnActionModeFactorChangeListener(() -> {
@@ -4543,15 +4552,11 @@ public class ChatActivity extends BaseFragment implements
 
         if (inPreviewMode) {
             if (headerItem != null) {
-                headerItem.setAlpha(0.0f);
+                headerItem.setVisibility(View.GONE);
             }
             if (attachItem != null) {
-                attachItem.setAlpha(0.0f);
+                attachItem.setVisibility(View.GONE);
             }
-            if (getRightHeaderAvatar() != null) {
-                getRightHeaderAvatar().setAlpha(0.0f);
-            }
-
         }
 
         if (BuildConfig.DEBUG_PRIVATE_VERSION && headerItem != null) {
@@ -19582,7 +19587,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private boolean useHeaderAvatarSlot() {
-        return headerItem != null && !isTopic && !UserObject.isBotForum(currentUser);
+        return headerItem != null && !inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser);
     }
 
     private BackupImageView getRightHeaderAvatar() {

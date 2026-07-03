@@ -784,10 +784,24 @@ public class ChatAvatarContainer extends FrameLayout implements NotificationCent
         return baseLeft + Math.max(0, (getMeasuredWidth() - baseLeft - textWidth) / 2);
     }
 
+    private int getLayoutAvatarHeight() {
+        if (avatarImageView.getMeasuredHeight() > 0) {
+            return avatarImageView.getMeasuredHeight();
+        }
+        if (glassMode && !hasVisibleAvatar()) {
+            return dp(46);
+        }
+        return 0;
+    }
+
+    private int getViewTop() {
+        final int actionBarHeight = ActionBar.getCurrentActionBarHeight();
+        return (actionBarHeight - getLayoutAvatarHeight()) / 2 + (occupyStatusBar ? AndroidUtilities.statusBarHeight : 0);
+    }
+
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        final int actionBarHeight = ActionBar.getCurrentActionBarHeight();
-        final int viewTop = (actionBarHeight - avatarImageView.getMeasuredHeight()) / 2 + (occupyStatusBar ? AndroidUtilities.statusBarHeight : 0);
+        final int viewTop = getViewTop();
         final int subtitleTop = viewTop + dp(glassMode ? 23.66f : 24);
 
         if (avatarImageView.getParent() == this) {
