@@ -3629,6 +3629,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (messageObject == null || parentFragment == null) {
             return;
         }
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            getMessagesController().flushPendingReadReceipts(messageObject.getDialogId(), messageObject.getTopicId());
+            scheduleGhostOfflineMaintenance();
+        }
         TLRPC.TL_messages_sendReaction req = new TLRPC.TL_messages_sendReaction();
         if (messageObject.messageOwner.isThreadMessage && messageObject.messageOwner.fwd_from != null) {
             req.peer = getMessagesController().getInputPeer(messageObject.getFromChatId());
@@ -7495,6 +7499,18 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         }, null, ConnectionsManager.RequestFlagCanCompress | ConnectionsManager.RequestFlagInvokeAfter);
     }
 
+    private void scheduleGhostOfflineMaintenance() {
+        if (!MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
+        getMessagesController().maintainGhostOfflineStatus();
+        AndroidUtilities.runOnUIThread(() -> {
+            if (MglaSpyConfig.isGhostModeEnabled()) {
+                getMessagesController().maintainGhostOfflineStatus();
+            }
+        }, 1500);
+    }
+
     private void performSendMessageRequest(final TLObject req, final MessageObject msgObj, final String originalPath, DelayedMessage delayedMessage, Object parentObject, HashMap<String, String> params, boolean scheduled) {
         performSendMessageRequest(req, msgObj, originalPath, null, false, delayedMessage, parentObject, params, scheduled);
     }
@@ -7587,6 +7603,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         }
         if (!BotForumHelper.getInstance(currentAccount).beforeSendingFinalRequest(req, msgObj, () -> performSendMessageRequest(req, msgObj, originalPath, parentMessage, check, delayedMessage, parentObject, params, scheduled))) {
             return;
+        }
+        if (MglaSpyConfig.isGhostModeEnabled() && msgObj != null && !scheduled && !(req instanceof TLRPC.TL_messages_editMessage)) {
+            getMessagesController().flushPendingReadReceipts(msgObj.getDialogId(), msgObj.getTopicId());
+            scheduleGhostOfflineMaintenance();
         }
         newMsgObj.reqId = getConnectionsManager().sendRequest(req, (response, error) -> {
             if (error != null && (req instanceof TLRPC.TL_messages_sendMedia || req instanceof TLRPC.TL_messages_editMessage || req instanceof TLRPC.TL_messages_addPollAnswer) && FileRefController.isFileRefError(error.text)) {

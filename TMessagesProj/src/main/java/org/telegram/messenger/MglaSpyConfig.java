@@ -45,5 +45,13 @@ public class MglaSpyConfig {
 
     public static void setGhostModeEnabled(boolean enabled) {
         prefs().edit().putBoolean(KEY_GHOST_MODE, enabled).apply();
+        AndroidUtilities.runOnUIThread(() -> {
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (UserConfig.getInstance(a).isClientActivated()) {
+                    MessagesController.getInstance(a).onGhostModeChanged(enabled);
+                }
+            }
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.ghostModeChanged);
+        });
     }
 }

@@ -10241,7 +10241,13 @@ public class MessagesController extends BaseController implements NotificationCe
         checkReadTasks();
 
         if (getUserConfig().isClientActivated()) {
-            if (!ignoreSetOnline && getConnectionsManager().getPauseTime() == 0 && ApplicationLoader.isScreenOn && !ApplicationLoader.mainInterfacePausedStageQueue) {
+            if (MglaSpyConfig.isGhostModeEnabled()) {
+                if (!ignoreSetOnline && getConnectionsManager().getPauseTime() == 0 && ApplicationLoader.isScreenOn && !ApplicationLoader.mainInterfacePausedStageQueue) {
+                    if (statusRequest == 0 && statusSettingState != 1 && (lastStatusUpdateTime == 0 || Math.abs(System.currentTimeMillis() - lastStatusUpdateTime) >= 30000)) {
+                        sendGhostOfflineStatus();
+                    }
+                }
+            } else if (!ignoreSetOnline && getConnectionsManager().getPauseTime() == 0 && ApplicationLoader.isScreenOn && !ApplicationLoader.mainInterfacePausedStageQueue) {
                 if (ApplicationLoader.mainInterfacePausedStageQueueTime != 0 && Math.abs(ApplicationLoader.mainInterfacePausedStageQueueTime - System.currentTimeMillis()) > 1000) {
                     if (statusSettingState != 1 && (lastStatusUpdateTime == 0 || Math.abs(System.currentTimeMillis() - lastStatusUpdateTime) >= 55000 || offlineSent)) {
                         statusSettingState = 1;
@@ -10266,7 +10272,8 @@ public class MessagesController extends BaseController implements NotificationCe
                         });
                     }
                 }
-            } else if (statusSettingState != 2 && !offlineSent && Math.abs(System.currentTimeMillis() - getConnectionsManager().getPauseTime()) >= 2000) {
+            }
+            if (statusSettingState != 2 && !offlineSent && Math.abs(System.currentTimeMillis() - getConnectionsManager().getPauseTime()) >= 2000) {
                 statusSettingState = 2;
                 if (statusRequest != 0) {
                     getConnectionsManager().cancelRequest(statusRequest, true);
@@ -11100,6 +11107,10 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public boolean sendTyping(long dialogId, long threadMsgId, int action, String emojicon, int classGuid) {
+        // Режим призрака: не отправляем статус печати на сервер
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            return false;
+        }
         if (action < 0 || action >= sendingTypings.length || dialogId == 0) {
             return false;
         }
@@ -14081,6 +14092,9 @@ public class MessagesController extends BaseController implements NotificationCe
         long dialogId = messageObject.getDialogId();
         getMessagesStorage().markMessagesContentAsRead(dialogId, arrayList, 0, 0);
         getNotificationCenter().postNotificationName(NotificationCenter.messagesReadContent, dialogId, arrayList);
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
         if (messageObject.getId() < 0) {
             markMessageAsRead(messageObject.getDialogId(), messageObject.messageOwner.random_id, Integer.MIN_VALUE);
         } else {
@@ -14109,6 +14123,9 @@ public class MessagesController extends BaseController implements NotificationCe
 
     public void markMentionMessageAsRead(int mid, long channelId, long did) {
         getMessagesStorage().markMentionMessageAsRead(-channelId, mid, did);
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
         if (channelId != 0) {
             TLRPC.TL_channels_readMessageContents req = new TLRPC.TL_channels_readMessageContents();
             req.channel = getInputChannel(channelId);
@@ -14188,6 +14205,12 @@ public class MessagesController extends BaseController implements NotificationCe
         if (createDeleteTask) {
             getMessagesStorage().createTaskForMid(dialogId, mid, time, time, ttl, false);
         }
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            if (newTaskId != 0) {
+                getMessagesStorage().removePendingTask(newTaskId);
+            }
+            return;
+        }
         if (inputChannel != null) {
             TLRPC.TL_channels_readMessageContents req = new TLRPC.TL_channels_readMessageContents();
             req.channel = inputChannel;
@@ -14216,6 +14239,9 @@ public class MessagesController extends BaseController implements NotificationCe
         if (randomId == 0 || dialogId == 0 || ttl <= 0 && ttl != Integer.MIN_VALUE) {
             return;
         }
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
         if (!DialogObject.isEncryptedDialog(dialogId)) {
             return;
         }
@@ -14233,6 +14259,14 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     private void completeReadTask(ReadTask task) {
+        completeReadTask(task, false);
+    }
+
+    private void completeReadTask(ReadTask task, boolean force) {
+        // Режим призрака: не отправляем прочтение сообщений на сервер
+        if (!force && MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
         if (task.replyId != 0 && task.monoForumPeerId == 0) {
             TLRPC.TL_messages_readDiscussion req = new TLRPC.TL_messages_readDiscussion();
             req.msg_id = (int) task.replyId;
@@ -14312,6 +14346,79 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public void markDialogAsReadNow(long dialogId, long replyId) {
+        markDialogAsReadNow(dialogId, replyId, false);
+    }
+
+    public void flushPendingReadReceipts(long dialogId, long threadId) {
+        if (!MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
+        Utilities.stageQueue.postRunnable(() -> flushPendingReadReceiptsInternal(dialogId, threadId));
+    }
+
+    private void flushPendingReadReceiptsInternal(long dialogId, long threadId) {
+        ReadTask task;
+        if (threadId != 0) {
+            task = threadsReadTasksMap.get(dialogId + "_" + threadId);
+        } else {
+            task = readTasksMap.get(dialogId);
+        }
+        if (task == null) {
+            Integer maxId = dialogs_read_inbox_max.get(dialogId);
+            if (maxId == null || maxId <= 0) {
+                return;
+            }
+            task = new ReadTask();
+            task.dialogId = dialogId;
+            task.replyId = threadId;
+            task.maxId = maxId;
+            if (getMessagesStorage().isMonoForum(dialogId)) {
+                task.monoForumPeerId = threadId;
+            }
+            if (DialogObject.isEncryptedDialog(dialogId)) {
+                TLRPC.Dialog dialog = dialogs_dict.get(dialogId);
+                if (dialog != null) {
+                    task.maxDate = dialog.last_message_date;
+                }
+            }
+        }
+        completeReadTask(task, true);
+    }
+
+    public void onGhostModeChanged(boolean enabled) {
+        if (enabled) {
+            maintainGhostOfflineStatus();
+        }
+    }
+
+    public void maintainGhostOfflineStatus() {
+        if (!MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
+        Utilities.stageQueue.postRunnable(this::sendGhostOfflineStatus);
+    }
+
+    private void sendGhostOfflineStatus() {
+        if (statusRequest != 0) {
+            getConnectionsManager().cancelRequest(statusRequest, true);
+            statusRequest = 0;
+        }
+        statusSettingState = 2;
+        TL_account.updateStatus req = new TL_account.updateStatus();
+        req.offline = true;
+        statusRequest = getConnectionsManager().sendRequest(req, (response, error) -> {
+            if (error == null) {
+                offlineSent = true;
+                lastStatusUpdateTime = System.currentTimeMillis();
+            } else if (lastStatusUpdateTime != 0) {
+                lastStatusUpdateTime += 5000;
+            }
+            statusRequest = 0;
+            statusSettingState = 0;
+        });
+    }
+
+    public void markDialogAsReadNow(long dialogId, long replyId, boolean force) {
         Utilities.stageQueue.postRunnable(() -> {
             if (replyId != 0) {
                 String key = dialogId + "_" + replyId;
@@ -14319,7 +14426,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 if (currentReadTask == null) {
                     return;
                 }
-                completeReadTask(currentReadTask);
+                completeReadTask(currentReadTask, force);
                 repliesReadTasks.remove(currentReadTask);
                 threadsReadTasksMap.remove(key);
             } else {
@@ -14327,7 +14434,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 if (currentReadTask == null) {
                     return;
                 }
-                completeReadTask(currentReadTask);
+                completeReadTask(currentReadTask, force);
                 readTasks.remove(currentReadTask);
                 readTasksMap.remove(dialogId);
             }
@@ -14339,6 +14446,9 @@ public class MessagesController extends BaseController implements NotificationCe
             return;
         }
         getMessagesStorage().resetMentionsCount(dialogId, topicId, 0);
+        if (MglaSpyConfig.isGhostModeEnabled()) {
+            return;
+        }
         TLRPC.TL_messages_readMentions req = new TLRPC.TL_messages_readMentions();
         req.peer = getInputPeer(dialogId);
         if (topicId != 0) {

@@ -42,6 +42,7 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
@@ -299,11 +300,14 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabs[INDEX_CONTACTS].setOnLongClickListener(this::openContactsSelector);
         tabs[INDEX_CALLS].setOnLongClickListener(this::openCallsSelector);
         tabs[INDEX_PROFILE].setOnLongClickListener(this::openAccountSelector);
+        tabs[INDEX_SETTINGS].setOnLongClickListener(this::openGhostModeSelector);
 
         tabsView.addTabToIgnoreClick(tabs[INDEX_CHATS]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_CONTACTS]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_PROFILE]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_CALLS]);
+        tabsView.addTabToIgnoreClick(tabs[INDEX_SETTINGS]);
+        tabsView.addTabToIgnoreLongPressNavigation(tabs[INDEX_SETTINGS]);
 
         for (int index = 0; index < tabs.length; index++) {
             final GlassTabView view = tabs[index];
@@ -473,6 +477,23 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         o.setGravity(Gravity.LEFT);
         o.show();
 
+        return true;
+    }
+
+    private boolean openGhostModeSelector(View anchor) {
+        if (getContext() == null || getParentActivity() == null) return false;
+
+        final ItemOptions o = ItemOptions.makeOptions(this, anchor);
+        o.addChecked(MglaSpyConfig.isGhostModeEnabled(), "Режим призрака", () -> {
+            MglaSpyConfig.setGhostModeEnabled(!MglaSpyConfig.isGhostModeEnabled());
+        }, null);
+        o.setBlur(true);
+        o.translate(0, -dp(4));
+        o.setGravity(Gravity.LEFT);
+        final ShapeDrawable bg = Theme.createRoundRectDrawable(dp(28), getThemedColor(Theme.key_windowBackgroundWhite));
+        bg.getPaint().setShadowLayer(dp(6), 0, dp(1), Theme.multAlpha(0xFF000000, 0.15f));
+        o.setScrimViewBackground(bg);
+        o.show();
         return true;
     }
 
