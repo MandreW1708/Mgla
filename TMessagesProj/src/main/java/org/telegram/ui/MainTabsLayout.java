@@ -402,7 +402,7 @@ public class MainTabsLayout extends AnimatedLinearLayout {
                 animatedLongSelectedViewCenterX = selected.getX() + selected.getWidth() / 2f;
                 animatedLongSelectedViewOffsetX = animatedLongSelectedViewCenterX - x;
                 selectedTabPositionOffsetX.animateToFinalPosition(0);
-                if (selected != found && found != null) {
+                if (selected != found && found != null && !tabsWithIgnoreLongPressNavigation.contains(found)) {
                     found.performClick();
                 }
             }
@@ -429,8 +429,14 @@ public class MainTabsLayout extends AnimatedLinearLayout {
     }
 
     private final Set<View> tabsWithIgnoreClick = new HashSet<>();
+    private final Set<View> tabsWithIgnoreLongPressNavigation = new HashSet<>();
+
     public void addTabToIgnoreClick(View v) {
         tabsWithIgnoreClick.add(v);
+    }
+
+    public void addTabToIgnoreLongPressNavigation(View v) {
+        tabsWithIgnoreLongPressNavigation.add(v);
     }
 
     private final BoolAnimator animatorIsScaled = new BoolAnimator(0, (a, factor, c, g) -> {
@@ -491,7 +497,7 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             checkLongMove(x, y, false, true);
             isInLongPress = false;
             AndroidUtilities.runOnUIThread(restoreDrawSelector, 450);
-            if (lastLongSelectedView != null) {
+            if (lastLongSelectedView != null && !tabsWithIgnoreLongPressNavigation.contains(lastLongSelectedView)) {
                 lastLongSelectedView.performClick();
             }
             lastLongSelectedView = null;

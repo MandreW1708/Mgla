@@ -14,6 +14,7 @@ import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -23,9 +24,10 @@ import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class MglaMainSettingsActivity extends BaseFragment {
+public class MglaMainSettingsActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
     private SharedPreferences prefs;
+    private TextCheckCell ghostModeCell;
 
     public MglaMainSettingsActivity() {
         this(null);
@@ -33,6 +35,25 @@ public class MglaMainSettingsActivity extends BaseFragment {
 
     public MglaMainSettingsActivity(android.os.Bundle args) {
         super(args);
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.ghostModeChanged);
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.ghostModeChanged);
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.ghostModeChanged && ghostModeCell != null) {
+            ghostModeCell.setChecked(MglaSpyConfig.isGhostModeEnabled());
+        }
     }
 
     @Override
@@ -100,7 +121,7 @@ public class MglaMainSettingsActivity extends BaseFragment {
         });
         spyBlock.addView(saveDeletedCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        TextCheckCell ghostModeCell = new TextCheckCell(context);
+        ghostModeCell = new TextCheckCell(context);
         ghostModeCell.setBackground(null);
         ghostModeCell.setTextAndCheck("Режим призрака", MglaSpyConfig.isGhostModeEnabled(), false);
         ghostModeCell.setOnClickListener(v -> {
