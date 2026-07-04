@@ -21786,16 +21786,9 @@ public class ChatActivity extends BaseFragment implements
             && chatMode == MODE_DEFAULT;
     }
 
-    private int compareMglaMessageOrder(MessageObject a, MessageObject b) {
-        if (a.messageOwner.date != b.messageOwner.date) {
-            return Integer.compare(a.messageOwner.date, b.messageOwner.date);
-        }
-        return Integer.compare(a.getId(), b.getId());
-    }
-
     private int findInsertIndexInDayArray(ArrayList<MessageObject> dayArray, MessageObject obj) {
         for (int i = 0, size = dayArray.size(); i < size; i++) {
-            if (compareMglaMessageOrder(dayArray.get(i), obj) < 0) {
+            if (MglaDeletedMessagesStorage.compareMessageOrder(dayArray.get(i), obj) < 0) {
                 return i;
             }
         }
@@ -21808,7 +21801,7 @@ public class ChatActivity extends BaseFragment implements
             if (m.isDateObject || m.getId() <= 0 || m.type < 0) {
                 continue;
             }
-            if (compareMglaMessageOrder(m, obj) < 0) {
+            if (MglaDeletedMessagesStorage.compareMessageOrder(m, obj) < 0) {
                 return i;
             }
         }
@@ -21847,6 +21840,16 @@ public class ChatActivity extends BaseFragment implements
         messagesDict[0].put(obj.getId(), obj);
         obj.stableId = lastStableId++;
         getMessagesController().getTranslateController().checkTranslation(obj, false);
+    }
+
+    private Runnable mglaMergeRunnable;
+
+    private void scheduleMglaMerge() {
+        if (mglaMergeRunnable != null) {
+            AndroidUtilities.cancelRunOnUIThread(mglaMergeRunnable);
+        }
+        mglaMergeRunnable = this::loadAndMergeMglaDeletedMessages;
+        AndroidUtilities.runOnUIThread(mglaMergeRunnable, 350);
     }
 
     private int[] getLoadedMessageIdRange() {
@@ -26494,6 +26497,7 @@ public class ChatActivity extends BaseFragment implements
         }
 
         int commentsDeleted = 0;
+        ArrayList<MessageObject> mglaBatchToSave = new ArrayList<>();
         for (int a = 0; a < size; a++) {
             Integer mid = markAsDeletedMessages.get(a);
             MessageObject obj = chatAdapter != null && chatAdapter.isFiltered ? filteredMessagesDict.get(mid) :  messagesDict[loadIndex].get(mid);
@@ -26545,7 +26549,7 @@ public class ChatActivity extends BaseFragment implements
                     obj.mglaSavedDeleted = true;
                     obj.deleted = false;
                     obj.deletedByThanos = false;
-                    MglaDeletedMessagesStorage.saveMessageObjectIfEnabled(currentAccount, obj);
+                    mglaBatchToSave.add(obj);
                 } else {
                     obj.deleted = true;
                 }
@@ -26679,7 +26683,7 @@ public class ChatActivity extends BaseFragment implements
                     obj.mglaSavedDeleted = true;
                     obj.deleted = false;
                     obj.deletedByThanos = false;
-                    MglaDeletedMessagesStorage.saveMessageObjectIfEnabled(currentAccount, obj);
+                    mglaBatchToSave.add(obj);
                     insertMglaDeletedMessage(obj);
                     updated = true;
                 }
@@ -26700,6 +26704,9 @@ public class ChatActivity extends BaseFragment implements
                     }
                 });
             }
+        }
+        if (!mglaBatchToSave.isEmpty()) {
+            MglaDeletedMessagesStorage.saveMessageObjectsBatchIfEnabled(currentAccount, mglaBatchToSave);
         }
         if (updatedReplies) {
             updateReplyMessageHeader(true);
