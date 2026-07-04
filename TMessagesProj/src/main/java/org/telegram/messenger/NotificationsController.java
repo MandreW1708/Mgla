@@ -101,6 +101,7 @@ public class NotificationsController extends BaseController implements Notificat
 
     public static final String EXTRA_VOICE_REPLY = "extra_voice_reply";
     public static String OTHER_NOTIFICATIONS_CHANNEL = null;
+    public static String MGLA_BACKGROUND_CHANNEL = null;
 
     private static final DispatchQueue notificationsQueue = new DispatchQueue("notificationsQueue");
     private final ArrayList<MessageObject> pushMessages = new ArrayList<>();
@@ -284,6 +285,46 @@ public class NotificationsController extends BaseController implements Notificat
             notificationChannel.enableLights(false);
             notificationChannel.enableVibration(false);
             notificationChannel.setSound(null, null);
+            try {
+                systemNotificationManager.createNotificationChannel(notificationChannel);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        }
+    }
+
+    public static void checkMglaBackgroundChannel() {
+        if (Build.VERSION.SDK_INT < 26) {
+            return;
+        }
+        SharedPreferences preferences = null;
+        if (MGLA_BACKGROUND_CHANNEL == null) {
+            preferences = ApplicationLoader.applicationContext.getSharedPreferences("Notifications", Activity.MODE_PRIVATE);
+            MGLA_BACKGROUND_CHANNEL = preferences.getString("MglaBackgroundKey", null);
+        }
+        NotificationChannel notificationChannel = MGLA_BACKGROUND_CHANNEL != null ? systemNotificationManager.getNotificationChannel(MGLA_BACKGROUND_CHANNEL) : null;
+        if (notificationChannel != null && notificationChannel.getImportance() == NotificationManager.IMPORTANCE_NONE) {
+            try {
+                systemNotificationManager.deleteNotificationChannel(MGLA_BACKGROUND_CHANNEL);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            MGLA_BACKGROUND_CHANNEL = null;
+            notificationChannel = null;
+        }
+        if (MGLA_BACKGROUND_CHANNEL == null) {
+            if (preferences == null) {
+                preferences = ApplicationLoader.applicationContext.getSharedPreferences("Notifications", Activity.MODE_PRIVATE);
+            }
+            MGLA_BACKGROUND_CHANNEL = "MglaBackground" + Utilities.random.nextLong();
+            preferences.edit().putString("MglaBackgroundKey", MGLA_BACKGROUND_CHANNEL).commit();
+        }
+        if (notificationChannel == null) {
+            notificationChannel = new NotificationChannel(MGLA_BACKGROUND_CHANNEL, "Mgla", NotificationManager.IMPORTANCE_MIN);
+            notificationChannel.enableLights(false);
+            notificationChannel.enableVibration(false);
+            notificationChannel.setSound(null, null);
+            notificationChannel.setShowBadge(false);
             try {
                 systemNotificationManager.createNotificationChannel(notificationChannel);
             } catch (Exception e) {

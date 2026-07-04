@@ -9,8 +9,11 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -38,7 +41,7 @@ public class MglaMainSettingsActivity extends BaseFragment {
 
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle("Основные настройки");
+        actionBar.setTitle("Общие настройки");
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -48,13 +51,16 @@ public class MglaMainSettingsActivity extends BaseFragment {
             }
         });
 
+        ScrollView scrollView = new ScrollView(context);
+        scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+
         LinearLayout rootLayout = new LinearLayout(context);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
         LinearLayout block = createBlock(context, "Базовые");
 
-        // Прокси в шапке
         TextCheckCell proxyCell = new TextCheckCell(context);
         proxyCell.setBackground(null);
         proxyCell.setTextAndCheck("Прокси в шапке", prefs.getBoolean("proxy_in_header", false), true);
@@ -65,7 +71,6 @@ public class MglaMainSettingsActivity extends BaseFragment {
         });
         block.addView(proxyCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // Виброотклик
         TextCheckCell hapticCell = new TextCheckCell(context);
         hapticCell.setBackground(null);
         hapticCell.setTextAndCheck("Виброотклик", prefs.getBoolean("haptic_enabled", false), true);
@@ -76,7 +81,6 @@ public class MglaMainSettingsActivity extends BaseFragment {
         });
         block.addView(hapticCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // Сила вибрации
         TextView[] strengthValueRef = new TextView[1];
         addSelectRow(block, "Сила вибрации", MglaHapticManager.STRENGTH_NAMES[MglaHapticManager.getStrength()], () -> {
             showStrengthDialog(strengthValueRef[0]);
@@ -84,25 +88,31 @@ public class MglaMainSettingsActivity extends BaseFragment {
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
-        LinearLayout popupBlock = createBlock(context, "Уведомления");
-        TextCheckCell popupCell = new TextCheckCell(context);
-        popupCell.setBackground(null);
-        popupCell.setTextAndCheck("Всплывающие уведомления", prefs.getBoolean("mgla_popup_notifications_enabled", false), true);
-        popupCell.setOnClickListener(v -> {
-            boolean newVal = !prefs.getBoolean("mgla_popup_notifications_enabled", false);
-            prefs.edit().putBoolean("mgla_popup_notifications_enabled", newVal).apply();
-            popupCell.setChecked(newVal);
+        LinearLayout spyBlock = createBlock(context, "Шпион");
+
+        TextCheckCell saveDeletedCell = new TextCheckCell(context);
+        saveDeletedCell.setBackground(null);
+        saveDeletedCell.setTextAndCheck("Сохранение удаленных", MglaSpyConfig.isSaveDeletedMessagesEnabled(), true);
+        saveDeletedCell.setOnClickListener(v -> {
+            boolean newVal = !MglaSpyConfig.isSaveDeletedMessagesEnabled();
+            MglaSpyConfig.setSaveDeletedMessagesEnabled(newVal);
+            saveDeletedCell.setChecked(newVal);
         });
-        popupBlock.addView(popupCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        spyBlock.addView(saveDeletedCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        TextView[] durationValueRef = new TextView[1];
-        addSelectRow(popupBlock, "Время отображения", getPopupDurationName(), () -> showPopupDurationDialog(durationValueRef[0]), durationValueRef);
+        TextCheckCell ghostModeCell = new TextCheckCell(context);
+        ghostModeCell.setBackground(null);
+        ghostModeCell.setTextAndCheck("Режим призрака", MglaSpyConfig.isGhostModeEnabled(), false);
+        ghostModeCell.setOnClickListener(v -> {
+            boolean newVal = !MglaSpyConfig.isGhostModeEnabled();
+            MglaSpyConfig.setGhostModeEnabled(newVal);
+            ghostModeCell.setChecked(newVal);
+        });
+        spyBlock.addView(ghostModeCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        TextView[] alphaValueRef = new TextView[1];
-        addSelectRow(popupBlock, "Прозрачность", getPopupAlphaName(), () -> showPopupAlphaDialog(alphaValueRef[0]), alphaValueRef);
-        rootLayout.addView(popupBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        rootLayout.addView(spyBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
 
-        fragmentView = rootLayout;
+        fragmentView = scrollView;
         return fragmentView;
     }
 
@@ -134,44 +144,6 @@ public class MglaMainSettingsActivity extends BaseFragment {
                 valueView.setText(MglaHapticManager.STRENGTH_NAMES[which]);
             }
             MglaHapticManager.previewPattern(MglaHapticManager.getPatternForAction(MglaHapticManager.ACTION_DEFAULT));
-        });
-        showDialog(dlg.create());
-    }
-
-    private String getPopupDurationName() {
-        return (prefs.getInt("mgla_popup_duration_ms", 4000) / 1000) + " сек.";
-    }
-
-    private String getPopupAlphaName() {
-        return prefs.getInt("mgla_popup_alpha", 90) + "%";
-    }
-
-    private void showPopupDurationDialog(TextView valueView) {
-        if (getParentActivity() == null) return;
-        String[] names = {"2 сек.", "3 сек.", "4 сек.", "5 сек.", "7 сек.", "10 сек."};
-        int[] values = {2000, 3000, 4000, 5000, 7000, 10000};
-        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
-        dlg.setTitle("Время отображения");
-        dlg.setItems(names, (dialog, which) -> {
-            prefs.edit().putInt("mgla_popup_duration_ms", values[which]).apply();
-            if (valueView != null) {
-                valueView.setText(names[which]);
-            }
-        });
-        showDialog(dlg.create());
-    }
-
-    private void showPopupAlphaDialog(TextView valueView) {
-        if (getParentActivity() == null) return;
-        String[] names = {"60%", "70%", "80%", "90%", "100%"};
-        int[] values = {60, 70, 80, 90, 100};
-        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
-        dlg.setTitle("Прозрачность");
-        dlg.setItems(names, (dialog, which) -> {
-            prefs.edit().putInt("mgla_popup_alpha", values[which]).apply();
-            if (valueView != null) {
-                valueView.setText(names[which]);
-            }
         });
         showDialog(dlg.create());
     }
