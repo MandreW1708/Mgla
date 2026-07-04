@@ -21,6 +21,9 @@ public class MglaSpyConfig {
 
     public static void setSaveDeletedMessagesEnabled(boolean enabled) {
         prefs().edit().putBoolean(KEY_SAVE_DELETED, enabled).apply();
+        if (!enabled) {
+            MglaDeletedMessagesStorage.clearAllDeletedMessagesForAllAccounts();
+        }
         updatePushBackgroundSettings();
     }
 
