@@ -286,15 +286,18 @@ public class FileLoadOperation {
     }
 
     private void updateParams() {
+        int mglaRequests = MglaTransferConfig.getMaxDownloadRequests();
+        int mglaChunkBig = MglaTransferConfig.getDownloadChunkSizeBig();
         if ((preloadPrefixSize > 0 || MessagesController.getInstance(currentAccount).getfileExperimentalParams) && !forceSmallChunk) {
-            downloadChunkSizeBig = 1024 * 512;
-            maxDownloadRequests = 8;
-            maxDownloadRequestsBig = 8;
+            downloadChunkSizeBig = Math.max(mglaChunkBig, 1024 * 512);
+            maxDownloadRequests = Math.max(mglaRequests, 8);
+            maxDownloadRequestsBig = maxDownloadRequests;
         } else {
-            downloadChunkSizeBig = 1024 * 128;
-            maxDownloadRequests = 4;
-            maxDownloadRequestsBig = 4;
+            downloadChunkSizeBig = mglaChunkBig;
+            maxDownloadRequests = mglaRequests;
+            maxDownloadRequestsBig = mglaRequests;
         }
+        maxDownloadRequestsAnimation = Math.max(4, mglaRequests);
         maxCdnParts = (int) (FileLoader.DEFAULT_MAX_FILE_SIZE / downloadChunkSizeBig);
     }
 

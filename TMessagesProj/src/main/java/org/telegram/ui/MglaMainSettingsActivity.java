@@ -14,6 +14,7 @@ import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.MglaTransferConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -131,7 +132,23 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         });
         spyBlock.addView(ghostModeCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        rootLayout.addView(spyBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
+        rootLayout.addView(spyBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
+        LinearLayout transferBlock = createBlock(context, "Загрузка");
+
+        TextView[] downloadModeValueRef = new TextView[1];
+        addSelectRow(transferBlock, "Ускорение загрузки", MglaTransferConfig.getModeName(MglaTransferConfig.getDownloadMode()), () -> {
+            showTransferModeDialog(true, downloadModeValueRef[0]);
+        }, downloadModeValueRef);
+
+        transferBlock.addView(createDivider(context));
+
+        TextView[] uploadModeValueRef = new TextView[1];
+        addSelectRow(transferBlock, "Ускорение отправки", MglaTransferConfig.getModeName(MglaTransferConfig.getUploadMode()), () -> {
+            showTransferModeDialog(false, uploadModeValueRef[0]);
+        }, uploadModeValueRef);
+
+        rootLayout.addView(transferBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
 
         fragmentView = scrollView;
         return fragmentView;
@@ -153,6 +170,30 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         return block;
+    }
+
+    private View createDivider(Context context) {
+        View divider = new View(context);
+        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        divider.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 21, 0, 21, 0));
+        return divider;
+    }
+
+    private void showTransferModeDialog(boolean download, TextView valueView) {
+        if (getParentActivity() == null) return;
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle(download ? "Ускорение загрузки" : "Ускорение отправки");
+        dlg.setItems(MglaTransferConfig.MODE_NAMES, (dialog, which) -> {
+            if (download) {
+                MglaTransferConfig.setDownloadMode(which);
+            } else {
+                MglaTransferConfig.setUploadMode(which);
+            }
+            if (valueView != null) {
+                valueView.setText(MglaTransferConfig.MODE_NAMES[which]);
+            }
+        });
+        showDialog(dlg.create());
     }
 
     private void showStrengthDialog(TextView valueView) {

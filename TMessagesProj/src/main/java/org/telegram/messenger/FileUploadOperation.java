@@ -121,7 +121,7 @@ public class FileUploadOperation {
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("start upload on slow network = " + slowNetwork);
             }
-            for (int a = 0, count = (slowNetwork ? initialRequestsSlowNetworkCount : initialRequestsCount); a < count; a++) {
+            for (int a = 0, count = MglaTransferConfig.getInitialUploadRequestsCount(slowNetwork); a < count; a++) {
                 startUploadRequest();
             }
         });
@@ -158,7 +158,7 @@ public class FileUploadOperation {
                 cachedResults.clear();
 
                 operationGuid++;
-                for (int a = 0, count = (slowNetwork ? initialRequestsSlowNetworkCount : initialRequestsCount); a < count; a++) {
+                for (int a = 0, count = MglaTransferConfig.getInitialUploadRequestsCount(slowNetwork); a < count; a++) {
                     startUploadRequest();
                 }
             }
@@ -317,7 +317,7 @@ public class FileUploadOperation {
                     }
                     uploadChunkSize = chunkSize;
                 }
-                maxRequestsCount = Math.max(1, (slowNetwork ? maxUploadingSlowNetworkKBytes : maxUploadingKBytes) / uploadChunkSize);
+                maxRequestsCount = Math.max(1, MglaTransferConfig.getMaxUploadKBytes(slowNetwork) / uploadChunkSize);
 
                 if (isEncrypted) {
                     freeRequestIvs = new ArrayList<>(maxRequestsCount);
