@@ -40163,7 +40163,7 @@ public class ChatActivity extends BaseFragment implements
                 popupLayout.addView(userButton, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 52));
             }
 
-            if (ChatObject.isChannel(currentChat) && !ChatObject.isMonoForum(currentChat)) {
+            if (ChatObject.isChannelAndNotMegaGroup(currentChat) && !ChatObject.isMonoForum(currentChat)) {
                 if (showCompletion) {
                     ActionBarPopupWindow.GapView gap = new ActionBarPopupWindow.GapView(getContext(), getResourceProvider());
                     gap.setTag(R.id.fit_width_tag, 1);
@@ -45751,7 +45751,7 @@ public class ChatActivity extends BaseFragment implements
                     options.add(OPTION_VIEW_REPLIES_OR_THREAD);
                     icons.add(R.drawable.msg_viewreplies);
                 }
-                if (!selectedObject.isSponsored() && chatMode != MODE_SCHEDULED && ChatObject.isChannel(currentChat) && !ChatObject.isMonoForum(currentChat) && selectedObject.getDialogId() != mergeDialogId) {
+                if (!selectedObject.isSponsored() && chatMode != MODE_SCHEDULED && ChatObject.isChannelAndNotMegaGroup(currentChat) && !ChatObject.isMonoForum(currentChat) && selectedObject.getDialogId() != mergeDialogId) {
                     items.add(LocaleController.getString(R.string.CopyLink));
                     options.add(OPTION_COPY_LINK);
                     icons.add(R.drawable.msg_link);
@@ -46158,9 +46158,9 @@ public class ChatActivity extends BaseFragment implements
 
     private float calculateInputIslandHeight(boolean target) {
         final float enterViewIslandHeight = Math.max(
-            chatActivityEnterView != null ? chatActivityEnterView.getIslandTotalHeight(target): 0, dp(44));
+            chatActivityEnterView != null ? chatActivityEnterView.getIslandTotalHeight(target): 0, dp(ChatActivityEnterView.DEFAULT_HEIGHT));
 
-        final float defaultIslandHeight = dp(44);
+        final float defaultIslandHeight = dp(ChatActivityEnterView.DEFAULT_HEIGHT);
         final float enterViewFactor;
         float visibility;
         float pollAddVisibility;
@@ -46176,7 +46176,7 @@ public class ChatActivity extends BaseFragment implements
         }
 
         if (!isInsideContainer && !isInPreviewMode()) {
-            return lerp(Math.max(lerp(defaultIslandHeight, enterViewIslandHeight, enterViewFactor) * visibility, dp(44)), -dp(7), pollAddVisibility);
+            return lerp(Math.max(lerp(defaultIslandHeight, enterViewIslandHeight, enterViewFactor) * visibility, dp(ChatActivityEnterView.DEFAULT_HEIGHT)), -dp(7), pollAddVisibility);
         } else {
             return lerp(defaultIslandHeight, enterViewIslandHeight, enterViewFactor) * visibility;
         }

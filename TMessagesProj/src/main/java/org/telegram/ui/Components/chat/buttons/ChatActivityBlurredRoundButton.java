@@ -34,7 +34,7 @@ import me.vkryl.android.animator.FactorAnimator;
 
 public class ChatActivityBlurredRoundButton extends FrameLayout implements FactorAnimator.Target {
     public static final int CLICK_ZONE_MARGIN = 6;
-    public static final int BUTTON_SIZE = 44;
+    public static final int BUTTON_SIZE = 38;
 
     public ChatActivityBlurredRoundButton(Context context) {
         super(context);

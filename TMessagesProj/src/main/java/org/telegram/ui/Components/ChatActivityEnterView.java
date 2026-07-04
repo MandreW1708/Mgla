@@ -1416,7 +1416,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 if (tooltipLayout != null) {
                     canvas.save();
                     rectF.set(0, 0, getMeasuredWidth(), getMeasuredHeight());
-                    canvas.translate(getMeasuredWidth() - tooltipWidth - dp(44), multilinTooltipOffset + dpf2(16));
+                    canvas.translate(getMeasuredWidth() - tooltipWidth - dp(DEFAULT_HEIGHT), multilinTooltipOffset + dpf2(16));
                     tooltipBackground.setBounds(
                             -dp(8), -dp(2),
                             (int) (tooltipWidth + dp(36)), (int) (tooltipLayout.getHeight() + dpf2(4))
@@ -2616,7 +2616,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             @Override
             protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                final int height = Math.max(dp(44), getMeasuredHeight());
+                final int height = Math.max(dp(DEFAULT_HEIGHT), getMeasuredHeight());
                 if (animatorInputFieldHeight.getFactor() > 0) {
                     animatorInputFieldHeight.animateTo(height);
                 } else {
@@ -2671,10 +2671,10 @@ public class ChatActivityEnterView extends FrameLayout implements
         };
         emojiButton.setContentDescription(getString(R.string.AccDescrEmojiButton));
         emojiButton.setFocusable(true);
-        int padding = dp(7.5f);
+        int padding = dp(6.5f);
         emojiButton.setPadding(padding, padding, padding, padding);
         emojiButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
-        emojiButton.setBackground(Theme.createInsetRoundRectDrawable(getThemedColor(Theme.key_listSelector), dp(19), dp(1), dp(3)));
+        emojiButton.setBackground(Theme.createInsetRoundRectDrawable(getThemedColor(Theme.key_listSelector), dp(17), dp(1), dp(3)));
         emojiButton.setOnClickListener(v -> {
             if (adjustPanLayoutHelper != null && adjustPanLayoutHelper.animationInProgress()) {
                 return;
@@ -2725,8 +2725,8 @@ public class ChatActivityEnterView extends FrameLayout implements
             aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
             aiEditorButton.setImageResource(R.drawable.input_bot2);
             aiEditorButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
-            aiEditorButton.setBackground(Theme.createInsetRoundRectDrawable(getThemedColor(Theme.key_listSelector), dp(19), dp(1), dp(3)));
-            int aiBtnPadding = dp(10);
+            aiEditorButton.setBackground(Theme.createInsetRoundRectDrawable(getThemedColor(Theme.key_listSelector), dp(17), dp(1), dp(3)));
+            int aiBtnPadding = dp(8);
             aiEditorButton.setPadding(aiBtnPadding, aiBtnPadding, aiBtnPadding, aiBtnPadding);
             aiEditorButton.setContentDescription("AI-редактор");
             aiEditorButton.setClickable(true);
@@ -3632,7 +3632,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         captionLimitView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
         captionLimitView.setTypeface(AndroidUtilities.bold());
         captionLimitView.setCenterAlign(true);
-        addView(captionLimitView, Math.min(2, getChildCount()), LayoutHelper.createFrame(DEFAULT_HEIGHT, 20, Gravity.BOTTOM | Gravity.RIGHT, 3, 0, 0, DEFAULT_HEIGHT));
+        addView(captionLimitView, Math.min(2, getChildCount()), LayoutHelper.createFrame(DEFAULT_HEIGHT, 18, Gravity.BOTTOM | Gravity.RIGHT, 3, 0, 0, DEFAULT_HEIGHT));
     }
 
     private void createScheduledButton() {
@@ -4045,7 +4045,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         sizeNotifierLayout.addView(videoTimeHintView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, 0, 0, 0, 52));
 
         audioTimelineView = new RecordedAudioPlayerView(getContext(), resourcesProvider);
-        recordedAudioPanel.addView(audioTimelineView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 32, Gravity.CENTER_VERTICAL | Gravity.LEFT, DEFAULT_HEIGHT, 0, 4, 0));
+        recordedAudioPanel.addView(audioTimelineView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 28, Gravity.CENTER_VERTICAL | Gravity.LEFT, DEFAULT_HEIGHT, 0, 4, 0));
 
         updateFieldRight(lastAttachVisible);
     }
@@ -4446,7 +4446,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 botCommandsMenuContainer.dismiss();
             }
         });
-        messageEditTextContainer.addView(botCommandsMenuButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 32, Gravity.BOTTOM | Gravity.LEFT, 8, 6, 8, 6));
+        messageEditTextContainer.addView(botCommandsMenuButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 28, Gravity.BOTTOM | Gravity.LEFT, 8, 6, 8, 6));
         AndroidUtilities.updateViewVisibilityAnimated(botCommandsMenuButton, false, 1f, false);
         botCommandsMenuButton.setExpanded(true, false);
     }
@@ -5714,9 +5714,9 @@ public class ChatActivityEnterView extends FrameLayout implements
         updateFieldHint(false);
         messageEditText.setSingleLine(false);
         messageEditText.setMaxLines(6);
-        messageEditText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        messageEditText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, INPUT_TEXT_SIZE_DP);
         messageEditText.setGravity(Gravity.BOTTOM);
-        messageEditText.setPadding(0, dp(9), 0, dp(10));
+        messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), 0, dp(INPUT_TEXT_PADDING_BOTTOM));
         messageEditText.setBackgroundDrawable(null);
         messageEditText.setTextColor(getThemedColor(Theme.key_chat_messagePanelText));
         messageEditText.setLinkTextColor(getThemedColor(Theme.key_chat_messageLinkOut));
@@ -5725,11 +5725,11 @@ public class ChatActivityEnterView extends FrameLayout implements
         messageEditText.setHintTextColor(getThemedColor(Theme.key_chat_messagePanelHint));
         messageEditText.setCursorColor(getThemedColor(Theme.key_chat_messagePanelCursor));
         messageEditText.setHandlesColor(getThemedColor(Theme.key_chat_TextSelectionCursor));
-        int msgLeftMargin = 52;
+        int msgLeftMargin = INPUT_INNER_BUTTON_LEFT_MARGIN + DEFAULT_HEIGHT + 2;
         if (aiEditorButton != null) {
             msgLeftMargin += DEFAULT_HEIGHT + dp(12) + dp(1) - dp(3);
         }
-        messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, useStaticSendButton() ? INPUT_INNER_BUTTON_RIGHT_MARGIN : (isChat ? 50 : 2), 1.5f));
+        messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, useStaticSendButton() ? INPUT_INNER_BUTTON_RIGHT_MARGIN : (isChat ? INPUT_INNER_SEND_RESERVED : 2), 1));
         if (aiEditorButton != null) {
             aiEditorButton.bringToFront();
         }
@@ -6347,13 +6347,17 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
     }
 
-    public static final int DEFAULT_HEIGHT = 44;
+    public static final int DEFAULT_HEIGHT = 38;
+    private static final int INPUT_TEXT_SIZE_DP = 16;
+    private static final int INPUT_TEXT_PADDING_TOP = 7;
+    private static final int INPUT_TEXT_PADDING_BOTTOM = 8;
+    private static final int INPUT_INNER_SEND_RESERVED = DEFAULT_HEIGHT + 6;
     private static final int STATIC_ATTACH_GAP = 0;
     private static final int STATIC_SEND_GAP = 0;
     private static final int INPUT_BUBBLE_SIDE_TUCK = 4;
     private static final int INPUT_BUBBLE_CONTENT_SIDE_TUCK = 2;
     private static final int INPUT_BUBBLE_BLUR_PADDING = 7;
-    private static final int INPUT_INNER_BUTTON_LEFT_MARGIN = 10;
+    private static final int INPUT_INNER_BUTTON_LEFT_MARGIN = 6;
     private static final int INPUT_INNER_BUTTON_RIGHT_MARGIN = 10;
 
     private boolean resizeForTopViewLastShow;
@@ -6368,7 +6372,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         textFieldContainer.setLayoutParams(layoutParams);
 
         resizeForTopViewLastShow = show;
-        setMinimumHeight(dp(44) + (show ? topView.getLayoutParams().height : 0));
+        setMinimumHeight(dp(DEFAULT_HEIGHT) + (show ? topView.getLayoutParams().height : 0));
         if (stickersExpanded) {
             if (searchingType == 0) {
                 setStickersExpanded(false, true, false);
@@ -8592,7 +8596,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         slowModeButton.setVisibility(visible ? VISIBLE : GONE);
         int padding = visible ? dp(slowModeButton.isPremiumMode ? 26 : 16) : 0;
         if (messageEditText != null && messageEditText.getPaddingRight() != padding) {
-            messageEditText.setPadding(0, dp(9), padding, dp(10));
+            messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), padding, dp(INPUT_TEXT_PADDING_BOTTOM));
         }
         updateStaticSendLayout();
     }
@@ -8606,7 +8610,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) messageEditText.getLayoutParams();
         int oldRightMargin = layoutParams.rightMargin;
         if (isStories && isLiveComment) {
-            layoutParams.rightMargin = dp(suggestButtonVisible ? 50 : 2) + Math.max(0, sendButton.width() - dp(DEFAULT_HEIGHT));
+            layoutParams.rightMargin = dp(suggestButtonVisible ? INPUT_INNER_SEND_RESERVED : 2) + Math.max(0, sendButton.width() - dp(DEFAULT_HEIGHT));
         } else if (attachVisible == 1 || attachVisible == 2/* && layoutParams.rightMargin != dp(2)*/) {
             if (useStaticSendButton()) {
                 layoutParams.rightMargin = dp(INPUT_INNER_BUTTON_RIGHT_MARGIN);
@@ -8615,11 +8619,11 @@ public class ChatActivityEnterView extends FrameLayout implements
             } else if (botButton != null && botButton.getVisibility() == VISIBLE || notifyButton != null && notifyButton.getVisibility() == VISIBLE || scheduledButton != null && scheduledButton.getTag() != null) {
                 layoutParams.rightMargin = dp(98);
             } else {
-                layoutParams.rightMargin = dp(50);
+                layoutParams.rightMargin = dp(INPUT_INNER_SEND_RESERVED);
             }
         } else {
             if (scheduledButton != null && scheduledButton.getTag() != null) {
-                layoutParams.rightMargin = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(50);
+                layoutParams.rightMargin = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(INPUT_INNER_SEND_RESERVED);
             } else {
                 layoutParams.rightMargin = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(2);
             }
@@ -14032,7 +14036,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             int emojiMargin = dp(10) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
             ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = emojiMargin;
             if (messageEditText != null) {
-                int mlm = dp(57) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
+                int mlm = dp(10 + DEFAULT_HEIGHT + 3) + (botCommandsMenuButton == null ? 0 : botCommandsMenuButton.getMeasuredWidth());
                 if (aiEditorButton != null) mlm += DEFAULT_HEIGHT + leftGap + rightGap - dp(3);
                 ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = mlm;
             }
@@ -14044,7 +14048,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             senderSelectView.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
             ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = dp(7) + width;
             if (messageEditText != null) {
-                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = dp(54) + width;
+                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = dp(7 + DEFAULT_HEIGHT + 3) + width;
             }
         } else {
             int emojiMargin = getInputInnerButtonLeftMargin();
