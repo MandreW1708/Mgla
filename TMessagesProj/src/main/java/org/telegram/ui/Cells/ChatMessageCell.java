@@ -1690,6 +1690,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     private float drawTimeX;
     private float drawTimeY;
+    private Drawable mglaDeletedTrashDrawable;
     public StaticLayout timeLayout;
     public int timeWidth;
     private int timeTextWidth;
@@ -6446,6 +6447,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         if (messageObjectToSet != null) {
             messageObjectToSet.animateComments = false;
             setMessageContent(messageObjectToSet, groupedMessagesToSet, bottomNearToSet, topNearToSet, firstInChatToSet, lastInChatListToSet);
+            applyMglaSavedDeletedStyle(messageObjectToSet);
             messageObjectToSet = null;
             groupedMessagesToSet = null;
         }
@@ -7351,6 +7353,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                     timeMore += dp(20.5f);
                 }
                 timeMore += getExtraTimeX();
+                if (messageObject.mglaSavedDeleted) {
+                    timeMore += dp(18);
+                }
 
                 hasGamePreview = MessageObject.getMedia(messageObject.messageOwner) instanceof TLRPC.TL_messageMediaGame && MessageObject.getMedia(messageObject.messageOwner).game instanceof TLRPC.TL_game;
                 hasInvoicePrice = hasInvoicePreview = MessageObject.getMedia(messageObject.messageOwner) instanceof TLRPC.TL_messageMediaInvoice;
@@ -9039,6 +9044,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                             timeMore += dp(20.5f);
                         }
                         timeMore += getExtraTimeX();
+                if (messageObject.mglaSavedDeleted) {
+                    timeMore += dp(18);
+                }
                         if (reactionsLayoutInBubble.lastLineX + timeMore >= backgroundWidth) {
                             reactionsLayoutInBubble.totalHeight += dp(12);
                             reactionsLayoutInBubble.positionOffsetY -= dp(12);
@@ -13274,6 +13282,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                                  boolean lastInChatList) {
         if (attachedToWindow && !frozen) {
             setMessageContent(messageObject, groupedMessages, bottomNear, topNear, firstInChat, lastInChatList);
+            applyMglaSavedDeletedStyle(messageObject);
         } else {
             messageObjectToSet = messageObject;
             groupedMessagesToSet = groupedMessages;
@@ -13290,6 +13299,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         if (!frozen && messageObjectToSet != null && attachedToWindow) {
             messageObjectToSet.animateComments = false;
             setMessageContent(messageObjectToSet, groupedMessagesToSet, bottomNearToSet, topNearToSet, firstInChatToSet, lastInChatListToSet);
+            applyMglaSavedDeletedStyle(messageObjectToSet);
             messageObjectToSet = null;
             groupedMessagesToSet = null;
         }
@@ -18551,7 +18561,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     protected boolean checkNeedDrawShareButton(MessageObject messageObject) {
         if (isReportChat) return false;
-        if (currentMessageObject.deleted && !currentMessageObject.deletedByThanos) return false;
+        if (currentMessageObject.isHiddenDeleted() && !currentMessageObject.deletedByThanos) return false;
         if (currentMessageObject.isSponsored()) return false;
         if (currentMessagesGroup != null && currentPosition != null) {
             final boolean last = (currentPosition.flags & MessageObject.POSITION_FLAG_BOTTOM) != 0 && (currentPosition.flags & (messageObject.isOutOwner() ? MessageObject.POSITION_FLAG_LEFT : MessageObject.POSITION_FLAG_RIGHT)) != 0;
@@ -20932,7 +20942,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             Choreographer60FpsContent.getInstance().removeFrameCallback(invalidateOutboundsRunnable);
         }
 
-        if ((currentNameStatusDrawable != null || currentNameEmojiStatusDrawable != null || topicButton != null && (drawTopic || transitionParams.animateDrawTopic)) && drawNameLayout && nameLayout != null && (currentPosition == null || currentPosition.minX == 0 && currentPosition.minY == 0) && !(currentMessageObject.deleted && !drawingToBitmap && currentMessagesGroup != null && currentMessagesGroup.messages.size() >= 1)) {
+        if ((currentNameStatusDrawable != null || currentNameEmojiStatusDrawable != null || topicButton != null && (drawTopic || transitionParams.animateDrawTopic)) && drawNameLayout && nameLayout != null && (currentPosition == null || currentPosition.minX == 0 && currentPosition.minY == 0) && !(currentMessageObject.isHiddenDeleted() && !drawingToBitmap && currentMessagesGroup != null && currentMessagesGroup.messages.size() >= 1)) {
             int color;
             float nameX, nameY;
             if (currentMessageObject.shouldDrawWithoutBackground()) {
@@ -21692,7 +21702,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
         lastNamesAnimationTime = newAnimationTime;
 
-        if (currentMessageObject.deleted && !drawingToBitmap && currentMessagesGroup != null && currentMessagesGroup.messages.size() >= 1) {
+        if (currentMessageObject.isHiddenDeleted() && !drawingToBitmap && currentMessagesGroup != null && currentMessagesGroup.messages.size() >= 1) {
             return;
         }
 
@@ -23232,7 +23242,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
         drawCommentLayout(canvas, alpha);
 
-        if (captionLayout == null || selectionOnly && links.isEmpty() || (currentMessageObject.deleted && !drawingToBitmap && currentPosition != null) || alpha == 0) {
+        if (captionLayout == null || selectionOnly && links.isEmpty() || (currentMessageObject.isHiddenDeleted() && !drawingToBitmap && currentPosition != null) || alpha == 0) {
             return;
         }
         setupTextColors();
@@ -23563,7 +23573,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     }
 
     private void drawTimeInternal(Canvas canvas, float alpha, boolean fromParent, float timeX, StaticLayout timeLayout, float timeWidth, boolean drawSelectionBackground) {
-        if ((!drawTime || groupPhotoInvisible) && shouldDrawTimeOnMedia() || timeLayout == null || (currentMessageObject.deleted && currentPosition != null) || currentMessageObject.type == MessageObject.TYPE_PHONE_CALL) {
+        if ((!drawTime || groupPhotoInvisible) && shouldDrawTimeOnMedia() || timeLayout == null || (currentMessageObject.isHiddenDeleted() && currentPosition != null) || currentMessageObject.type == MessageObject.TYPE_PHONE_CALL) {
             return;
         }
         if (currentMessageObject.type == MessageObject.TYPE_ROUND_VIDEO) {
@@ -23986,6 +23996,31 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 canvas.restore();
             }
         }
+        drawMglaDeletedTrashIcon(canvas);
+    }
+
+    private void applyMglaSavedDeletedStyle(MessageObject messageObject) {
+        float alpha = messageObject != null && messageObject.mglaSavedDeleted ? 0.75f : 1f;
+        if (alphaInternal != alpha) {
+            alphaInternal = alpha;
+            setAlpha(alpha);
+        }
+    }
+
+    private void drawMglaDeletedTrashIcon(Canvas canvas) {
+        if (currentMessageObject == null || !currentMessageObject.mglaSavedDeleted || timeLayout == null) {
+            return;
+        }
+        if (mglaDeletedTrashDrawable == null) {
+            mglaDeletedTrashDrawable = getContext().getResources().getDrawable(R.drawable.msg_delete).mutate();
+        }
+        mglaDeletedTrashDrawable.setColorFilter(new PorterDuffColorFilter(0xFFFF5252, PorterDuff.Mode.SRC_IN));
+        int size = dp(14);
+        float trashX = drawTimeX + timeWidth + dp(2);
+        float trashY = drawTimeY + (timeLayout.getHeight() - size) / 2f;
+        mglaDeletedTrashDrawable.setAlpha((int) (255 * getAlpha()));
+        mglaDeletedTrashDrawable.setBounds((int) trashX, (int) trashY, (int) trashX + size, (int) trashY + size);
+        mglaDeletedTrashDrawable.draw(canvas);
     }
 
     private void createStatusDrawableAnimator(int lastStatusDrawableParams, int currentStatus, boolean fromParent) {

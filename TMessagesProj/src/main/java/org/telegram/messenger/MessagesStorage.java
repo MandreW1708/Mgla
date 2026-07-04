@@ -381,6 +381,7 @@ public class MessagesStorage extends BaseController {
                 }
             }
             databaseCreated = true;
+            MglaDeletedMessagesStorage.ensureTable(database);
         } catch (Exception e) {
             FileLog.e(e);
             if (openTries < 3 && e.getMessage() != null && e.getMessage().contains("malformed")) {
@@ -756,6 +757,8 @@ public class MessagesStorage extends BaseController {
         database.executeFast("CREATE INDEX IF NOT EXISTS poll_votes_mentions_did ON poll_votes_mentions(dialog_id);").stepThis().dispose();
         database.executeFast("CREATE TABLE poll_votes_mentions_topics(message_id INTEGER, state INTEGER, dialog_id INTEGER, topic_id INTEGER, PRIMARY KEY(message_id, dialog_id, topic_id))").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS poll_votes_mentions_topics_did ON poll_votes_mentions_topics(dialog_id, topic_id);").stepThis().dispose();
+
+        MglaDeletedMessagesStorage.ensureTable(database);
 
         database.executeFast("PRAGMA user_version = " + MessagesStorage.LAST_DB_VERSION).stepThis().dispose();
 
@@ -13849,13 +13852,15 @@ public class MessagesStorage extends BaseController {
                                 }
                             }
                         }
-                        if (!DialogObject.isEncryptedDialog(did) && !deleteFiles && did != currentUser) {
-                            continue;
-                        }
                         NativeByteBuffer data = cursor.byteBufferValue(1);
                         if (data != null) {
                             TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                             message.readAttachPath(data, currentUser);
+                            MglaDeletedMessagesStorage.saveMessageIfEnabled(database, currentAccount, did, message, 0);
+                            if (!DialogObject.isEncryptedDialog(did) && !deleteFiles && did != currentUser) {
+                                data.reuse();
+                                continue;
+                            }
                             if (deletedMessages != null) {
                                 deletedMessages.add(message);
                             }
@@ -13910,6 +13915,7 @@ public class MessagesStorage extends BaseController {
                                 topicsToDelete.add(TopicKey.of(did, message.id));
                             }
                             topicId = MessageObject.getTopicId(currentAccount, message, getForumTypeFlags(did));
+                            MglaDeletedMessagesStorage.saveMessageIfEnabled(database, currentAccount, did, message, topicId);
                         }
                         if (topicId != 0) {
                             TopicKey topicKey = TopicKey.of(did, topicId);
@@ -14528,6 +14534,28 @@ public class MessagesStorage extends BaseController {
         executeInStorageQueue(() -> updateDialogsWithDeletedMessagesInternal(dialogId, channelId, messages, additionalDialogsToUpdate));
     }
 
+    public void loadMglaDeletedMessages(long dialogId, long topicId, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.loadDeletedMessages(database, dialogId, topicId, 500);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(messages);
+                }
+            });
+        });
+    }
+
+    public void loadMglaDeletedMessageById(long dialogId, int messageId, Utilities.Callback<TLRPC.Message> callback) {
+        storageQueue.postRunnable(() -> {
+            TLRPC.Message message = MglaDeletedMessagesStorage.loadDeletedMessageById(database, dialogId, messageId);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(message);
+                }
+            });
+        });
+    }
+
     public ArrayList<Long> markMessagesAsDeleted(long dialogId, ArrayList<Integer> messages, boolean useQueue, boolean deleteFiles, int mode, int topicId) {
         if (messages.isEmpty()) {
             return null;
@@ -14573,13 +14601,15 @@ public class MessagesStorage extends BaseController {
                             }
                         }
                     }
-                    if (!DialogObject.isEncryptedDialog(did) && !deleteFiles) {
-                        continue;
-                    }
                     NativeByteBuffer data = cursor.byteBufferValue(1);
                     if (data != null) {
                         TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                         message.readAttachPath(data, getUserConfig().clientUserId);
+                        MglaDeletedMessagesStorage.saveMessageIfEnabled(database, currentAccount, did, message, 0);
+                        if (!DialogObject.isEncryptedDialog(did) && !deleteFiles) {
+                            data.reuse();
+                            continue;
+                        }
                         data.reuse();
                         addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, false);
                     }

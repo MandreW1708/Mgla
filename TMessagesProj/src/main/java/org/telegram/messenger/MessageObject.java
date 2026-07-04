@@ -219,6 +219,11 @@ public class MessageObject {
     public String monthKey;
     public boolean deleted;
     public boolean deletedByThanos;
+    public boolean mglaSavedDeleted;
+
+    public boolean isHiddenDeleted() {
+        return deleted && !mglaSavedDeleted;
+    }
     public float audioProgress;
     public float forceSeekTo = -1;
     public int audioProgressMs;
@@ -760,6 +765,7 @@ public class MessageObject {
 
     public void copyStableParams(MessageObject old) {
         stableId = old.stableId;
+        mglaSavedDeleted = old.mglaSavedDeleted;
         messageOwner.premiumEffectWasPlayed = old.messageOwner.premiumEffectWasPlayed;
         forcePlayEffect = old.forcePlayEffect;
         wasJustSent = old.wasJustSent;

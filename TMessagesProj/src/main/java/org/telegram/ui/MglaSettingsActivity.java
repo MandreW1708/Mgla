@@ -1,7 +1,6 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
-import static org.telegram.messenger.LocaleController.getString;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -9,6 +8,7 @@ import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -16,6 +16,7 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -23,13 +24,14 @@ import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
-import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
@@ -38,11 +40,7 @@ import org.telegram.ui.Components.UItem;
 import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 
-import java.util.ArrayList;
-
 public class MglaSettingsActivity extends BaseFragment {
-
-    private UniversalRecyclerView listView;
 
     public MglaSettingsActivity() {
         this(null);
@@ -66,62 +64,128 @@ public class MglaSettingsActivity extends BaseFragment {
             }
         });
 
-        fragmentView = new FrameLayout(context);
-        fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        ScrollView scrollView = new ScrollView(context);
+        scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        listView = new UniversalRecyclerView(this, this::fillItems, this::onClick, this::onLongClick);
-        listView.adapter.setApplyBackground(false);
-        listView.setSections();
-        listView.setPadding(0, dp(8), 0, AndroidUtilities.navigationBarHeight);
-        ((FrameLayout) fragmentView).addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        LinearLayout rootLayout = new LinearLayout(context);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-        listView.adapter.update(false);
+        rootLayout.addView(createHeader(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 12, 0, 8));
+
+        LinearLayout mainBlock = createBlock(context, "Главное");
+        addMenuItem(mainBlock, () -> presentFragment(new MglaMainSettingsActivity()),
+            IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_features, "Общие настройки");
+        addMenuItem(mainBlock, () -> presentFragment(new MglaChatsSettingsActivity()),
+            IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.filled_chatlist2, "Чаты");
+        addMenuItem(mainBlock, () -> presentFragment(new MglaNotificationsSettingsActivity()),
+            IconBackgroundColors.RED.top, IconBackgroundColors.RED.bottom, R.drawable.settings_sounds, "Уведомления");
+        addMenuItem(mainBlock, () -> presentFragment(new MglaAppearanceSettingsActivity()),
+            IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.msg_palette, "Внешний вид");
+        addMenuItem(mainBlock, () -> presentFragment(new MglaCameraSettingsActivity()),
+            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
+        addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
+            IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект", null, true);
+        rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
+
+        LinearLayout extraBlock = createBlock(context, "Дополнительно");
+        addMenuItem(extraBlock, () -> openTelegramUsername(BuildVars.MGLA_DEV_CHANNEL_USERNAME),
+            IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_channel, "Канал разработчика",
+            "@" + BuildVars.MGLA_DEV_CHANNEL_USERNAME);
+        addMenuItem(extraBlock, () -> openSupportChat(),
+            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Поддержка");
+        rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
+
+        fragmentView = scrollView;
         return fragmentView;
     }
 
-    private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
+    private View createHeader(Context context) {
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setGravity(Gravity.CENTER_HORIZONTAL);
 
-        items.add(SettingCell.Factory.of(4, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_chat, "AI"));
-        items.add(SettingCell.Factory.of(5, IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_features, "Основные настройки"));
-        items.add(SettingCell.Factory.of(7, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.msg_palette, "Внешний вид"));
-        items.add(SettingCell.Factory.of(6, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.filled_chatlist2, "Чаты"));
-        items.add(UItem.asShadow(null));
+        FrameLayout iconContainer = new FrameLayout(context);
+        GradientDrawable iconBg = new GradientDrawable();
+        iconBg.setCornerRadius(dp(18));
+        iconBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        iconContainer.setBackground(iconBg);
+        iconContainer.setClipToOutline(true);
+        iconContainer.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
 
-        items.add(SettingCell.Factory.of(1, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, "О приложении", "Mgla v" + BuildVars.BUILD_VERSION_STRING));
-        items.add(SettingCell.Factory.of(3, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Помощь"));
+        ImageView iconView = new ImageView(context);
+        iconView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        iconView.setImageResource(R.mipmap.ic_launcher);
+        iconContainer.addView(iconView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        items.add(UItem.asShadow(null));
+        header.addView(iconContainer, LayoutHelper.createLinear(80, 80, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
+        TextView titleView = new TextView(context);
+        titleView.setText("Mgla");
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
+        titleView.setTypeface(AndroidUtilities.bold());
+        titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        titleView.setGravity(Gravity.CENTER);
+        header.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 4));
+
+        TextView versionView = new TextView(context);
+        versionView.setText(BuildVars.MGLA_VERSION_STRING);
+        versionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        versionView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        versionView.setGravity(Gravity.CENTER);
+        header.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+
+        return header;
     }
 
-    private void onClick(UItem item, View view, int position, float x, float y) {
-        switch (item.id) {
-            case 4:
-                presentFragment(new MglaAiSettingsActivity());
-                break;
-            case 5:
-                presentFragment(new MglaMainSettingsActivity());
-                break;
-            case 7:
-                presentFragment(new MglaAppearanceSettingsActivity());
-                break;
-            case 6:
-                presentFragment(new MglaChatsSettingsActivity());
-                break;
-            case 1:
-                AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-                builder.setTitle("О приложении Mgla");
-                builder.setMessage("Mgla v" + BuildVars.BUILD_VERSION_STRING + "\n\nКастомный клиент Telegram.");
-                builder.setPositiveButton(getString(R.string.OK), null);
-                showDialog(builder.create());
-                break;
-            case 3:
-                Browser.openUrl(getParentActivity(), "https://telegram.org/faq");
-                break;
+    private LinearLayout createBlock(Context context, String title) {
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        block.setBackground(bg);
+        block.setClipToOutline(true);
+        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+
+        HeaderCell header = new HeaderCell(context, 22);
+        header.setBackground(null);
+        header.setText(title);
+        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        return block;
+    }
+
+    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title) {
+        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, null);
+    }
+
+    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value) {
+        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, value, false);
+    }
+
+    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value, boolean showBetaBadge) {
+        SettingCell cell = new SettingCell(getContext(), null);
+        cell.set(iconColorTop, iconColorBottom, icon, title, null, value, false, showBetaBadge);
+        cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 0));
+        cell.setOnClickListener(v -> onClick.run());
+        block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        return cell;
+    }
+
+    private void openTelegramUsername(String username) {
+        if (getParentActivity() == null || TextUtils.isEmpty(username)) {
+            return;
         }
+        Browser.openUrl(getParentActivity(), "https://t.me/" + username);
     }
 
-    private boolean onLongClick(UItem item, View view, int position, float x, float y) {
-        return false;
+    private void openSupportChat() {
+        if (getParentActivity() == null || TextUtils.isEmpty(BuildVars.MGLA_SUPPORT_USERNAME)) {
+            return;
+        }
+        MessagesController.getInstance(currentAccount).openByUserName(BuildVars.MGLA_SUPPORT_USERNAME, this, 1);
     }
 
     public static class SettingCell extends LinearLayout implements Theme.Colorable {
@@ -131,7 +195,9 @@ public class MglaSettingsActivity extends BaseFragment {
         private final FrameLayout iconLayout;
         private final ImageView iconView;
         private final LinearLayout textLayout;
+        private final LinearLayout titleRow;
         private final TextView titleView;
+        private final TextView betaBadge;
         private final TextView subtitleView;
         private final TextView valueView;
         private final Switch switchView;
@@ -150,11 +216,30 @@ public class MglaSettingsActivity extends BaseFragment {
             iconLayout.addView(iconView, LayoutHelper.createFrame(24, 24, Gravity.CENTER));
 
             textLayout = new LinearLayout(context);
-            textLayout.setOrientation(VERTICAL);
+            textLayout.setOrientation(LinearLayout.VERTICAL);
+
+            titleRow = new LinearLayout(context);
+            titleRow.setOrientation(LinearLayout.HORIZONTAL);
+            titleRow.setGravity(Gravity.CENTER_VERTICAL);
 
             titleView = new TextView(context);
             titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            textLayout.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 0));
+            titleRow.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 0));
+
+            betaBadge = new TextView(context);
+            betaBadge.setText("beta");
+            betaBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+            betaBadge.setTypeface(AndroidUtilities.bold());
+            betaBadge.setTextColor(0xFFFFFFFF);
+            betaBadge.setGravity(Gravity.CENTER);
+            betaBadge.setPadding(dp(5), dp(1), dp(5), dp(2));
+            betaBadge.setVisibility(GONE);
+            GradientDrawable badgeBg = new GradientDrawable();
+            badgeBg.setCornerRadius(dp(4));
+            betaBadge.setBackground(badgeBg);
+            titleRow.addView(betaBadge, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
+
+            textLayout.addView(titleRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
             subtitleView = new TextView(context);
             subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
@@ -179,6 +264,9 @@ public class MglaSettingsActivity extends BaseFragment {
             subtitleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
             valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider));
             iconBackground.setDrawBorder(resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark());
+            if (betaBadge.getBackground() instanceof GradientDrawable) {
+                ((GradientDrawable) betaBadge.getBackground()).setColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourcesProvider));
+            }
         }
 
         private boolean twoLines;
@@ -191,7 +279,7 @@ public class MglaSettingsActivity extends BaseFragment {
             CharSequence subtitle,
             CharSequence value
         ) {
-            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, false);
+            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, false, false);
         }
 
         public void set(
@@ -201,6 +289,17 @@ public class MglaSettingsActivity extends BaseFragment {
             CharSequence value,
             boolean checked
         ) {
+            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, checked, false);
+        }
+
+        public void set(
+            int iconColorTop, int iconColorBottom, int icon,
+            CharSequence title,
+            CharSequence subtitle,
+            CharSequence value,
+            boolean checked,
+            boolean showBetaBadge
+        ) {
             iconLayout.setVisibility(icon != 0 ? View.VISIBLE : View.GONE);
             titleView.setTranslationX(icon == 0 ? dp(2) : 0);
             subtitleView.setTranslationX(icon == 0 ? dp(2) : 0);
@@ -208,6 +307,7 @@ public class MglaSettingsActivity extends BaseFragment {
             iconBackground.setColor(iconColorTop, iconColorBottom);
             iconView.setImageResource(icon);
             titleView.setText(title);
+            betaBadge.setVisibility(showBetaBadge ? View.VISIBLE : View.GONE);
             subtitleView.setVisibility((twoLines = !TextUtils.isEmpty(subtitle)) ? View.VISIBLE : View.GONE);
             subtitleView.setText(subtitle);
             valueView.setVisibility(View.GONE);
@@ -224,6 +324,11 @@ public class MglaSettingsActivity extends BaseFragment {
             } else {
                 valueView.setVisibility(!TextUtils.isEmpty(value) ? View.VISIBLE : View.GONE);
                 valueView.setText(value);
+                valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+                valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider));
+            }
+            if (showBetaBadge && betaBadge.getBackground() instanceof GradientDrawable) {
+                ((GradientDrawable) betaBadge.getBackground()).setColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourcesProvider));
             }
         }
 

@@ -9302,7 +9302,11 @@ public class MessagesController extends BaseController implements NotificationCe
                         Integer id = messages.get(a);
                         MessageObject obj = dialogMessagesByIds.get(id);
                         if (obj != null) {
-                            obj.deleted = true;
+                            if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId)) {
+                                MglaDeletedMessagesStorage.markMessageAsSavedDeleted(obj);
+                            } else {
+                                obj.deleted = true;
+                            }
                         }
                     }
                 } else {
@@ -11802,6 +11806,9 @@ public class MessagesController extends BaseController implements NotificationCe
                     }
                 }
             }
+        }
+        if (needProcess && mode == ChatActivity.MODE_DEFAULT && loadIndex == 0 && MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId) && !objects.isEmpty()) {
+            MglaDeletedMessagesStorage.mergeIntoLoadedMessages(currentAccount, getMessagesStorage().getDatabase(), dialogId, threadMessageId, objects, usersDict, chatsDict);
         }
         getFileLoader().checkMediaExistance(objects);
         if (MessageObject.canCreateStripedThubms()) {
@@ -20370,7 +20377,11 @@ public class MessagesController extends BaseController implements NotificationCe
                                 if (BuildVars.LOGS_ENABLED) {
                                     FileLog.d("mark messages " + obj.getId() + " deleted");
                                 }
-                                obj.deleted = true;
+                                if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+                                    MglaDeletedMessagesStorage.markMessageAsSavedDeleted(obj);
+                                } else {
+                                    obj.deleted = true;
+                                }
                             }
                         }
                     } else {
@@ -20381,7 +20392,11 @@ public class MessagesController extends BaseController implements NotificationCe
                                 if (obj != null) {
                                     for (int b = 0, size2 = arrayList.size(); b < size2; b++) {
                                         if (obj.getId() == arrayList.get(b)) {
-                                            obj.deleted = true;
+                                            if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId)) {
+                                                MglaDeletedMessagesStorage.markMessageAsSavedDeleted(obj);
+                                            } else {
+                                                obj.deleted = true;
+                                            }
                                             break;
                                         }
                                     }

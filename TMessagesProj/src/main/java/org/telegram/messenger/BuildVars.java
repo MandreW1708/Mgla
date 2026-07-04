@@ -26,6 +26,10 @@ public class BuildVars {
     public static boolean NO_SCOPED_STORAGE = Build.VERSION.SDK_INT <= 29;
     public static String BUILD_VERSION_STRING = BuildConfig.BUILD_VERSION_STRING;
 
+    public static String MGLA_VERSION_STRING = "v1.2.0";
+    public static String MGLA_DEV_CHANNEL_USERNAME = "mgla_fork";
+    public static String MGLA_SUPPORT_USERNAME = "lkpk_k";
+
     public static int APP_ID = 36633907;
     public static String APP_HASH = "ebfa5487e826fe22692743fdbe58f4f8";
 

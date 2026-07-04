@@ -38,6 +38,7 @@ import org.telegram.messenger.FileUploadOperation;
 import org.telegram.messenger.KeepAliveJob;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.PushListenerController;
 import org.telegram.messenger.SharedConfig;
@@ -281,6 +282,9 @@ public class ConnectionsManager extends BaseController {
     }
 
     public boolean isPushConnectionEnabled() {
+        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            return true;
+        }
         SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
         if (preferences.contains("pushConnection")) {
             return preferences.getBoolean("pushConnection", true);
