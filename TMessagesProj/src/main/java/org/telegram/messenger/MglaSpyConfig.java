@@ -12,15 +12,23 @@ public class MglaSpyConfig {
     public static final String KEY_GHOST_MODE = "spy_ghost_mode";
 
     private static SharedPreferences prefs() {
+        if (ApplicationLoader.applicationContext == null) {
+            return null;
+        }
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     public static boolean isSaveDeletedMessagesEnabled() {
-        return ApplicationLoader.applicationContext != null && prefs().getBoolean(KEY_SAVE_DELETED, false);
+        SharedPreferences prefs = prefs();
+        return prefs != null && prefs.getBoolean(KEY_SAVE_DELETED, false);
     }
 
     public static void setSaveDeletedMessagesEnabled(boolean enabled) {
-        prefs().edit().putBoolean(KEY_SAVE_DELETED, enabled).apply();
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return;
+        }
+        prefs.edit().putBoolean(KEY_SAVE_DELETED, enabled).apply();
         if (!enabled) {
             MglaDeletedMessagesStorage.clearAllDeletedMessagesForAllAccounts();
         }
@@ -40,11 +48,16 @@ public class MglaSpyConfig {
     }
 
     public static boolean isGhostModeEnabled() {
-        return ApplicationLoader.applicationContext != null && prefs().getBoolean(KEY_GHOST_MODE, false);
+        SharedPreferences prefs = prefs();
+        return prefs != null && prefs.getBoolean(KEY_GHOST_MODE, false);
     }
 
     public static void setGhostModeEnabled(boolean enabled) {
-        prefs().edit().putBoolean(KEY_GHOST_MODE, enabled).apply();
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return;
+        }
+        prefs.edit().putBoolean(KEY_GHOST_MODE, enabled).apply();
         AndroidUtilities.runOnUIThread(() -> {
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 if (UserConfig.getInstance(a).isClientActivated()) {

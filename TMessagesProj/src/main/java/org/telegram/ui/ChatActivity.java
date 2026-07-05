@@ -437,7 +437,6 @@ public class ChatActivity extends BaseFragment implements
     private ActionBarMenu.LazyItem attachItem;
     private ActionBarMenuItem.Item savedChatsItem, savedChatsGap;;
     private ActionBarMenuItem headerItem;
-    private TextView mglaDeletedHeaderPill;
     // Mgla: right avatar in the chat/channel header (replaces the "more" three-dots button)
 
     private ActionBarMenu.LazyItem editTextItem;
@@ -1873,6 +1872,13 @@ public class ChatActivity extends BaseFragment implements
                 }
                 processRowSelect(view, outside, x, y);
                 return;
+            }
+            if (chatMode == MODE_MGLA_DELETED && view instanceof ChatMessageCell) {
+                MessageObject msg = ((ChatMessageCell) view).getMessageObject();
+                if (msg != null && !msg.isDateObject) {
+                    openMglaDeletedMessageInChat(msg.getId());
+                    return;
+                }
             }
             if (view instanceof ChatMessageCell) {
                 MessageObject msg = ((ChatMessageCell) view).getMessageObject();
@@ -4190,7 +4196,7 @@ public class ChatActivity extends BaseFragment implements
         avatarContainer.setClipChildren(false);
         updateTopicTitleIcon();
         avatarContainer.setGlassMode();
-        if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+        if ((inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) || chatMode == MODE_MGLA_DELETED) {
             avatarContainer.getAvatarImageView().setVisibility(View.GONE);
             avatarContainer.updateGlassLayout();
         }
@@ -4251,29 +4257,11 @@ public class ChatActivity extends BaseFragment implements
             });
             getConnectionsManager().bindRequestToGuid(req, classGuid);
         } else {
-            if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+            if ((inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) || chatMode == MODE_MGLA_DELETED) {
                 actionBar.setPreviewGlassMode(true);
                 actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, dp(6), 0, dp(6), 0));
             } else {
                 actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, 53, 0, 52, 0));
-            }
-            if (avatarContainer != null) {
-                avatarContainer.setVisibility(chatMode == MODE_MGLA_DELETED ? View.GONE : View.VISIBLE);
-            }
-            if (chatMode == MODE_MGLA_DELETED) {
-                if (mglaDeletedHeaderPill == null) {
-                    mglaDeletedHeaderPill = new TextView(context);
-                    mglaDeletedHeaderPill.setText("Удаленные");
-                    mglaDeletedHeaderPill.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-                    mglaDeletedHeaderPill.setTypeface(AndroidUtilities.bold());
-                    mglaDeletedHeaderPill.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
-                    mglaDeletedHeaderPill.setPadding(dp(22), dp(7), dp(22), dp(7));
-                    mglaDeletedHeaderPill.setBackground(Theme.createRoundRectDrawable(dp(18), getThemedColor(Theme.key_actionBarDefaultSubmenuBackground)));
-                    actionBar.addView(mglaDeletedHeaderPill, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-                }
-                mglaDeletedHeaderPill.setVisibility(View.VISIBLE);
-            } else if (mglaDeletedHeaderPill != null) {
-                mglaDeletedHeaderPill.setVisibility(View.GONE);
             }
             actionBar.createMenu().bringToFront();
         }
@@ -19482,7 +19470,7 @@ public class ChatActivity extends BaseFragment implements
             avatarContainer.setTitle(LocaleController.formatPluralString("PinnedMessagesCount", getPinnedMessagesCount()));
         } else if (chatMode == MODE_MGLA_DELETED) {
             if (avatarContainer != null) {
-                avatarContainer.setTitle("");
+                avatarContainer.setTitle("Удаленные");
             }
         } else if (currentChat != null) {
             avatarContainer.setTitle(AndroidUtilities.removeRTL(AndroidUtilities.removeDiacritics(currentChat.title)), currentChat.scam, currentChat.fake, currentChat.verified, false, currentChat.emoji_status, animated);
@@ -21968,6 +21956,13 @@ public class ChatActivity extends BaseFragment implements
         });
     }
 
+    private void openMglaDeletedMessageInChat(int messageId) {
+        if (chatActivityDelegate != null) {
+            chatActivityDelegate.openReplyMessage(messageId);
+            finishFragment();
+        }
+    }
+
     private void openMglaDeletedMessages() {
         Bundle bundle = new Bundle();
         if (currentChat != null) {
@@ -21981,7 +21976,21 @@ public class ChatActivity extends BaseFragment implements
             bundle.putInt("message_id", (int) threadMessageId);
         }
         bundle.putInt("chatMode", MODE_MGLA_DELETED);
-        presentFragment(new ChatActivity(bundle));
+        ChatActivity fragment = new ChatActivity(bundle);
+        fragment.userInfo = userInfo;
+        fragment.chatInfo = chatInfo;
+        fragment.chatActivityDelegate = new ChatActivityDelegate() {
+            @Override
+            public void openReplyMessage(int mid) {
+                scrollToMessageId(mid, 0, true, 0, true, 0);
+            }
+
+            @Override
+            public void openHashtagSearch(String text) {
+                ChatActivity.this.openHashtagSearch(text);
+            }
+        };
+        presentFragment(fragment);
     }
 
     private void didReceivedNotification2(int id, int account, final Object... args) {
@@ -39497,7 +39506,7 @@ public class ChatActivity extends BaseFragment implements
                 chatActivityEnterView.closeKeyboard();
             }
             MessageObject messageObject = cell.getMessageObject();
-            if (chatMode == MODE_PINNED) {
+            if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
                 chatActivityDelegate.openReplyMessage(messageObject.getId());
                 finishFragment();
             } else if (chatMode == MODE_SAVED || (chatMode == MODE_SEARCH && searchType == SEARCH_PUBLIC_POSTS) || (UserObject.isReplyUser(currentUser) || UserObject.isUserSelf(currentUser)) && messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.saved_from_peer != null) {
@@ -41143,7 +41152,7 @@ public class ChatActivity extends BaseFragment implements
                             }
                         }, messageObject.getId(), quoteOffset, task_id, option_id);
                     }
-                } else if (chatMode == MODE_PINNED || chatMode == MODE_SCHEDULED) {
+                } else if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED || chatMode == MODE_SCHEDULED) {
                     chatActivityDelegate.openReplyMessage(id);
                     finishFragment();
                 } else {
@@ -42380,7 +42389,7 @@ public class ChatActivity extends BaseFragment implements
                     openDiscussionMessageChat(currentChat.id, null, threadId, 0, -1, 0, null);
                 } else {
                     showScrollToMessageError = true;
-                    if (chatMode == MODE_PINNED) {
+                    if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
                         chatActivityDelegate.openReplyMessage(messageId);
                         finishFragment();
                     } else {
@@ -42421,7 +42430,7 @@ public class ChatActivity extends BaseFragment implements
                             return false;
                         }
                         showScrollToMessageError = true;
-                        if (chatMode == MODE_PINNED) {
+                        if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
                             chatActivityDelegate.openReplyMessage(messageId);
                             finishFragment();
                         } else {
@@ -42444,7 +42453,7 @@ public class ChatActivity extends BaseFragment implements
                         if (threadId != 0 || commentId != 0) {
                             return false;
                         } else {
-                            if (chatMode == MODE_PINNED) {
+                            if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
                                 chatActivityDelegate.openReplyMessage(messageId);
                                 finishFragment();
                             } else {
@@ -42502,7 +42511,7 @@ public class ChatActivity extends BaseFragment implements
                                 }
                             }
                             showScrollToMessageError = true;
-                            if (chatMode == MODE_PINNED) {
+                            if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
                                 chatActivityDelegate.openReplyMessage(messageId);
                                 finishFragment();
                             } else {

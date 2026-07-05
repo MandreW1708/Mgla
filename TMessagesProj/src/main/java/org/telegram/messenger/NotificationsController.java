@@ -294,7 +294,13 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     public static void checkMglaBackgroundChannel() {
-        if (Build.VERSION.SDK_INT < 26) {
+        if (Build.VERSION.SDK_INT < 26 || ApplicationLoader.applicationContext == null) {
+            return;
+        }
+        if (systemNotificationManager == null) {
+            systemNotificationManager = (NotificationManager) ApplicationLoader.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE);
+        }
+        if (systemNotificationManager == null) {
             return;
         }
         SharedPreferences preferences = null;

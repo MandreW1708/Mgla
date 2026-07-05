@@ -374,6 +374,7 @@ public class NotificationCenter {
     public static final int guardBotDecisionResult = totalEvents++;
     public static final int webBrowserSettingsUpdate = totalEvents++;
     public static final int ghostModeChanged = totalEvents++;
+    public static final int mglaHeaderSettingsChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 
