@@ -13,6 +13,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaHeaderConfig;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaTransferConfig;
 import org.telegram.messenger.NotificationCenter;
@@ -85,13 +86,23 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         TextCheckCell proxyCell = new TextCheckCell(context);
         proxyCell.setBackground(null);
-        proxyCell.setTextAndCheck("Прокси в шапке", prefs.getBoolean("proxy_in_header", false), true);
+        proxyCell.setTextAndCheck("Прокси в шапке", MglaHeaderConfig.isProxyInHeader(), true);
         proxyCell.setOnClickListener(v -> {
-            boolean newVal = !prefs.getBoolean("proxy_in_header", false);
-            prefs.edit().putBoolean("proxy_in_header", newVal).apply();
+            boolean newVal = !MglaHeaderConfig.isProxyInHeader();
+            MglaHeaderConfig.setProxyInHeader(newVal);
             proxyCell.setChecked(newVal);
         });
         block.addView(proxyCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextCheckCell downloadsHeaderCell = new TextCheckCell(context);
+        downloadsHeaderCell.setBackground(null);
+        downloadsHeaderCell.setTextAndCheck("Загрузки в шапке", MglaHeaderConfig.isDownloadsInHeader(), true);
+        downloadsHeaderCell.setOnClickListener(v -> {
+            boolean newVal = !MglaHeaderConfig.isDownloadsInHeader();
+            MglaHeaderConfig.setDownloadsInHeader(newVal);
+            downloadsHeaderCell.setChecked(newVal);
+        });
+        block.addView(downloadsHeaderCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         TextCheckCell hapticCell = new TextCheckCell(context);
         hapticCell.setBackground(null);

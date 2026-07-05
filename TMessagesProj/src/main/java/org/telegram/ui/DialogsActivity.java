@@ -115,6 +115,7 @@ import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MglaHeaderConfig;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
@@ -494,6 +495,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private ActionBarMenuItem downloadsItem;
     private DownloadProgressIcon downloadProgressIcon;
     private boolean downloadsItemVisible;
+    private ActionBarMenuItem mglaDownloadsHeaderItem;
+    private DownloadProgressIcon mglaDownloadProgressIcon;
     public ActionBarMenuItem searchItem;
     private ActionBarMenuItem optionsItem;
     private ActionBarMenuItem speedItem;
@@ -2841,6 +2844,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (!onlySelect) {
                 globalObserversGroup.add(NotificationCenter.closeSearchByActiveAction);
                 globalObserversGroup.add(NotificationCenter.proxySettingsChanged);
+                globalObserversGroup.add(NotificationCenter.mglaHeaderSettingsChanged);
                 observersGroup.add(NotificationCenter.filterSettingsUpdated);
                 observersGroup.add(NotificationCenter.dialogsUnreadCounterChanged);
             }
@@ -3214,15 +3218,18 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             downloadsItem.setContentDescription(getString(R.string.DownloadsTabs));
             downloadsItem.setVisibility(View.GONE);
 
+            mglaDownloadsHeaderItem = menu.addItem(101, new ColorDrawable(Color.TRANSPARENT));
+            mglaDownloadsHeaderItem.addView(mglaDownloadProgressIcon = new DownloadProgressIcon(currentAccount, context));
+            mglaDownloadsHeaderItem.setContentDescription(getString(R.string.DownloadsTabs));
+            mglaDownloadsHeaderItem.setOnClickListener(v -> openDownloadsSearch());
+            mglaDownloadsHeaderItem.setVisibility(View.GONE);
+
             updateProxyButton(false, false);
 
-            // Mgla: proxy button in header
             proxyHeaderItem = menu.addItem(100, R.drawable.outline_shield_plain_24);
             proxyHeaderItem.setContentDescription("Proxy");
             proxyHeaderItem.setOnClickListener(v -> presentFragment(new ProxyListActivity()));
-            boolean showProxy = ApplicationLoader.applicationContext.getSharedPreferences("mgla_config", Context.MODE_PRIVATE)
-                .getBoolean("proxy_in_header", false);
-            proxyHeaderItem.setVisibility(showProxy ? View.VISIBLE : View.GONE);
+            proxyHeaderItem.setVisibility(View.GONE);
             updateProxyHeaderIcon();
         }
 
@@ -3245,6 +3252,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
             fragmentSearchField.addAdditionalIcon(speedItem);
             fragmentSearchField.updateColors();
+            updateProxyButton(false, true);
         }
 
         fragmentSearchField.setCloseButtonOnClickListener(() -> {
@@ -3848,8 +3856,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     getNotificationsController().showNotifications();
                     checkUi_itemPasscodeVisibility();
                 } else if (id == 3) {
-                    showSearch(true, true, true);
-                    fragmentSearchFieldWatcher.toggleSearch(true);
+                    openDownloadsSearch();
                 } else if (id == 11) {
                     openAccountSelector(switchItem);
                 } else if (id == add_to_folder) {
@@ -6921,6 +6928,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         if (searchViewPager != null) {
             searchViewPager.onResume();
         }
+        checkUi_mglaHeaderIcons();
         final boolean tosAccepted;
         if (!afterSignup) {
             tosAccepted = getUserConfig().unacceptedTermsOfService == null;
@@ -9995,18 +10003,23 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             return;
         }
         boolean showDownloads = false;
-        for (int i = 0; i < getDownloadController().downloadingFiles.size(); i++) {
-            if (getFileLoader().isLoadingFile(getDownloadController().downloadingFiles.get(i).getFileName())) {
-                showDownloads = true;
-                break;
+        if (!MglaHeaderConfig.isDownloadsInHeader()) {
+            for (int i = 0; i < getDownloadController().downloadingFiles.size(); i++) {
+                if (getFileLoader().isLoadingFile(getDownloadController().downloadingFiles.get(i).getFileName())) {
+                    showDownloads = true;
+                    break;
+                }
             }
-        }
-        if ((getDownloadController().hasUnviewedDownloads() || showDownloads || (downloadsItem.getVisibility() == View.VISIBLE && downloadsItem.getAlpha() == 1 && !force))) {
-            downloadsItemVisible = true;
+            if ((getDownloadController().hasUnviewedDownloads() || showDownloads || (downloadsItem.getVisibility() == View.VISIBLE && downloadsItem.getAlpha() == 1 && !force))) {
+                downloadsItemVisible = true;
+            } else {
+                downloadsItemVisible = false;
+            }
+            checkUi_itemDownloadsVisibility();
         } else {
             downloadsItemVisible = false;
+            checkUi_itemDownloadsVisibility();
         }
-        checkUi_itemDownloadsVisibility();
 
         final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
         boolean proxyEnabled = preferences.getBoolean("proxy_enabled", false);
@@ -10015,6 +10028,41 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         proxyDrawable.setConnected(proxyEnabled, connected, animated);
 
         updateProxyHeaderIcon();
+        checkUi_mglaHeaderIcons();
+    }
+
+    private void openDownloadsSearch() {
+        showSearch(true, true, true);
+        if (fragmentSearchFieldWatcher != null) {
+            fragmentSearchFieldWatcher.toggleSearch(true);
+        }
+        createSearchViewPager();
+        if (searchViewPager != null) {
+            searchViewPager.showDownloads();
+            updateSpeedItem(true);
+        }
+    }
+
+    private void checkUi_mglaHeaderIcons() {
+        if (proxyHeaderItem == null) {
+            return;
+        }
+
+        final boolean showProxy = MglaHeaderConfig.isProxyInHeader();
+        final boolean showDownloads = MglaHeaderConfig.isDownloadsInHeader();
+
+        final float factor1 = 1f - animatorSearchVisible.getFloatValue();
+        final float factor2 = 1f - getRightSlidingProgress();
+        final float factor3 = 1f - animatorDoneButtonVisible.getFloatValue();
+        final float factor = factor1 * factor2 * factor3;
+
+        FragmentFloatingButton.setAnimatedVisibility(proxyHeaderItem, showProxy ? factor : 0);
+
+        if (showDownloads) {
+            FragmentFloatingButton.setAnimatedVisibility(mglaDownloadsHeaderItem, factor);
+        } else {
+            FragmentFloatingButton.setAnimatedVisibility(mglaDownloadsHeaderItem, 0);
+        }
     }
 
     private void updateProxyHeaderIcon() {
@@ -10022,7 +10070,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
         boolean proxyEnabled = preferences.getBoolean("proxy_enabled", false);
         final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
-        proxyHeaderItem.setIcon(proxyEnabled && connected ? R.drawable.outline_shield_check : R.drawable.outline_shield_plain_24);
+        final int icon = proxyEnabled && connected ? R.drawable.outline_shield_check : R.drawable.outline_shield_plain_24;
+        proxyHeaderItem.setIcon(icon);
     }
 
     private AnimatorSet doneItemAnimator;
@@ -10352,6 +10401,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             }
         } else if (id == NotificationCenter.proxySettingsChanged) {
             updateProxyButton(false, false);
+        } else if (id == NotificationCenter.mglaHeaderSettingsChanged) {
+            checkUi_mglaHeaderIcons();
+            updateProxyButton(false, true);
         } else if (id == NotificationCenter.updateInterfaces) {
             Integer mask = (Integer) args[0];
             updateVisibleRows(mask);
@@ -12252,6 +12304,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             downloadProgressIcon.updateColors();
             downloadProgressIcon.invalidate();
         }
+        if (mglaDownloadProgressIcon != null) {
+            mglaDownloadProgressIcon.updateColors();
+            mglaDownloadProgressIcon.invalidate();
+        }
 
         if (searchViewPager != null) {
             searchViewPager.getThemeDescriptions(arrayList);
@@ -13554,6 +13610,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             checkUi_filterTabsVisible();
             checkUi_searchFiltersVisibility();
             checkUi_searchFieldStyle();
+            checkUi_mglaHeaderIcons();
         } else if (id == ANIMATOR_ID_DONE_BUTTON_VISIBLE) {
             checkUi_menuItems();
             checkUi_searchFieldVisibility();
@@ -13730,7 +13787,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         fragmentSearchField.setAlpha(alpha);
         fragmentSearchField.setVisibility(alpha > 0 ? View.VISIBLE : View.GONE);
-        animatorSearchButtonVisible.setValue(alpha <= 0.01f, true);
+        final boolean showSearchButton = alpha <= 0.01f && !animatorSearchVisible.getValue();
+        animatorSearchButtonVisible.setValue(showSearchButton, true);
+        checkUi_mglaHeaderIcons();
     }
 
     private void checkUi_searchFieldStyle() {
@@ -13749,6 +13808,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         checkUi_itemBackButtonVisibility();
         checkUi_itemOptionsVisibility();
         checkUi_itemDownloadsVisibility();
+        checkUi_mglaHeaderIcons();
         checkUi_itemSpeedVisibility();
         checkUi_itemPasscodeVisibility();
         checkUi_itemSearchVisibility();
@@ -13784,6 +13844,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     }
 
     private void checkUi_itemDownloadsVisibility() {
+        if (MglaHeaderConfig.isDownloadsInHeader()) {
+            FragmentFloatingButton.setAnimatedVisibility(downloadsItem, 0);
+            return;
+        }
         final float factor0 = downloadsItemVisible ? 1 : 0;
         final float factor1 = 1f - animatorSearchVisible.getFloatValue();
         final float factor2 = 1f - getRightSlidingProgress();
@@ -13803,7 +13867,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     private void checkUi_itemSearchVisibility() {
         final float factor0 = isSupportSearch() ? 1 : 0;
-        final float factor1 = animatorSearchButtonVisible.getFloatValue();
+        final float factor1 = animatorSearchButtonVisible.getFloatValue() * (1f - animatorSearchVisible.getFloatValue());
         final float factor2 = 1f - getRightSlidingProgress();
         final float factor3 = 1f - animatorDoneButtonVisible.getFloatValue();
         final float factor = factor0 * factor1 * factor2 * factor3;
