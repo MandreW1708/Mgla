@@ -471,4 +471,50 @@ public class MglaDeletedMessagesStorage {
         }
         return 0;
     }
+
+    public static int getMaxDeletedDate(SQLiteDatabase database, long dialogId, long topicId) {
+        if (database == null) {
+            return 0;
+        }
+        SQLiteCursor cursor = null;
+        try {
+            String query = topicId != 0
+                ? "SELECT MAX(deleted_date) FROM " + TABLE + " WHERE uid = " + dialogId + " AND topic_id = " + topicId
+                : "SELECT MAX(deleted_date) FROM " + TABLE + " WHERE uid = " + dialogId;
+            cursor = database.queryFinalized(query);
+            if (cursor.next()) {
+                return cursor.intValue(0);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        return 0;
+    }
+
+    public static int countDeletedSince(SQLiteDatabase database, long dialogId, long topicId, int sinceDeletedDate) {
+        if (database == null || sinceDeletedDate <= 0) {
+            return 0;
+        }
+        SQLiteCursor cursor = null;
+        try {
+            String query = topicId != 0
+                ? "SELECT COUNT(*) FROM " + TABLE + " WHERE uid = " + dialogId + " AND topic_id = " + topicId + " AND deleted_date > " + sinceDeletedDate
+                : "SELECT COUNT(*) FROM " + TABLE + " WHERE uid = " + dialogId + " AND deleted_date > " + sinceDeletedDate;
+            cursor = database.queryFinalized(query);
+            if (cursor.next()) {
+                return cursor.intValue(0);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        return 0;
+    }
 }

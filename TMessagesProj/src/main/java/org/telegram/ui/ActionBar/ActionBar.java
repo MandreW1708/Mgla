@@ -195,6 +195,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
 
     private boolean glassMode;
     private boolean previewGlassMode;
+    private boolean suppressTitleGlass;
     private ChatAvatarContainer chatAvatarContainer;
 
     public void setChatAvatarContainer(ChatAvatarContainer chatAvatarContainer) {
@@ -204,6 +205,13 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     public void setPreviewGlassMode(boolean previewGlassMode) {
         if (this.previewGlassMode != previewGlassMode) {
             this.previewGlassMode = previewGlassMode;
+            invalidate();
+        }
+    }
+
+    public void setSuppressTitleGlass(boolean suppressTitleGlass) {
+        if (this.suppressTitleGlass != suppressTitleGlass) {
+            this.suppressTitleGlass = suppressTitleGlass;
             invalidate();
         }
     }
@@ -2187,7 +2195,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         final int t = getHeight() - (getCurrentActionBarHeight() + s) / 2 - p;
         final int b = t + s + p * 2;
 
-        if (glassDrawable != null) {
+        if (glassDrawable != null && !suppressTitleGlass) {
             if (previewGlassMode && chatAvatarContainer != null) {
                 final int left = p;
                 final int right = getWidth() - p;

@@ -159,6 +159,7 @@ import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceBitmap;
 import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
 import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceRenderNode;
 import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceWrapped;
+import org.telegram.ui.Components.ChatActivityEnterView;
 import org.telegram.ui.Components.chat.ViewPositionWatcher;
 import org.telegram.ui.Components.chat.WallpaperBitmapProvider;
 import org.telegram.ui.Components.chat.layouts.ChatActivityChannelButtonsLayout;
@@ -1493,7 +1494,7 @@ public class ChannelAdminLogActivity extends BaseFragment implements Notificatio
         bottomOverlayChat2.setTranslationY(-AndroidUtilities.navigationBarHeight);
         bottomOverlayChat2.showButton(ChatActivityChannelButtonsLayout.BUTTON_RECENT_ACTIONS_INFO, true, false);
         bottomOverlayChat2.setupDrawableForContainer();
-        contentView.addView(bottomOverlayChat2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 56, Gravity.BOTTOM, 54, 0, 0, (44 - 56) / 2 + 9));
+        contentView.addView(bottomOverlayChat2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, ChatActivityEnterView.DEFAULT_HEIGHT, Gravity.BOTTOM, 54, 0, 0, 9));
 
         bottomOverlayChatText = new TextView(context);
         bottomOverlayChatText.setOnClickListener(view -> {
