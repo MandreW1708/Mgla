@@ -14556,6 +14556,44 @@ public class MessagesStorage extends BaseController {
         });
     }
 
+    public void processMglaDeletedEnterNotification(int account, long dialogId, long topicId, Utilities.Callback<Integer> callback) {
+        storageQueue.postRunnable(() -> {
+            int count = 0;
+            if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && database != null) {
+                int watermark = MglaSpyConfig.getDeletedNotifyWatermark(account, dialogId, topicId);
+                int maxDate = MglaDeletedMessagesStorage.getMaxDeletedDate(database, dialogId, topicId);
+                if (maxDate > 0) {
+                    if (watermark == 0) {
+                        MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
+                    } else if (maxDate > watermark) {
+                        count = MglaDeletedMessagesStorage.countDeletedSince(database, dialogId, topicId, watermark);
+                        if (count > 0) {
+                            MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
+                        }
+                    }
+                }
+            }
+            final int finalCount = count;
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(finalCount);
+                }
+            });
+        });
+    }
+
+    public void markMglaDeletedNotified(int account, long dialogId, long topicId) {
+        storageQueue.postRunnable(() -> {
+            if (database == null) {
+                return;
+            }
+            int maxDate = MglaDeletedMessagesStorage.getMaxDeletedDate(database, dialogId, topicId);
+            if (maxDate > 0) {
+                MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
+            }
+        });
+    }
+
     public ArrayList<Long> markMessagesAsDeleted(long dialogId, ArrayList<Integer> messages, boolean useQueue, boolean deleteFiles, int mode, int topicId) {
         if (messages.isEmpty()) {
             return null;

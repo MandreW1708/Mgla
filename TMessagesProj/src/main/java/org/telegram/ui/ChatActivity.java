@@ -437,6 +437,8 @@ public class ChatActivity extends BaseFragment implements
     private ActionBarMenu.LazyItem attachItem;
     private ActionBarMenuItem.Item savedChatsItem, savedChatsGap;;
     private ActionBarMenuItem headerItem;
+    private FrameLayout mglaDeletedHeaderView;
+    private Bulletin mglaDeletedNotifyBulletin;
     // Mgla: right avatar in the chat/channel header (replaces the "more" three-dots button)
 
     private ActionBarMenu.LazyItem editTextItem;
@@ -4196,7 +4198,7 @@ public class ChatActivity extends BaseFragment implements
         avatarContainer.setClipChildren(false);
         updateTopicTitleIcon();
         avatarContainer.setGlassMode();
-        if ((inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) || chatMode == MODE_MGLA_DELETED) {
+        if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
             avatarContainer.getAvatarImageView().setVisibility(View.GONE);
             avatarContainer.updateGlassLayout();
         }
@@ -4257,11 +4259,13 @@ public class ChatActivity extends BaseFragment implements
             });
             getConnectionsManager().bindRequestToGuid(req, classGuid);
         } else {
-            if ((inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) || chatMode == MODE_MGLA_DELETED) {
-                actionBar.setPreviewGlassMode(true);
-                actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, dp(6), 0, dp(6), 0));
-            } else {
-                actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, 53, 0, 52, 0));
+            if (chatMode != MODE_MGLA_DELETED) {
+                if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+                    actionBar.setPreviewGlassMode(true);
+                    actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, dp(6), 0, dp(6), 0));
+                } else {
+                    actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, 53, 0, 52, 0));
+                }
             }
             actionBar.createMenu().bringToFront();
         }
@@ -4613,12 +4617,18 @@ public class ChatActivity extends BaseFragment implements
         contentView.setOccupyStatusBar(!inBubbleMode && !isInsideContainer && !inPreviewMode);
 
         actionBar.setupGlass(glassBackgroundDrawableFactory, blurredBackgroundColorProvider);
-        actionBar.setChatAvatarContainer(avatarContainer);
-        avatarContainer.setActionBar(actionBar);
-        if (!isTopic && !UserObject.isBotForum(currentUser)) {
-            avatarContainer.setLeftPadding(0);
+        if (chatMode == MODE_MGLA_DELETED) {
+            actionBar.setSuppressTitleGlass(true);
+            actionBar.setChatAvatarContainer(null);
+            setupMglaDeletedHeader(context);
+        } else {
+            actionBar.setChatAvatarContainer(avatarContainer);
+            avatarContainer.setActionBar(actionBar);
+            if (!isTopic && !UserObject.isBotForum(currentUser)) {
+                avatarContainer.setLeftPadding(0);
+            }
+            actionBar.checkAvatarContainerWidth(false);
         }
-        actionBar.checkAvatarContainerWidth(false);
         updateBackButtonUnreadBadge();
 
         chatInputViewsContainer = new ChatInputViewsContainer(context);
@@ -8449,7 +8459,7 @@ public class ChatActivity extends BaseFragment implements
             updateInputBubbleOffsets();
         });
 
-        chatInputBubbleContainer.addView(bottomChannelButtonsLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 56, Gravity.BOTTOM, 0, 0, 0, (44 - 56) / 2));
+        chatInputBubbleContainer.addView(bottomChannelButtonsLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, ChatActivityEnterView.DEFAULT_HEIGHT, Gravity.BOTTOM));
 
         bottomOverlayStartButton = new TextView(context) {
             CellFlickerDrawable cellFlickerDrawable;
@@ -8468,7 +8478,7 @@ public class ChatActivity extends BaseFragment implements
                 invalidate();
             }
         };
-        bottomOverlayStartButton.setBackground(Theme.AdaptiveRipple.filledRect(getThemedColor(Theme.key_featuredStickers_addButton), 22));
+        bottomOverlayStartButton.setBackground(Theme.AdaptiveRipple.filledRect(getThemedColor(Theme.key_featuredStickers_addButton), ChatActivityEnterView.DEFAULT_HEIGHT / 2f));
         bottomOverlayStartButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
         bottomOverlayStartButton.setText(LocaleController.getString(R.string.BotStart2));
         bottomOverlayStartButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
@@ -8478,7 +8488,7 @@ public class ChatActivity extends BaseFragment implements
         bottomOverlayStartButton.setOnClickListener(v -> bottomOverlayChatText.callOnClick());
         bottomOverlayStartButton.setPadding(dp(31), 0, dp(31), 0);
         ScaleStateListAnimator.apply(bottomOverlayStartButton, 0.02f, 1.2f);
-        bottomChannelButtonsLayout.getContainer().addView(bottomOverlayStartButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 38, Gravity.CENTER, 3, 3, 3, 3));
+        bottomChannelButtonsLayout.getContainer().addView(bottomOverlayStartButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
         bottomChannelButtonsLayout.makeViewWrapContent(bottomOverlayStartButton);
 
         if (currentUser != null && currentUser.bot && currentUser.id != UserObject.VERIFY && !UserObject.isDeleted(currentUser) && !UserObject.isReplyUser(currentUser) && !isInScheduleMode() && chatMode != MODE_PINNED && chatMode != MODE_SAVED && !isReport()) {
@@ -19385,6 +19395,10 @@ public class ChatActivity extends BaseFragment implements
         if (avatarContainer == null) {
             return;
         }
+        if (chatMode == MODE_MGLA_DELETED) {
+            setParentActivityTitle("Удаленные");
+            return;
+        }
         if (chatMode == MODE_SUGGESTIONS && currentChat != null) {
             if (isSubscriberSuggestions) {
                 avatarContainer.setTitle(ForumUtilities.getMonoForumTitle(currentAccount, currentChat), currentChat.scam, currentChat.fake, currentChat.verified, false, null, animated);
@@ -19468,10 +19482,6 @@ public class ChatActivity extends BaseFragment implements
             }
         } else if (chatMode == MODE_PINNED) {
             avatarContainer.setTitle(LocaleController.formatPluralString("PinnedMessagesCount", getPinnedMessagesCount()));
-        } else if (chatMode == MODE_MGLA_DELETED) {
-            if (avatarContainer != null) {
-                avatarContainer.setTitle("Удаленные");
-            }
         } else if (currentChat != null) {
             avatarContainer.setTitle(AndroidUtilities.removeRTL(AndroidUtilities.removeDiacritics(currentChat.title)), currentChat.scam, currentChat.fake, currentChat.verified, false, currentChat.emoji_status, animated);
         } else if (currentUser != null) {
@@ -21912,7 +21922,51 @@ public class ChatActivity extends BaseFragment implements
                 chatAdapter.updateRowsInternal();
                 chatAdapter.notifyDataSetChanged(false);
             }
+            checkMglaDeletedEnterNotification();
         });
+    }
+
+    private static CharSequence formatMglaDeletedNotifyText(int count) {
+        int mod10 = count % 10;
+        int mod100 = count % 100;
+        String word;
+        if (mod10 == 1 && mod100 != 11) {
+            word = "сообщение";
+        } else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+            word = "сообщения";
+        } else {
+            word = "сообщений";
+        }
+        return "Было удалено " + count + " " + word;
+    }
+
+    private void checkMglaDeletedEnterNotification() {
+        if (!MglaSpyConfig.isSaveDeletedMessagesEnabled() || currentEncryptedChat != null || chatMode != MODE_DEFAULT || !isFullyVisible || isInPreviewMode() || isReport()) {
+            return;
+        }
+        if (mglaDeletedNotifyBulletin != null) {
+            return;
+        }
+        final long topicId = isTopic ? getTopicId() : 0;
+        getMessagesStorage().processMglaDeletedEnterNotification(currentAccount, dialog_id, topicId, count -> {
+            if (count <= 0 || !isFullyVisible || chatMode != MODE_DEFAULT) {
+                return;
+            }
+            if (mglaDeletedNotifyBulletin != null) {
+                return;
+            }
+            mglaDeletedNotifyBulletin = BulletinFactory.of(ChatActivity.this)
+                .createSimpleBulletin(R.raw.ic_delete, formatMglaDeletedNotifyText(count), "Открыть", () -> {
+                    openMglaDeletedMessages();
+                })
+                .setOnHideListener(() -> mglaDeletedNotifyBulletin = null);
+            mglaDeletedNotifyBulletin.show(true);
+        });
+    }
+
+    private void markMglaDeletedNotified() {
+        final long topicId = isTopic ? getTopicId() : 0;
+        getMessagesStorage().markMglaDeletedNotified(currentAccount, dialog_id, topicId);
     }
 
     private void loadMglaDeletedModeMessages() {
@@ -21963,7 +22017,62 @@ public class ChatActivity extends BaseFragment implements
         }
     }
 
+    private void setupMglaDeletedHeader(Context context) {
+        if (mglaDeletedHeaderView != null) {
+            return;
+        }
+        final int p = dp(6);
+        final int s = dp(46);
+        final int pillHeight = s + p * 2;
+
+        mglaDeletedHeaderView = new FrameLayout(context) {
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                final int maxWidth = View.MeasureSpec.getSize(widthMeasureSpec);
+                final int childWidthSpec = View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST);
+                final int childHeightSpec = View.MeasureSpec.makeMeasureSpec(pillHeight, View.MeasureSpec.EXACTLY);
+                for (int i = 0; i < getChildCount(); i++) {
+                    final View child = getChildAt(i);
+                    if (child.getVisibility() != GONE) {
+                        measureChild(child, childWidthSpec, childHeightSpec);
+                    }
+                }
+                int width = 0;
+                for (int i = 0; i < getChildCount(); i++) {
+                    final View child = getChildAt(i);
+                    if (child.getVisibility() != GONE) {
+                        width = Math.max(width, child.getMeasuredWidth());
+                    }
+                }
+                setMeasuredDimension(width, pillHeight);
+            }
+        };
+        mglaDeletedHeaderView.setClipChildren(false);
+
+        TextView title = new TextView(context);
+        title.setText("Удаленные");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        title.setTypeface(AndroidUtilities.bold());
+        title.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
+        title.setGravity(Gravity.CENTER);
+        title.setSingleLine(true);
+        title.setIncludeFontPadding(false);
+        title.setPadding(dp(16), 0, dp(16), 0);
+        mglaDeletedHeaderView.addView(title, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
+        BlurredBackgroundDrawable drawable = glassBackgroundDrawableFactory.create(mglaDeletedHeaderView, blurredBackgroundColorProvider);
+        drawable.setRadius(dp(23)).setPadding(dp(6));
+        mglaDeletedHeaderView.setBackground(drawable);
+
+        final int actionBarHeight = ActionBar.getCurrentActionBarHeight();
+        final int statusBarHeight = actionBar.getOccupyStatusBar() ? AndroidUtilities.statusBarHeight : 0;
+        final int topMarginPx = actionBarHeight + statusBarHeight - (actionBarHeight + s) / 2 - p;
+
+        actionBar.addView(mglaDeletedHeaderView, LayoutHelper.createFrameMarginPx(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, topMarginPx, 0, 0));
+    }
+
     private void openMglaDeletedMessages() {
+        markMglaDeletedNotified();
         Bundle bundle = new Bundle();
         if (currentChat != null) {
             bundle.putLong("chat_id", currentChat.id);
@@ -27299,6 +27408,7 @@ public class ChatActivity extends BaseFragment implements
                 .setOnHideListener(this::checkConversionDateTimeToast)
                 .show(true);
         }
+        AndroidUtilities.runOnUIThread(this::checkMglaDeletedEnterNotification, 400);
     }
 
     private boolean shownConversionDateTimeToast;
@@ -32706,6 +32816,16 @@ public class ChatActivity extends BaseFragment implements
             businessLinksEmptyView = new BusinessLinksEmptyView(getContext(), this, businessLink, getResourceProvider());
             businessLinksEmptyView.setBackground(Theme.createServiceDrawable(AndroidUtilities.dp(16), businessLinksEmptyView, contentView, getThemedPaint(Theme.key_paint_chatActionBackground)));
             emptyViewContainer.addView(businessLinksEmptyView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+        } else if (chatMode == MODE_MGLA_DELETED) {
+            emptyView = new TextView(getContext());
+            emptyView.setText("Нет удалённых сообщений");
+            emptyView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            emptyView.setGravity(Gravity.CENTER);
+            emptyView.setTextColor(getThemedColor(Theme.key_chat_serviceText));
+            emptyView.setBackground(Theme.createServiceDrawable(AndroidUtilities.dp(30), emptyView, contentView, getThemedPaint(Theme.key_paint_chatActionBackground)));
+            emptyView.setTypeface(AndroidUtilities.bold());
+            emptyView.setPadding(AndroidUtilities.dp(9), AndroidUtilities.dp(2), AndroidUtilities.dp(9), AndroidUtilities.dp(3));
+            emptyViewContainer.addView(emptyView, new FrameLayout.LayoutParams(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
         } else if (preloadedGreetingsSticker != null && currentUser != null && !userBlocked || userInfo != null && getDialogId() != getUserConfig().getClientUserId() && (userInfo.contact_require_premium && !getUserConfig().isPremium() || userInfo.send_paid_messages_stars > StarsController.getInstance(currentAccount).getBalance().amount)) {
             greetingsViewContainer = new ChatGreetingsView(getContext(), currentUser, currentAccount, preloadedGreetingsSticker, themeDelegate) {
                 @Override
@@ -32884,6 +33004,9 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void updateGreetInfo() {
+        if (chatMode == MODE_MGLA_DELETED) {
+            return;
+        }
         showGreetInfo(
             getDialogId() != getUserConfig().getClientUserId() &&
             userInfo != null && userInfo.business_intro != null &&

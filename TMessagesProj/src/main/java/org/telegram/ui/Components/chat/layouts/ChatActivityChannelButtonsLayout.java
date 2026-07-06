@@ -21,6 +21,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.utils.ViewOutlineProviderImpl;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.CubicBezierInterpolator;
+import org.telegram.ui.Components.ChatActivityEnterView;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ScaleStateListAnimator;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
@@ -41,6 +42,9 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
     public static final int BUTTON_GIGA_GROUP_INFO = 3;
     public static final int BUTTON_RECENT_ACTIONS_INFO = 4;
     private static final int BUTTONS_COUNT = 5;
+    private static final int BAR_BUTTON_HEIGHT = ChatActivityEnterView.DEFAULT_HEIGHT;
+    private static final int BAR_BUTTON_RADIUS = BAR_BUTTON_HEIGHT / 2;
+    private static final int SIDE_BUTTON_SPACING = 4;
 
     private final ButtonHolder[] buttonHolders = new ButtonHolder[BUTTONS_COUNT];
     private final OnClickListener[] onClickListeners = new OnClickListener[BUTTONS_COUNT];
@@ -82,8 +86,8 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
 
         container = new FrameLayout(context);
         container.setClipToOutline(true);
-        container.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(22)));
-        addView(container, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 44, Gravity.CENTER_VERTICAL));
+        container.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(BAR_BUTTON_RADIUS)));
+        addView(container, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, BAR_BUTTON_HEIGHT, Gravity.CENTER_VERTICAL));
     }
 
     public void updateColors() {
@@ -124,6 +128,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
                 buttonIcons[buttonId],
                 48
             );
+            button.updateVisualSize(BAR_BUTTON_HEIGHT, false);
 
             if (buttonId == BUTTON_GIFT) {
                 button.setContentDescription(getString(R.string.ProfileActionsGift));
@@ -142,7 +147,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
                     onClickListeners[buttonId].onClick(v);
                 }
             });
-            addView(button, LayoutHelper.createFrame(56, 56));
+            addView(button, LayoutHelper.createFrame(BAR_BUTTON_HEIGHT, BAR_BUTTON_HEIGHT, Gravity.CENTER_VERTICAL));
 
             buttonHolders[buttonId] = new ButtonHolder(button, visibilityAnimator);
             checkButtonsPositionsAndVisibility();
@@ -155,7 +160,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
     public void setupDrawableForContainer() {
         containerDrawable = blurredBackgroundDrawableViewFactory.create(this)
             .setColorProvider(colorProvider)
-            .setRadius(dp(22))
+            .setRadius(dp(BAR_BUTTON_RADIUS))
             .setPadding(dp(6));
     }
 
@@ -269,7 +274,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
             if (holder == null) {
                 continue;
             }
-            paddingLeft += holder.visibilityAnimator.getValue() ? dp(44 + 10) : 0;
+            paddingLeft += holder.visibilityAnimator.getValue() ? dp(BAR_BUTTON_HEIGHT + SIDE_BUTTON_SPACING) : 0;
         }
 
         for (final int buttonId : buttonsOrderRight) {
@@ -277,7 +282,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
             if (holder == null) {
                 continue;
             }
-            paddingRight += holder.visibilityAnimator.getValue() ? dp(44 + 10) : 0;
+            paddingRight += holder.visibilityAnimator.getValue() ? dp(BAR_BUTTON_HEIGHT + SIDE_BUTTON_SPACING) : 0;
         }
 
         final MarginLayoutParams lp = (MarginLayoutParams) container.getLayoutParams();
@@ -313,7 +318,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
                 continue;
             }
 
-            final float width = holder.visibilityAnimator.getFloatValue() * dp(44 + 10);    // width + margin
+            final float width = holder.visibilityAnimator.getFloatValue() * dp(BAR_BUTTON_HEIGHT + SIDE_BUTTON_SPACING);    // width + margin
             holder.button.setTranslationX(dp(1) + totalWidthLeft);
             totalWidthLeft += width;
         }
@@ -324,7 +329,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
                 continue;
             }
 
-            final float width = holder.visibilityAnimator.getFloatValue() * dp(44 + 10);    // width + margin
+            final float width = holder.visibilityAnimator.getFloatValue() * dp(BAR_BUTTON_HEIGHT + SIDE_BUTTON_SPACING);    // width + margin
             holder.button.setTranslationX(getMeasuredWidth() - holder.button.getMeasuredWidth() - dp(1) - totalWidthRight);
             totalWidthRight += width;
         }
@@ -433,13 +438,13 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
         if (accentAlpha > 0) {
             tmpRect.set(
                 totalWidthLeft + dp(10),
-                dp(9),
+                0,
                 getMeasuredWidth() - dp(10) - totalWidthRight,
-                getMeasuredHeight() - dp(9)
+                getMeasuredHeight()
             );
             backgroundAccentPaint.setColor(accentColor);
             backgroundAccentPaint.setAlpha(accentAlpha);
-            canvas.drawRoundRect(tmpRect, dp(19), dp(19), backgroundAccentPaint);
+            canvas.drawRoundRect(tmpRect, dp(BAR_BUTTON_RADIUS), dp(BAR_BUTTON_RADIUS), backgroundAccentPaint);
         }
 
         super.dispatchDraw(canvas);
