@@ -19014,6 +19014,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
 
                 ImageLoader.saveMessageThumbs(message);
+                getMessagesStorage().saveMglaIncomingEditHistory(message);
                 AndroidUtilities.runOnUIThread(()-> getSendMessagesHelper().onMessageEdited(message));
 
                 boolean isDialogCreated = createdDialogIds.contains(message.dialog_id);

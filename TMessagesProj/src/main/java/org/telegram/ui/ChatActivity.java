@@ -74,6 +74,7 @@ import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.style.CharacterStyle;
+import android.text.style.BackgroundColorSpan;
 import android.text.style.ClickableSpan;
 import android.text.style.StyleSpan;
 import android.text.style.TypefaceSpan;
@@ -106,6 +107,7 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Space;
 import android.widget.TextView;
 
@@ -174,6 +176,7 @@ import org.telegram.messenger.MessageSuggestionParams;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.MglaEditHistoryStorage;
 import org.telegram.messenger.MglaDeletedMessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
@@ -1261,6 +1264,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_SUGGESTION_ADD_OFFER = 114;
 
     public final static int OPTION_VIEW_STATISTICS = 115;
+    public final static int OPTION_EDIT_HISTORY = 116;
 
     private final static int[] allowedNotificationsDuringChatListAnimations = new int[]{
             NotificationCenter.messagesRead,
@@ -21771,8 +21775,8 @@ public class ChatActivity extends BaseFragment implements
                     }
                 }
             }
-            if (did == dialog_id && loadIndex == 0 && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-                loadAndMergeMglaDeletedMessages();
+            if (did == dialog_id && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
+                scheduleMglaMerge();
             }
         }
     }
@@ -30118,7 +30122,7 @@ public class ChatActivity extends BaseFragment implements
             chatAttachAlert.onResume();
         }
         if (!firstLoading && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-            loadAndMergeMglaDeletedMessages();
+            scheduleMglaMerge();
         }
         if (contentView != null) {
             contentView.onResume();
@@ -33730,6 +33734,10 @@ public class ChatActivity extends BaseFragment implements
         }
         boolean preserveDim = false;
         switch (option) {
+            case OPTION_EDIT_HISTORY: {
+                showMglaEditHistorySheet(selectedObject);
+                break;
+            }
             case OPTION_RETRY: {
                 final MessageObject object = selectedObject;
                 final MessageObject.GroupedMessages group = selectedObjectGroup;
@@ -34779,6 +34787,164 @@ public class ChatActivity extends BaseFragment implements
         } else {
             onLoad.run();
         }
+    }
+
+    private void showMglaEditHistorySheet(MessageObject messageObject) {
+        if (messageObject == null || messageObject.messageOwner == null || getParentActivity() == null) {
+            return;
+        }
+        getMessagesStorage().loadMglaEditHistory(messageObject.getDialogId(), messageObject.getId(), history -> {
+            if (getParentActivity() == null) {
+                return;
+            }
+
+            Context context = getParentActivity();
+            ScrollView scrollView = new ScrollView(context);
+            scrollView.setFillViewport(true);
+
+            LinearLayout container = new LinearLayout(context);
+            container.setOrientation(LinearLayout.VERTICAL);
+            container.setPadding(dp(16), dp(8), dp(16), dp(24));
+            scrollView.addView(container, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT));
+
+            TextView infoView = new TextView(context);
+            infoView.setText("Здесь сохранены прошлые версии входящего сообщения. Подсветка показывает, что менялось по сравнению с более новой версией.");
+            infoView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            infoView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
+            infoView.setPadding(0, 0, 0, dp(12));
+            container.addView(infoView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            CharSequence currentText = getMglaEditHistoryDisplayText(messageObject.messageOwner);
+            addMglaEditHistoryVersionView(container, "Текущая версия", "Актуальный текст сообщения", messageObject.messageOwner.edit_date != 0 ? messageObject.messageOwner.edit_date : messageObject.messageOwner.date, currentText, null, true);
+
+            if (history != null && !history.isEmpty()) {
+                CharSequence newerText = currentText;
+                for (int i = 0; i < history.size(); i++) {
+                    MglaEditHistoryStorage.Entry entry = history.get(i);
+                    CharSequence versionText = entry.message != null ? getMglaEditHistoryDisplayText(entry.message) : null;
+                    String title = i == 0 ? "Предыдущая версия" : "Версия " + (i + 1);
+                    String subtitle = "Изменена затем " + LocaleController.formatDateTime(entry.replacedByEditDate, true);
+                    addMglaEditHistoryVersionView(
+                        container,
+                        title,
+                        subtitle,
+                        entry.message != null ? (entry.message.edit_date != 0 ? entry.message.edit_date : entry.message.date) : entry.replacedByEditDate,
+                        versionText,
+                        newerText,
+                        false
+                    );
+                    newerText = versionText;
+                }
+            } else {
+                TextView emptyView = new TextView(context);
+                emptyView.setText("Сохранённая история изменений пока пуста");
+                emptyView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+                emptyView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
+                emptyView.setPadding(0, dp(8), 0, 0);
+                container.addView(emptyView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            }
+
+            BottomSheet.Builder builder = new BottomSheet.Builder(context, false, themeDelegate);
+            builder.setTitle("История изменений");
+            builder.setCustomView(scrollView);
+            showDialog(builder.create());
+        });
+    }
+
+    private CharSequence getMglaEditHistoryDisplayText(TLRPC.Message message) {
+        if (message == null) {
+            return null;
+        }
+        if (!TextUtils.isEmpty(message.message)) {
+            return message.message;
+        }
+        return "Без текста";
+    }
+
+    private void addMglaEditHistoryVersionView(LinearLayout container, CharSequence title, CharSequence subtitle, int date, CharSequence text, CharSequence newerText, boolean current) {
+        if (container == null || getParentActivity() == null) {
+            return;
+        }
+
+        Context context = getParentActivity();
+        LinearLayout itemLayout = new LinearLayout(context);
+        itemLayout.setOrientation(LinearLayout.VERTICAL);
+        itemLayout.setPadding(dp(14), dp(12), dp(14), dp(12));
+        itemLayout.setBackground(Theme.createRoundRectDrawable(dp(16), getThemedColor(Theme.key_dialogBackgroundGray)));
+
+        TextView titleView = new TextView(context);
+        titleView.setText(title);
+        titleView.setTypeface(AndroidUtilities.bold());
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        titleView.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
+        itemLayout.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        if (!TextUtils.isEmpty(subtitle)) {
+            TextView subtitleView = new TextView(context);
+            subtitleView.setText(subtitle);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            subtitleView.setTextColor(getThemedColor(current ? Theme.key_windowBackgroundWhiteBlueText4 : Theme.key_windowBackgroundWhiteGrayText2));
+            subtitleView.setPadding(0, dp(3), 0, 0);
+            itemLayout.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        }
+
+        TextView dateView = new TextView(context);
+        dateView.setText("Версия от " + LocaleController.formatDateTime((long) date, true));
+        dateView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        dateView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
+        dateView.setPadding(0, dp(4), 0, 0);
+        itemLayout.addView(dateView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView textView = new TextView(context);
+        textView.setText(createMglaEditHistoryDiffText(text, newerText));
+        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        textView.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
+        textView.setPadding(0, dp(10), 0, 0);
+        itemLayout.addView(textView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        LinearLayout.LayoutParams layoutParams = LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT);
+        layoutParams.bottomMargin = dp(10);
+        container.addView(itemLayout, layoutParams);
+    }
+
+    private CharSequence createMglaEditHistoryDiffText(CharSequence text, CharSequence newerText) {
+        CharSequence safeText = !TextUtils.isEmpty(text) ? text : "Без текста";
+        if (TextUtils.isEmpty(newerText) || TextUtils.equals(safeText, newerText)) {
+            return safeText;
+        }
+
+        String oldText = safeText.toString();
+        String newText = newerText.toString();
+        int prefix = 0;
+        int oldLength = oldText.length();
+        int newLength = newText.length();
+        while (prefix < oldLength && prefix < newLength && oldText.charAt(prefix) == newText.charAt(prefix)) {
+            prefix++;
+        }
+
+        int oldSuffix = oldLength - 1;
+        int newSuffix = newLength - 1;
+        while (oldSuffix >= prefix && newSuffix >= prefix && oldText.charAt(oldSuffix) == newText.charAt(newSuffix)) {
+            oldSuffix--;
+            newSuffix--;
+        }
+
+        SpannableStringBuilder builder = new SpannableStringBuilder(oldText);
+        if (prefix <= oldSuffix) {
+            builder.setSpan(
+                new BackgroundColorSpan(Theme.multAlpha(getThemedColor(Theme.key_windowBackgroundWhiteBlueText4), 0.18f)),
+                prefix,
+                oldSuffix + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            );
+            builder.setSpan(
+                new ForegroundColorSpan(getThemedColor(Theme.key_chat_messageLinkIn)),
+                prefix,
+                oldSuffix + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            );
+        }
+        return builder;
     }
 
     private void hideAds() {
@@ -46067,6 +46233,11 @@ public class ChatActivity extends BaseFragment implements
                     options.add(OPTION_TRANSLATE);
                     icons.add(R.drawable.msg_translate);
                 }
+                if (selectedObject != null && selectedObject.getId() > 0 && !selectedObject.isOutOwner() && selectedObject.isEdited()) {
+                    items.add("История изменений");
+                    options.add(OPTION_EDIT_HISTORY);
+                    icons.add(R.drawable.msg_recent);
+                }
                 if (selectedObject != null && selectedObject.contentType == 0 && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice()
                     && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
                     items.add("Краткая Сводка");
@@ -46161,6 +46332,11 @@ public class ChatActivity extends BaseFragment implements
                     items.add(LocaleController.getString(R.string.Copy));
                     options.add(OPTION_COPY);
                     icons.add(R.drawable.msg_copy);
+                }
+                if (selectedObject != null && selectedObject.getId() > 0 && !selectedObject.isOutOwner() && selectedObject.isEdited()) {
+                    items.add("История изменений");
+                    options.add(OPTION_EDIT_HISTORY);
+                    icons.add(R.drawable.msg_recent);
                 }
                 if (selectedObject.contentType == 0 && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice()
                     && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
