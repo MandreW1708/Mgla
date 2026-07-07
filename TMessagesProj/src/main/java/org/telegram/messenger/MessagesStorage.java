@@ -14538,7 +14538,7 @@ public class MessagesStorage extends BaseController {
 
     public void loadMglaDeletedMessages(long dialogId, long topicId, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
         storageQueue.postRunnable(() -> {
-            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.loadDeletedMessages(database, dialogId, topicId, 500);
+            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.loadDeletedMessages(database, currentAccount, dialogId, topicId, 500);
             AndroidUtilities.runOnUIThread(() -> {
                 if (callback != null) {
                     callback.run(messages);
@@ -14549,7 +14549,7 @@ public class MessagesStorage extends BaseController {
 
     public void loadMglaDeletedMessageById(long dialogId, int messageId, Utilities.Callback<TLRPC.Message> callback) {
         storageQueue.postRunnable(() -> {
-            TLRPC.Message message = MglaDeletedMessagesStorage.loadDeletedMessageById(database, dialogId, messageId);
+            TLRPC.Message message = MglaDeletedMessagesStorage.loadDeletedMessageById(database, currentAccount, dialogId, messageId);
             AndroidUtilities.runOnUIThread(() -> {
                 if (callback != null) {
                     callback.run(message);
