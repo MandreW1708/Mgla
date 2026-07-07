@@ -382,6 +382,7 @@ public class MessagesStorage extends BaseController {
             }
             databaseCreated = true;
             MglaDeletedMessagesStorage.ensureTable(database);
+            MglaEditHistoryStorage.ensureTable(database);
         } catch (Exception e) {
             FileLog.e(e);
             if (openTries < 3 && e.getMessage() != null && e.getMessage().contains("malformed")) {
@@ -759,6 +760,7 @@ public class MessagesStorage extends BaseController {
         database.executeFast("CREATE INDEX IF NOT EXISTS poll_votes_mentions_topics_did ON poll_votes_mentions_topics(dialog_id, topic_id);").stepThis().dispose();
 
         MglaDeletedMessagesStorage.ensureTable(database);
+        MglaEditHistoryStorage.ensureTable(database);
 
         database.executeFast("PRAGMA user_version = " + MessagesStorage.LAST_DB_VERSION).stepThis().dispose();
 
@@ -14591,6 +14593,21 @@ public class MessagesStorage extends BaseController {
             if (maxDate > 0) {
                 MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
             }
+        });
+    }
+
+    public void saveMglaIncomingEditHistory(TLRPC.Message message) {
+        storageQueue.postRunnable(() -> MglaEditHistoryStorage.savePreviousVersionIfIncomingEdit(database, currentAccount, message));
+    }
+
+    public void loadMglaEditHistory(long dialogId, int messageId, Utilities.Callback<ArrayList<MglaEditHistoryStorage.Entry>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<MglaEditHistoryStorage.Entry> history = MglaEditHistoryStorage.loadEditHistory(database, currentAccount, dialogId, messageId, 50);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(history);
+                }
+            });
         });
     }
 
