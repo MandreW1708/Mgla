@@ -11818,7 +11818,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
             }
         }
-        if (needProcess && mode == ChatActivity.MODE_DEFAULT && loadIndex == 0 && MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId) && !objects.isEmpty()) {
+        if (needProcess && mode == ChatActivity.MODE_DEFAULT && MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId) && !objects.isEmpty()) {
             MglaDeletedMessagesStorage.mergeIntoLoadedMessages(currentAccount, getMessagesStorage().getDatabase(), dialogId, threadMessageId, objects, usersDict, chatsDict);
         }
         getFileLoader().checkMediaExistance(objects);

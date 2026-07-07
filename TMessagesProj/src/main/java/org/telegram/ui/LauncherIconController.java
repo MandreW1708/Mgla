@@ -42,7 +42,10 @@ public class LauncherIconController {
         AQUA("AquaIcon", R.drawable.icon_4_background_sa, R.mipmap.icon_foreground_sa, R.string.AppIconAqua),
         PREMIUM("PremiumIcon", R.drawable.icon_3_background_sa, R.mipmap.icon_3_foreground_sa, R.string.AppIconPremium, true),
         TURBO("TurboIcon", R.drawable.icon_5_background_sa, R.mipmap.icon_5_foreground_sa, R.string.AppIconTurbo, true),
-        NOX("NoxIcon", R.mipmap.icon_2_background_sa, R.mipmap.icon_foreground_sa, R.string.AppIconNox, true);
+        NOX("NoxIcon", R.mipmap.icon_2_background_sa, R.mipmap.icon_foreground_sa, R.string.AppIconNox, true),
+        GREEN("GreenIcon", R.drawable.green_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGreen),
+        PERLAMUTR("PerlamutrIcon", R.drawable.perlamutr_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconPerlamutr),
+        UFC("UfcIcon", R.drawable.ufc_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconUfc);
 
         public final String key;
         public final int background;

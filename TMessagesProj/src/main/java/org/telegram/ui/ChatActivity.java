@@ -21844,6 +21844,72 @@ public class ChatActivity extends BaseFragment implements
         getMessagesController().getTranslateController().checkTranslation(obj, false);
     }
 
+    private boolean applyMglaDeletedSnapshotToLoadedMessage(int loadIndex, TLRPC.Message tlMsg) {
+        if (tlMsg == null) {
+            return false;
+        }
+        MessageObject existing = messagesDict[loadIndex].get(tlMsg.id);
+        if (existing == null) {
+            MessageObject obj = new MessageObject(currentAccount, tlMsg, false, false);
+            obj.mglaSavedDeleted = true;
+            obj.deleted = false;
+            obj.deletedByThanos = false;
+            insertMglaDeletedMessage(obj);
+            return true;
+        }
+
+        boolean hasStoredAttachPath = !TextUtils.isEmpty(tlMsg.attachPath);
+        boolean needsUpdate = !existing.mglaSavedDeleted || existing.deleted;
+        if (hasStoredAttachPath && !TextUtils.equals(existing.messageOwner.attachPath, tlMsg.attachPath)) {
+            needsUpdate = true;
+        }
+
+        if (!messages.contains(existing)) {
+            existing.mglaSavedDeleted = true;
+            existing.deleted = false;
+            existing.deletedByThanos = false;
+            if (hasStoredAttachPath) {
+                existing.messageOwner.attachPath = tlMsg.attachPath;
+                existing.attachPathExists = new File(tlMsg.attachPath).exists();
+            }
+            existing.checkMediaExistance(false);
+            insertMglaDeletedMessage(existing);
+            return true;
+        }
+
+        if (!needsUpdate) {
+            return false;
+        }
+
+        if (hasStoredAttachPath) {
+            existing.messageOwner.attachPath = tlMsg.attachPath;
+            existing.attachPathExists = new File(tlMsg.attachPath).exists();
+            existing.mediaExists = existing.attachPathExists;
+        }
+
+        MessageObject replacement = new MessageObject(currentAccount, tlMsg, false, false);
+        replacement.mglaSavedDeleted = true;
+        replacement.deleted = false;
+        replacement.deletedByThanos = false;
+
+        ArrayList<MessageObject> replacementList = new ArrayList<>(1);
+        replacementList.add(replacement);
+        replaceMessageObjects(replacementList, loadIndex, false, false);
+
+        MessageObject updated = messagesDict[loadIndex].get(tlMsg.id);
+        if (updated != null) {
+            updated.mglaSavedDeleted = true;
+            updated.deleted = false;
+            updated.deletedByThanos = false;
+            if (hasStoredAttachPath) {
+                updated.messageOwner.attachPath = tlMsg.attachPath;
+                updated.attachPathExists = new File(tlMsg.attachPath).exists();
+            }
+            updated.checkMediaExistance(false);
+        }
+        return true;
+    }
+
     private Runnable mglaMergeRunnable;
 
     private void scheduleMglaMerge() {
@@ -21851,7 +21917,7 @@ public class ChatActivity extends BaseFragment implements
             AndroidUtilities.cancelRunOnUIThread(mglaMergeRunnable);
         }
         mglaMergeRunnable = this::loadAndMergeMglaDeletedMessages;
-        AndroidUtilities.runOnUIThread(mglaMergeRunnable, 350);
+        AndroidUtilities.runOnUIThread(mglaMergeRunnable);
     }
 
     private int[] getLoadedMessageIdRange() {
@@ -21902,25 +21968,14 @@ public class ChatActivity extends BaseFragment implements
                     }
                 }
                 if (messagesDict[0].indexOfKey(tlMsg.id) >= 0) {
-                    MessageObject existing = messagesDict[0].get(tlMsg.id);
-                    if (existing != null) {
-                        boolean needsUpdate = !existing.mglaSavedDeleted || existing.deleted;
-                        existing.mglaSavedDeleted = true;
-                        existing.deleted = false;
-                        existing.deletedByThanos = false;
-                        if (!messages.contains(existing)) {
-                            insertMglaDeletedMessage(existing);
-                            merged++;
-                        } else if (needsUpdate) {
-                            merged++;
-                        }
+                    if (applyMglaDeletedSnapshotToLoadedMessage(0, tlMsg)) {
+                        merged++;
                     }
                     continue;
                 }
-                MessageObject obj = new MessageObject(currentAccount, tlMsg, false, false);
-                obj.mglaSavedDeleted = true;
-                insertMglaDeletedMessage(obj);
-                merged++;
+                if (applyMglaDeletedSnapshotToLoadedMessage(0, tlMsg)) {
+                    merged++;
+                }
             }
             if (merged > 0 && chatAdapter != null && !chatAdapter.isFrozen) {
                 chatAdapter.updateRowsInternal();
@@ -26814,13 +26869,10 @@ public class ChatActivity extends BaseFragment implements
                 final int deletedMid = mid;
                 final int loadIndexFinal = loadIndex;
                 getMessagesStorage().loadMglaDeletedMessageById(dialog_id, deletedMid, tlMsg -> {
-                    if (tlMsg == null || messagesDict[loadIndexFinal].indexOfKey(deletedMid) >= 0) {
+                    if (tlMsg == null) {
                         return;
                     }
-                    MessageObject newObj = new MessageObject(currentAccount, tlMsg, false, false);
-                    newObj.mglaSavedDeleted = true;
-                    insertMglaDeletedMessage(newObj);
-                    if (chatAdapter != null && !chatAdapter.isFrozen) {
+                    if (applyMglaDeletedSnapshotToLoadedMessage(loadIndexFinal, tlMsg) && chatAdapter != null && !chatAdapter.isFrozen) {
                         chatAdapter.updateRowsInternal();
                         chatAdapter.notifyDataSetChanged(false);
                     }

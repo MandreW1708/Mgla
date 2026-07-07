@@ -12,6 +12,7 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLRPC;
 
+import java.io.File;
 import java.util.ArrayList;
 
 public class MglaDeletedMessagesStorage {
@@ -53,6 +54,7 @@ public class MglaDeletedMessagesStorage {
         NativeByteBuffer data = null;
         SQLitePreparedStatement state = null;
         try {
+            preserveLocalMediaCopyIfPresent(currentAccount, message);
             data = new NativeByteBuffer(message.getObjectSize());
             message.serializeToStream(data);
 
@@ -143,6 +145,7 @@ public class MglaDeletedMessagesStorage {
                 long topicId = MessageObject.getTopicId(currentAccount, message, true);
                 NativeByteBuffer data = null;
                 try {
+                    preserveLocalMediaCopyIfPresent(currentAccount, message);
                     data = new NativeByteBuffer(message.getObjectSize());
                     message.serializeToStream(data);
                     state.requery();
@@ -180,7 +183,7 @@ public class MglaDeletedMessagesStorage {
         }
     }
 
-    public static TLRPC.Message loadDeletedMessageById(SQLiteDatabase database, long dialogId, int messageId) {
+    public static TLRPC.Message loadDeletedMessageById(SQLiteDatabase database, int currentAccount, long dialogId, int messageId) {
         if (database == null || messageId <= 0) {
             return null;
         }
@@ -196,6 +199,7 @@ public class MglaDeletedMessagesStorage {
                     TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                     message.readAttachPath(data, currentUserId);
                     data.reuse();
+                    restoreLocalMediaPath(currentAccount, message);
                     return message;
                 }
             }
@@ -242,7 +246,7 @@ public class MglaDeletedMessagesStorage {
         }
 
         // Use range-filtered SQL query instead of loading all and filtering in memory
-        ArrayList<TLRPC.Message> deleted = loadDeletedMessagesInRange(database, dialogId, topicId, minId, maxId, 500);
+        ArrayList<TLRPC.Message> deleted = loadDeletedMessagesInRange(database, currentAccount, dialogId, topicId, minId, maxId, 500);
         if (deleted.isEmpty()) {
             return;
         }
@@ -278,6 +282,11 @@ public class MglaDeletedMessagesStorage {
                         existing.mglaSavedDeleted = true;
                         existing.deleted = false;
                         existing.deletedByThanos = false;
+                        if (tlMsg.attachPath != null && tlMsg.attachPath.length() > 0) {
+                            existing.messageOwner.attachPath = tlMsg.attachPath;
+                            existing.attachPathExists = new File(tlMsg.attachPath).exists();
+                        }
+                        existing.checkMediaExistance(false);
                         break;
                     }
                 }
@@ -354,7 +363,7 @@ public class MglaDeletedMessagesStorage {
         return findInsertIndexBinary(objects, toInsert, ascending, size);
     }
 
-    public static ArrayList<TLRPC.Message> loadDeletedMessages(SQLiteDatabase database, long dialogId, long topicId, int limit) {
+    public static ArrayList<TLRPC.Message> loadDeletedMessages(SQLiteDatabase database, int currentAccount, long dialogId, long topicId, int limit) {
         ArrayList<TLRPC.Message> result = new ArrayList<>();
         if (database == null || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
             return result;
@@ -376,6 +385,7 @@ public class MglaDeletedMessagesStorage {
                 message.readAttachPath(data, currentUserId);
                 data.reuse();
                 if (message != null) {
+                    restoreLocalMediaPath(currentAccount, message);
                     result.add(message);
                 }
             }
@@ -389,7 +399,7 @@ public class MglaDeletedMessagesStorage {
         return result;
     }
 
-    public static ArrayList<TLRPC.Message> loadDeletedMessagesInRange(SQLiteDatabase database, long dialogId, long topicId, int minId, int maxId, int limit) {
+    public static ArrayList<TLRPC.Message> loadDeletedMessagesInRange(SQLiteDatabase database, int currentAccount, long dialogId, long topicId, int minId, int maxId, int limit) {
         ArrayList<TLRPC.Message> result = new ArrayList<>();
         if (database == null || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
             return result;
@@ -416,6 +426,7 @@ public class MglaDeletedMessagesStorage {
                 message.readAttachPath(data, currentUserId);
                 data.reuse();
                 if (message != null) {
+                    restoreLocalMediaPath(currentAccount, message);
                     result.add(message);
                 }
             }
@@ -427,6 +438,86 @@ public class MglaDeletedMessagesStorage {
             }
         }
         return result;
+    }
+
+    private static void preserveLocalMediaCopyIfPresent(int currentAccount, TLRPC.Message message) {
+        if (message == null) {
+            return;
+        }
+        File sourceFile = null;
+        if (message.attachPath != null && message.attachPath.length() != 0) {
+            File attachFile = new File(message.attachPath);
+            if (attachFile.exists() && attachFile.isFile()) {
+                sourceFile = attachFile;
+            }
+        }
+        if (sourceFile == null) {
+            File pathToMessage = FileLoader.getInstance(currentAccount).getPathToMessage(message, false, true);
+            if (pathToMessage != null && pathToMessage.exists() && pathToMessage.isFile()) {
+                sourceFile = pathToMessage;
+            }
+        }
+        if (sourceFile == null) {
+            return;
+        }
+
+        File destination = new File(getDeletedMediaDir(currentAccount), buildDeletedMediaFileName(message, sourceFile));
+        if (!destination.exists()) {
+            try {
+                AndroidUtilities.copyFile(sourceFile, destination);
+            } catch (Exception e) {
+                FileLog.e(e);
+                return;
+            }
+        }
+        message.attachPath = destination.getAbsolutePath();
+        restoreLocalMediaPath(currentAccount, message);
+    }
+
+    private static void restoreLocalMediaPath(int currentAccount, TLRPC.Message message) {
+        if (message == null || message.attachPath == null || message.attachPath.length() == 0) {
+            return;
+        }
+        File file = new File(message.attachPath);
+        if (!file.exists()) {
+            return;
+        }
+        TLRPC.MessageMedia media = MessageObject.getMedia(message);
+        if (media instanceof TLRPC.TL_messageMediaDocument && media.document != null) {
+            FileLoader.getInstance(currentAccount).setLocalPathTo(media.document, file.getAbsolutePath());
+        } else if (media instanceof TLRPC.TL_messageMediaPhoto && media.photo != null && !media.photo.sizes.isEmpty()) {
+            TLRPC.PhotoSize size = FileLoader.getClosestPhotoSizeWithSize(media.photo.sizes, AndroidUtilities.getPhotoSize(true), false, null, true);
+            if (size != null) {
+                FileLoader.getInstance(currentAccount).setLocalPathTo(size, file.getAbsolutePath());
+            }
+        }
+    }
+
+    private static File getDeletedMediaDir(int currentAccount) {
+        File baseDir = new File(ApplicationLoader.applicationContext.getFilesDir(), "mgla_deleted_media");
+        File accountDir = new File(baseDir, "account_" + currentAccount);
+        if (!accountDir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            accountDir.mkdirs();
+        }
+        return accountDir;
+    }
+
+    private static String buildDeletedMediaFileName(TLRPC.Message message, File sourceFile) {
+        String originalName = null;
+        TLRPC.MessageMedia media = MessageObject.getMedia(message);
+        if (media instanceof TLRPC.TL_messageMediaDocument && media.document != null) {
+            originalName = FileLoader.getAttachFileName(media.document);
+        } else if (media instanceof TLRPC.TL_messageMediaPhoto && media.photo != null && !media.photo.sizes.isEmpty()) {
+            TLRPC.PhotoSize size = FileLoader.getClosestPhotoSizeWithSize(media.photo.sizes, AndroidUtilities.getPhotoSize(true), false, null, true);
+            if (size != null) {
+                originalName = FileLoader.getAttachFileName(size);
+            }
+        }
+        if (originalName == null || originalName.isEmpty()) {
+            originalName = sourceFile.getName();
+        }
+        return Math.abs(message.dialog_id) + "_" + message.id + "_" + originalName;
     }
 
     public static void clearAllDeletedMessages(SQLiteDatabase database) {
