@@ -608,4 +608,22 @@ public class MglaDeletedMessagesStorage {
         }
         return 0;
     }
+
+    public static void deleteDeletedMessage(SQLiteDatabase database, long dialogId, int messageId) {
+        if (database == null || messageId <= 0) {
+            return;
+        }
+        try {
+            database.executeFast("DELETE FROM " + TABLE + " WHERE mid = " + messageId + " AND uid = " + dialogId).stepThis().dispose();
+        } catch (SQLiteException e) {
+            FileLog.e(e);
+        }
+    }
+
+    public static void deleteDeletedMessageAsync(int currentAccount, long dialogId, int messageId) {
+        MessagesStorage storage = MessagesStorage.getInstance(currentAccount);
+        storage.getStorageQueue().postRunnable(() -> {
+            deleteDeletedMessage(storage.getDatabase(), dialogId, messageId);
+        });
+    }
 }
