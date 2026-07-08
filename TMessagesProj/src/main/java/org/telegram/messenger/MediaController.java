@@ -3158,7 +3158,15 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             if (neededAudioFocus == 3) {
                 result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN);
             } else {
-                result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, neededAudioFocus == 2 && !SharedConfig.pauseMusicOnMedia ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK : AudioManager.AUDIOFOCUS_GAIN);
+                int focusGain;
+                if (MglaAudioConfig.useTransientAutopause(messageObject)) {
+                    focusGain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT;
+                } else if (neededAudioFocus == 2 && !SharedConfig.pauseMusicOnMedia) {
+                    focusGain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK;
+                } else {
+                    focusGain = AudioManager.AUDIOFOCUS_GAIN;
+                }
+                result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focusGain);
             }
             if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                 audioFocus = AUDIO_FOCUSED;

@@ -206,7 +206,7 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
                 buttonId == BUTTON_ATTACH ? CubicBezierInterpolator.EASE_OUT_QUINT : AnimatorUtils.DECELERATE_INTERPOLATOR,
                 buttonId == BUTTON_ATTACH ? 300 : 280);
 
-            int size = 56, iconSize = 48;
+            int size = 44, iconSize = 32;
             if (buttonId == BUTTON_ATTACH) {
                 size = 50;
                 iconSize = 32;
