@@ -177,6 +177,7 @@ import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
+import org.telegram.messenger.MglaAudioConfig;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessageSuggestionParams;
@@ -10514,6 +10515,13 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         videoPlayerSeekbar.updateTimestamps(currentMessageObject, getVideoDuration());
         updateVideoPlayerTime();
         AndroidUtilities.runOnUIThread(this::pipInvalidateAvailability);
+        if (MglaAudioConfig.isAutoPauseEnabled() && videoPlayer != null) {
+            if (playWhenReady && playbackState == ExoPlayer.STATE_READY) {
+                MglaAudioConfig.requestStandaloneAutopauseFocus();
+            } else if (!playWhenReady || playbackState == ExoPlayer.STATE_ENDED || playbackState == ExoPlayer.STATE_IDLE) {
+                MglaAudioConfig.abandonStandaloneAutopauseFocus();
+            }
+        }
     }
 
     private void playVideoOrWeb() {
@@ -11175,6 +11183,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             }
             videoPlayer.releasePlayer(true);
             videoPlayer = null;
+            MglaAudioConfig.abandonStandaloneAutopauseFocus();
         } else {
             playerWasPlaying = false;
         }

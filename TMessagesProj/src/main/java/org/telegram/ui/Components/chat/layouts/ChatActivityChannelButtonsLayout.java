@@ -44,7 +44,7 @@ public class ChatActivityChannelButtonsLayout extends FrameLayout implements Fac
     private static final int BUTTONS_COUNT = 5;
     private static final int BAR_BUTTON_HEIGHT = ChatActivityEnterView.DEFAULT_HEIGHT;
     private static final int BAR_BUTTON_RADIUS = BAR_BUTTON_HEIGHT / 2;
-    private static final int SIDE_BUTTON_SPACING = 4;
+    private static final int SIDE_BUTTON_SPACING = 2;
 
     private final ButtonHolder[] buttonHolders = new ButtonHolder[BUTTONS_COUNT];
     private final OnClickListener[] onClickListeners = new OnClickListener[BUTTONS_COUNT];

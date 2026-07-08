@@ -13,6 +13,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaAudioConfig;
 import org.telegram.messenger.MglaHeaderConfig;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaTransferConfig;
@@ -159,7 +160,21 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
             showTransferModeDialog(false, uploadModeValueRef[0]);
         }, uploadModeValueRef);
 
-        rootLayout.addView(transferBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
+        rootLayout.addView(transferBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
+        LinearLayout soundBlock = createBlock(context, "Звук");
+
+        TextCheckCell autoPauseCell = new TextCheckCell(context);
+        autoPauseCell.setBackground(null);
+        autoPauseCell.setTextAndCheck("Автопауза", MglaAudioConfig.isAutoPauseEnabled(), false);
+        autoPauseCell.setOnClickListener(v -> {
+            boolean newVal = !MglaAudioConfig.isAutoPauseEnabled();
+            MglaAudioConfig.setAutoPauseEnabled(newVal);
+            autoPauseCell.setChecked(newVal);
+        });
+        soundBlock.addView(autoPauseCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(soundBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
 
         fragmentView = scrollView;
         return fragmentView;
