@@ -441,6 +441,9 @@ public class ChatActivity extends BaseFragment implements
     private ActionBarMenuItem.Item savedChatsItem, savedChatsGap;;
     private ActionBarMenuItem headerItem;
     private FrameLayout mglaDeletedHeaderView;
+    private FrameLayout mglaDeletedSearchContainer;
+    private EditTextBoldCursor mglaDeletedSearchField;
+    private ImageView mglaDeletedSearchClear;
     private Bulletin mglaDeletedNotifyBulletin;
     // Mgla: right avatar in the chat/channel header (replaces the "more" three-dots button)
 
@@ -1703,6 +1706,13 @@ public class ChatActivity extends BaseFragment implements
         public boolean onItemClick(View view, int position, float x, float y) {
             if (isTryingTextSelection() || hasTextSelection() || inPreviewMode || isInsideContainer) {
                 return false;
+            }
+            if (chatMode == MODE_MGLA_DELETED && view instanceof ChatMessageCell) {
+                MessageObject msg = ((ChatMessageCell) view).getMessageObject();
+                if (msg != null && !msg.isDateObject) {
+                    showDeleteDeletedMessageAlert(msg.getId());
+                    return true;
+                }
             }
             wasManualScroll = true;
             boolean result = true;
@@ -4475,36 +4485,38 @@ public class ChatActivity extends BaseFragment implements
             if (currentUser != null && currentUser.self && getDialogId() != UserObject.VERIFY) {
                 headerItem.lazilyAddSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
             }
-            if (!isTopic && !ChatObject.isMonoForum(currentChat)) {
-                clearHistoryItem = headerItem.lazilyAddSubItem(clear_history, R.drawable.msg_clear,
-                    LocaleController.getString(UserObject.isBotForum(currentUser) ? R.string.ClearAllHistory : R.string.ClearHistory));
-            }
-            boolean addedSettings = false;
-            if (!isTopic) {
-                if (ChatObject.isChannel(currentChat) && !currentChat.creator) {
-                    if (!ChatObject.isNotInChat(currentChat)) {
-                        if (currentChat.monoforum) {
-                            headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.LeaveConversationMenu));
-                        } else if (currentChat.megagroup) {
-                            headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.LeaveMegaMenu));
+            if (chatMode != MODE_MGLA_DELETED) {
+                if (!isTopic && !ChatObject.isMonoForum(currentChat)) {
+                    clearHistoryItem = headerItem.lazilyAddSubItem(clear_history, R.drawable.msg_clear,
+                        LocaleController.getString(UserObject.isBotForum(currentUser) ? R.string.ClearAllHistory : R.string.ClearHistory));
+                }
+                boolean addedSettings = false;
+                if (!isTopic) {
+                    if (ChatObject.isChannel(currentChat) && !currentChat.creator) {
+                        if (!ChatObject.isNotInChat(currentChat)) {
+                            if (currentChat.monoforum) {
+                                headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.LeaveConversationMenu));
+                            } else if (currentChat.megagroup) {
+                                headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.LeaveMegaMenu));
+                            } else {
+                                headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.LeaveChannelMenu));
+                            }
+                        }
+                    } else if (!ChatObject.isChannel(currentChat) && getDialogId() != UserObject.VERIFY) {
+                        if (currentChat != null) {
+                            headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.DeleteAndExit));
+                        } else if (currentUser != null && currentUser.bot) {
+                            headerItem.lazilyAddSubItem(bot_settings, R.drawable.msg_settings_old, LocaleController.getString(R.string.BotSettings));
+                            addedSettings = true;
+                            headerItem.lazilyAddSubItem(bot_help, R.drawable.msg_help, LocaleController.getString(R.string.BotHelp));
+                            if (!MessagesController.isSupportUser(currentUser)) {
+                                headerItem.lazilyAddSubItem(report, R.drawable.msg_report, LocaleController.getString(R.string.ReportBot)).setColors(getThemedColor(Theme.key_text_RedRegular), getThemedColor(Theme.key_text_RedRegular));
+                            }
+                            headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_block2, LocaleController.getString(R.string.DeleteAndBlock)).setColors(getThemedColor(Theme.key_text_RedRegular), getThemedColor(Theme.key_text_RedRegular));
+                            updateBotButtons();
                         } else {
-                            headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.LeaveChannelMenu));
+                            headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_delete, LocaleController.getString(R.string.DeleteChatUser));
                         }
-                    }
-                } else if (!ChatObject.isChannel(currentChat) && getDialogId() != UserObject.VERIFY) {
-                    if (currentChat != null) {
-                        headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_leave, LocaleController.getString(R.string.DeleteAndExit));
-                    } else if (currentUser != null && currentUser.bot) {
-                        headerItem.lazilyAddSubItem(bot_settings, R.drawable.msg_settings_old, LocaleController.getString(R.string.BotSettings));
-                        addedSettings = true;
-                        headerItem.lazilyAddSubItem(bot_help, R.drawable.msg_help, LocaleController.getString(R.string.BotHelp));
-                        if (!MessagesController.isSupportUser(currentUser)) {
-                            headerItem.lazilyAddSubItem(report, R.drawable.msg_report, LocaleController.getString(R.string.ReportBot)).setColors(getThemedColor(Theme.key_text_RedRegular), getThemedColor(Theme.key_text_RedRegular));
-                        }
-                        headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_block2, LocaleController.getString(R.string.DeleteAndBlock)).setColors(getThemedColor(Theme.key_text_RedRegular), getThemedColor(Theme.key_text_RedRegular));
-                        updateBotButtons();
-                    } else {
-                        headerItem.lazilyAddSubItem(delete_chat, R.drawable.msg_delete, LocaleController.getString(R.string.DeleteChatUser));
                     }
                 }
             }
@@ -8533,6 +8545,56 @@ public class ChatActivity extends BaseFragment implements
             }
         };
         bottomChannelButtonsLayout.getContainer().addView(bottomOverlayChatText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, 0));
+        
+        mglaDeletedSearchContainer = new FrameLayout(context);
+        mglaDeletedSearchContainer.setClipToOutline(true);
+        mglaDeletedSearchContainer.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(ChatActivityEnterView.DEFAULT_HEIGHT / 2f)));
+        // Add "air" between pill edges and left/right buttons backgrounds
+        mglaDeletedSearchContainer.setPadding(dp(24), 0, dp(24), 0);
+        mglaDeletedSearchContainer.setVisibility(View.GONE);
+
+        mglaDeletedSearchField = new EditTextBoldCursor(context);
+        mglaDeletedSearchField.setHint("Поиск по удалённым...");
+        mglaDeletedSearchField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        mglaDeletedSearchField.setCursorWidth(1.5f);
+        mglaDeletedSearchField.setTextColor(getThemedColor(Theme.key_chat_messagePanelText));
+        mglaDeletedSearchField.setHintTextColor(getThemedColor(Theme.key_chat_messagePanelHint));
+        mglaDeletedSearchField.setSingleLine(true);
+        mglaDeletedSearchField.setIncludeFontPadding(false);
+        mglaDeletedSearchField.setBackground(null);
+        mglaDeletedSearchField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        mglaDeletedSearchField.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        mglaDeletedSearchField.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL);
+        // Keep text away from pill edges and the clear button (on the right)
+        mglaDeletedSearchField.setPadding(dp(24), 0, dp(44), 0);
+        mglaDeletedSearchContainer.addView(mglaDeletedSearchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        mglaDeletedSearchClear = new ImageView(context);
+        mglaDeletedSearchClear.setScaleType(ImageView.ScaleType.CENTER);
+        mglaDeletedSearchClear.setImageResource(R.drawable.miniplayer_close);
+        mglaDeletedSearchClear.setVisibility(View.GONE);
+        mglaDeletedSearchClear.setColorFilter(ColorUtils.setAlphaComponent(getThemedColor(Theme.key_windowBackgroundWhiteBlackText), 153), PorterDuff.Mode.MULTIPLY);
+        mglaDeletedSearchClear.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, dp(16)));
+        mglaDeletedSearchClear.setOnClickListener(v -> {
+            mglaDeletedSearchField.setText("");
+            filterMglaDeletedMessages("");
+        });
+        // Clear button sits to the right of the input
+        mglaDeletedSearchContainer.addView(mglaDeletedSearchClear, LayoutHelper.createFrame(36, LayoutHelper.MATCH_PARENT, (LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
+
+        mglaDeletedSearchField.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                mglaDeletedSearchClear.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+                filterMglaDeletedMessages(s.toString());
+            }
+        });
+        bottomChannelButtonsLayout.getContainer().addView(mglaDeletedSearchContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+        
         bottomOverlayChatText.setOnClickListener(view -> {
             if (getParentActivity() == null || pullingDownOffset != 0) {
                 return;
@@ -22041,6 +22103,10 @@ public class ChatActivity extends BaseFragment implements
             messagesByDaysSorted.clear();
             groupedMessagesMap.clear();
             threadMessageAdded = false;
+            
+            // Заполняем массив для поиска
+            mglaDeletedAllMessages = new ArrayList<>();
+            
             if (deleted != null && !deleted.isEmpty()) {
                 deleted.sort((a, b) -> {
                 if (a.date != b.date) {
@@ -22058,6 +22124,7 @@ public class ChatActivity extends BaseFragment implements
                     MessageObject obj = new MessageObject(currentAccount, tlMsg, false, false);
                     obj.mglaSavedDeleted = true;
                     insertMglaDeletedMessage(obj);
+                    mglaDeletedAllMessages.add(obj);
                 }
             }
             showProgressView(false);
@@ -22128,6 +22195,117 @@ public class ChatActivity extends BaseFragment implements
         final int topMarginPx = actionBarHeight + statusBarHeight - (actionBarHeight + s) / 2 - p;
 
         actionBar.addView(mglaDeletedHeaderView, LayoutHelper.createFrameMarginPx(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, topMarginPx, 0, 0));
+    }
+
+    private ArrayList<MessageObject> mglaDeletedAllMessages;
+    private ArrayList<MessageObject> mglaDeletedFilteredMessages;
+    private boolean mglaDeletedFilterActive;
+    private String mglaDeletedFilterQuery;
+
+    private void filterMglaDeletedMessages(String query) {
+        if (chatMode != MODE_MGLA_DELETED) return;
+        String raw = query == null ? "" : query.trim();
+        String q = raw.toLowerCase();
+        if (q.isEmpty()) {
+            mglaDeletedFilterActive = false;
+            mglaDeletedFilteredMessages = null;
+            mglaDeletedFilterQuery = null;
+            if (mglaDeletedAllMessages != null) {
+                messages.clear();
+                messagesDict[0].clear();
+                messagesByDays.clear();
+                messagesByDaysSorted.clear();
+                groupedMessagesMap.clear();
+                threadMessageAdded = false;
+                for (int i = 0; i < mglaDeletedAllMessages.size(); i++) {
+                    MessageObject obj = mglaDeletedAllMessages.get(i);
+                    if (obj != null) {
+                        obj.highlightedWords = null;
+                        insertMglaDeletedMessage(obj);
+                    }
+                }
+            }
+            if (chatAdapter != null) {
+                chatAdapter.updateRowsInternal();
+                chatAdapter.notifyDataSetChanged(true);
+            }
+            return;
+        }
+        if (mglaDeletedAllMessages == null || mglaDeletedAllMessages.isEmpty()) return;
+        mglaDeletedFilterActive = true;
+        mglaDeletedFilterQuery = raw;
+        mglaDeletedFilteredMessages = new ArrayList<>();
+        for (int i = 0; i < mglaDeletedAllMessages.size(); i++) {
+            MessageObject obj = mglaDeletedAllMessages.get(i);
+            if (obj == null) continue;
+            String text = obj.messageText != null ? obj.messageText.toString() : null;
+            if (text == null) text = obj.caption != null ? obj.caption.toString() : null;
+            if (text == null) text = "";
+            if (text.toLowerCase().contains(q)) {
+                obj.highlightedWords = new ArrayList<>(1);
+                obj.highlightedWords.add(raw);
+                mglaDeletedFilteredMessages.add(obj);
+            } else {
+                obj.highlightedWords = null;
+            }
+        }
+        messages.clear();
+        messagesDict[0].clear();
+        messagesByDays.clear();
+        messagesByDaysSorted.clear();
+        groupedMessagesMap.clear();
+        threadMessageAdded = false;
+        for (int i = 0; i < mglaDeletedFilteredMessages.size(); i++) {
+            insertMglaDeletedMessage(mglaDeletedFilteredMessages.get(i));
+        }
+        if (chatAdapter != null) {
+            chatAdapter.updateRowsInternal();
+            chatAdapter.notifyDataSetChanged(true);
+        }
+    }
+
+    private void showDeleteDeletedMessageAlert(int messageId) {
+        if (getParentActivity() == null) return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle("Удалить сообщение");
+        builder.setMessage("Удалить это сообщение из сохранённых удалённых?");
+        builder.setPositiveButton("Удалить", (dialog, which) -> {
+            MglaDeletedMessagesStorage.deleteDeletedMessageAsync(currentAccount, dialog_id, messageId);
+            if (mglaDeletedAllMessages != null) {
+                for (int i = mglaDeletedAllMessages.size() - 1; i >= 0; i--) {
+                    if (mglaDeletedAllMessages.get(i).getId() == messageId) {
+                        mglaDeletedAllMessages.remove(i);
+                        break;
+                    }
+                }
+            }
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                if (messages.get(i).getId() == messageId) {
+                    messages.remove(i);
+                    break;
+                }
+            }
+            rebuildMessagesByDays();
+            if (chatAdapter != null) {
+                chatAdapter.notifyDataSetChanged();
+            }
+        });
+        builder.setNegativeButton("Отмена", null);
+        showDialog(builder.create());
+    }
+
+    private void rebuildMessagesByDays() {
+        messagesByDays.clear();
+        for (int i = 0; i < messages.size(); i++) {
+            MessageObject obj = messages.get(i);
+            if (obj.isDateObject) continue;
+            ArrayList<MessageObject> dayArray = messagesByDays.get(obj.dateKey);
+            if (dayArray == null) {
+                dayArray = new ArrayList<>();
+                messagesByDays.put(obj.dateKey, dayArray);
+            }
+            dayArray.add(obj);
+        }
     }
 
     private void openMglaDeletedMessages() {
@@ -28078,6 +28256,9 @@ public class ChatActivity extends BaseFragment implements
         }
         bottomOverlayChatWaitsReply = false;
         bottomOverlayLinks = false;
+        if (mglaDeletedSearchContainer != null) {
+            mglaDeletedSearchContainer.setVisibility(View.GONE);
+        }
 
         boolean accentTextButton = false;
         boolean forceVisible = false;
@@ -28139,6 +28320,17 @@ public class ChatActivity extends BaseFragment implements
             }
         } else if (isReport()) {
             updateActionModeTitle();
+        } else if (chatMode == MODE_MGLA_DELETED) {
+            if (mglaDeletedSearchContainer != null) {
+                mglaDeletedSearchContainer.setVisibility(View.VISIBLE);
+            }
+            bottomOverlayChatText.setVisibility(View.GONE);
+            bottomOverlayLinksText.setVisibility(View.GONE);
+            if (bottomOverlayStartButton != null) {
+                bottomOverlayStartButton.setVisibility(View.GONE);
+            }
+            showBottomOverlayProgress(false, false);
+            forceVisible = true;
         } else if (chatMode == MODE_PINNED) {
             boolean allowPin;
             if (currentChat != null) {
@@ -38347,6 +38539,8 @@ public class ChatActivity extends BaseFragment implements
                         messageCell.setHighlightedPoll(highlightPollOptionId);
                     } else if (chatMode == MODE_SEARCH && searchingHashtag != null && searchingQuery != null) {
                         messageCell.setHighlightedText(searchingQuery);
+                } else if (chatMode == MODE_MGLA_DELETED) {
+                    messageCell.setHighlightedText(mglaDeletedFilterQuery);
                     }
                     if (highlightMessageId != Integer.MAX_VALUE) {
                         startMessageUnselect();
@@ -44793,7 +44987,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void checkLeaveChannelButton() {
-        if (headerItem == null || chatMode == MODE_SAVED) return;
+        if (headerItem == null || chatMode == MODE_SAVED || chatMode == MODE_MGLA_DELETED) return;
         if (!headerItem.hasSubItem(delete_chat)) {
             if (!isTopic) {
                 if (ChatObject.isChannel(currentChat) && !currentChat.creator) {
