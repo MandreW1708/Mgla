@@ -14547,12 +14547,45 @@ public class MessagesStorage extends BaseController {
         });
     }
 
+    public void loadMglaDeletedMessagesPage(long dialogId, long topicId, int limit, int offset, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.loadDeletedMessages(database, currentAccount, dialogId, topicId, limit, offset);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(messages);
+                }
+            });
+        });
+    }
+
+    public void searchMglaDeletedMessages(long dialogId, long topicId, String query, int limit, int offset, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.searchDeletedMessages(database, currentAccount, dialogId, topicId, query, limit, offset);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(messages);
+                }
+            });
+        });
+    }
+
     public void loadMglaDeletedMessageById(long dialogId, int messageId, Utilities.Callback<TLRPC.Message> callback) {
         storageQueue.postRunnable(() -> {
             TLRPC.Message message = MglaDeletedMessagesStorage.loadDeletedMessageById(database, currentAccount, dialogId, messageId);
             AndroidUtilities.runOnUIThread(() -> {
                 if (callback != null) {
                     callback.run(message);
+                }
+            });
+        });
+    }
+
+    public void deleteMglaDeletedMessagesByType(long dialogId, long topicId, int msgType, Utilities.Callback<Integer> callback) {
+        storageQueue.postRunnable(() -> {
+            int count = MglaDeletedMessagesStorage.deleteDeletedMessagesByType(database, currentAccount, dialogId, topicId, msgType);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(count);
                 }
             });
         });

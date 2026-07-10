@@ -124,6 +124,8 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         LinearLayout spyBlock = createBlock(context, "Шпион");
 
+        final TextCheckCell[] deletedSubCells = new TextCheckCell[4];
+
         TextCheckCell saveDeletedCell = new TextCheckCell(context);
         saveDeletedCell.setBackground(null);
         saveDeletedCell.setTextAndCheck("Сохранение удаленных", MglaSpyConfig.isSaveDeletedMessagesEnabled(), true);
@@ -131,8 +133,25 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
             boolean newVal = !MglaSpyConfig.isSaveDeletedMessagesEnabled();
             MglaSpyConfig.setSaveDeletedMessagesEnabled(newVal);
             saveDeletedCell.setChecked(newVal);
+            updateDeletedSubCellsState(deletedSubCells, newVal);
         });
         spyBlock.addView(saveDeletedCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        spyBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        deletedSubCells[0] = createDeletedSubCell(context, "Личные чаты", MglaSpyConfig.isSaveDeletedForPrivateEnabled(), MglaSpyConfig::setSaveDeletedForPrivateEnabled);
+        spyBlock.addView(deletedSubCells[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        deletedSubCells[1] = createDeletedSubCell(context, "Группы", MglaSpyConfig.isSaveDeletedForGroupsEnabled(), MglaSpyConfig::setSaveDeletedForGroupsEnabled);
+        spyBlock.addView(deletedSubCells[1], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        deletedSubCells[2] = createDeletedSubCell(context, "Каналы", MglaSpyConfig.isSaveDeletedForChannelsEnabled(), MglaSpyConfig::setSaveDeletedForChannelsEnabled);
+        spyBlock.addView(deletedSubCells[2], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        deletedSubCells[3] = createDeletedSubCell(context, "Комментарии в каналах", MglaSpyConfig.isSaveDeletedForCommentsEnabled(), MglaSpyConfig::setSaveDeletedForCommentsEnabled);
+        spyBlock.addView(deletedSubCells[3], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        updateDeletedSubCellsState(deletedSubCells, MglaSpyConfig.isSaveDeletedMessagesEnabled());
 
         ghostModeCell = new TextCheckCell(context);
         ghostModeCell.setBackground(null);
@@ -267,5 +286,40 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
     private void addSelectRow(LinearLayout block, String title, String value, Runnable onClick) {
         addSelectRow(block, title, value, onClick, null);
+    }
+
+    private TextCheckCell createDeletedSubCell(Context context, String title, boolean checked, MglaDeletedSetter setter) {
+        TextCheckCell cell = new TextCheckCell(context);
+        cell.setBackground(null);
+        cell.setTextAndCheck(title, checked, true);
+        cell.setPadding(dp(36), cell.getPaddingTop(), cell.getPaddingRight(), cell.getPaddingBottom());
+        cell.setOnClickListener(v -> {
+            if (!MglaSpyConfig.isSaveDeletedMessagesEnabled()) return;
+            boolean newVal = !cell.isChecked();
+            setter.set(newVal);
+            cell.setChecked(newVal);
+        });
+        return cell;
+    }
+
+    private View createIndentedDivider(Context context) {
+        View divider = new View(context);
+        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        divider.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 36, 0, 0, 0));
+        return divider;
+    }
+
+    private void updateDeletedSubCellsState(TextCheckCell[] cells, boolean enabled) {
+        float alpha = enabled ? 1f : 0.4f;
+        for (TextCheckCell cell : cells) {
+            if (cell != null) {
+                cell.setAlpha(alpha);
+                cell.setEnabled(enabled);
+            }
+        }
+    }
+
+    private interface MglaDeletedSetter {
+        void set(boolean enabled);
     }
 }

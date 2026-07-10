@@ -4,7 +4,6 @@ import org.telegram.SQLite.SQLiteCursor;
 import org.telegram.SQLite.SQLiteDatabase;
 import org.telegram.SQLite.SQLiteException;
 import org.telegram.SQLite.SQLitePreparedStatement;
-import android.util.SparseBooleanArray;
 
 import androidx.collection.LongSparseArray;
 
@@ -14,6 +13,7 @@ import org.telegram.tgnet.TLRPC;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 
 public class MglaDeletedMessagesStorage {
 
@@ -48,6 +48,12 @@ public class MglaDeletedMessagesStorage {
             return;
         }
         if (DialogObject.isEncryptedDialog(dialogId)) {
+            return;
+        }
+        if (!shouldSaveForDialog(currentAccount, dialogId, message)) {
+            return;
+        }
+        if (!shouldSaveForMessageType(message)) {
             return;
         }
 
@@ -142,6 +148,12 @@ public class MglaDeletedMessagesStorage {
                 if (DialogObject.isEncryptedDialog(dialogId)) {
                     continue;
                 }
+                if (!shouldSaveForDialog(currentAccount, dialogId, message)) {
+                    continue;
+                }
+                if (!shouldSaveForMessageType(message)) {
+                    continue;
+                }
                 long topicId = MessageObject.getTopicId(currentAccount, message, true);
                 NativeByteBuffer data = null;
                 try {
@@ -228,17 +240,20 @@ public class MglaDeletedMessagesStorage {
         if (DialogObject.isEncryptedDialog(dialogId)) {
             return;
         }
+        if (!shouldSaveForDialog(currentAccount, dialogId, null)) {
+            return;
+        }
 
         int minId = Integer.MAX_VALUE;
         int maxId = Integer.MIN_VALUE;
-        SparseBooleanArray existingIds = new SparseBooleanArray();
+        HashSet<Integer> existingIds = new HashSet<>(objects.size());
         for (int i = 0, size = objects.size(); i < size; i++) {
             MessageObject obj = objects.get(i);
             int id = obj.getId();
             if (id > 0) {
                 minId = Math.min(minId, id);
                 maxId = Math.max(maxId, id);
-                existingIds.put(id, true);
+                existingIds.add(id);
             }
         }
         if (minId == Integer.MAX_VALUE) {
@@ -258,12 +273,6 @@ public class MglaDeletedMessagesStorage {
             return Integer.compare(a.id, b.id);
         });
 
-        // Build a fast lookup for existing objects by id
-        SparseBooleanArray existingIdLookup = new SparseBooleanArray(existingIds.size());
-        for (int i = 0; i < existingIds.size(); i++) {
-            existingIdLookup.put(existingIds.keyAt(i), true);
-        }
-
         boolean ascending = isAscendingOrder(objects);
         int size = objects.size();
         for (int i = 0, dSize = deleted.size(); i < dSize; i++) {
@@ -275,7 +284,7 @@ public class MglaDeletedMessagesStorage {
                     continue;
                 }
             }
-            if (existingIdLookup.get(id)) {
+            if (existingIds.contains(id)) {
                 for (int j = 0; j < size; j++) {
                     MessageObject existing = objects.get(j);
                     if (existing.getId() == id) {
@@ -297,7 +306,7 @@ public class MglaDeletedMessagesStorage {
             obj.deleted = false;
             int insertIdx = findInsertIndexBinary(objects, obj, ascending, size);
             objects.add(insertIdx, obj);
-            existingIdLookup.put(id, true);
+            existingIds.add(id);
             size++;
         }
     }
@@ -364,6 +373,10 @@ public class MglaDeletedMessagesStorage {
     }
 
     public static ArrayList<TLRPC.Message> loadDeletedMessages(SQLiteDatabase database, int currentAccount, long dialogId, long topicId, int limit) {
+        return loadDeletedMessages(database, currentAccount, dialogId, topicId, limit, 0);
+    }
+
+    public static ArrayList<TLRPC.Message> loadDeletedMessages(SQLiteDatabase database, int currentAccount, long dialogId, long topicId, int limit, int offset) {
         ArrayList<TLRPC.Message> result = new ArrayList<>();
         if (database == null || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
             return result;
@@ -371,10 +384,52 @@ public class MglaDeletedMessagesStorage {
 
         SQLiteCursor cursor = null;
         try {
+            int safeLimit = Math.max(1, limit);
+            int safeOffset = Math.max(0, offset);
             String query = topicId != 0
-                ? "SELECT data FROM " + TABLE + " WHERE uid = " + dialogId + " AND topic_id = " + topicId + " ORDER BY date DESC LIMIT " + Math.max(1, limit)
-                : "SELECT data FROM " + TABLE + " WHERE uid = " + dialogId + " ORDER BY date DESC LIMIT " + Math.max(1, limit);
+                ? "SELECT data FROM " + TABLE + " WHERE uid = " + dialogId + " AND topic_id = " + topicId + " ORDER BY date DESC LIMIT " + safeLimit + " OFFSET " + safeOffset
+                : "SELECT data FROM " + TABLE + " WHERE uid = " + dialogId + " ORDER BY date DESC LIMIT " + safeLimit + " OFFSET " + safeOffset;
             cursor = database.queryFinalized(query);
+            long currentUserId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
+            while (cursor.next()) {
+                NativeByteBuffer data = cursor.byteBufferValue(0);
+                if (data == null) {
+                    continue;
+                }
+                TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                message.readAttachPath(data, currentUserId);
+                data.reuse();
+                if (message != null) {
+                    restoreLocalMediaPath(currentAccount, message);
+                    result.add(message);
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        return result;
+    }
+
+    public static ArrayList<TLRPC.Message> searchDeletedMessages(SQLiteDatabase database, int currentAccount, long dialogId, long topicId, String query, int limit, int offset) {
+        ArrayList<TLRPC.Message> result = new ArrayList<>();
+        if (database == null || !MglaSpyConfig.isSaveDeletedMessagesEnabled() || query == null || query.isEmpty()) {
+            return result;
+        }
+
+        SQLiteCursor cursor = null;
+        try {
+            int safeLimit = Math.max(1, limit);
+            int safeOffset = Math.max(0, offset);
+            String escapedQuery = query.replace("'", "''");
+            String likeQuery = "'%" + escapedQuery + "%'";
+            String sql = topicId != 0
+                ? "SELECT data FROM " + TABLE + " WHERE uid = " + dialogId + " AND topic_id = " + topicId + " AND data LIKE " + likeQuery + " ORDER BY date DESC LIMIT " + safeLimit + " OFFSET " + safeOffset
+                : "SELECT data FROM " + TABLE + " WHERE uid = " + dialogId + " AND data LIKE " + likeQuery + " ORDER BY date DESC LIMIT " + safeLimit + " OFFSET " + safeOffset;
+            cursor = database.queryFinalized(sql);
             long currentUserId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
             while (cursor.next()) {
                 NativeByteBuffer data = cursor.byteBufferValue(0);
@@ -620,10 +675,121 @@ public class MglaDeletedMessagesStorage {
         }
     }
 
+    public static int deleteDeletedMessagesByType(SQLiteDatabase database, int currentAccount, long dialogId, long topicId, int msgType) {
+        if (database == null) {
+            return 0;
+        }
+        ArrayList<Integer> idsToDelete = new ArrayList<>();
+        SQLiteCursor cursor = null;
+        try {
+            String query = topicId != 0
+                ? "SELECT mid, data FROM " + TABLE + " WHERE uid = " + dialogId + " AND topic_id = " + topicId
+                : "SELECT mid, data FROM " + TABLE + " WHERE uid = " + dialogId;
+            cursor = database.queryFinalized(query);
+            long currentUserId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
+            while (cursor.next()) {
+                int mid = cursor.intValue(0);
+                NativeByteBuffer data = cursor.byteBufferValue(1);
+                if (data == null) {
+                    continue;
+                }
+                try {
+                    TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                    if (message != null && resolveMessageType(message) == msgType) {
+                        idsToDelete.add(mid);
+                    }
+                } catch (Exception e) {
+                    FileLog.e(e);
+                } finally {
+                    data.reuse();
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        if (idsToDelete.isEmpty()) {
+            return 0;
+        }
+        int deleted = 0;
+        try {
+            database.executeFast("BEGIN TRANSACTION").stepThis().dispose();
+            for (int i = 0; i < idsToDelete.size(); i++) {
+                database.executeFast("DELETE FROM " + TABLE + " WHERE mid = " + idsToDelete.get(i) + " AND uid = " + dialogId).stepThis().dispose();
+                deleted++;
+            }
+            database.executeFast("COMMIT").stepThis().dispose();
+        } catch (SQLiteException e) {
+            FileLog.e(e);
+            try {
+                database.executeFast("ROLLBACK").stepThis().dispose();
+            } catch (SQLiteException ex) {
+                FileLog.e(ex);
+            }
+        }
+        return deleted;
+    }
+
     public static void deleteDeletedMessageAsync(int currentAccount, long dialogId, int messageId) {
         MessagesStorage storage = MessagesStorage.getInstance(currentAccount);
         storage.getStorageQueue().postRunnable(() -> {
             deleteDeletedMessage(storage.getDatabase(), dialogId, messageId);
         });
+    }
+
+    public static boolean shouldSaveForDialog(int currentAccount, long dialogId, TLRPC.Message message) {
+        int chatType = resolveChatType(currentAccount, dialogId, message);
+        return MglaSpyConfig.isSaveDeletedForCategoryEnabled(chatType);
+    }
+
+    public static int resolveChatType(int currentAccount, long dialogId, TLRPC.Message message) {
+        if (DialogObject.isUserDialog(dialogId)) {
+            return MglaSpyConfig.CHAT_TYPE_PRIVATE;
+        }
+        if (DialogObject.isChatDialog(dialogId)) {
+            long chatId = -dialogId;
+            MessagesController controller = MessagesController.getInstance(currentAccount);
+            TLRPC.Chat chat = controller.getChat(chatId);
+            if (chat == null) {
+                return MglaSpyConfig.CHAT_TYPE_GROUP;
+            }
+            if (ChatObject.isChannelAndNotMegaGroup(chat)) {
+                return MglaSpyConfig.CHAT_TYPE_CHANNEL;
+            }
+            // Megagroup or regular group — check if it's a discussion group (comments)
+            TLRPC.ChatFull chatFull = controller.getChatFull(chatId);
+            if (ChatObject.isDiscussionGroup(chat, chatFull)) {
+                return MglaSpyConfig.CHAT_TYPE_COMMENTS;
+            }
+            return MglaSpyConfig.CHAT_TYPE_GROUP;
+        }
+        return MglaSpyConfig.CHAT_TYPE_GROUP;
+    }
+
+    public static int resolveMessageType(TLRPC.Message message) {
+        if (message == null) {
+            return MglaSpyConfig.MSG_TYPE_TEXT;
+        }
+        if (MessageObject.isVoiceMessage(message)) {
+            return MglaSpyConfig.MSG_TYPE_VOICE;
+        }
+        if (MessageObject.isRoundVideoMessage(message)) {
+            return MglaSpyConfig.MSG_TYPE_ROUND;
+        }
+        if (MessageObject.isPhoto(message)) {
+            return MglaSpyConfig.MSG_TYPE_PHOTO;
+        }
+        if (MessageObject.isVideoMessage(message)) {
+            return MglaSpyConfig.MSG_TYPE_VIDEO;
+        }
+        return MglaSpyConfig.MSG_TYPE_TEXT;
+    }
+
+    public static boolean shouldSaveForMessageType(TLRPC.Message message) {
+        int msgType = resolveMessageType(message);
+        return MglaSpyConfig.isSaveDeletedMsgTypeEnabled(msgType);
     }
 }
