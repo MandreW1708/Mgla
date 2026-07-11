@@ -12,6 +12,7 @@ import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.util.TypedValue;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
@@ -159,6 +160,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     AnimatedTextView titleView;
     ActionBarAnimatedSubtitleOverlayContainer subtitleOverlayContainer;
     ImageView telegramLogoView;
+    private TextView mglaTitleView;
     ImageView emojiStatusView;
     AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable statusDrawable;
     boolean drawCircleForce;
@@ -180,6 +182,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     private ActionBar actionBar;
     private StoriesUtilities.EnsureStoryFileLoadedObject globalCancelable;
     private float menuItemsOffset;
+    private boolean storiesExpandedOnly;
 
     public DialogStoriesCell(@NonNull Context context, BaseFragment fragment, int currentAccount, int type) {
         super(context);
@@ -341,6 +344,14 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         telegramLogoView.setFocusableInTouchMode(true);
         addView(telegramLogoView, LayoutHelper.createFrame(90, 22));
 
+        mglaTitleView = new TextView(context);
+        mglaTitleView.setText("Mgla");
+        mglaTitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        mglaTitleView.setTypeface(AndroidUtilities.bold());
+        mglaTitleView.setTextColor(getTextLogoColor());
+        mglaTitleView.setVisibility(GONE);
+        addView(mglaTitleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
         statusDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(null, dp(26));
         statusDrawable.center = true;
         statusDrawable.setCallback(this);
@@ -453,6 +464,14 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
 
     public void setMenuItemsOffset(float menuItemsOffset) {
         this.menuItemsOffset = menuItemsOffset;
+    }
+
+    public void setStoriesExpandedOnly(boolean storiesExpandedOnly) {
+        if (this.storiesExpandedOnly != storiesExpandedOnly) {
+            this.storiesExpandedOnly = storiesExpandedOnly;
+            checkUi_titleVisibility();
+            invalidate();
+        }
     }
 
     public void openStoryForCell(StoryCell cell) {
@@ -944,6 +963,12 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             telegramLogoView.setTranslationX(titleView.getTranslationX() + dp(1));
             telegramLogoView.setTranslationY(bottomY + dp(14 + FAKE_TOP_PADDING + 4.333f) + translationOffset /*titleView.getTranslationY() + dpf2(37.33f)*/);
 
+            if (mglaTitleView != null) {
+                float sideMenuOffset = storiesExpandedOnly ? dp(48) : 0;
+                mglaTitleView.setTranslationX(telegramLogoView.getTranslationX() + sideMenuOffset);
+                mglaTitleView.setTranslationY(telegramLogoView.getTranslationY());
+            }
+
             emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
             emojiStatusView.setTranslationY(bottomY + dp(14 - 11 + FAKE_TOP_PADDING + 4.333f) + translationOffset);
 
@@ -1157,6 +1182,9 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             subtitleOverlayContainer.updateColors();
         }
         telegramLogoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+        if (mglaTitleView != null) {
+            mglaTitleView.setTextColor(getTextLogoColor());
+        }
         AndroidUtilities.forEachViews(recyclerListView, view -> {
             StoryCell cell = (StoryCell) view;
             cell.invalidate();
@@ -2058,8 +2086,13 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             listViewMini.setVisibility(View.INVISIBLE);
             recyclerListView.setVisibility(View.VISIBLE);
         } else if (currentState == COLLAPSED_STATE) {
-            listViewMini.setVisibility(View.VISIBLE);
-            recyclerListView.setVisibility(View.INVISIBLE);
+            if (storiesExpandedOnly) {
+                listViewMini.setVisibility(View.INVISIBLE);
+                recyclerListView.setVisibility(View.INVISIBLE);
+            } else {
+                listViewMini.setVisibility(View.VISIBLE);
+                recyclerListView.setVisibility(View.INVISIBLE);
+            }
             layoutManager.scrollToPositionWithOffset(0,  0);
             MessagesController.getInstance(currentAccount).getStoriesController().scheduleSort();
             if (globalCancelable != null) {
@@ -2216,13 +2249,32 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             titleView.setAlpha(titleAlpha);
             titleView.setVisibility(titleAlpha > 0 ? VISIBLE : GONE);
         }
-        if (telegramLogoView != null) {
-            telegramLogoView.setAlpha(logoAlpha);
-            telegramLogoView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
-        }
-        if (emojiStatusView != null) {
-            emojiStatusView.setAlpha(logoAlpha);
-            emojiStatusView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
+        if (storiesExpandedOnly) {
+            if (telegramLogoView != null) {
+                telegramLogoView.setAlpha(0f);
+                telegramLogoView.setVisibility(GONE);
+            }
+            if (mglaTitleView != null) {
+                mglaTitleView.setAlpha(logoAlpha);
+                mglaTitleView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
+            }
+            if (emojiStatusView != null) {
+                emojiStatusView.setAlpha(0f);
+                emojiStatusView.setVisibility(GONE);
+            }
+        } else {
+            if (mglaTitleView != null) {
+                mglaTitleView.setAlpha(0f);
+                mglaTitleView.setVisibility(GONE);
+            }
+            if (telegramLogoView != null) {
+                telegramLogoView.setAlpha(logoAlpha);
+                telegramLogoView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
+            }
+            if (emojiStatusView != null) {
+                emojiStatusView.setAlpha(logoAlpha);
+                emojiStatusView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
+            }
         }
         if (subtitleOverlayContainer != null) {
             subtitleOverlayContainer.setAlpha(progress);
