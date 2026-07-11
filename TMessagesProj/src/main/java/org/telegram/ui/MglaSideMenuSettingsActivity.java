@@ -4,29 +4,27 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
-import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class MglaAppearanceSettingsActivity extends BaseFragment {
+public class MglaSideMenuSettingsActivity extends BaseFragment {
 
-    public MglaAppearanceSettingsActivity() {
+    public MglaSideMenuSettingsActivity() {
         this(null);
     }
 
-    public MglaAppearanceSettingsActivity(android.os.Bundle args) {
+    public MglaSideMenuSettingsActivity(android.os.Bundle args) {
         super(args);
     }
 
@@ -34,7 +32,7 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
     public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle("Внешний вид");
+        actionBar.setTitle("Боковое меню");
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -49,30 +47,31 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
 
-        LinearLayout glassBlock = createBlock(context, "Стекло");
+        LinearLayout toggleBlock = new LinearLayout(context);
+        toggleBlock.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable toggleBg = new GradientDrawable();
+        toggleBg.setCornerRadius(dp(10));
+        toggleBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        toggleBlock.setBackground(toggleBg);
+        toggleBlock.setClipToOutline(true);
+        toggleBlock.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
 
-        TextCheckCell darkeningCell = new TextCheckCell(context);
-        darkeningCell.setBackground(null);
-        darkeningCell.setTextAndCheck("Затемнение стекла", MglaGlassConfig.isGlassDarkeningEnabled(), false);
-        darkeningCell.setOnClickListener(v -> {
-            boolean newVal = !MglaGlassConfig.isGlassDarkeningEnabled();
-            MglaGlassConfig.setGlassDarkeningEnabled(newVal);
-            darkeningCell.setChecked(newVal);
+        TextCheckCell enableCell = new TextCheckCell(context);
+        enableCell.setBackground(null);
+        enableCell.setTextAndCheck("Включить боковое меню", MglaSideMenuConfig.isEnabled(), false);
+        enableCell.setOnClickListener(v -> {
+            boolean newVal = !MglaSideMenuConfig.isEnabled();
+            MglaSideMenuConfig.setEnabled(newVal);
+            enableCell.setChecked(newVal);
         });
-        glassBlock.addView(darkeningCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        toggleBlock.addView(enableCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
+        rootLayout.addView(toggleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
-        LinearLayout sideMenuBlock = createBlock(context, "Боковое меню");
-
-        TextSettingsCell configureCell = new TextSettingsCell(context);
-        configureCell.setBackground(null);
-        configureCell.setText("Настроить", false);
-        configureCell.setCanDisable(false);
-        configureCell.setOnClickListener(v -> presentFragment(new MglaSideMenuSettingsActivity()));
-        sideMenuBlock.addView(configureCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        rootLayout.addView(sideMenuBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        TextInfoPrivacyCell infoCell = new TextInfoPrivacyCell(context);
+        infoCell.setText("Боковое меню открывается кнопкой в шапке списка чатов.");
+        infoCell.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+        rootLayout.addView(infoCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         fragmentView = rootLayout;
         return fragmentView;

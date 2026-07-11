@@ -121,6 +121,8 @@ import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
@@ -307,6 +309,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     private FireworksOverlay fireworksOverlay;
     private BottomSheetTabsOverlay bottomSheetTabsOverlay;
     public DrawerLayoutContainer drawerLayoutContainer;
+    private MglaSideMenu mglaSideMenu;
     private PasscodeViewDialog passcodeDialog;
     private List<PasscodeView> overlayPasscodeViews = new ArrayList<>();
     private TermsOfServiceView termsOfServiceView;
@@ -523,6 +526,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
         frameLayout.addView(drawerLayoutContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         mglaPopupNotificationController = new MglaPopupNotificationController(this);
+
+        mglaSideMenu = new MglaSideMenu(this, this);
+        frameLayout.addView(mglaSideMenu, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         themeSwitchSunView = new ImageView(this) {
             @Override
@@ -2891,6 +2897,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     open_settings = 1;
                 } else if (intent.getAction().equals("new_dialog")) {
                     open_new_dialog = 1;
+                } else if (intent.getAction().equals("mgla_ghost_toggle")) {
+                    boolean newVal = !MglaSpyConfig.isGhostModeEnabled();
+                    MglaSpyConfig.setGhostModeEnabled(newVal);
                 } else if (intent.getAction().startsWith("com.tmessages.openchat")) {
 //                    Integer chatIdInt = intent.getIntExtra("chatId", 0);
                     long chatId = intent.getLongExtra("chatId", 0);
@@ -6643,6 +6652,20 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         getActionBarLayout().presentFragment(fragment);
     }
 
+    public void openMglaSideMenu() {
+        if (mglaSideMenu != null && MglaSideMenuConfig.isEnabled()) {
+            mglaSideMenu.open();
+        }
+    }
+
+    public MglaSideMenu getMglaSideMenu() {
+        return mglaSideMenu;
+    }
+
+    public boolean isMglaSideMenuVisible() {
+        return mglaSideMenu != null && mglaSideMenu.isVisibleOrAnimating();
+    }
+
     public boolean presentFragment(final BaseFragment fragment, final boolean removeLast, boolean forceWithoutAnimation) {
         return getActionBarLayout().presentFragment(fragment, removeLast, forceWithoutAnimation, true, false);
     }
@@ -8367,6 +8390,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     }
 
     public boolean onBackPressed(boolean invoked) {
+        if (mglaSideMenu != null && mglaSideMenu.isOpen()) {
+            if (invoked) mglaSideMenu.close();
+            return false;
+        }
         if (FloatingDebugController.onBackPressed(invoked)) {
             return false;
         }

@@ -116,6 +116,8 @@ import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MglaHeaderConfig;
+import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
@@ -505,6 +507,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private ProxyDrawable proxyDrawable;
     private ActionBarMenuSubItem proxyMenuSubItem;
     private ActionBarMenuItem proxyHeaderItem;
+    private ActionBarMenuItem ghostHeaderItem;
+    private ImageView mglaSideMenuButton;
     private HintView2 storyHint;
     private HintView2 storyPremiumHint;
     private boolean canShowStoryHint;
@@ -712,6 +716,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private int maximumVelocity;
     private boolean startedTracking;
     private boolean maybeStartTracking;
+    private boolean mglaSideMenuGestureActive;
     private static final Interpolator interpolator = t -> {
         --t;
         return t * t * t * t * t + 1.0F;
@@ -1309,6 +1314,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         @Override
         public boolean onInterceptTouchEvent(MotionEvent ev) {
+            if (tryStartMglaSideMenuGesture(ev)) {
+                return true;
+            }
             int action = ev.getActionMasked();
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 if (actionBar.isActionModeShowed()) {
@@ -1328,6 +1336,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         @Override
         public boolean onTouchEvent(MotionEvent ev) {
+            if (tryStartMglaSideMenuGesture(ev)) {
+                return true;
+            }
             if (
                     parentLayout != null &&
                             filterTabsView != null && !filterTabsView.isEditing() &&
@@ -1592,14 +1603,16 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     private void updateStoriesViewAlpha(float alpha) {
         final float factorSearch = Utilities.clamp(searchAnimationProgress * 2, 1f, 0f);
+        final boolean mglaStoriesExpandedOnly = MglaSideMenuConfig.isEnabled() && !isArchive();
+        float storiesCollapseProgress = Utilities.clamp(-scrollYOffset / dp(DialogStoriesCell.HEIGHT_IN_DP), 1f, 0f);
+        if (progressToActionMode == 1f) {
+            storiesCollapseProgress = 1f;
+        }
         dialogStoriesCell.setAlpha((1f - progressToActionMode) * alpha * progressToDialogStoriesCell * (1f - factorSearch));
         float containersAlpha;
 
         if (hasStories || animateToHasStories) {
-            float p = Utilities.clamp(-scrollYOffset / dp(DialogStoriesCell.HEIGHT_IN_DP), 1f, 0f);
-            if (progressToActionMode == 1f) {
-                p = 1f;
-            }
+            float p = storiesCollapseProgress;
             float pHalf = Utilities.clamp(p / 0.5f, 1f, 0f);
             dialogStoriesCell.setClipTop(0);
             if (!hasStories && animateToHasStories) {
@@ -1618,18 +1631,25 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionBar.setTranslationY(0);
         } else {
             if (hasOnlySlefStories) {
-                dialogStoriesCell.setTranslationY(-dp(DialogStoriesCell.HEIGHT_IN_DP) + Math.max(scrollYOffset, -getMaxScrollYOffsetWithoutSearch()) - dp(8));
-                dialogStoriesCell.setProgressToCollapse(1f);
-                dialogStoriesCell.setClipTop((int) (AndroidUtilities.statusBarHeight - dialogStoriesCell.getY()));
+                if (mglaStoriesExpandedOnly) {
+                    dialogStoriesCell.setTranslationY(Math.max(scrollYOffset, -getMaxScrollYOffsetWithoutSearch()) + storiesYOffset + storiesOverscroll / 2f - dp(8));
+                    dialogStoriesCell.setProgressToCollapse(storiesCollapseProgress, false);
+                    dialogStoriesCell.setClipTop(0);
+                } else {
+                    dialogStoriesCell.setTranslationY(-dp(DialogStoriesCell.HEIGHT_IN_DP) + Math.max(scrollYOffset, -getMaxScrollYOffsetWithoutSearch()) - dp(8));
+                    dialogStoriesCell.setProgressToCollapse(1f);
+                    dialogStoriesCell.setClipTop((int) (AndroidUtilities.statusBarHeight - dialogStoriesCell.getY()));
+                }
             }
             containersAlpha = 1f - progressToDialogStoriesCell;
 
             actionBar.setTranslationY(0);
         }
         containersAlpha *= (1f - factorSearch);
+        final float mglaTitleOffset = getMglaSideMenuTitleOffset();
         if (containersAlpha != 1f) {
             actionBar.getTitlesContainer().setPivotY(AndroidUtilities.statusBarHeight);
-            actionBar.getTitlesContainer().setPivotX(dp(20));
+            actionBar.getTitlesContainer().setPivotX(dp(20) + mglaTitleOffset);
             float s = 0.4f + 0.6f * containersAlpha;
             actionBar.getTitlesContainer().setScaleY(s);
             actionBar.getTitlesContainer().setScaleX(s);
@@ -1658,6 +1678,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionBar.getAdditionalSubTitleOverlayContainer().setAlpha(titleAlpha);
             actionBar.getAdditionalSubTitleOverlayContainer().setVisibility(titleAlpha > 0 ? View.VISIBLE : View.INVISIBLE);
         }
+        updateMglaActionBarTitleOffset();
     }
 
     public static float viewOffset = 0.0f;
@@ -2845,6 +2866,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 globalObserversGroup.add(NotificationCenter.closeSearchByActiveAction);
                 globalObserversGroup.add(NotificationCenter.proxySettingsChanged);
                 globalObserversGroup.add(NotificationCenter.mglaHeaderSettingsChanged);
+                globalObserversGroup.add(NotificationCenter.ghostModeChanged);
                 observersGroup.add(NotificationCenter.filterSettingsUpdated);
                 observersGroup.add(NotificationCenter.dialogsUnreadCounterChanged);
             }
@@ -2920,6 +2942,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
 
         BirthdayController.getInstance(currentAccount).check();
+        getMediaDataController().buildShortcuts();
         additionNavigationBarHeight = hasMainTabs ? dp(MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
         additionFloatingButtonOffset = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
 
@@ -3231,6 +3254,31 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             proxyHeaderItem.setOnClickListener(v -> presentFragment(new ProxyListActivity()));
             proxyHeaderItem.setVisibility(View.GONE);
             updateProxyHeaderIcon();
+
+            ghostHeaderItem = menu.addItem(102, R.drawable.ghost);
+            ghostHeaderItem.setContentDescription("Режим призрака");
+            ghostHeaderItem.setOnClickListener(v -> {
+                boolean newVal = !MglaSpyConfig.isGhostModeEnabled();
+                MglaSpyConfig.setGhostModeEnabled(newVal);
+                updateGhostHeaderIcon();
+            });
+            ghostHeaderItem.setVisibility(View.GONE);
+            updateGhostHeaderIcon();
+
+            mglaSideMenuButton = new ImageView(context);
+            mglaSideMenuButton.setImageResource(R.drawable.mgla_ic_menu);
+            mglaSideMenuButton.setScaleType(ImageView.ScaleType.CENTER);
+            mglaSideMenuButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarDefaultSelector)));
+            mglaSideMenuButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_actionBarDefaultIcon), PorterDuff.Mode.SRC_IN));
+            mglaSideMenuButton.setContentDescription("Боковое меню");
+            mglaSideMenuButton.setOnClickListener(v -> {
+                if (getParentActivity() instanceof LaunchActivity) {
+                    ((LaunchActivity) getParentActivity()).openMglaSideMenu();
+                }
+            });
+            mglaSideMenuButton.setVisibility(View.GONE);
+            actionBar.addView(mglaSideMenuButton, 0, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.TOP));
+            updateMglaSideMenuButtonLayout();
         }
 
         fragmentSearchField = new FragmentSearchField(context, resourceProvider) {
@@ -3464,9 +3512,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo_2).mutate();
                 logoDrawable.setBounds(0, dp(2), logoDrawable.getIntrinsicWidth(), dp(2) + logoDrawable.getIntrinsicHeight());
                 logoDrawable.setColorFilter(getThemedColor(Theme.key_telegram_color_dialogsLogo), PorterDuff.Mode.MULTIPLY);
-                SpannableStringBuilder ssb = new SpannableStringBuilder(getString(R.string.AppName));
-                ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                actionBar.setTitle(ssb, statusDrawable);
+                updateMglaActionBarTitle();
                 updateStatus(UserConfig.getInstance(currentAccount).getCurrentUser(), false);
             }
             if (folderId == 0) {
@@ -5251,6 +5297,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         };
         dialogStoriesCell.setActionBar(actionBar);
         dialogStoriesCell.setMenuItemsOffset(isArchive() ? dp(68) : dpf2(16.66f));
+        dialogStoriesCell.setStoriesExpandedOnly(MglaSideMenuConfig.isEnabled() && !isArchive());
+        if (MglaSideMenuConfig.isEnabled() && !isArchive()) {
+            dialogStoriesCell.setMenuItemsOffset(dp(52));
+        }
         dialogStoriesCell.allowGlobalUpdates = false;
         dialogStoriesCell.setVisibility(View.GONE);
         animateToHasStories = false;
@@ -5282,9 +5332,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         undoView[1] = null;
 
         if (hasMainTabs) {
-            actionBar.getTitlesContainer().setTranslationX(dp(4));
             actionBar.setTitleColor(getThemedColor(Theme.key_telegram_color_dialogsLogo));
         }
+        updateMglaActionBarTitleOffset();
 
         if (folderId != 0) {
             viewPages[0].listView.setGlowColor(getThemedColor(Theme.key_windowBackgroundWhite));
@@ -10050,6 +10100,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         final boolean showProxy = MglaHeaderConfig.isProxyInHeader();
         final boolean showDownloads = MglaHeaderConfig.isDownloadsInHeader();
+        final boolean showGhost = MglaSpyConfig.isGhostModeEnabled();
+        final boolean showSideMenu = MglaSideMenuConfig.isEnabled();
 
         final float factor1 = 1f - animatorSearchVisible.getFloatValue();
         final float factor2 = 1f - getRightSlidingProgress();
@@ -10063,6 +10115,143 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         } else {
             FragmentFloatingButton.setAnimatedVisibility(mglaDownloadsHeaderItem, 0);
         }
+
+        if (showGhost) {
+            FragmentFloatingButton.setAnimatedVisibility(ghostHeaderItem, factor);
+        } else {
+            FragmentFloatingButton.setAnimatedVisibility(ghostHeaderItem, 0);
+        }
+
+        if (mglaSideMenuButton != null) {
+            updateMglaSideMenuButtonLayout();
+            if (showSideMenu) {
+                FragmentFloatingButton.setAnimatedVisibility(mglaSideMenuButton, factor);
+                actionBar.bringChildToFront(mglaSideMenuButton);
+            } else {
+                FragmentFloatingButton.setAnimatedVisibility(mglaSideMenuButton, 0);
+            }
+        }
+        updateMglaSideMenuStoriesLayout(showSideMenu);
+    }
+
+    private void updateMglaSideMenuStoriesLayout(boolean showSideMenu) {
+        updateMglaActionBarTitle();
+        if (dialogStoriesCell == null) {
+            return;
+        }
+        final boolean expandedOnly = showSideMenu && !isArchive();
+        dialogStoriesCell.setStoriesExpandedOnly(expandedOnly);
+        float offset = expandedOnly ? dp(52) : (isArchive() ? dp(68) : dpf2(16.66f));
+        dialogStoriesCell.setMenuItemsOffset(offset);
+        dialogStoriesCell.updateItems(false, true);
+        dialogStoriesCell.invalidate();
+    }
+
+    private void updateMglaActionBarTitle() {
+        if (actionBar == null || folderId != 0 || statusDrawable == null) {
+            return;
+        }
+        if (MglaSideMenuConfig.isEnabled()) {
+            actionBar.setTitleColor(getThemedColor(Theme.key_telegram_color_dialogsLogo));
+            actionBar.setTitle("Mgla", statusDrawable);
+        } else if (logoDrawable != null) {
+            SpannableStringBuilder ssb = new SpannableStringBuilder(getString(R.string.AppName));
+            ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            actionBar.setTitle(ssb, statusDrawable);
+        }
+        updateMglaActionBarTitleOffset();
+    }
+
+    private float getMglaSideMenuTitleOffset() {
+        return MglaSideMenuConfig.isEnabled() && folderId == 0 ? dp(48) : 0;
+    }
+
+    private boolean canOpenMglaSideMenuByGesture() {
+        if (!MglaSideMenuConfig.isEnabled() || folderId != 0 || onlySelect || searching) {
+            return false;
+        }
+        if (initialDialogsType != DIALOGS_TYPE_DEFAULT) {
+            return false;
+        }
+        if (actionBar != null && actionBar.isActionModeShowed()) {
+            return false;
+        }
+        if (rightSlidingDialogContainer != null && rightSlidingDialogContainer.hasFragment()) {
+            return false;
+        }
+        if (filterTabsView != null && !filterTabsView.isFirstTabSelected()) {
+            return false;
+        }
+        if (!(getParentActivity() instanceof LaunchActivity)) {
+            return false;
+        }
+        return !((LaunchActivity) getParentActivity()).isMglaSideMenuVisible();
+    }
+
+    private boolean tryStartMglaSideMenuGesture(MotionEvent ev) {
+        if (!(getParentActivity() instanceof LaunchActivity) || ev == null) {
+            return false;
+        }
+        MglaSideMenu menu = ((LaunchActivity) getParentActivity()).getMglaSideMenu();
+        if (menu == null) {
+            return false;
+        }
+        if (mglaSideMenuGestureActive || menu.isHandlingOpenGesture()) {
+            boolean handled = menu.handleOpenGesture(ev);
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                mglaSideMenuGestureActive = false;
+            }
+            return handled;
+        }
+        if (ev.getActionMasked() != MotionEvent.ACTION_DOWN || !canOpenMglaSideMenuByGesture()) {
+            return false;
+        }
+        if (ev.getRawX() > dp(20)) {
+            return false;
+        }
+        boolean handled = menu.handleOpenGesture(ev);
+        if (handled) {
+            mglaSideMenuGestureActive = true;
+        }
+        return handled;
+    }
+
+    private void updateMglaActionBarTitleOffset() {
+        if (actionBar == null) {
+            return;
+        }
+        float titleTranslationX = hasMainTabs ? dp(4) : 0;
+        titleTranslationX += getMglaSideMenuTitleOffset();
+        actionBar.getTitlesContainer().setTranslationX(titleTranslationX);
+        actionBar.getAdditionalSubTitleOverlayContainer().setTranslationX(titleTranslationX);
+        actionBar.getTitlesContainer().setPivotX(dp(20) + getMglaSideMenuTitleOffset());
+    }
+
+    private void updateMglaSideMenuButtonLayout() {
+        if (mglaSideMenuButton == null || actionBar == null) {
+            return;
+        }
+        AndroidUtilities.fillStatusBarHeight(getContext(), AndroidUtilities.statusBarHeight == 0);
+        int statusBarTop = AndroidUtilities.statusBarHeight;
+        if (statusBarTop <= 0 && getContext() != null) {
+            statusBarTop = AndroidUtilities.getStatusBarHeight(getContext());
+        }
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) mglaSideMenuButton.getLayoutParams();
+        if (lp == null) {
+            return;
+        }
+        lp.gravity = Gravity.LEFT | Gravity.TOP;
+        lp.width = dp(48);
+        lp.height = dp(48);
+        lp.leftMargin = 0;
+        lp.topMargin = statusBarTop + (ActionBar.getCurrentActionBarHeight() - dp(48)) / 2;
+        mglaSideMenuButton.setLayoutParams(lp);
+    }
+
+    private void updateGhostHeaderIcon() {
+        if (ghostHeaderItem == null) return;
+        checkUi_mglaHeaderIcons();
     }
 
     private void updateProxyHeaderIcon() {
@@ -10404,6 +10593,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         } else if (id == NotificationCenter.mglaHeaderSettingsChanged) {
             checkUi_mglaHeaderIcons();
             updateProxyButton(false, true);
+        } else if (id == NotificationCenter.ghostModeChanged) {
+            updateGhostHeaderIcon();
         } else if (id == NotificationCenter.updateInterfaces) {
             Integer mask = (Integer) args[0];
             updateVisibleRows(mask);
@@ -11906,6 +12097,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (logoDrawable != null) {
                 logoDrawable.setColorFilter(getThemedColor(Theme.key_telegram_color_dialogsLogo), PorterDuff.Mode.MULTIPLY);
             }
+            updateMglaActionBarTitle();
             if (actionModeCloseView != null) {
                 actionModeCloseView.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_actionBarActionModeDefaultIcon), PorterDuff.Mode.MULTIPLY));
                 actionModeCloseView.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarActionModeDefaultSelector)));
@@ -13569,6 +13761,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
         navigationBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
+        if (statusBarHeight > 0) {
+            AndroidUtilities.statusBarHeight = statusBarHeight;
+        }
+        updateMglaSideMenuButtonLayout();
         final int imeInsetHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
         if (this.imeInsetHeight != imeInsetHeight) {
             this.imeInsetHeight = imeInsetHeight;
