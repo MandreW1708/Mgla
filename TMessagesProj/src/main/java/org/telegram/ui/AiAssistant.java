@@ -14,6 +14,10 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * AI assistant powered by OpenRouter.
@@ -25,10 +29,16 @@ public class AiAssistant {
 
     private static final String OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
     private static final String[] MODELS = {
-        "nex-agi/nex-n2-pro:free",
+        "deepseek/deepseek-v4-flash",
         "openrouter/owl-alpha",
         "google/gemma-4-26b-a4b-it:free"
     };
+
+    public static final int DAILY_LIMIT = 50;
+    private static final String PREFS_NAME = "mgla_config";
+    private static final String KEY_DATE = "ai_editor_date";
+    private static final String KEY_COUNT = "ai_editor_count";
+    private static final String KEY_LAST_REQUEST = "ai_last_request";
 
     private static volatile AiAssistant instance;
 
@@ -53,8 +63,65 @@ public class AiAssistant {
         return !TextUtils.isEmpty(API_KEY);
     }
 
+    private static SharedPreferences prefs() {
+        return ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    private static String todayKey() {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+    }
+
+    /** Сколько запросов уже сделано сегодня (0 после сброса). */
+    public static int getUsedToday() {
+        SharedPreferences prefs = prefs();
+        String today = todayKey();
+        if (!today.equals(prefs.getString(KEY_DATE, ""))) {
+            return 0;
+        }
+        return prefs.getInt(KEY_COUNT, 0);
+    }
+
+    public static String getUsageLabel() {
+        return getUsedToday() + " / " + DAILY_LIMIT;
+    }
+
+    public static String getResetInLabel() {
+        Calendar now = Calendar.getInstance();
+        Calendar midnight = Calendar.getInstance();
+        midnight.set(Calendar.HOUR_OF_DAY, 0);
+        midnight.set(Calendar.MINUTE, 0);
+        midnight.set(Calendar.SECOND, 0);
+        midnight.set(Calendar.MILLISECOND, 0);
+        midnight.add(Calendar.DAY_OF_MONTH, 1);
+        long diffMs = midnight.getTimeInMillis() - now.getTimeInMillis();
+        long hours = diffMs / (1000 * 60 * 60);
+        long minutes = (diffMs / (1000 * 60)) % 60;
+        return hours + " ч " + minutes + " мин";
+    }
+
+    /**
+     * Учитывает запрос в дневном лимите. Возвращает false, если лимит исчерпан.
+     */
+    private synchronized boolean consumeDailyQuota() {
+        SharedPreferences prefs = prefs();
+        String today = todayKey();
+        String savedDate = prefs.getString(KEY_DATE, "");
+        int count;
+        if (!today.equals(savedDate)) {
+            prefs.edit().putString(KEY_DATE, today).putInt(KEY_COUNT, 1).apply();
+            return true;
+        }
+        count = prefs.getInt(KEY_COUNT, 0);
+        if (count >= DAILY_LIMIT) {
+            return false;
+        }
+        prefs.edit().putInt(KEY_COUNT, count + 1).apply();
+        return true;
+    }
+
     /**
      * Отправляет запрос к OpenRouter и возвращает ответ.
+     * Любой вызов учитывается в дневном лимите ({@link #DAILY_LIMIT}).
      *
      * @param userMessage сообщение пользователя
      * @param callback    вызывается с ответом (на UI-потоке) или ошибкой
@@ -67,11 +134,9 @@ public class AiAssistant {
             return;
         }
 
-        // Anti-spam: 10-second cooldown
-        SharedPreferences prefs = ApplicationLoader.applicationContext
-            .getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+        SharedPreferences prefs = prefs();
         long now = System.currentTimeMillis();
-        long last = prefs.getLong("ai_last_request", 0);
+        long last = prefs.getLong(KEY_LAST_REQUEST, 0);
         if (now - last < 10_000) {
             long remain = 10 - (now - last) / 1000;
             if (callback != null) {
@@ -79,7 +144,16 @@ public class AiAssistant {
             }
             return;
         }
-        prefs.edit().putLong("ai_last_request", now).apply();
+
+        if (!consumeDailyQuota()) {
+            if (callback != null) {
+                AndroidUtilities.runOnUIThread(() ->
+                    callback.onError("Лимит " + DAILY_LIMIT + " запросов в день исчерпан. До сброса: " + getResetInLabel()));
+            }
+            return;
+        }
+
+        prefs.edit().putLong(KEY_LAST_REQUEST, now).apply();
 
         new Thread(() -> {
             try {

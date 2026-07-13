@@ -46600,13 +46600,15 @@ public class ChatActivity extends BaseFragment implements
                     && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
                     items.add("Краткая Сводка");
                     options.add(OPTION_AI_SUMMARY);
-                    icons.add(R.drawable.msg_translate);
-                    items.add("Ответить вежливо");
-                    options.add(OPTION_AI_REPLY_POLITE);
-                    icons.add(R.drawable.menu_reply);
-                    items.add("Объяснить проще");
-                    options.add(OPTION_AI_EXPLAIN_SIMPLE);
-                    icons.add(R.drawable.menu_rewrite);
+                    icons.add(R.drawable.msg_text_outlined);
+                    if (!ChatObject.isChannelAndNotMegaGroup(currentChat)) {
+                        items.add("Ответить вежливо");
+                        options.add(OPTION_AI_REPLY_POLITE);
+                        icons.add(R.drawable.menu_reply);
+                        items.add("Объяснить проще");
+                        options.add(OPTION_AI_EXPLAIN_SIMPLE);
+                        icons.add(R.drawable.menu_rewrite);
+                    }
                     items.add("AI-перевод");
                     options.add(OPTION_AI_TRANSLATE);
                     icons.add(R.drawable.msg_translate);
@@ -46700,13 +46702,15 @@ public class ChatActivity extends BaseFragment implements
                     && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
                     items.add("Краткая Сводка");
                     options.add(OPTION_AI_SUMMARY);
-                    icons.add(R.drawable.msg_translate);
-                    items.add("Ответить вежливо");
-                    options.add(OPTION_AI_REPLY_POLITE);
-                    icons.add(R.drawable.menu_reply);
-                    items.add("Объяснить проще");
-                    options.add(OPTION_AI_EXPLAIN_SIMPLE);
-                    icons.add(R.drawable.menu_rewrite);
+                    icons.add(R.drawable.msg_text_outlined);
+                    if (!ChatObject.isChannelAndNotMegaGroup(currentChat)) {
+                        items.add("Ответить вежливо");
+                        options.add(OPTION_AI_REPLY_POLITE);
+                        icons.add(R.drawable.menu_reply);
+                        items.add("Объяснить проще");
+                        options.add(OPTION_AI_EXPLAIN_SIMPLE);
+                        icons.add(R.drawable.menu_rewrite);
+                    }
                     items.add("AI-перевод");
                     options.add(OPTION_AI_TRANSLATE);
                     icons.add(R.drawable.msg_translate);

@@ -23,10 +23,6 @@ import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-
 public class MglaAiSettingsActivity extends BaseFragment {
 
     private static final int ROW_AI_ENABLED = 0;
@@ -113,11 +109,12 @@ public class MglaAiSettingsActivity extends BaseFragment {
         return null;
     }
 
-    private String getEditorLimitValue() {
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-        String savedDate = prefs.getString("ai_editor_date", "");
-        int used = today.equals(savedDate) ? prefs.getInt("ai_editor_count", 0) : 0;
-        return used + " / 50";
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (listView != null && listView.getAdapter() != null) {
+            listView.getAdapter().notifyItemChanged(ROW_AI_EDITOR_LIMIT);
+        }
     }
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
@@ -168,7 +165,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             if (position == ROW_AI_EDITOR_LIMIT) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("Лимит AI-редактора", getEditorLimitValue(), false);
+                cell.setTextAndValue("Лимит запросов к AI", AiAssistant.getUsageLabel(), false);
                 cell.setCanDisable(false);
             } else if (position == ROW_AI_TRANSCRIBE) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;

@@ -74,6 +74,20 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
 
         rootLayout.addView(sideMenuBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
+        LinearLayout animationBlock = createBlock(context, "Анимация");
+
+        TextCheckCell predictiveBackCell = new TextCheckCell(context);
+        predictiveBackCell.setBackground(null);
+        predictiveBackCell.setTextAndCheck("Новая predective back анимация", MglaGlassConfig.isMd3PredictiveBackEnabled(), false);
+        predictiveBackCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isMd3PredictiveBackEnabled();
+            MglaGlassConfig.setMd3PredictiveBackEnabled(newVal);
+            predictiveBackCell.setChecked(newVal);
+        });
+        animationBlock.addView(predictiveBackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(animationBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         fragmentView = rootLayout;
         return fragmentView;
     }
