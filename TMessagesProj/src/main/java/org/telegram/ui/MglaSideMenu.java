@@ -84,7 +84,15 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private TextView ghostButtonLabel;
     private View ghostButton;
     private LinearLayout accountsBlock;
-    private LinearLayout accountsListContainer;
+    private LinearLayout accountsPinnedContainer;
+    private LinearLayout accountsExpandableContainer;
+    private FrameLayout accountsExpandClip;
+    private View accountsDivider;
+    private View addAccountRow;
+    private ImageView accountsExpandBtn;
+    private boolean accountsExpanded = true;
+    private ValueAnimator accountsHeightAnimator;
+    private boolean themeIconIsDark;
     private LinearLayout profileSection;
     private LinearLayout navContainer;
     private final ArrayList<View> navRows = new ArrayList<>();
@@ -195,7 +203,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
         themeToggleBtn = new ImageView(context);
         themeToggleBtn.setScaleType(ImageView.ScaleType.CENTER);
-        themeToggleBtn.setBackground(createRectSelector());
+        themeToggleBtn.setBackground(null);
         themeToggleBtn.setOnClickListener(v -> toggleTheme());
         actionButtons.addView(themeToggleBtn, LayoutHelper.createLinear(40, 40));
 
@@ -287,24 +295,46 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         accountsBlock = new LinearLayout(context);
         accountsBlock.setOrientation(LinearLayout.VERTICAL);
         accountsBlock.setPadding(dp(12), dp(8), dp(12), dp(8));
+        accountsBlock.setClipToPadding(false);
+        accountsBlock.setClipChildren(false);
 
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(14));
         bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        bg.setStroke(dp(1.5f), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 55));
         accountsBlock.setBackground(bg);
 
-        accountsListContainer = new LinearLayout(context);
-        accountsListContainer.setOrientation(LinearLayout.VERTICAL);
-        accountsBlock.addView(accountsListContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        FrameLayout pinnedWrap = new FrameLayout(context);
+        accountsPinnedContainer = new LinearLayout(context);
+        accountsPinnedContainer.setOrientation(LinearLayout.VERTICAL);
+        pinnedWrap.addView(accountsPinnedContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        View divider = new View(context);
-        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        accountsBlock.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 4, 4, 4, 4));
+        accountsExpandBtn = new ImageView(context);
+        accountsExpandBtn.setImageResource(R.drawable.arrow_more);
+        accountsExpandBtn.setScaleType(ImageView.ScaleType.CENTER);
+        accountsExpandBtn.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
+        accountsExpandBtn.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_CIRCLE_20DP));
+        accountsExpandBtn.setOnClickListener(v -> setAccountsExpanded(!accountsExpanded, true));
+        pinnedWrap.addView(accountsExpandBtn, LayoutHelper.createFrame(36, 36, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+
+        accountsBlock.addView(pinnedWrap, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        accountsExpandClip = new FrameLayout(context);
+        accountsExpandClip.setClipChildren(true);
+        accountsExpandableContainer = new LinearLayout(context);
+        accountsExpandableContainer.setOrientation(LinearLayout.VERTICAL);
+        accountsExpandClip.addView(accountsExpandableContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        accountsBlock.addView(accountsExpandClip, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        accountsDivider = new View(context);
+        accountsDivider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        accountsExpandableContainer.addView(accountsDivider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 4, 4, 4, 4));
 
         FrameLayout addRow = new FrameLayout(context);
         addRow.setPadding(dp(4), dp(8), dp(4), dp(8));
         addRow.setBackground(createRectSelector());
         addRow.setOnClickListener(v -> openAddAccount());
+        addAccountRow = addRow;
 
         FrameLayout plusWrap = new FrameLayout(context);
         GradientDrawable plusBg = new GradientDrawable();
@@ -327,7 +357,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         addLabel.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         addRow.addView(addLabel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 48, 0, 0, 0));
 
-        accountsBlock.addView(addRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        accountsExpandableContainer.addView(addRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         registerAnimatedView(accountsBlock);
 
         return accountsBlock;
@@ -470,13 +500,55 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         NotificationCenter.getGlobalInstance().postNotificationName(
                 NotificationCenter.needSetDayNightTheme, themeInfo, false, null, -1, toDark, null, null, null, false
         );
-        updateThemeIcon();
+        updateThemeIcon(true);
     }
 
     private void updateThemeIcon() {
+        updateThemeIcon(false);
+    }
+
+    private void updateThemeIcon(boolean animated) {
         boolean isDark = Theme.isCurrentThemeDark();
-        themeToggleBtn.setImageResource(isDark ? R.drawable.mgla_ic_moon : R.drawable.mgla_ic_sun);
-        themeToggleBtn.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.SRC_IN));
+        int iconRes = isDark ? R.drawable.mgla_ic_moon : R.drawable.mgla_ic_sun;
+        int color = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+        if (!animated || themeToggleBtn.getDrawable() == null) {
+            themeIconIsDark = isDark;
+            themeToggleBtn.setScaleX(1f);
+            themeToggleBtn.setScaleY(1f);
+            themeToggleBtn.setAlpha(1f);
+            themeToggleBtn.setRotation(0f);
+            themeToggleBtn.setImageResource(iconRes);
+            themeToggleBtn.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+            return;
+        }
+        if (themeIconIsDark == isDark) {
+            themeToggleBtn.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+            return;
+        }
+        themeIconIsDark = isDark;
+        themeToggleBtn.animate().cancel();
+        themeToggleBtn.animate()
+                .scaleX(0.35f)
+                .scaleY(0.35f)
+                .alpha(0f)
+                .rotation(isDark ? 90f : -90f)
+                .setDuration(140)
+                .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                .withEndAction(() -> {
+                    themeToggleBtn.setImageResource(iconRes);
+                    themeToggleBtn.setColorFilter(new PorterDuffColorFilter(
+                            Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.SRC_IN));
+                    themeToggleBtn.setRotation(isDark ? -90f : 90f);
+                    themeToggleBtn.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .alpha(1f)
+                            .rotation(0f)
+                            .setDuration(180)
+                            .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                            .start();
+                })
+                .start();
     }
 
     private void updateGhostButton() {
@@ -872,11 +944,19 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void refreshAccountsList() {
-        if (accountsListContainer == null) {
+        if (accountsPinnedContainer == null || accountsExpandableContainer == null) {
             return;
         }
-        accountsListContainer.removeAllViews();
+        accountsPinnedContainer.removeAllViews();
+        // Keep divider + addAccountRow; remove only account rows before them.
+        for (int i = accountsExpandableContainer.getChildCount() - 1; i >= 0; i--) {
+            View child = accountsExpandableContainer.getChildAt(i);
+            if (child != accountsDivider && child != addAccountRow) {
+                accountsExpandableContainer.removeViewAt(i);
+            }
+        }
         accountRows.clear();
+
         ArrayList<Integer> accountNumbers = new ArrayList<>();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (UserConfig.getInstance(a).isClientActivated()) {
@@ -895,35 +975,66 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         });
         int selectedAccount = UserConfig.selectedAccount;
         Context context = getContext();
+
+        // Insert other accounts above divider.
+        int insertIndex = 0;
         for (int i = 0; i < accountNumbers.size(); i++) {
             final int account = accountNumbers.get(i);
-            TLRPC.User accountUser = UserConfig.getInstance(account).getCurrentUser();
+            boolean isSelected = account == selectedAccount;
+            FrameLayout accountRow = createAccountRow(context, account, isSelected);
+            accountRows.add(accountRow);
+            if (isSelected) {
+                accountsPinnedContainer.addView(accountRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            } else {
+                accountsExpandableContainer.addView(accountRow, insertIndex++, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            }
+        }
 
-            FrameLayout accountRow = new FrameLayout(context);
-            accountRow.setPadding(dp(4), dp(8), dp(4), dp(8));
-            accountRow.setBackground(createRectSelector());
-            accountRow.setOnClickListener(v -> switchToAccount(account));
+        boolean multiAccount = accountNumbers.size() > 1;
+        if (accountsExpandBtn != null) {
+            accountsExpandBtn.setVisibility(multiAccount ? VISIBLE : GONE);
+        }
+        if (!multiAccount) {
+            accountsExpanded = true;
+        }
+        applyAccountsExpandedState(false);
+        rebuildAnimatedViews();
+    }
 
-            BackupImageView avatar = new BackupImageView(context);
-            avatar.setRoundRadius(dp(18));
-            AvatarDrawable drawable = new AvatarDrawable(accountUser);
-            avatar.setForUserOrChat(accountUser, drawable);
-            accountRow.addView(avatar, LayoutHelper.createFrame(36, 36, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+    private FrameLayout createAccountRow(Context context, int account, boolean isSelected) {
+        TLRPC.User accountUser = UserConfig.getInstance(account).getCurrentUser();
+        FrameLayout accountRow = new FrameLayout(context);
+        accountRow.setPadding(dp(4), dp(8), dp(4), dp(8));
+        accountRow.setBackground(createRectSelector());
+        accountRow.setTag(account);
+        accountRow.setOnClickListener(v -> switchToAccount(account));
 
-            TextView name = new TextView(context);
-            name.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-            name.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            name.setSingleLine(true);
-            name.setText(UserObject.getUserName(accountUser));
-            accountRow.addView(name, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 48, 0, 40, 0));
+        BackupImageView avatar = new BackupImageView(context);
+        avatar.setRoundRadius(dp(18));
+        AvatarDrawable drawable = new AvatarDrawable(accountUser);
+        avatar.setForUserOrChat(accountUser, drawable);
+        accountRow.addView(avatar, LayoutHelper.createFrame(36, 36, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
+        float nameLeft = 48;
+        if (isSelected) {
+            ImageView check = new ImageView(context);
+            check.setImageResource(R.drawable.msg_check_s);
+            check.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText), PorterDuff.Mode.SRC_IN));
+            check.setTag("account_check");
+            accountRow.addView(check, LayoutHelper.createFrame(18, 18, Gravity.LEFT | Gravity.CENTER_VERTICAL, 42, 0, 0, 0));
+            nameLeft = 64;
+        }
+
+        TextView name = new TextView(context);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        name.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        name.setSingleLine(true);
+        name.setText(UserObject.getUserName(accountUser));
+        accountRow.addView(name, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, nameLeft, 0, isSelected ? 44 : 12, 0));
+
+        if (!isSelected) {
             int unread = MessagesStorage.getInstance(account).getMainUnreadCount();
-            if (account == selectedAccount) {
-                ImageView check = new ImageView(context);
-                check.setImageResource(R.drawable.msg_check_s);
-                check.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText), PorterDuff.Mode.SRC_IN));
-                accountRow.addView(check, LayoutHelper.createFrame(18, 18, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
-            } else if (unread > 0) {
+            if (unread > 0) {
                 TextView counter = new TextView(context);
                 counter.setText(String.valueOf(unread));
                 counter.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
@@ -937,11 +1048,149 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 counter.setPadding(dp(6), dp(2), dp(6), dp(2));
                 accountRow.addView(counter, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
             }
-
-            accountsListContainer.addView(accountRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-            accountRows.add(accountRow);
         }
-        rebuildAnimatedViews();
+        return accountRow;
+    }
+
+    private void setAccountsExpanded(boolean expanded, boolean animated) {
+        if (accountsExpanded == expanded) {
+            return;
+        }
+        accountsExpanded = expanded;
+        applyAccountsExpandedState(animated);
+    }
+
+    private void cancelAccountsHeightAnimator() {
+        if (accountsHeightAnimator != null) {
+            accountsHeightAnimator.removeAllListeners();
+            accountsHeightAnimator.removeAllUpdateListeners();
+            accountsHeightAnimator.cancel();
+            accountsHeightAnimator = null;
+        }
+    }
+
+    private void setAccountsExpandClipHeight(int height) {
+        if (accountsExpandClip == null) {
+            return;
+        }
+        ViewGroup.LayoutParams lp = accountsExpandClip.getLayoutParams();
+        if (lp == null) {
+            return;
+        }
+        int newHeight = height;
+        if (height != ViewGroup.LayoutParams.WRAP_CONTENT && height != ViewGroup.LayoutParams.MATCH_PARENT) {
+            newHeight = Math.max(0, height);
+        }
+        if (lp.height == newHeight) {
+            return;
+        }
+        lp.height = newHeight;
+        accountsExpandClip.setLayoutParams(lp);
+    }
+
+    private int measureAccountsExpandableHeight() {
+        if (accountsExpandableContainer == null || accountsBlock == null) {
+            return 0;
+        }
+        int width = accountsBlock.getWidth() - accountsBlock.getPaddingLeft() - accountsBlock.getPaddingRight();
+        if (width <= 0) {
+            width = accountsExpandClip != null ? accountsExpandClip.getWidth() : 0;
+        }
+        if (width <= 0) {
+            width = dp(280);
+        }
+        accountsExpandableContainer.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+        return Math.max(0, accountsExpandableContainer.getMeasuredHeight());
+    }
+
+    private void applyAccountsExpandedState(boolean animated) {
+        if (accountsExpandClip == null || accountsExpandableContainer == null) {
+            return;
+        }
+
+        View check = accountsPinnedContainer != null ? accountsPinnedContainer.findViewWithTag("account_check") : null;
+        if (check != null) {
+            check.setVisibility(accountsExpanded ? VISIBLE : GONE);
+        }
+
+        if (accountsExpandBtn != null) {
+            accountsExpandBtn.animate().cancel();
+            float rotation = accountsExpanded ? 180f : 0f;
+            if (animated) {
+                accountsExpandBtn.animate().rotation(rotation).setDuration(260).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
+            } else {
+                accountsExpandBtn.setRotation(rotation);
+            }
+        }
+
+        cancelAccountsHeightAnimator();
+
+        if (!animated) {
+            accountsExpandableContainer.setAlpha(1f);
+            accountsExpandClip.setVisibility(accountsExpanded ? VISIBLE : GONE);
+            setAccountsExpandClipHeight(accountsExpanded ? ViewGroup.LayoutParams.WRAP_CONTENT : 0);
+            return;
+        }
+
+        accountsExpandClip.setVisibility(VISIBLE);
+        final int fullHeight = measureAccountsExpandableHeight();
+        if (fullHeight <= 0) {
+            accountsExpandableContainer.setAlpha(1f);
+            accountsExpandClip.setVisibility(accountsExpanded ? VISIBLE : GONE);
+            setAccountsExpandClipHeight(accountsExpanded ? ViewGroup.LayoutParams.WRAP_CONTENT : 0);
+            return;
+        }
+
+        int currentHeight = accountsExpandClip.getLayoutParams() != null ? accountsExpandClip.getLayoutParams().height : 0;
+        if (currentHeight == ViewGroup.LayoutParams.WRAP_CONTENT || currentHeight < 0) {
+            currentHeight = accountsExpandClip.getHeight();
+        }
+        if (currentHeight < 0) {
+            currentHeight = 0;
+        }
+
+        final int startHeight;
+        final int endHeight;
+        if (accountsExpanded) {
+            startHeight = Math.min(currentHeight, fullHeight);
+            endHeight = fullHeight;
+            accountsExpandableContainer.setAlpha(Math.max(0.2f, startHeight / (float) fullHeight));
+            setAccountsExpandClipHeight(startHeight);
+        } else {
+            startHeight = currentHeight > 0 ? currentHeight : fullHeight;
+            endHeight = 0;
+            setAccountsExpandClipHeight(startHeight);
+        }
+
+        accountsHeightAnimator = ValueAnimator.ofInt(startHeight, endHeight);
+        accountsHeightAnimator.addUpdateListener(a -> {
+            int value = (int) a.getAnimatedValue();
+            setAccountsExpandClipHeight(value);
+            accountsExpandableContainer.setAlpha(Utilities.clamp(value / (float) fullHeight, 1f, 0f));
+        });
+        accountsHeightAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (accountsHeightAnimator != animation) {
+                    return;
+                }
+                accountsHeightAnimator = null;
+                accountsExpandableContainer.setAlpha(1f);
+                if (accountsExpanded) {
+                    setAccountsExpandClipHeight(ViewGroup.LayoutParams.WRAP_CONTENT);
+                    accountsExpandClip.setVisibility(VISIBLE);
+                } else {
+                    setAccountsExpandClipHeight(0);
+                    accountsExpandClip.setVisibility(GONE);
+                }
+            }
+        });
+        accountsHeightAnimator.setDuration(260);
+        accountsHeightAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        accountsHeightAnimator.start();
     }
 
     private void updatePanelColors() {
@@ -975,7 +1224,14 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 Theme.getColor(Theme.key_dialogBackgroundGray),
                 0.35f
         ));
+        accountsBg.setStroke(dp(1.5f), ColorUtils.setAlphaComponent(grayText, 55));
         accountsBlock.setBackground(accountsBg);
+        if (accountsExpandBtn != null) {
+            accountsExpandBtn.setColorFilter(new PorterDuffColorFilter(grayText, PorterDuff.Mode.SRC_IN));
+        }
+        if (accountsDivider != null) {
+            accountsDivider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        }
 
         if (ghostButton != null) {
             GradientDrawable ghostBg = new GradientDrawable();
