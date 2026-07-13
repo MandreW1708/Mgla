@@ -22,6 +22,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Camera;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -30,6 +31,7 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -87,6 +89,7 @@ import org.telegram.ui.Components.FloatingDebug.FloatingDebugProvider;
 import org.telegram.ui.Components.GroupCallPip;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.LaunchActivity;
+import org.telegram.ui.MglaGlassConfig;
 import org.telegram.ui.Stories.StoryViewer;
 
 import java.util.ArrayList;
@@ -645,6 +648,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private boolean withShadow;
     private final Path clipPath = new Path();
     private float[] radii = new float[8];
+    private final RectF predictiveBackShadowRect = new RectF();
+    private final Paint predictiveBackShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Camera predictiveBackCamera = new Camera();
+    private final Matrix predictiveBackMatrix = new Matrix();
 
     public ActionBarLayout(Context context, boolean main) {
         super(context);
@@ -915,7 +922,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         if (fragmentsStack.size() >= 2 && containerView.getMeasuredWidth() > 0) {
             float progress;
             if (newBackTransitions()) {
-                progress = Utilities.clamp01(value / (6 * dp(56)));
+                progress = predictiveBackEnhanced
+                        ? Utilities.clamp01(Math.min(1f, getSpatialBackProgress()))
+                        : Utilities.clamp01(value / (6f * predictivePeekPx()));
             } else {
                 progress = value / containerView.getMeasuredWidth();
             }
@@ -1051,7 +1060,12 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         int clipRight = width + getPaddingLeft();
         int backOffset = 0;
 
-        if (child == containerViewBack) {
+        final boolean spatialBack = predictiveBackEnhanced && newBackTransitions();
+        if (spatialBack) {
+            // Both layers are fully visible — depth is painted, not clipped away
+            clipLeft = getPaddingLeft();
+            clipRight = width + getPaddingLeft();
+        } else if (child == containerViewBack) {
             clipRight = translationX + dp(1);
         } else if (child == containerView) {
             clipLeft = translationX;
@@ -1062,67 +1076,129 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             bottomSheetTabsClip.clip(canvas, withShadow, isKeyboardVisible, getWidth(), (int) getY() + getHeight(), 1.0f);
             withShadow = false;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !isSheet && (translationX != 0 || overrideWidthOffset != -1)) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !isSheet && (translationX != 0 || overrideWidthOffset != -1 || spatialBack)) {
             if (child == containerView) {
-                final WindowInsets insets = getRootWindowInsets();
-                if (insets != null) {
-                    AndroidUtilities.rectTmp.set(translationX, 0, translationX + child.getWidth(), getHeight());
-                    if (newBackTransitions()) {
-                        final float scale;
-                        if (predictiveBackInProgress) {
-                            scale = lerp(1.00f, lerp(0.90f, 0.85f, 1.0f - containerView.getAlpha()), clamp01(translationX / dpf2(56)));
-                        } else {
-                            scale = 1.00f - Math.min(0.25f, 0.05f * translationX / dpf2(56));
-                        }
-                        float dx = translationX > dp(56) && !animationInProgress && predictiveBackInProgress ? translationX : Utilities.clamp(translationX, dp(56), 0);
-                        if (!predictiveBackInProgress || predictiveBackLeft) {
-                            canvas.translate(-dx, 0);
-                            clipRight += dx;
-                            backOffset += dx;
-                        } else {
-                            canvas.translate(-dx, 0);
-                            clipRight += dx;
-                            AndroidUtilities.rectTmp.set(translationX, 0, translationX + child.getWidth(), getHeight());
-                        }
-                        canvas.scale(scale, scale, predictiveBackLeft ? AndroidUtilities.rectTmp.right - dp(82) : AndroidUtilities.rectTmp.left + dp(82), predictiveBackInProgress ? predictiveBackY : AndroidUtilities.rectTmp.centerY());
+                AndroidUtilities.rectTmp.set(0, 0, child.getWidth(), getHeight());
+                if (spatialBack) {
+                    applySpatialFrontTransform(canvas, AndroidUtilities.rectTmp);
+                    final float p = Math.min(1f, getSpatialBackProgress());
+                    final WindowInsets insets = getRootWindowInsets();
+                    float sysTL = 0, sysTR = 0, sysBR = 0, sysBL = 0;
+                    if (insets != null) {
+                        final RoundedCorner topLeft = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
+                        final RoundedCorner topRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_RIGHT);
+                        final RoundedCorner bottomRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_BOTTOM_RIGHT);
+                        final RoundedCorner bottomLeft = insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT);
+                        sysTL = topLeft == null ? 0 : topLeft.getRadius();
+                        sysTR = topRight == null ? 0 : topRight.getRadius();
+                        sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
+                        sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
                     }
-
-                    final RoundedCorner topLeft = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
-                    final RoundedCorner topRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_RIGHT);
-                    final RoundedCorner bottomRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_BOTTOM_RIGHT);
-                    final RoundedCorner bottomLeft = insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT);
-                    radii[0] = radii[1] = topLeft == null ? 0 : topLeft.getRadius();
-                    radii[2] = radii[3] = topRight == null ? 0 : topRight.getRadius();
-                    radii[4] = radii[5] = bottomRight == null ? 0 : bottomRight.getRadius();
-                    radii[6] = radii[7] = bottomLeft == null ? 0 : bottomLeft.getRadius();
-
-                    if (isRightLayout) {
-                        final float factor = Utilities.clamp01(Math.abs(translationX) / dpf2(12));
-                        radii[0] *= factor;
-                        radii[1] *= factor;
-                        radii[6] *= factor;
-                        radii[7] *= factor;
-                    }
-
+                    final float targetRadius = dpf2(48);
+                    radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, targetRadius), p);
+                    radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, targetRadius), p);
+                    radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, targetRadius), p);
+                    radii[6] = radii[7] = lerp(sysBL, Math.max(sysBL, targetRadius), p);
+                    drawSpatialFrontShadow(canvas, AndroidUtilities.rectTmp, Math.max(radii[0], radii[2]), Math.min(1.2f, getSpatialBackProgress()));
                     clipPath.rewind();
                     clipPath.addRoundRect(AndroidUtilities.rectTmp, radii, Path.Direction.CW);
                     canvas.clipPath(clipPath);
+                } else {
+                    final WindowInsets insets = getRootWindowInsets();
+                    if (insets != null) {
+                        AndroidUtilities.rectTmp.set(translationX, 0, translationX + child.getWidth(), getHeight());
+                        if (newBackTransitions()) {
+                            final float peek = predictivePeekPx();
+                            final float p = clamp01(translationX / Math.max(1f, peek));
+                            final float scale;
+                            if (predictiveBackInProgress) {
+                                scale = lerp(1.00f, lerp(0.90f, 0.85f, 1.0f - containerView.getAlpha()), p);
+                            } else {
+                                scale = 1.00f - Math.min(0.25f, 0.05f * p);
+                            }
+                            float dx = translationX > peek && !animationInProgress && predictiveBackInProgress
+                                    ? translationX
+                                    : Utilities.clamp((float) translationX, peek, 0f);
+                            if (!predictiveBackInProgress || predictiveBackLeft) {
+                                canvas.translate(-dx, 0);
+                                clipRight += dx;
+                                backOffset += dx;
+                            } else {
+                                canvas.translate(-dx, 0);
+                                clipRight += dx;
+                                AndroidUtilities.rectTmp.set(translationX, 0, translationX + child.getWidth(), getHeight());
+                            }
+                            float pivotX = predictiveBackLeft
+                                    ? AndroidUtilities.rectTmp.right - dp(82)
+                                    : AndroidUtilities.rectTmp.left + dp(82);
+                            float pivotY = predictiveBackInProgress ? predictiveBackY : AndroidUtilities.rectTmp.centerY();
+                            canvas.scale(scale, scale, pivotX, pivotY);
+                        }
+
+                        final RoundedCorner topLeft = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
+                        final RoundedCorner topRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_RIGHT);
+                        final RoundedCorner bottomRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_BOTTOM_RIGHT);
+                        final RoundedCorner bottomLeft = insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT);
+                        radii[0] = radii[1] = topLeft == null ? 0 : topLeft.getRadius();
+                        radii[2] = radii[3] = topRight == null ? 0 : topRight.getRadius();
+                        radii[4] = radii[5] = bottomRight == null ? 0 : bottomRight.getRadius();
+                        radii[6] = radii[7] = bottomLeft == null ? 0 : bottomLeft.getRadius();
+
+                        if (isRightLayout) {
+                            final float factor = Utilities.clamp01(Math.abs(translationX) / dpf2(12));
+                            radii[0] *= factor;
+                            radii[1] *= factor;
+                            radii[6] *= factor;
+                            radii[7] *= factor;
+                        }
+
+                        clipPath.rewind();
+                        clipPath.addRoundRect(AndroidUtilities.rectTmp, radii, Path.Direction.CW);
+                        canvas.clipPath(clipPath);
+                    }
                 }
             } else if (child == containerViewBack) {
-                final WindowInsets insets = getRootWindowInsets();
-                if (insets != null) {
-                    final RoundedCorner topLeft = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
-                    final RoundedCorner bottomLeft = insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT);
-                    clipRight += Math.max(topLeft == null ? 0 : topLeft.getRadius(), bottomLeft == null ? 0 : bottomLeft.getRadius());
-                    if (newBackTransitions()) {
-                        clipRight = width + getPaddingLeft();
+                if (spatialBack) {
+                    AndroidUtilities.rectTmp.set(0, 0, child.getWidth(), getHeight());
+                    applySpatialBackTransform(canvas, AndroidUtilities.rectTmp);
+                    final float p = Math.min(1f, getSpatialBackProgress());
+                    final WindowInsets insets = getRootWindowInsets();
+                    float sysTL = 0, sysTR = 0, sysBR = 0, sysBL = 0;
+                    if (insets != null) {
+                        final RoundedCorner topLeft = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
+                        final RoundedCorner topRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_RIGHT);
+                        final RoundedCorner bottomRight = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_BOTTOM_RIGHT);
+                        final RoundedCorner bottomLeft = insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT);
+                        sysTL = topLeft == null ? 0 : topLeft.getRadius();
+                        sysTR = topRight == null ? 0 : topRight.getRadius();
+                        sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
+                        sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
+                    }
+                    final float deepRadius = dpf2(32);
+                    radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, deepRadius), 1f - p);
+                    radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, deepRadius), 1f - p);
+                    radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, deepRadius), 1f - p);
+                    radii[6] = radii[7] = lerp(sysBL, Math.max(sysBL, deepRadius), 1f - p);
+                    clipPath.rewind();
+                    clipPath.addRoundRect(AndroidUtilities.rectTmp, radii, Path.Direction.CW);
+                    canvas.clipPath(clipPath);
+                    clipRight = width + getPaddingLeft();
+                } else {
+                    final WindowInsets insets = getRootWindowInsets();
+                    if (insets != null) {
+                        final RoundedCorner topLeft = insets.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
+                        final RoundedCorner bottomLeft = insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT);
+                        clipRight += Math.max(topLeft == null ? 0 : topLeft.getRadius(), bottomLeft == null ? 0 : bottomLeft.getRadius());
+                        if (newBackTransitions()) {
+                            clipRight = width + getPaddingLeft();
+                        }
                     }
                 }
             }
         }
 
         final int restoreCount = canvas.save();
-        if (!isTransitionAnimationInProgress() && !inPreviewMode) {
+        if (!spatialBack && !isTransitionAnimationInProgress() && !inPreviewMode) {
             canvas.clipRect(clipLeft, 0, clipRight, getHeight());
         }
         if ((inPreviewMode || transitionAnimationPreviewMode) && child == containerView) {
@@ -1216,9 +1292,19 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     }
                 }
             } else if (child == containerViewBack) {
-                float opacity = MathUtils.clamp(widthOffset / (float) width, 0, 0.8f);
-                scrimPaint.setColor(Color.argb((int) (120 * opacity), 0x00, 0x00, 0x00));
-                if (overrideWidthOffset != -1) {
+                float opacity;
+                int maxAlpha;
+                if (spatialBack) {
+                    // Dim softens as previous screen comes forward from depth
+                    float p = Math.min(1f, getSpatialBackProgress());
+                    opacity = lerp(0.72f, 0.08f, p);
+                    maxAlpha = 160;
+                } else {
+                    opacity = MathUtils.clamp(widthOffset / (float) width, 0, 0.8f);
+                    maxAlpha = 120;
+                }
+                scrimPaint.setColor(Color.argb((int) (maxAlpha * opacity), 0x00, 0x00, 0x00));
+                if (overrideWidthOffset != -1 || spatialBack) {
                     canvas.drawRect(0, 0, getWidth(), getHeight() * 1.5f, scrimPaint);
                 } else {
                     canvas.drawRect(clipLeft, 0, clipRight, getHeight() * 1.5f, scrimPaint);
@@ -1535,8 +1621,94 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private boolean predictiveInput;
     private boolean predictiveBackInProgress;
     private boolean predictiveBackHasProgress;
+    private boolean predictiveBackEnhanced;
+    private float predictiveBackProgress;
+    private float spatialAnimProgress = -1f;
     private float predictiveBackY;
     private boolean predictiveBackLeft;
+
+    private float predictivePeekPx() {
+        return dpf2(predictiveBackEnhanced ? 120 : 56);
+    }
+
+    private float getSpatialBackProgress() {
+        if (spatialAnimProgress >= 0f) {
+            return spatialAnimProgress;
+        }
+        return clamp01(innerTranslationX / Math.max(1f, predictivePeekPx()));
+    }
+
+    @Keep
+    public void setSpatialAnimProgress(float value) {
+        spatialAnimProgress = value;
+        invalidate();
+    }
+
+    @Keep
+    public float getSpatialAnimProgress() {
+        return spatialAnimProgress;
+    }
+
+    /** Previous screen rises forward from Z-depth. */
+    private void applySpatialBackTransform(Canvas canvas, RectF rect) {
+        final float raw = getSpatialBackProgress();
+        final float p = Math.min(1f, raw);
+        final float cx = rect.centerX();
+        final float cy = rect.centerY();
+        // Starts recessed in the stack, approaches full size toward the user
+        final float scale = lerp(0.80f, 1.0f, CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(p));
+        final float yShift = Utilities.clamp((predictiveBackY - cy) * -0.10f, -dp(16), dp(16)) * (1f - p);
+        canvas.translate(0, yShift);
+        canvas.scale(scale, scale, cx, cy);
+    }
+
+    /** Active screen leaves as a floating card with perspective. */
+    private void applySpatialFrontTransform(Canvas canvas, RectF rect) {
+        final float raw = getSpatialBackProgress();
+        final float p = Math.min(1f, raw);
+        final float commit = Math.max(0f, raw - 1f);
+        final float cx = rect.centerX();
+        final float cy = rect.centerY();
+        final float dir = predictiveBackLeft ? 1f : -1f;
+        final float ease = CubicBezierInterpolator.StandardDecelerate.getInterpolation(p);
+
+        // Lift off the stack: shrink + slide + camera perspective
+        final float scale = lerp(1.0f, 0.70f, ease) * lerp(1f, 0.78f, commit);
+        final float marginX = (getWidth() * 0.07f + dp(10)) * (ease + commit * 0.6f);
+        final float tx = dir * marginX + dir * getWidth() * 0.62f * commit;
+        final float maxY = Math.max(0, getHeight() / 16f - dp(8));
+        final float ty = Utilities.clamp((predictiveBackY - cy) * 0.62f, -maxY, maxY) * ease;
+
+        predictiveBackCamera.save();
+        predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 1.55f);
+        predictiveBackCamera.translate(0, 0, lerp(0f, dpf2(56), ease) + commit * dpf2(110));
+        predictiveBackCamera.rotateY(dir * lerp(0f, 11f, ease) + dir * commit * 18f);
+        predictiveBackCamera.rotateX(Utilities.clamp((predictiveBackY - cy) / Math.max(1f, getHeight()), -0.55f, 0.55f) * -5.5f * ease);
+        predictiveBackCamera.getMatrix(predictiveBackMatrix);
+        predictiveBackCamera.restore();
+
+        predictiveBackMatrix.preTranslate(-cx, -cy);
+        predictiveBackMatrix.postTranslate(cx + tx, cy + ty);
+        predictiveBackMatrix.postScale(scale, scale, cx + tx, cy + ty);
+        canvas.concat(predictiveBackMatrix);
+        // Clip stays in local (0,0,w,h) space after concat
+    }
+
+    private void drawSpatialFrontShadow(Canvas canvas, RectF rect, float radius, float p) {
+        if (p < 0.01f) {
+            return;
+        }
+        final float strength = Math.min(1.15f, p);
+        for (int i = 6; i >= 1; i--) {
+            float expand = dpf2(2.6f) * i * Math.min(1f, strength);
+            predictiveBackShadowRect.set(rect);
+            predictiveBackShadowRect.inset(-expand, -expand);
+            predictiveBackShadowRect.offset(0, dpf2(1.6f) * i * Math.min(1f, strength));
+            predictiveBackShadowPaint.setColor(Color.argb((int) (12 * Math.min(1f, strength) * i), 0, 0, 0));
+            canvas.drawRoundRect(predictiveBackShadowRect, radius + expand, radius + expand, predictiveBackShadowPaint);
+        }
+    }
+
     public boolean onBackStarted(float touchX, float touchY) {
         if (animationInProgress) {
             if (backAnimator != null) {
@@ -1569,6 +1741,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         predictiveBackHasProgress = false;
         predictiveBackInProgress = true;
         predictiveInput = true;
+        predictiveBackEnhanced = MglaGlassConfig.isMd3PredictiveBackEnabled();
+        predictiveBackProgress = 0f;
+        spatialAnimProgress = -1f;
         predictiveBackLeft = touchX < AndroidUtilities.displaySize.x / 2f;
         predictiveBackY = touchY;
         prepareForMoving();
@@ -1581,10 +1756,17 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
 
     public void onBackProgress(float t) {
         if (!predictiveInput) return;
-        final float dx = dp(56) * CubicBezierInterpolator.StandardDecelerate.getInterpolation(t);
+        predictiveBackProgress = t;
+        final float dx = predictivePeekPx() * CubicBezierInterpolator.StandardDecelerate.getInterpolation(t);
         predictiveBackHasProgress = t > 0;
-        containerView.setTranslationX(dx);
-        setInnerTranslationX(dx);
+        if (predictiveBackEnhanced) {
+            // Spatial look is fully canvas-driven on both layers; keep the view untranslated
+            containerView.setTranslationX(0);
+            setInnerTranslationX(dx);
+        } else {
+            containerView.setTranslationX(dx);
+            setInnerTranslationX(dx);
+        }
     }
 
     public void onBackCancelled() {
@@ -1612,31 +1794,59 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         final BaseFragment currentFragment = !fragmentsStack.isEmpty() ? fragmentsStack.get(fragmentsStack.size() - 1) : null;
         if (currentFragment == null) return;
 
-        float x = containerView.getX();
+        float x = predictiveBackEnhanced ? innerTranslationX : containerView.getX();
         AnimatorSet animatorSet = new AnimatorSet();
         float distToMove;
         boolean overrideTransition = currentFragment.shouldOverrideSlideTransition(false, backAnimation);
+        final float peek = predictivePeekPx();
+        final boolean enhanced = predictiveBackEnhanced && newBackTransitions();
+        final float spatialFrom = enhanced ? getSpatialBackProgress() : 0f;
 
         if (!backAnimation) {
-            distToMove = Math.abs(containerView.getMeasuredWidth() - x);
-            int duration = Math.max((int) (200.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? 380 : 50);
+            distToMove = Math.abs(containerView.getMeasuredWidth() - Math.max(x, peek));
+            int duration = Math.max((int) (200.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? (enhanced ? 280 : 380) : 50);
+            if (enhanced) {
+                // Fly away immediately from the current pose — no hold at progress=1
+                duration = Math.max(200, (int) (240 + 140 * (1.55f - spatialFrom)));
+            }
             if (!overrideTransition) {
-                animatorSet.playTogether(
-                    ObjectAnimator.ofFloat(containerView, View.TRANSLATION_X, (containerView.getMeasuredWidth() + (predictiveBackInProgress ? dp(56) : 0))).setDuration(duration),
-                    ObjectAnimator.ofFloat(this, "innerTranslationX", (float) containerView.getMeasuredWidth()).setDuration(duration)
-                );
+                if (enhanced) {
+                    containerView.setTranslationX(0);
+                    spatialAnimProgress = spatialFrom;
+                    animatorSet.playTogether(
+                        ObjectAnimator.ofFloat(this, "spatialAnimProgress", spatialFrom, 1.55f).setDuration(duration),
+                        ObjectAnimator.ofFloat(this, "innerTranslationX", (float) containerView.getMeasuredWidth()).setDuration(duration)
+                    );
+                } else {
+                    animatorSet.playTogether(
+                        ObjectAnimator.ofFloat(containerView, View.TRANSLATION_X, (containerView.getMeasuredWidth() + (predictiveBackInProgress ? peek : 0))).setDuration(duration),
+                        ObjectAnimator.ofFloat(this, "innerTranslationX", (float) containerView.getMeasuredWidth()).setDuration(duration)
+                    );
+                }
                 if (newBackTransitions()) {
-                    animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+                    animatorSet.setInterpolator(enhanced ? CubicBezierInterpolator.EASE_IN : CubicBezierInterpolator.EASE_OUT_QUINT);
                 }
             }
         } else {
             distToMove = x;
-            int duration = Math.max((int) (320.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? 320 : 120);
+            int duration = Math.max((int) ((enhanced ? 280.0f : 320.0f) / containerView.getMeasuredWidth() * Math.max(distToMove, 1)), newBackTransitions() ? (enhanced ? 260 : 320) : 120);
+            if (enhanced) {
+                duration = Math.max(160, (int) (280 * Math.max(0.15f, spatialFrom)));
+            }
             if (!overrideTransition) {
-                animatorSet.playTogether(
-                    ObjectAnimator.ofFloat(containerView, View.TRANSLATION_X, 0).setDuration(duration),
-                    ObjectAnimator.ofFloat(this, "innerTranslationX", 0.0f).setDuration(duration)
-                );
+                if (enhanced) {
+                    containerView.setTranslationX(0);
+                    spatialAnimProgress = spatialFrom;
+                    animatorSet.playTogether(
+                        ObjectAnimator.ofFloat(this, "spatialAnimProgress", spatialFrom, 0f).setDuration(duration),
+                        ObjectAnimator.ofFloat(this, "innerTranslationX", 0.0f).setDuration(duration)
+                    );
+                } else {
+                    animatorSet.playTogether(
+                        ObjectAnimator.ofFloat(containerView, View.TRANSLATION_X, 0).setDuration(duration),
+                        ObjectAnimator.ofFloat(this, "innerTranslationX", 0.0f).setDuration(duration)
+                    );
+                }
                 if (newBackTransitions()) {
                     animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
                 }
@@ -1662,6 +1872,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             public void onAnimationCancel(Animator animation) {
                 cancelled = true;
                 predictiveBackInProgress = false;
+                predictiveBackEnhanced = false;
+                predictiveBackProgress = 0f;
+                spatialAnimProgress = -1f;
                 containerView.setAlpha(1.0f);
                 onSlideAnimationEnd(true);
                 backAnimator = null;
@@ -1670,6 +1883,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             public void onAnimationEnd(Animator animator) {
                 if (cancelled) return;
                 predictiveBackInProgress = false;
+                predictiveBackEnhanced = false;
+                predictiveBackProgress = 0f;
+                spatialAnimProgress = -1f;
                 containerView.setAlpha(1.0f);
                 onSlideAnimationEnd(backAnimation);
                 backAnimator = null;

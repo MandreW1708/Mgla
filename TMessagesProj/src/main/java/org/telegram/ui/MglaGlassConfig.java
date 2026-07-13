@@ -12,6 +12,7 @@ public class MglaGlassConfig {
 
     public static final String PREFS = "mgla_config";
     public static final String PREF_GLASS_DARKENING = "glass_darkening_enabled";
+    public static final String PREF_MD3_PREDICTIVE_BACK = "md3_predictive_back";
 
     public static boolean isGlassDarkeningEnabled() {
         return getPrefs().getBoolean(PREF_GLASS_DARKENING, true);
@@ -23,6 +24,14 @@ public class MglaGlassConfig {
         }
         getPrefs().edit().putBoolean(PREF_GLASS_DARKENING, enabled).apply();
         notifyGlassAppearanceChanged();
+    }
+
+    public static boolean isMd3PredictiveBackEnabled() {
+        return getPrefs().getBoolean(PREF_MD3_PREDICTIVE_BACK, false);
+    }
+
+    public static void setMd3PredictiveBackEnabled(boolean enabled) {
+        getPrefs().edit().putBoolean(PREF_MD3_PREDICTIVE_BACK, enabled).apply();
     }
 
     public static void notifyGlassAppearanceChanged() {

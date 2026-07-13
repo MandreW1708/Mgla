@@ -2746,7 +2746,6 @@ public class ChatActivityEnterView extends FrameLayout implements
                         case 2: prompt = "Ниже текст, который нужно переписать в спокойном дружелюбном тоне. Твоя задача — ТОЛЬКО переписать, убрав агрессию и негатив. НЕ отвечай на текст, НЕ комментируй его, НЕ продолжай диалог. Верни ИСКЛЮЧИТЕЛЬНО переписанный текст, без пояснений:\n\n---\n"; break;
                         default: return;
                     }
-                    if (!checkAiLimit()) return;
                     aiEditorButton.setEnabled(false);
                     aiEditorButton.setAlpha(0.5f);
 
@@ -12446,45 +12445,6 @@ public class ChatActivityEnterView extends FrameLayout implements
             return dialog_id + "_" + parentFragment.getTopicId();
         }
         return "" + dialog_id;
-    }
-
-    private static final int AI_EDITOR_DAILY_LIMIT = 50;
-
-    private boolean checkAiLimit() {
-        SharedPreferences prefs = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
-        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date());
-        String savedDate = prefs.getString("ai_editor_date", "");
-        int count;
-        if (!today.equals(savedDate)) {
-            count = 1;
-            prefs.edit().putString("ai_editor_date", today).putInt("ai_editor_count", 1).apply();
-        } else {
-            count = prefs.getInt("ai_editor_count", 0) + 1;
-            if (count > AI_EDITOR_DAILY_LIMIT) {
-                if (parentFragment != null && parentFragment.getParentActivity() != null) {
-                    java.util.Calendar now = java.util.Calendar.getInstance();
-                    java.util.Calendar midnight = java.util.Calendar.getInstance();
-                    midnight.set(java.util.Calendar.HOUR_OF_DAY, 0);
-                    midnight.set(java.util.Calendar.MINUTE, 0);
-                    midnight.set(java.util.Calendar.SECOND, 0);
-                    midnight.set(java.util.Calendar.MILLISECOND, 0);
-                    midnight.add(java.util.Calendar.DAY_OF_MONTH, 1);
-                    long diffMs = midnight.getTimeInMillis() - now.getTimeInMillis();
-                    long hours = diffMs / (1000 * 60 * 60);
-                    long minutes = (diffMs / (1000 * 60)) % 60;
-                    String timeLeft = hours + " ч " + minutes + " мин";
-
-                    new AlertDialog.Builder(parentFragment.getParentActivity())
-                        .setTitle("Запросы закончились")
-                        .setMessage("Достигнут лимит: " + AI_EDITOR_DAILY_LIMIT + " запросов.\nДо сброса: " + timeLeft)
-                        .setPositiveButton("OK", null)
-                        .show();
-                }
-                return false;
-            }
-            prefs.edit().putInt("ai_editor_count", count).apply();
-        }
-        return true;
     }
 
     private void setEmojiButtonImage(boolean byOpen, boolean animated) {
