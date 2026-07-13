@@ -716,7 +716,6 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private int maximumVelocity;
     private boolean startedTracking;
     private boolean maybeStartTracking;
-    private boolean mglaSideMenuGestureActive;
     private static final Interpolator interpolator = t -> {
         --t;
         return t * t * t * t * t + 1.0F;
@@ -1314,9 +1313,6 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         @Override
         public boolean onInterceptTouchEvent(MotionEvent ev) {
-            if (tryStartMglaSideMenuGesture(ev)) {
-                return true;
-            }
             int action = ev.getActionMasked();
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 if (actionBar.isActionModeShowed()) {
@@ -1336,9 +1332,6 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         @Override
         public boolean onTouchEvent(MotionEvent ev) {
-            if (tryStartMglaSideMenuGesture(ev)) {
-                return true;
-            }
             if (
                     parentLayout != null &&
                             filterTabsView != null && !filterTabsView.isEditing() &&
@@ -10166,7 +10159,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         return MglaSideMenuConfig.isEnabled() && folderId == 0 ? dp(48) : 0;
     }
 
-    private boolean canOpenMglaSideMenuByGesture() {
+    public boolean canOpenMglaSideMenuByGesture() {
         if (!MglaSideMenuConfig.isEnabled() || folderId != 0 || onlySelect || searching) {
             return false;
         }
@@ -10186,35 +10179,6 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             return false;
         }
         return !((LaunchActivity) getParentActivity()).isMglaSideMenuVisible();
-    }
-
-    private boolean tryStartMglaSideMenuGesture(MotionEvent ev) {
-        if (!(getParentActivity() instanceof LaunchActivity) || ev == null) {
-            return false;
-        }
-        MglaSideMenu menu = ((LaunchActivity) getParentActivity()).getMglaSideMenu();
-        if (menu == null) {
-            return false;
-        }
-        if (mglaSideMenuGestureActive || menu.isHandlingOpenGesture()) {
-            boolean handled = menu.handleOpenGesture(ev);
-            int action = ev.getActionMasked();
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                mglaSideMenuGestureActive = false;
-            }
-            return handled;
-        }
-        if (ev.getActionMasked() != MotionEvent.ACTION_DOWN || !canOpenMglaSideMenuByGesture()) {
-            return false;
-        }
-        if (ev.getRawX() > dp(20)) {
-            return false;
-        }
-        boolean handled = menu.handleOpenGesture(ev);
-        if (handled) {
-            mglaSideMenuGestureActive = true;
-        }
-        return handled;
     }
 
     private void updateMglaActionBarTitleOffset() {

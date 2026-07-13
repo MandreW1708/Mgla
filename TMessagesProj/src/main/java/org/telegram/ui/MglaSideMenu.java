@@ -21,6 +21,7 @@ import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -28,6 +29,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.core.graphics.Insets;
+import androidx.core.graphics.ColorUtils;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
@@ -40,7 +42,6 @@ import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SavedMessagesController;
-import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
@@ -86,37 +87,52 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private LinearLayout accountsListContainer;
     private LinearLayout profileSection;
     private LinearLayout navContainer;
+    private final ArrayList<View> navRows = new ArrayList<>();
+    private final ArrayList<ImageView> navIcons = new ArrayList<>();
+    private final ArrayList<TextView> navLabels = new ArrayList<>();
+    private final ArrayList<View> accountRows = new ArrayList<>();
+    private final ArrayList<View> animatedViews = new ArrayList<>();
 
-    private int panelWidth;
+    private int panelWidthPx;
     private float openProgress;
+    private boolean isAnimating;
     private ValueAnimator progressAnimator;
-    private VelocityTracker velocityTracker;
     private int trackingPointerId = -1;
     private float trackingStartRawX;
     private float trackingStartRawY;
-    private boolean maybeTracking;
-    private boolean isTracking;
-    private boolean trackingOpenGesture;
-    private boolean trackingCloseGesture;
+    private boolean drawerMaybeTracking;
+    private boolean drawerTracking;
+    private boolean drawerIntercepted;
+
+    private float dragStartProgress;
+    private VelocityTracker velocityTracker;
 
     private static final CubicBezierInterpolator MENU_INTERPOLATOR = CubicBezierInterpolator.EASE_OUT_QUINT;
     private static final long MENU_ANIMATION_DURATION = 280;
+    private static final int PANEL_WIDTH_DP = 320;
+    private final int drawerTouchSlop;
+    private final int[] tempLocation = new int[2];
 
     public MglaSideMenu(Context context, LaunchActivity activity) {
         super(context);
         this.activity = activity;
         this.isTablet = AndroidUtilities.isTablet();
-        panelWidth = isTablet ? dp(320) : Math.min(dp(320), AndroidUtilities.displaySize.x - dp(56));
+        panelWidthPx = dp(PANEL_WIDTH_DP);
+        drawerTouchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+
+        setClickable(true);
+        setFocusable(true);
 
         scrim = new View(context);
-        scrim.setBackgroundColor(0x80000000);
+        scrim.setBackgroundColor(0x52000000);
         scrim.setVisibility(GONE);
         scrim.setClickable(true);
         scrim.setOnClickListener(v -> close(true));
         addView(scrim, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         panel = buildPanel(context);
-        addView(panel, LayoutHelper.createFrame(panelWidth / dp(1), LayoutHelper.MATCH_PARENT, Gravity.LEFT));
+        // Full height edge-to-edge panel — left margin made it look like only a thin strip opens.
+        addView(panel, LayoutHelper.createFrame(PANEL_WIDTH_DP, LayoutHelper.MATCH_PARENT, Gravity.LEFT));
 
         ViewCompat.setOnApplyWindowInsetsListener(panel, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -129,6 +145,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         });
         ViewCompat.requestApplyInsets(this);
 
+        panel.setTranslationX(-panelWidthPx);
+        openProgress = 0f;
+        scrim.setAlpha(0f);
         setVisibility(GONE);
     }
 
@@ -163,7 +182,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private View buildProfileSection(Context context) {
         profileSection = new LinearLayout(context);
         profileSection.setOrientation(LinearLayout.VERTICAL);
-        profileSection.setPadding(dp(20), dp(12), dp(20), dp(12));
+        profileSection.setPadding(dp(20), dp(18), dp(20), dp(18));
 
         FrameLayout profileBlock = new FrameLayout(context);
 
@@ -222,12 +241,13 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             args.putLong("user_id", UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId());
             openFragment(new ProfileActivity(args));
         };
-        profileSection.setBackground(createRectSelector());
+        profileSection.setBackground(null);
         profileSection.setOnClickListener(openProfile);
         avatarView.setOnClickListener(openProfile);
         nameText.setOnClickListener(openProfile);
         usernameText.setOnClickListener(openProfile);
         phoneText.setOnClickListener(openProfile);
+        registerAnimatedView(profileSection);
 
         return profileSection;
     }
@@ -259,6 +279,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             MglaSpyConfig.setGhostModeEnabled(newVal);
             updateGhostButton();
         });
+        registerAnimatedView(row);
         return row;
     }
 
@@ -307,6 +328,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         addRow.addView(addLabel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 48, 0, 0, 0));
 
         accountsBlock.addView(addRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        registerAnimatedView(accountsBlock);
 
         return accountsBlock;
     }
@@ -354,6 +376,10 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
         row.setOnClickListener(v -> handleNavClick(id));
         navContainer.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        navRows.add(row);
+        navIcons.add(icon);
+        navLabels.add(label);
+        registerAnimatedView(row);
     }
 
     private void handleNavClick(int id) {
@@ -462,37 +488,39 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     public void open() {
-        if (isOpen) {
+        if (isOpen && openProgress >= 1f && !isAnimating) {
             return;
         }
-        cancelProgressAnimator();
+        cancelAnimation();
         applySystemInsets();
         ViewCompat.requestApplyInsets(this);
         registerObserver();
         refreshData();
-        if (getParent() instanceof ViewGroup) {
-            ((ViewGroup) getParent()).bringChildToFront(this);
-        }
+        bringMenuToFront();
         isOpen = false;
-        openProgress = 0;
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
-        panel.setTranslationX(-panelWidth);
-        scrim.setAlpha(0f);
-        animateProgress(1f);
+        ensurePanelLaidOut(() -> {
+            float closed = getClosedTranslationX();
+            panel.setTranslationX(closed);
+            openProgress = 0f;
+            scrim.setAlpha(0f);
+            updateAnimatedViewsProgress();
+            animatePanelTo(0f, true);
+        });
     }
 
     public void close(boolean animated) {
-        if (!isOpen && openProgress <= 0 && !isTracking && progressAnimator == null) {
+        if (!isOpen && !isAnimating && getVisibility() != VISIBLE) {
             return;
         }
-        if (animated) {
-            animateProgress(0f);
-        } else {
-            cancelProgressAnimator();
-            setOpenProgress(0);
-            finishClose();
+        if (!animated) {
+            cancelAnimation();
+            hideImmediate();
+            return;
         }
+        isOpen = false;
+        animatePanelTo(getClosedTranslationX(), false);
     }
 
     public void close() {
@@ -503,214 +531,229 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         return isOpen;
     }
 
+    public boolean isDragging() {
+        return drawerTracking;
+    }
+
     public boolean isVisibleOrAnimating() {
-        return isOpen || openProgress > 0 || isTracking || progressAnimator != null;
+        return isOpen || isAnimating || drawerTracking || getVisibility() == VISIBLE;
     }
 
-    public boolean isHandlingOpenGesture() {
-        return trackingOpenGesture && (maybeTracking || isTracking);
+    private float getGestureEdgeWidth() {
+        int screenWidth = getMeasuredWidth();
+        if (screenWidth <= 0) {
+            screenWidth = AndroidUtilities.displaySize != null ? AndroidUtilities.displaySize.x : 0;
+        }
+        if (screenWidth <= 0 && activity != null) {
+            screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
+        }
+        // Full screen width — swipe from anywhere opens the side menu.
+        return Math.max(screenWidth, dp(1));
     }
 
-    public boolean handleOpenGesture(MotionEvent ev) {
-        if (!MglaSideMenuConfig.isEnabled() || isOpen) {
+    private float getLocalTouchX(MotionEvent ev) {
+        View root = activity != null && activity.frameLayout != null ? activity.frameLayout : this;
+        root.getLocationOnScreen(tempLocation);
+        return ev.getRawX() - tempLocation[0];
+    }
+
+    public boolean handleGlobalTouchEvent(MotionEvent ev) {
+        if (ev == null || !MglaSideMenuConfig.isEnabled()) {
             return false;
         }
-        if (isTracking && trackingCloseGesture) {
-            return false;
-        }
-        if (ev == null) {
-            resetGestureTracking();
+        if (!canHandleDrawerGesture() && !drawerTracking && !isOpen) {
             return false;
         }
         switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                if (!trackingOpenGesture && !isTracking && ev.getRawX() > dp(20)) {
-                    return false;
-                }
+            case MotionEvent.ACTION_DOWN: {
+                resetDrawerTracking();
                 trackingPointerId = ev.getPointerId(0);
                 trackingStartRawX = ev.getRawX();
                 trackingStartRawY = ev.getRawY();
-                maybeTracking = true;
-                trackingOpenGesture = true;
-                trackingCloseGesture = false;
                 ensureVelocityTracker();
                 velocityTracker.addMovement(ev);
-                setVisibility(VISIBLE);
-                scrim.setVisibility(VISIBLE);
-                setOpenProgress(0);
+                if (isOpen) {
+                    drawerMaybeTracking = true;
+                } else if (getLocalTouchX(ev) <= getGestureEdgeWidth()) {
+                    drawerMaybeTracking = true;
+                }
+                return false;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                if (!drawerMaybeTracking && !drawerTracking) {
+                    return false;
+                }
+                if (ev.getPointerId(0) != trackingPointerId) {
+                    return drawerTracking;
+                }
+                ensureVelocityTracker();
+                velocityTracker.addMovement(ev);
+                float dx = ev.getRawX() - trackingStartRawX;
+                float dy = Math.abs(ev.getRawY() - trackingStartRawY);
+                if (!drawerTracking) {
+                    if (!isOpen && dx > drawerTouchSlop && dx > dy) {
+                        startDragOpen(ev.getRawX());
+                    } else if (isOpen && dx < -drawerTouchSlop && Math.abs(dx) > dy) {
+                        startDragClose(ev.getRawX());
+                    } else if (dy > drawerTouchSlop * 2 && dy > Math.abs(dx) * 1.5f) {
+                        resetDrawerTracking();
+                        return false;
+                    }
+                }
+                if (drawerTracking) {
+                    float closed = getClosedTranslationX();
+                    float translation = dragStartTranslationX + (ev.getRawX() - trackingStartRawX);
+                    translation = Math.max(closed, Math.min(0f, translation));
+                    setPanelTranslation(translation);
+                    return true;
+                }
+                return false;
+            }
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                if (!drawerTracking) {
+                    resetDrawerTracking();
+                    return false;
+                }
+                float velocityX = 0f;
+                if (velocityTracker != null) {
+                    velocityTracker.addMovement(ev);
+                    velocityTracker.computeCurrentVelocity(1000);
+                    velocityX = velocityTracker.getXVelocity();
+                }
+                float closed = getClosedTranslationX();
+                float current = panel.getTranslationX();
+                boolean shouldOpen;
+        // Any noticeable open swipe completes fully — no stuck half-open panel.
+        if (dragOpening) {
+            shouldOpen = current > closed * 0.92f || velocityX > 400 || (ev.getRawX() - trackingStartRawX) > dp(24);
+        } else {
+            shouldOpen = !(current < closed * 0.08f || velocityX < -400 || (ev.getRawX() - trackingStartRawX) < -dp(24));
+        }
+                resetDrawerTracking();
+                animatePanelTo(shouldOpen ? 0f : closed, shouldOpen);
                 return true;
-            case MotionEvent.ACTION_MOVE:
-                if (!trackingOpenGesture || ev.getPointerId(0) != trackingPointerId) {
-                    return false;
-                }
-                ensureVelocityTracker();
-                velocityTracker.addMovement(ev);
-                float dx = ev.getRawX() - trackingStartRawX;
-                float dy = Math.abs(ev.getRawY() - trackingStartRawY);
-                if (maybeTracking && !isTracking && dx >= AndroidUtilities.getPixelsInCM(0.25f, true) && dx > dy * 1.2f) {
-                    isTracking = true;
-                    maybeTracking = false;
-                    cancelProgressAnimator();
-                    registerObserver();
-                    refreshData();
-                    if (getParent() != null) {
-                        getParent().requestDisallowInterceptTouchEvent(true);
-                    }
-                } else if (maybeTracking && !isTracking && dy >= AndroidUtilities.getPixelsInCM(0.25f, true) && dy > Math.abs(dx)) {
-                    resetGestureTracking();
-                    finishClose();
-                    return false;
-                }
-                if (isTracking) {
-                    setOpenProgress(Math.max(0, dx / panelWidth));
-                    return true;
-                }
-                return maybeTracking;
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                if (!trackingOpenGesture || ev.getPointerId(0) != trackingPointerId) {
-                    return false;
-                }
-                if (isTracking) {
-                    ensureVelocityTracker();
-                    velocityTracker.addMovement(ev);
-                    velocityTracker.computeCurrentVelocity(1000);
-                    finishOpenDrag(velocityTracker.getXVelocity());
-                } else {
-                    resetGestureTracking();
-                    finishClose();
-                }
-                return isTracking || maybeTracking;
+            }
             default:
-                return false;
+                return drawerTracking;
         }
     }
 
-    private boolean handleCloseGesture(MotionEvent ev) {
-        if (!isOpen || ev == null || isTracking && trackingOpenGesture) {
-            return false;
-        }
-        switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                trackingPointerId = ev.getPointerId(0);
-                trackingStartRawX = ev.getRawX();
-                trackingStartRawY = ev.getRawY();
-                maybeTracking = true;
-                trackingCloseGesture = true;
-                trackingOpenGesture = false;
-                ensureVelocityTracker();
-                velocityTracker.addMovement(ev);
-                return false;
-            case MotionEvent.ACTION_MOVE:
-                if (!trackingCloseGesture || ev.getPointerId(0) != trackingPointerId) {
-                    return false;
+    private boolean dragOpening;
+    private float dragStartTranslationX;
+
+    private void startDragOpen(float rawX) {
+        drawerTracking = true;
+        drawerIntercepted = true;
+        dragOpening = true;
+        cancelAnimation();
+        registerObserver();
+        refreshData();
+        bringMenuToFront();
+        setVisibility(VISIBLE);
+        scrim.setVisibility(VISIBLE);
+        isOpen = false;
+        float closed = getClosedTranslationX();
+        panel.setTranslationX(closed);
+        openProgress = 0f;
+        scrim.setAlpha(0f);
+        updateAnimatedViewsProgress();
+        trackingStartRawX = rawX;
+        dragStartTranslationX = closed;
+        // Re-sync after first layout if width was unknown.
+        if (panel.getWidth() <= 0) {
+            panel.post(() -> {
+                if (!drawerTracking || !dragOpening) {
+                    return;
                 }
-                ensureVelocityTracker();
-                velocityTracker.addMovement(ev);
-                float dx = ev.getRawX() - trackingStartRawX;
-                float dy = Math.abs(ev.getRawY() - trackingStartRawY);
-                if (maybeTracking && !isTracking && dx <= -AndroidUtilities.getPixelsInCM(0.25f, true) && Math.abs(dx) > dy * 1.2f) {
-                    isTracking = true;
-                    maybeTracking = false;
-                    cancelProgressAnimator();
-                    if (getParent() != null) {
-                        getParent().requestDisallowInterceptTouchEvent(true);
-                    }
-                } else if (maybeTracking && !isTracking && dy >= AndroidUtilities.getPixelsInCM(0.25f, true) && dy > Math.abs(dx)) {
-                    resetGestureTracking();
-                    return false;
-                }
-                if (isTracking) {
-                    setOpenProgress(Math.max(0, 1f + dx / panelWidth));
-                    return true;
-                }
-                return false;
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                if (!trackingCloseGesture || ev.getPointerId(0) != trackingPointerId) {
-                    return false;
-                }
-                if (isTracking) {
-                    ensureVelocityTracker();
-                    velocityTracker.addMovement(ev);
-                    velocityTracker.computeCurrentVelocity(1000);
-                    finishCloseDrag(velocityTracker.getXVelocity());
-                    return true;
-                }
-                resetGestureTracking();
-                return false;
-            default:
-                return false;
+                float newClosed = getClosedTranslationX();
+                float shown = panel.getTranslationX() - dragStartTranslationX;
+                dragStartTranslationX = newClosed;
+                setPanelTranslation(newClosed + shown);
+            });
         }
     }
 
-    private void finishOpenDrag(float velocityX) {
-        boolean shouldOpen = openProgress > 0.35f || velocityX > 800;
-        animateProgress(shouldOpen ? 1f : 0f);
-        resetGestureTracking();
+    private void startDragClose(float rawX) {
+        drawerTracking = true;
+        drawerIntercepted = true;
+        dragOpening = false;
+        cancelAnimation();
+        trackingStartRawX = rawX;
+        dragStartTranslationX = panel.getTranslationX();
     }
 
-    private void finishCloseDrag(float velocityX) {
-        boolean shouldClose = openProgress < 0.65f || velocityX < -800;
-        animateProgress(shouldClose ? 0f : 1f);
-        resetGestureTracking();
-    }
-
-    private void ensureVelocityTracker() {
-        if (velocityTracker == null) {
-            velocityTracker = VelocityTracker.obtain();
+    private void ensurePanelLaidOut(Runnable after) {
+        if (panel.getWidth() > 0) {
+            after.run();
+            return;
         }
+        setVisibility(VISIBLE);
+        panel.post(after);
     }
 
-    private void resetGestureTracking() {
-        maybeTracking = false;
-        isTracking = false;
-        trackingOpenGesture = false;
-        trackingCloseGesture = false;
-        trackingPointerId = -1;
-        if (velocityTracker != null) {
-            velocityTracker.recycle();
-            velocityTracker = null;
+    private float getClosedTranslationX() {
+        int width = panel.getWidth();
+        if (width <= 0) {
+            width = panel.getMeasuredWidth();
         }
-    }
-
-    private void cancelProgressAnimator() {
-        if (progressAnimator != null) {
-            progressAnimator.cancel();
-            progressAnimator = null;
+        if (width <= 0) {
+            width = panelWidthPx;
         }
+        return -width;
     }
 
-    private void animateProgress(float target) {
-        cancelProgressAnimator();
-        if (!SharedConfig.animationsEnabled()) {
-            setOpenProgress(target);
-            if (target >= 1f) {
-                finishOpen();
+    private void setPanelTranslation(float translationX) {
+        float closed = getClosedTranslationX();
+        if (closed >= 0) {
+            closed = -panelWidthPx;
+        }
+        translationX = Math.max(closed, Math.min(0f, translationX));
+        panel.setTranslationX(translationX);
+        openProgress = 1f - (translationX / closed);
+        openProgress = Utilities.clamp(openProgress, 1f, 0f);
+        scrim.setAlpha(openProgress);
+        updateAnimatedViewsProgress();
+    }
+
+    private void animatePanelTo(float targetTranslationX, boolean opening) {
+        cancelAnimation();
+        bringMenuToFront();
+        setVisibility(VISIBLE);
+        scrim.setVisibility(VISIBLE);
+        float startX = panel.getTranslationX();
+        float closed = getClosedTranslationX();
+        if (opening) {
+            targetTranslationX = 0f;
+        } else {
+            targetTranslationX = closed;
+        }
+        if (Math.abs(startX - targetTranslationX) < 1f) {
+            setPanelTranslation(targetTranslationX);
+            if (opening) {
+                showOpened();
             } else {
-                finishClose();
+                hideImmediate();
             }
             return;
         }
-        float start = openProgress;
-        if (Math.abs(start - target) < 0.001f) {
-            if (target >= 1f) {
-                finishOpen();
-            } else {
-                finishClose();
-            }
-            return;
-        }
-        progressAnimator = ValueAnimator.ofFloat(start, target);
-        progressAnimator.addUpdateListener(animation -> setOpenProgress((float) animation.getAnimatedValue()));
+        isAnimating = true;
+        final float target = targetTranslationX;
+        progressAnimator = ValueAnimator.ofFloat(startX, target);
+        progressAnimator.addUpdateListener(a -> setPanelTranslation((float) a.getAnimatedValue()));
         progressAnimator.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
+                if (progressAnimator != animation) {
+                    return;
+                }
                 progressAnimator = null;
-                if (target >= 1f) {
-                    finishOpen();
+                isAnimating = false;
+                setPanelTranslation(target);
+                if (opening) {
+                    showOpened();
                 } else {
-                    finishClose();
+                    hideImmediate();
                 }
             }
         });
@@ -719,35 +762,78 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         progressAnimator.start();
     }
 
-    private void setOpenProgress(float progress) {
-        openProgress = Utilities.clamp(progress, 0, 1);
-        if (openProgress <= 0) {
-            panel.setTranslationX(-panelWidth);
-            scrim.setAlpha(0f);
-            if (!isTracking && progressAnimator == null) {
-                scrim.setVisibility(GONE);
-                setVisibility(GONE);
-            }
-            return;
+    private void resetDrawerTracking() {
+        drawerMaybeTracking = false;
+        drawerTracking = false;
+        drawerIntercepted = false;
+        trackingPointerId = -1;
+        dragStartProgress = 0f;
+        if (velocityTracker != null) {
+            velocityTracker.recycle();
+            velocityTracker = null;
         }
-        setVisibility(VISIBLE);
-        scrim.setVisibility(VISIBLE);
-        panel.setTranslationX(-panelWidth * (1f - openProgress));
-        scrim.setAlpha(openProgress);
     }
 
-    private void finishOpen() {
+    private void ensureVelocityTracker() {
+        if (velocityTracker == null) {
+            velocityTracker = VelocityTracker.obtain();
+        }
+    }
+
+    private boolean canHandleDrawerGesture() {
+        if (isOpen || isAnimating || drawerTracking) {
+            return true;
+        }
+        BaseFragment fragment = LaunchActivity.getLastFragmentIncludeMainTabs();
+        if (fragment instanceof DialogsActivity) {
+            return ((DialogsActivity) fragment).canOpenMglaSideMenuByGesture();
+        }
+        return false;
+    }
+
+    private void bringMenuToFront() {
+        if (getParent() instanceof ViewGroup) {
+            ((ViewGroup) getParent()).bringChildToFront(this);
+        }
+        elevate();
+    }
+
+    private void elevate() {
+        setElevation(dp(16));
+        setTranslationZ(dp(16));
+    }
+
+    private void cancelAnimation() {
+        if (progressAnimator != null) {
+            progressAnimator.removeAllListeners();
+            progressAnimator.removeAllUpdateListeners();
+            progressAnimator.cancel();
+            progressAnimator = null;
+        }
+        panel.animate().cancel();
+        scrim.animate().cancel();
+        isAnimating = false;
+    }
+
+    private void showOpened() {
         isOpen = true;
         openProgress = 1f;
-        setOpenProgress(1f);
+        panel.setTranslationX(0f);
+        scrim.setAlpha(1f);
+        updateAnimatedViewsProgress();
+        setVisibility(VISIBLE);
+        scrim.setVisibility(VISIBLE);
     }
 
-    private void finishClose() {
+    private void hideImmediate() {
         isOpen = false;
+        isAnimating = false;
         openProgress = 0f;
         unregisterObserver();
-        resetGestureTracking();
-        setOpenProgress(0f);
+        resetDrawerTracking();
+        panel.setTranslationX(getClosedTranslationX());
+        scrim.setAlpha(0f);
+        updateAnimatedViewsProgress();
         setVisibility(GONE);
         scrim.setVisibility(GONE);
     }
@@ -790,6 +876,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             return;
         }
         accountsListContainer.removeAllViews();
+        accountRows.clear();
         ArrayList<Integer> accountNumbers = new ArrayList<>();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (UserConfig.getInstance(a).isClientActivated()) {
@@ -852,7 +939,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             }
 
             accountsListContainer.addView(accountRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            accountRows.add(accountRow);
         }
+        rebuildAnimatedViews();
     }
 
     private void updatePanelColors() {
@@ -868,21 +957,45 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         }
 
         GradientDrawable panelBg = new GradientDrawable();
-        panelBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        panelBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), 0, 0, 0, 0});
+        panelBg.setColor(ColorUtils.blendARGB(
+                Theme.getColor(Theme.key_dialogBackground),
+                Theme.getColor(Theme.key_windowBackgroundWhite),
+                0.78f
+        ));
+        panelBg.setCornerRadius(dp(28));
+        panelBg.setStroke(dp(1), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 36));
         panel.setBackground(panelBg);
 
+        profileSection.setBackground(null);
+
         GradientDrawable accountsBg = new GradientDrawable();
-        accountsBg.setCornerRadius(dp(14));
-        accountsBg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        accountsBg.setCornerRadius(dp(24));
+        accountsBg.setColor(ColorUtils.blendARGB(
+                Theme.getColor(Theme.key_windowBackgroundGray),
+                Theme.getColor(Theme.key_dialogBackgroundGray),
+                0.35f
+        ));
         accountsBlock.setBackground(accountsBg);
 
         if (ghostButton != null) {
             GradientDrawable ghostBg = new GradientDrawable();
-            ghostBg.setCornerRadius(dp(22));
-            ghostBg.setColor(Color.TRANSPARENT);
-            ghostBg.setStroke(dp(1.5f), textColor);
+            ghostBg.setCornerRadius(dp(24));
+            ghostBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton), 28));
+            ghostBg.setStroke(dp(1), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton), 90));
             ghostButton.setBackground(ghostBg);
+        }
+        navContainer.setBackground(null);
+
+        for (int i = 0; i < navRows.size(); i++) {
+            int topRadius = i == 0 ? dp(20) : 0;
+            int bottomRadius = i == navRows.size() - 1 ? dp(20) : 0;
+            navRows.get(i).setBackground(Theme.createRadSelectorDrawable(
+                    Theme.getColor(Theme.key_listSelector),
+                    topRadius,
+                    bottomRadius
+            ));
+            navIcons.get(i).setColorFilter(new PorterDuffColorFilter(textColor, PorterDuff.Mode.SRC_IN));
+            navLabels.get(i).setTextColor(textColor);
         }
     }
 
@@ -929,50 +1042,78 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (!MglaSideMenuConfig.isEnabled()) {
+        if (getVisibility() != VISIBLE) {
             return false;
         }
-        if (!isOpen && handleOpenGesture(ev)) {
-            return true;
-        }
-        if (openProgress > 0 || isOpen) {
-            return super.dispatchTouchEvent(ev);
-        }
-        return false;
-    }
-
-    @Override
-    public boolean onInterceptTouchEvent(MotionEvent ev) {
-        if (!isOpen || ev == null) {
-            return false;
-        }
-        handleCloseGesture(ev);
-        return isTracking && trackingCloseGesture;
+        return super.dispatchTouchEvent(ev);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (isTracking && trackingCloseGesture) {
-            return handleCloseGesture(event);
-        }
-        return false;
+        return isVisibleOrAnimating() || super.onTouchEvent(event);
     }
 
     @Override
     protected void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         isTablet = AndroidUtilities.isTablet();
-        panelWidth = isTablet ? dp(320) : Math.min(dp(320), AndroidUtilities.displaySize.x - dp(56));
+        panelWidthPx = dp(PANEL_WIDTH_DP);
         ViewGroup.LayoutParams lp = panel.getLayoutParams();
-        lp.width = panelWidth;
-        panel.setLayoutParams(lp);
+        if (lp != null) {
+            lp.width = panelWidthPx;
+            panel.setLayoutParams(lp);
+        }
         applySystemInsets();
+        if (isOpen) {
+            panel.setTranslationX(0f);
+            openProgress = 1f;
+        } else {
+            panel.setTranslationX(getClosedTranslationX());
+            openProgress = 0f;
+        }
+        scrim.setAlpha(openProgress);
+        updateAnimatedViewsProgress();
     }
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.ghostModeChanged) {
             updateGhostButton();
+        }
+    }
+
+    private void registerAnimatedView(View view) {
+        if (view != null && !animatedViews.contains(view)) {
+            animatedViews.add(view);
+        }
+    }
+
+    private void rebuildAnimatedViews() {
+        animatedViews.clear();
+        registerAnimatedView(profileSection);
+        registerAnimatedView(ghostButton);
+        registerAnimatedView(accountsBlock);
+        for (int i = 0; i < accountRows.size(); i++) {
+            registerAnimatedView(accountRows.get(i));
+        }
+        for (int i = 0; i < navRows.size(); i++) {
+            registerAnimatedView(navRows.get(i));
+        }
+        updateAnimatedViewsProgress();
+    }
+
+    private void updateAnimatedViewsProgress() {
+        for (int i = 0; i < animatedViews.size(); i++) {
+            View view = animatedViews.get(i);
+            if (view == null) {
+                continue;
+            }
+            float start = i * 0.05f;
+            float itemProgress = Utilities.clamp((openProgress - start) / 0.42f, 1f, 0f);
+            view.setAlpha(itemProgress);
+            view.setTranslationY(dp(18) * (1f - itemProgress));
+            view.setScaleX(0.97f + 0.03f * itemProgress);
+            view.setScaleY(0.97f + 0.03f * itemProgress);
         }
     }
 }

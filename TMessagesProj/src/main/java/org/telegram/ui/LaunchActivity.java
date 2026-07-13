@@ -392,6 +392,27 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     // private RefreshRateController refreshRateController;
 
     @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (mglaSideMenu != null && MglaSideMenuConfig.isEnabled()) {
+            boolean wasDragging = mglaSideMenu.isDragging();
+            boolean handled = mglaSideMenu.handleGlobalTouchEvent(ev);
+            if (handled) {
+                if (!wasDragging && mglaSideMenu.isDragging() && ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                    MotionEvent cancel = MotionEvent.obtain(ev);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    try {
+                        super.dispatchTouchEvent(cancel);
+                    } finally {
+                        cancel.recycle();
+                    }
+                }
+                return true;
+            }
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         isActive = true;
         activeInstanceCount++;
@@ -527,9 +548,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         frameLayout.addView(drawerLayoutContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         mglaPopupNotificationController = new MglaPopupNotificationController(this);
 
-        mglaSideMenu = new MglaSideMenu(this, this);
-        frameLayout.addView(mglaSideMenu, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
         themeSwitchSunView = new ImageView(this) {
             @Override
             protected void onDraw(Canvas canvas) {
@@ -558,6 +576,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 setVisibility(GONE);
             }
         });
+
+        mglaSideMenu = new MglaSideMenu(this, this);
+        frameLayout.addView(mglaSideMenu, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        mglaSideMenu.setElevation(dp(16));
         setupActionBarLayout();
         drawerLayoutContainer.setParentActionBarLayout(actionBarLayout);
         actionBarLayout.setDrawerLayoutContainer(drawerLayoutContainer);
