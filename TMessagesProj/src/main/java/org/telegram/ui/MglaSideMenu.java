@@ -369,19 +369,17 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         navContainer.setClipChildren(true);
         navContainer.setClipToPadding(true);
 
-        addNavItem(context, R.drawable.msg_openprofile, "Профиль", NAV_PROFILE);
-        addNavItem(context, R.drawable.outline_saved_24, LocaleController.getString(R.string.SavedMessages), NAV_SAVED);
-        addNavItem(context, R.drawable.outline_groups_24, LocaleController.getString(R.string.NewGroup), NAV_NEW_GROUP);
-        addNavItem(context, R.drawable.msg_contacts, LocaleController.getString(R.string.Contacts), NAV_CONTACTS);
-        addNavItem(context, R.drawable.msg_calls, LocaleController.getString(R.string.Calls), NAV_CALLS);
-
-        View divider = new View(context);
-        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 20, 8, 20, 8));
-
-        addNavItem(context, R.drawable.msg_settings_old, LocaleController.getString(R.string.Settings), NAV_SETTINGS);
-        addNavItem(context, R.drawable.msg_qrcode, LocaleController.getString(R.string.ScanQrCode), NAV_QR);
-        addNavItem(context, R.drawable.outline_header_search, LocaleController.getString(R.string.BrowserSettingsTitle), NAV_BROWSER);
+        ArrayList<Integer> visibleItems = MglaSideMenuController.getVisibleItems(context);
+        for (int i = 0; i < visibleItems.size(); i++) {
+            int item = visibleItems.get(i);
+            if (MglaSideMenuController.isDivider(item)) {
+                View divider = new View(context);
+                divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+                navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 20, 8, 20, 8));
+            } else {
+                addNavItem(context, MglaSideMenuController.getIcon(item), MglaSideMenuController.getTitle(item), item);
+            }
+        }
 
         return navContainer;
     }
@@ -414,29 +412,29 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
     private void handleNavClick(int id) {
         switch (id) {
-            case NAV_PROFILE: {
+            case MglaSideMenuController.ITEM_PROFILE: {
                 Bundle args = new Bundle();
                 args.putLong("user_id", UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId());
                 openFragment(new ProfileActivity(args));
                 break;
             }
-            case NAV_SAVED:
+            case MglaSideMenuController.ITEM_SAVED:
                 close(true);
                 AndroidUtilities.runOnUIThread(SavedMessagesController::openSavedMessages, 220);
                 break;
-            case NAV_NEW_GROUP:
+            case MglaSideMenuController.ITEM_NEW_GROUP:
                 openFragment(new GroupCreateActivity(new Bundle()));
                 break;
-            case NAV_CONTACTS:
+            case MglaSideMenuController.ITEM_CONTACTS:
                 openFragment(new ContactsActivity(null));
                 break;
-            case NAV_CALLS:
+            case MglaSideMenuController.ITEM_CALLS:
                 openFragment(new CallLogActivity());
                 break;
-            case NAV_SETTINGS:
+            case MglaSideMenuController.ITEM_SETTINGS:
                 openFragment(new SettingsActivity());
                 break;
-            case NAV_QR:
+            case MglaSideMenuController.ITEM_QR:
                 close(true);
                 AndroidUtilities.runOnUIThread(() -> {
                     BaseFragment fragment = activity.getActionBarLayout().getLastFragment();
@@ -445,8 +443,14 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                     }
                 }, 220);
                 break;
-            case NAV_BROWSER:
+            case MglaSideMenuController.ITEM_BROWSER:
                 openFragment(new WebBrowserSettings(null));
+                break;
+            case MglaSideMenuController.ITEM_ARCHIVE:
+                openFragment(new ArchivedStickersActivity(org.telegram.messenger.MediaDataController.TYPE_IMAGE));
+                break;
+            case MglaSideMenuController.ITEM_NEW_CHANNEL:
+                openFragment(new ChannelCreateActivity(new Bundle()));
                 break;
         }
     }
