@@ -16,6 +16,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
+import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaSideMenuSettingsActivity extends BaseFragment {
@@ -67,6 +68,17 @@ public class MglaSideMenuSettingsActivity extends BaseFragment {
         toggleBlock.addView(enableCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         rootLayout.addView(toggleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
+
+        LinearLayout elementsBlock = createBlock(context, "Элементы");
+
+        TextSettingsCell configureElementsCell = new TextSettingsCell(context);
+        configureElementsCell.setBackground(null);
+        configureElementsCell.setText("Настроить элементы", true);
+        configureElementsCell.setCanDisable(false);
+        configureElementsCell.setOnClickListener(v -> presentFragment(new MglaSideMenuElementsActivity()));
+        elementsBlock.addView(configureElementsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(elementsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         TextInfoPrivacyCell infoCell = new TextInfoPrivacyCell(context);
         infoCell.setText("Боковое меню открывается кнопкой в шапке списка чатов.");

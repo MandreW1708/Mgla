@@ -3,9 +3,10 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.ItemTouchHelper;
@@ -17,6 +18,7 @@ import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
@@ -54,13 +56,17 @@ public class MglaMessageMenuSettingsActivity extends BaseFragment {
 
         order = MglaMessageMenuController.getOrder(context);
 
-        fragmentView = new FrameLayout(context);
-        fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        LinearLayout rootLayout = new LinearLayout(context);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
+
+        // Создаём красивый блок с закруглёнными углами
+        LinearLayout menuBlock = createBlock(context, "Элементы меню");
 
         listView = new RecyclerListView(context);
         listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
-        listView.setPadding(0, dp(8), 0, AndroidUtilities.navigationBarHeight);
-        listView.setClipToPadding(false);
+        listView.setNestedScrollingEnabled(false);
         listView.setAdapter(adapter = new ListAdapter(context));
         listView.setOnItemClickListener((view, position) -> {
             if (position < 0 || position >= order.size()) return;
@@ -111,8 +117,32 @@ public class MglaMessageMenuSettingsActivity extends BaseFragment {
         });
         itemTouchHelper.attachToRecyclerView(listView);
 
-        ((FrameLayout) fragmentView).addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Добавляем listView в блок
+        menuBlock.addView(listView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        // Добавляем блок в rootLayout с отступами
+        rootLayout.addView(menuBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
+
+        fragmentView = rootLayout;
         return fragmentView;
+    }
+
+    private LinearLayout createBlock(Context context, String title) {
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        block.setBackground(bg);
+        block.setClipToOutline(true);
+        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+
+        HeaderCell header = new HeaderCell(context, 22);
+        header.setBackground(null);
+        header.setText(title);
+        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        return block;
     }
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
@@ -136,7 +166,7 @@ public class MglaMessageMenuSettingsActivity extends BaseFragment {
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             TextCheckCell cell = new TextCheckCell(context);
-            cell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            cell.setBackground(null);
             return new RecyclerListView.Holder(cell);
         }
 
