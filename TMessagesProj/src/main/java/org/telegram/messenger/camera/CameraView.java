@@ -123,6 +123,7 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
     private Drawable thumbDrawable;
 
     private final boolean useCamera2 = false && SharedConfig.isUsingCamera2(UserConfig.selectedAccount);
+    private final boolean useCameraX = SharedConfig.isUsingCameraX();
     private final CameraSessionWrapper[] cameraSession = new CameraSessionWrapper[2];
     private CameraSessionWrapper cameraSessionRecording;
 
@@ -2289,7 +2290,23 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
                 FileLog.d("CameraView " + "create camera"+(useCamera2 ? "2" : "")+" session " + i);
             }
 
-            if (useCamera2) {
+            if (useCameraX) {
+                CameraXSession session = new CameraXSession("0", i == 0 ? isFrontface : !isFrontface);
+                cameraSession[i] = CameraSessionWrapper.of(session);
+                previewSize[i] = new Size(1920, 1080); // CameraX handles resolution, just give a default surface size
+                cameraThread.setCurrentSession(cameraSession[i], i);
+                session.open(surfaceTexture, () -> {
+                    requestLayout();
+                    if (dual && i == 1 && initFirstCameraAfterSecond) {
+                        initFirstCameraAfterSecond = false;
+                        AndroidUtilities.runOnUIThread(() -> {
+                            updateCameraInfoSize(0);
+                            cameraThread.reinitForNewCamera();
+                            addToDualWait(350L);
+                        });
+                    }
+                });
+            } else if (useCamera2) {
                 Camera2Session session = Camera2Session.create(i == 0 ? isFrontface : !isFrontface, surfaceWidth, surfaceHeight);
                 if (session == null) return;
                 cameraSession[i] = CameraSessionWrapper.of(session);

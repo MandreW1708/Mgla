@@ -1089,7 +1089,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
                         sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
                     }
-                    final float targetRadius = dpf2(48);
+                    final float targetRadius = dpf2(32);
                     radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, targetRadius), p);
                     radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, targetRadius), p);
                     radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, targetRadius), p);
@@ -1651,8 +1651,8 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         final float cx = rect.centerX();
         final float cy = rect.centerY();
         // Starts recessed in the stack, approaches full size toward the user
-        final float scale = lerp(0.80f, 1.0f, CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(p));
-        final float yShift = Utilities.clamp((predictiveBackY - cy) * -0.10f, -dp(16), dp(16)) * (1f - p);
+        final float scale = lerp(0.92f, 1.0f, CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(p));
+        final float yShift = Utilities.clamp((predictiveBackY - cy) * -0.06f, -dp(10), dp(10)) * (1f - p);
         canvas.translate(0, yShift);
         canvas.scale(scale, scale, cx, cy);
     }
@@ -1665,20 +1665,23 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         final float cx = rect.centerX();
         final float cy = rect.centerY();
         final float dir = predictiveBackLeft ? 1f : -1f;
-        final float ease = CubicBezierInterpolator.StandardDecelerate.getInterpolation(p);
+        final float ease = CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(p);
 
-        // Lift off the stack: shrink + slide + camera perspective
-        final float scale = lerp(1.0f, 0.70f, ease) * lerp(1f, 0.78f, commit);
-        final float marginX = (getWidth() * 0.07f + dp(10)) * (ease + commit * 0.6f);
-        final float tx = dir * marginX + dir * getWidth() * 0.62f * commit;
-        final float maxY = Math.max(0, getHeight() / 16f - dp(8));
-        final float ty = Utilities.clamp((predictiveBackY - cy) * 0.62f, -maxY, maxY) * ease;
+        // No alpha fading so the card doesn't disappear in mid-air
+        containerView.setAlpha(1.0f);
+
+        // Lift off the stack: shrink + slide completely off-screen + camera perspective
+        final float scale = lerp(1.0f, 0.88f, ease) * lerp(1f, 0.95f, commit);
+        final float marginX = (getWidth() * 0.05f + dp(6)) * (ease + commit * 0.5f);
+        final float tx = dir * (marginX + getWidth() * 2.5f * commit);
+        final float maxY = Math.max(0, getHeight() / 20f - dp(4));
+        final float ty = Utilities.clamp((predictiveBackY - cy) * 0.35f, -maxY, maxY) * ease;
 
         predictiveBackCamera.save();
         predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 1.55f);
-        predictiveBackCamera.translate(0, 0, lerp(0f, dpf2(56), ease) + commit * dpf2(110));
-        predictiveBackCamera.rotateY(dir * lerp(0f, 11f, ease) + dir * commit * 18f);
-        predictiveBackCamera.rotateX(Utilities.clamp((predictiveBackY - cy) / Math.max(1f, getHeight()), -0.55f, 0.55f) * -5.5f * ease);
+        predictiveBackCamera.translate(0, 0, lerp(0f, dpf2(40), ease) + commit * dpf2(80));
+        predictiveBackCamera.rotateY(dir * lerp(0f, 5.0f, ease) + dir * commit * 2.0f);
+        predictiveBackCamera.rotateX(Utilities.clamp((predictiveBackY - cy) / Math.max(1f, getHeight()), -0.4f, 0.4f) * -1.5f * ease);
         predictiveBackCamera.getMatrix(predictiveBackMatrix);
         predictiveBackCamera.restore();
 
@@ -1693,13 +1696,13 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         if (p < 0.01f) {
             return;
         }
-        final float strength = Math.min(1.15f, p);
-        for (int i = 6; i >= 1; i--) {
-            float expand = dpf2(2.6f) * i * Math.min(1f, strength);
+        final float strength = Math.min(1.0f, p);
+        for (int i = 5; i >= 1; i--) {
+            float expand = dpf2(2.0f) * i * strength;
             predictiveBackShadowRect.set(rect);
             predictiveBackShadowRect.inset(-expand, -expand);
-            predictiveBackShadowRect.offset(0, dpf2(1.6f) * i * Math.min(1f, strength));
-            predictiveBackShadowPaint.setColor(Color.argb((int) (12 * Math.min(1f, strength) * i), 0, 0, 0));
+            predictiveBackShadowRect.offset(0, dpf2(1.2f) * i * strength);
+            predictiveBackShadowPaint.setColor(Color.argb((int) (10 * strength * i), 0, 0, 0));
             canvas.drawRoundRect(predictiveBackShadowRect, radius + expand, radius + expand, predictiveBackShadowPaint);
         }
     }
@@ -1752,7 +1755,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     public void onBackProgress(float t) {
         if (!predictiveInput) return;
         predictiveBackProgress = t;
-        final float dx = predictivePeekPx() * CubicBezierInterpolator.StandardDecelerate.getInterpolation(t);
+        final float dx = predictivePeekPx() * CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(t);
         predictiveBackHasProgress = t > 0;
         if (predictiveBackEnhanced) {
             // Spatial look is fully canvas-driven on both layers; keep the view untranslated
@@ -1799,17 +1802,17 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
 
         if (!backAnimation) {
             distToMove = Math.abs(containerView.getMeasuredWidth() - Math.max(x, peek));
-            int duration = Math.max((int) (200.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? (enhanced ? 280 : 380) : 50);
+            int duration = Math.max((int) (150.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? (enhanced ? 180 : 260) : 50);
             if (enhanced) {
-                // Fly away immediately from the current pose — no hold at progress=1
-                duration = Math.max(200, (int) (240 + 140 * (1.55f - spatialFrom)));
+                // Fly away smoothly completely off-screen
+                duration = Math.max(280, (int) (280 + 120 * (2.0f - spatialFrom)));
             }
             if (!overrideTransition) {
                 if (enhanced) {
                     containerView.setTranslationX(0);
                     spatialAnimProgress = spatialFrom;
                     animatorSet.playTogether(
-                        ObjectAnimator.ofFloat(this, "spatialAnimProgress", spatialFrom, 1.55f).setDuration(duration),
+                        ObjectAnimator.ofFloat(this, "spatialAnimProgress", spatialFrom, 2.0f).setDuration(duration),
                         ObjectAnimator.ofFloat(this, "innerTranslationX", (float) containerView.getMeasuredWidth()).setDuration(duration)
                     );
                 } else {
@@ -1819,14 +1822,14 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     );
                 }
                 if (newBackTransitions()) {
-                    animatorSet.setInterpolator(enhanced ? CubicBezierInterpolator.EASE_IN : CubicBezierInterpolator.EASE_OUT_QUINT);
+                    animatorSet.setInterpolator(CubicBezierInterpolator.EASE_BOTH);
                 }
             }
         } else {
             distToMove = x;
-            int duration = Math.max((int) ((enhanced ? 280.0f : 320.0f) / containerView.getMeasuredWidth() * Math.max(distToMove, 1)), newBackTransitions() ? (enhanced ? 260 : 320) : 120);
+            int duration = Math.max((int) ((enhanced ? 180.0f : 240.0f) / containerView.getMeasuredWidth() * Math.max(distToMove, 1)), newBackTransitions() ? (enhanced ? 180 : 240) : 100);
             if (enhanced) {
-                duration = Math.max(160, (int) (280 * Math.max(0.15f, spatialFrom)));
+                duration = Math.max(120, (int) (160 * Math.max(0.15f, spatialFrom)));
             }
             if (!overrideTransition) {
                 if (enhanced) {

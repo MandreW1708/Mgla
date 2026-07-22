@@ -9675,6 +9675,31 @@ public class MessagesStorage extends BaseController {
                     }
                 }
 
+                if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId) && !scheduled && !quickReplies) {
+                    int minIdForDeleted = Integer.MAX_VALUE;
+                    int maxIdForDeleted = Integer.MIN_VALUE;
+                    for (int i = 0; i < res.messages.size(); i++) {
+                        TLRPC.Message message = res.messages.get(i);
+                        if (message.id > 0 && !MessageObject.isEphemeralMessageId(message.id)) {
+                            minIdForDeleted = Math.min(minIdForDeleted, message.id);
+                            maxIdForDeleted = Math.max(maxIdForDeleted, message.id);
+                        }
+                    }
+                    if (minIdForDeleted != Integer.MAX_VALUE) {
+                        long topicId = isTopic ? threadMessageId : 0;
+                        ArrayList<TLRPC.Message> deletedMessages = MglaDeletedMessagesStorage.loadDeletedMessagesInRange(database, currentAccount, dialogId, topicId, minIdForDeleted, maxIdForDeleted, 500);
+                        if (deletedMessages != null && !deletedMessages.isEmpty()) {
+                            for (int i = 0; i < deletedMessages.size(); i++) {
+                                TLRPC.Message delMsg = deletedMessages.get(i);
+                                addUsersAndChatsFromMessage(delMsg, usersToLoad, chatsToLoad, animatedEmojiToLoad);
+                                delMsg.mglaSavedDeleted = true;
+                                res.messages.add(delMsg);
+                                messagesCount++;
+                            }
+                        }
+                    }
+                }
+
                 Collections.sort(res.messages, (lhs, rhs) -> {
                     if (MessageObject.isEphemeralMessageId(lhs.id) || MessageObject.isEphemeralMessageId(rhs.id)) {
                         if (lhs.date > rhs.date) {
