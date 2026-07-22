@@ -1868,6 +1868,7 @@ public class MessageObject {
         localUserName = userName;
         messageText = formattedMessage;
         messageOwner = message;
+        this.mglaSavedDeleted = message.mglaSavedDeleted;
         localChannel = isChannel;
         localSupergroup = supergroup;
         localEdit = edit;
@@ -1923,6 +1924,7 @@ public class MessageObject {
 
         currentAccount = accountNum;
         messageOwner = message;
+        this.mglaSavedDeleted = message.mglaSavedDeleted;
         replyMessageObject = replyToMessage;
         eventId = eid;
         wasUnread = !messageOwner.out && messageOwner.unread;

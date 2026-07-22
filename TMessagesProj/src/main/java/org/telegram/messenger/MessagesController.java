@@ -10544,8 +10544,7 @@ public class MessagesController extends BaseController implements NotificationCe
                         });
                     }
                 }
-            }
-            if (statusSettingState != 2 && !offlineSent && Math.abs(System.currentTimeMillis() - getConnectionsManager().getPauseTime()) >= 2000) {
+            } else if (statusSettingState != 2 && getConnectionsManager().getPauseTime() != 0 && !offlineSent && Math.abs(System.currentTimeMillis() - getConnectionsManager().getPauseTime()) >= 2000) {
                 statusSettingState = 2;
                 if (statusRequest != 0) {
                     getConnectionsManager().cancelRequest(statusRequest, true);

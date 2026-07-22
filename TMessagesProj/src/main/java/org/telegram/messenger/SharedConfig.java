@@ -259,6 +259,12 @@ public class SharedConfig {
     public static boolean updateStickersOrderOnSend = true;
     public static boolean bigCameraForRound;
     public static Boolean useCamera2Force;
+    public static int cameraApi;
+    public static boolean cameraXSeamlessSwitch;
+    public static boolean cameraX60Fps;
+    public static boolean cameraXStabilization;
+    public static boolean cameraXMirror;
+    public static boolean cameraXStartWide;
     public static boolean useNewBlur;
     public static boolean useSurfaceInStories;
     public static boolean photoViewerBlur = true;
@@ -665,6 +671,12 @@ public class SharedConfig {
             bigCameraForRound = preferences.getBoolean("bigCameraForRound", false);
             useNewBlur = preferences.getBoolean("useNewBlur", true);
             useCamera2Force = !preferences.contains("useCamera2Force_2") ? null : preferences.getBoolean("useCamera2Force_2", false);
+            cameraApi = preferences.getInt("cameraApi", 0);
+            cameraXSeamlessSwitch = preferences.getBoolean("cameraXSeamlessSwitch", false);
+            cameraX60Fps = preferences.getBoolean("cameraX60Fps", false);
+            cameraXStabilization = preferences.getBoolean("cameraXStabilization", false);
+            cameraXMirror = preferences.getBoolean("cameraXMirror", false);
+            cameraXStartWide = preferences.getBoolean("cameraXStartWide", false);
             useSurfaceInStories = preferences.getBoolean("useSurfaceInStories", Build.VERSION.SDK_INT >= 30);
             payByInvoice = preferences.getBoolean("payByInvoice", false);
             photoViewerBlur = preferences.getBoolean("photoViewerBlur", true);
@@ -1823,16 +1835,53 @@ public class SharedConfig {
     }
 
     public static boolean isUsingCamera2(int currentAccount) {
-        return useCamera2Force == null ? !MessagesController.getInstance(currentAccount).androidDisableRoundCamera2 : useCamera2Force;
+        return cameraApi == 1;
     }
 
-    public static void toggleUseCamera2(int currentAccount) {
+    public static boolean isUsingCameraX() {
+        return cameraApi == 2;
+    }
+
+    public static void setCameraApi(int api) {
         ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
                 .edit()
-                .putBoolean("useCamera2Force_2", useCamera2Force = !isUsingCamera2(currentAccount))
+                .putInt("cameraApi", cameraApi = api)
                 .apply();
     }
 
+    public static void toggleCameraXSeamlessSwitch() {
+        cameraXSeamlessSwitch = !cameraXSeamlessSwitch;
+        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
+                .edit().putBoolean("cameraXSeamlessSwitch", cameraXSeamlessSwitch).apply();
+    }
+
+    public static void toggleCameraX60Fps() {
+        cameraX60Fps = !cameraX60Fps;
+        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
+                .edit().putBoolean("cameraX60Fps", cameraX60Fps).apply();
+    }
+
+    public static void toggleCameraXStabilization() {
+        cameraXStabilization = !cameraXStabilization;
+        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
+                .edit().putBoolean("cameraXStabilization", cameraXStabilization).apply();
+    }
+
+    public static void toggleCameraXMirror() {
+        cameraXMirror = !cameraXMirror;
+        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
+                .edit().putBoolean("cameraXMirror", cameraXMirror).apply();
+    }
+
+    public static void toggleCameraXStartWide() {
+        cameraXStartWide = !cameraXStartWide;
+        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
+                .edit().putBoolean("cameraXStartWide", cameraXStartWide).apply();
+    }
+
+    public static void toggleUseCamera2(int currentAccount) {
+        setCameraApi(cameraApi == 1 ? 0 : 1);
+    }
 
     @Deprecated
     public static int getLegacyDevicePerformanceClass() {

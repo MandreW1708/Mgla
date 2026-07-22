@@ -90,7 +90,7 @@ public class NotificationsService extends Service {
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(NOTIFICATION_ID, builder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                startForeground(NOTIFICATION_ID, builder.build(), 1073741824 /* ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE */);
             } else {
                 startForeground(NOTIFICATION_ID, builder.build());
             }
@@ -102,6 +102,17 @@ public class NotificationsService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        super.onTimeout(startId, fgsType);
+        try {
+            stopForeground(true);
+            stopSelfResult(startId);
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
     }
 
     @Override
