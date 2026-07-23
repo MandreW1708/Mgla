@@ -1648,6 +1648,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int change_colors = 27;
     private final static int tag_message = 28;
     private final static int boost_group = 29;
+    private final static int export_chat = 30;
     private final static int ai_summary_action = 35;
     private final static int ai_retell_menu = 37;
 
@@ -3869,6 +3870,12 @@ public class ChatActivity extends BaseFragment implements
                         return;
                     }
                     showDialog(AlertsCreator.createTTLAlert(getParentActivity(), currentEncryptedChat, themeDelegate).create());
+                } else if (id == export_chat) {
+                    if (getParentActivity() == null) {
+                        return;
+                    }
+                    org.telegram.ui.Components.ExportChatAlert alert = new org.telegram.ui.Components.ExportChatAlert(getParentActivity(), getDialogId(), themeDelegate, ChatActivity.this);
+                    showDialog(alert.create());
                 } else if (id == clear_history || id == delete_chat || id == auto_delete_timer) {
                     if (getParentActivity() == null) {
                         return;
@@ -4494,6 +4501,9 @@ public class ChatActivity extends BaseFragment implements
                 headerItem.lazilyAddSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
             }
             if (chatMode != MODE_MGLA_DELETED) {
+                if (currentUser != null && currentChat == null && getDialogId() != UserObject.VERIFY) {
+                    headerItem.lazilyAddSubItem(export_chat, R.drawable.msg_share, LocaleController.getString("ExportChat", R.string.ExportChat));
+                }
                 if (!isTopic && !ChatObject.isMonoForum(currentChat)) {
                     clearHistoryItem = headerItem.lazilyAddSubItem(clear_history, R.drawable.msg_clear,
                         LocaleController.getString(UserObject.isBotForum(currentUser) ? R.string.ClearAllHistory : R.string.ClearHistory));

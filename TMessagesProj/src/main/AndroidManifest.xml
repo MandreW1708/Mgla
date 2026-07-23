@@ -599,6 +599,7 @@
             android:exported="true"
             android:foregroundServiceType="dataSync"
         />
+
         <service
             android:name=".LocationSharingService"
             android:enabled="true"
