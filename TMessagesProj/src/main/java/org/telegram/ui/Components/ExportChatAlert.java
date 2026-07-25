@@ -1,141 +1,307 @@
 package org.telegram.ui.Components;
 
-import android.app.ProgressDialog;
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Environment;
+import android.provider.DocumentsContract;
 import android.text.InputType;
 import android.view.Gravity;
-import android.widget.CheckBox;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatExportManager;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.ChatActivity;
+
+import java.io.File;
 
 public class ExportChatAlert extends AlertDialog.Builder {
 
+    public static final int REQUEST_CODE_FOLDER_PICK = 99001;
+    private static final int STEP_MB = 5;
+    private static final int MAX_MB = 4096; // 4 GB
+    private static final int SEEK_BAR_MAX = MAX_MB / STEP_MB; // 819 steps
+
+    private static ExportChatAlert currentInstance;
+
     private ChatActivity chatActivity;
     private long dialogId;
+    private Theme.ResourcesProvider resourcesProvider;
+
+    private boolean htmlFormat = true;
+    private long maxFileSize = 0;
+    private String saveLocation;
+    private String saveLocationDisplay;
+
+    private TextSettingsCell locationCell;
+    private TextView sizeValueTextView;
+    private SeekBar sizeSeekBar;
 
     public ExportChatAlert(Context context, long dialogId, Theme.ResourcesProvider resourcesProvider, ChatActivity chatActivity) {
         super(context, resourcesProvider);
         this.chatActivity = chatActivity;
         this.dialogId = dialogId;
+        this.resourcesProvider = resourcesProvider;
+        this.saveLocation = Environment.DIRECTORY_DOWNLOADS;
+        this.saveLocationDisplay = "Загрузки";
+        currentInstance = this;
 
-        setTitle(LocaleController.getString("ExportChatTitle", org.telegram.messenger.R.string.ExportChatTitle));
+        setTitle(LocaleController.getString("ExportChatTitle", R.string.ExportChatTitle));
 
         ScrollView scrollView = new ScrollView(context);
-        LinearLayout linearLayout = new LinearLayout(context);
-        linearLayout.setOrientation(LinearLayout.VERTICAL);
-        linearLayout.setPadding(AndroidUtilities.dp(24), AndroidUtilities.dp(8), AndroidUtilities.dp(24), AndroidUtilities.dp(8));
-        scrollView.addView(linearLayout);
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        scrollView.addView(container);
 
-        // Media Checkboxes
-        CheckBox cbPhotos = new CheckBox(context);
-        cbPhotos.setText(LocaleController.getString("ExportPhotos", org.telegram.messenger.R.string.ExportPhotos));
-        cbPhotos.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        linearLayout.addView(cbPhotos);
+        // === Section: Media ===
+        container.addView(createSectionHeader(context, "Медиа"));
 
-        CheckBox cbVideos = new CheckBox(context);
-        cbVideos.setText(LocaleController.getString("ExportVideos", org.telegram.messenger.R.string.ExportVideos));
-        cbVideos.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        linearLayout.addView(cbVideos);
+        LinearLayout mediaContainer = createRoundedSection(context);
+        TextCheckCell cbPhotos = createCheckCellWithIcon(context, "Фото", 0xff5fa8d3, R.drawable.msg_photos);
+        cbPhotos.setOnClickListener(v -> cbPhotos.setChecked(!cbPhotos.isChecked()));
+        mediaContainer.addView(cbPhotos);
+        TextCheckCell cbVideos = createCheckCellWithIcon(context, "Видео", 0xffd3585f, R.drawable.msg_video);
+        cbVideos.setOnClickListener(v -> cbVideos.setChecked(!cbVideos.isChecked()));
+        mediaContainer.addView(cbVideos);
+        TextCheckCell cbVoice = createCheckCellWithIcon(context, "Голосовые сообщения", 0xff9a8cff, R.drawable.msg_voicechat);
+        cbVoice.setOnClickListener(v -> cbVoice.setChecked(!cbVoice.isChecked()));
+        mediaContainer.addView(cbVoice);
+        TextCheckCell cbStickers = createCheckCellWithIcon(context, "Стикеры", 0xff5fbf6f, R.drawable.msg_sticker);
+        cbStickers.setOnClickListener(v -> cbStickers.setChecked(!cbStickers.isChecked()));
+        mediaContainer.addView(cbStickers);
 
-        CheckBox cbVoice = new CheckBox(context);
-        cbVoice.setText(LocaleController.getString("ExportVoiceMessages", org.telegram.messenger.R.string.ExportVoiceMessages));
-        cbVoice.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        linearLayout.addView(cbVoice);
+        // File size limit inside Media section
+        TextCheckCell cbLimitSize = createCheckCellWithIcon(context, "Файлы", 0xff9a8cff, R.drawable.msg_filehq);
+        cbLimitSize.setChecked(false);
 
-        CheckBox cbStickers = new CheckBox(context);
-        cbStickers.setText(LocaleController.getString("ExportStickers", org.telegram.messenger.R.string.ExportStickers));
-        cbStickers.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        linearLayout.addView(cbStickers);
+        // Slider row
+        LinearLayout sliderRow = new LinearLayout(context);
+        sliderRow.setOrientation(LinearLayout.HORIZONTAL);
+        sliderRow.setGravity(Gravity.CENTER_VERTICAL);
+        sliderRow.setPadding(AndroidUtilities.dp(21), AndroidUtilities.dp(8), AndroidUtilities.dp(21), AndroidUtilities.dp(14));
+        sliderRow.setVisibility(View.GONE);
 
-        // Format RadioGroup
-        TextView formatTitle = new TextView(context);
-        formatTitle.setText(LocaleController.getString("ExportChatFormat", org.telegram.messenger.R.string.ExportChatFormat));
-        formatTitle.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        formatTitle.setTextSize(16);
-        formatTitle.setPadding(0, AndroidUtilities.dp(16), 0, AndroidUtilities.dp(8));
-        linearLayout.addView(formatTitle);
+        sizeSeekBar = new SeekBar(context);
+        sizeSeekBar.setMax(SEEK_BAR_MAX);
+        sizeSeekBar.setProgress(20); // 100 MB default
+        LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        sizeSeekBar.setLayoutParams(seekParams);
 
-        RadioGroup radioGroup = new RadioGroup(context);
-        radioGroup.setOrientation(RadioGroup.VERTICAL);
-        
-        RadioButton rbHtml = new RadioButton(context);
-        rbHtml.setText(LocaleController.getString("ExportHTML", org.telegram.messenger.R.string.ExportHTML));
-        rbHtml.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        rbHtml.setId(1);
-        rbHtml.setChecked(true);
-        radioGroup.addView(rbHtml);
+        sizeValueTextView = new TextView(context);
+        sizeValueTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        sizeValueTextView.setTextSize(15);
+        sizeValueTextView.setTypeface(AndroidUtilities.bold());
+        sizeValueTextView.setGravity(Gravity.CENTER);
+        sizeValueTextView.setMinWidth(AndroidUtilities.dp(80));
+        sizeValueTextView.setText("100 МБ");
 
-        RadioButton rbJson = new RadioButton(context);
-        rbJson.setText(LocaleController.getString("ExportJSON", org.telegram.messenger.R.string.ExportJSON));
-        rbJson.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        rbJson.setId(2);
-        radioGroup.addView(rbJson);
+        sizeSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int mb = (progress + 1) * STEP_MB;
+                if (mb > MAX_MB) mb = MAX_MB;
+                maxFileSize = (long) mb * 1024 * 1024;
+                sizeValueTextView.setText(formatSize(mb));
+            }
 
-        linearLayout.addView(radioGroup);
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
 
-        // Folder Name
-        TextView folderTitle = new TextView(context);
-        folderTitle.setText(LocaleController.getString("ExportFolderName", org.telegram.messenger.R.string.ExportFolderName));
-        folderTitle.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        folderTitle.setTextSize(16);
-        folderTitle.setPadding(0, AndroidUtilities.dp(16), 0, AndroidUtilities.dp(8));
-        linearLayout.addView(folderTitle);
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
 
+        // Set initial value
+        maxFileSize = 100L * 1024 * 1024;
+
+        sliderRow.addView(sizeSeekBar);
+        sliderRow.addView(sizeValueTextView);
+
+        cbLimitSize.setOnClickListener(v -> {
+            cbLimitSize.setChecked(!cbLimitSize.isChecked());
+            sliderRow.setVisibility(cbLimitSize.isChecked() ? View.VISIBLE : View.GONE);
+        });
+
+        mediaContainer.addView(cbLimitSize);
+        mediaContainer.addView(sliderRow);
+        container.addView(mediaContainer);
+
+        // === Section: Save location ===
+        container.addView(createSectionHeader(context, "Место сохранения"));
+
+        LinearLayout locationContainer = createRoundedSection(context);
+        locationCell = new TextSettingsCell(context, resourcesProvider);
+        locationCell.setTextAndValue("Сохранить в", saveLocationDisplay, false);
+        locationCell.setOnClickListener(v -> {
+            try {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                if (chatActivity != null) {
+                    chatActivity.startActivityForResult(intent, REQUEST_CODE_FOLDER_PICK);
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+        locationContainer.addView(locationCell);
+        container.addView(locationContainer);
+
+        // === Section: Format ===
+        container.addView(createSectionHeader(context, "Формат экспорта"));
+
+        LinearLayout formatContainer = createRoundedSection(context);
+        TextCheckCell cbHtml = createCheckCell(context, "HTML");
+        cbHtml.setChecked(true);
+        TextCheckCell cbJson = createCheckCell(context, "JSON");
+        cbJson.setChecked(false);
+        cbHtml.setOnClickListener(v -> {
+            htmlFormat = true;
+            cbHtml.setChecked(true);
+            cbJson.setChecked(false);
+        });
+        cbJson.setOnClickListener(v -> {
+            htmlFormat = false;
+            cbJson.setChecked(true);
+            cbHtml.setChecked(false);
+        });
+        formatContainer.addView(cbHtml);
+        formatContainer.addView(cbJson);
+        container.addView(formatContainer);
+
+        // === Section: Folder name ===
+        container.addView(createSectionHeader(context, "Название папки"));
+
+        LinearLayout folderContainer = createRoundedSection(context);
         EditText folderInput = new EditText(context);
         folderInput.setInputType(InputType.TYPE_CLASS_TEXT);
         folderInput.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        folderInput.setText("ChatExport_" + dialogId);
-        linearLayout.addView(folderInput);
+        folderInput.setHintTextColor(Theme.getColor(Theme.key_dialogTextGray3, resourcesProvider));
+        folderInput.setHint("ChatExport_" + dialogId);
+        folderInput.setPadding(AndroidUtilities.dp(21), AndroidUtilities.dp(14), AndroidUtilities.dp(21), AndroidUtilities.dp(14));
+        folderInput.setBackground(null);
+        folderInput.setTextSize(16);
+        folderContainer.addView(folderInput);
+        container.addView(folderContainer);
 
         setView(scrollView);
 
-        setPositiveButton(LocaleController.getString("ExportStart", org.telegram.messenger.R.string.ExportStart), (dialog, which) -> {
+        setPositiveButton(LocaleController.getString("ExportStart", R.string.ExportStart), (dialog, which) -> {
             boolean photos = cbPhotos.isChecked();
             boolean videos = cbVideos.isChecked();
             boolean voice = cbVoice.isChecked();
             boolean stickers = cbStickers.isChecked();
-            boolean htmlFormat = rbHtml.isChecked();
-            String folderName = folderInput.getText().toString();
-
-            if (folderName.trim().isEmpty()) {
+            String folderName = folderInput.getText().toString().trim();
+            if (folderName.isEmpty()) {
                 folderName = "ChatExport_" + dialogId;
             }
+            long fileSizeLimit = cbLimitSize.isChecked() ? maxFileSize : 0;
 
-            startExportProcess(context, photos, videos, voice, stickers, htmlFormat, folderName);
+            startExportProcess(context, photos, videos, voice, stickers, htmlFormat, folderName, saveLocation, fileSizeLimit);
         });
 
-        setNegativeButton(LocaleController.getString("Cancel", org.telegram.messenger.R.string.Cancel), null);
+        setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
     }
 
-    private void startExportProcess(Context context, boolean photos, boolean videos, boolean voice, boolean stickers, boolean htmlFormat, String folderName) {
-        Toast.makeText(context, "Экспорт начат в фоновом режиме...", Toast.LENGTH_SHORT).show();
+    public static void onFolderPicked(Uri treeUri) {
+        if (currentInstance == null || treeUri == null) return;
+        String path = treeUriToPath(treeUri);
+        if (path != null) {
+            currentInstance.saveLocation = path;
+            currentInstance.saveLocationDisplay = path;
+        } else {
+            currentInstance.saveLocation = treeUri.toString();
+            currentInstance.saveLocationDisplay = treeUri.getLastPathSegment();
+        }
+        if (currentInstance.locationCell != null) {
+            currentInstance.locationCell.setTextAndValue("Сохранить в", currentInstance.saveLocationDisplay, false);
+        }
+    }
 
-        ChatExportManager.startExport(chatActivity.getCurrentAccount(), dialogId, photos, videos, voice, stickers, htmlFormat, folderName, new ChatExportManager.ExportCallback() {
+    private static String treeUriToPath(Uri uri) {
+        try {
+            String docId = DocumentsContract.getTreeDocumentId(uri);
+            String[] split = docId.split(":");
+            String type = split[0];
+            if ("primary".equalsIgnoreCase(type)) {
+                return Environment.getExternalStorageDirectory() + "/" + (split.length > 1 ? split[1] : "");
+            }
+            return "/storage/" + type + "/" + (split.length > 1 ? split[1] : "");
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
+    private static String formatSize(int mb) {
+        if (mb >= 1024) {
+            double gb = mb / 1024.0;
+            if (gb == (int) gb) {
+                return (int) gb + " ГБ";
+            }
+            return String.format("%.1f ГБ", gb);
+        }
+        return mb + " МБ";
+    }
+
+    private View createSectionHeader(Context context, String title) {
+        HeaderCell headerCell = new HeaderCell(context, resourcesProvider);
+        headerCell.setText(title);
+        headerCell.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = AndroidUtilities.dp(16);
+        lp.bottomMargin = AndroidUtilities.dp(4);
+        headerCell.setLayoutParams(lp);
+        return headerCell;
+    }
+
+    private LinearLayout createRoundedSection(Context context) {
+        LinearLayout section = new LinearLayout(context);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
+        return section;
+    }
+
+    private TextCheckCell createCheckCell(Context context, String text) {
+        TextCheckCell cell = new TextCheckCell(context, 21, true, resourcesProvider);
+        cell.setTextAndCheck(text, false, true);
+        cell.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
+        return cell;
+    }
+
+    private TextCheckCell createCheckCellWithIcon(Context context, String text, int iconColor, int iconRes) {
+        TextCheckCell cell = new TextCheckCell(context, 21, true, resourcesProvider);
+        cell.setTextAndCheck(text, false, true);
+        cell.setColorfullIcon(iconColor, iconRes);
+        cell.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
+        return cell;
+    }
+
+    private void startExportProcess(Context context, boolean photos, boolean videos, boolean voice, boolean stickers, boolean htmlFormat, String folderName, String saveLocation, long maxFileSize) {
+        ChatExportManager.startExport(chatActivity.getCurrentAccount(), dialogId, photos, videos, voice, stickers, htmlFormat, folderName, saveLocation, maxFileSize, new ChatExportManager.ExportCallback() {
             @Override
             public void onProgress(int progress, int total) {
-                // UI progress is handled by system notifications now
             }
 
             @Override
             public void onComplete(String path) {
-                // UI completion is handled by system notifications
             }
 
             @Override
             public void onError(String error) {
-                // UI error is handled by system notifications
             }
         });
     }

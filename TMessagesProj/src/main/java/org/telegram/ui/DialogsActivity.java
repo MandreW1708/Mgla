@@ -235,6 +235,7 @@ import org.telegram.ui.Components.FolderDrawable;
 import org.telegram.ui.Components.ForegroundColorSpanThemable;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.Components.FragmentContextView;
+import org.telegram.ui.Components.MglaExportContextView;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.JoinGroupAlert;
 import org.telegram.ui.Components.LayoutHelper;
@@ -619,6 +620,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private FrameLayout fragmentLocationContextViewWrapper;
     private FragmentContextView fragmentContextView;
     private FrameLayout fragmentContextViewWrapper;
+    private MglaExportContextView mglaExportContextView;
+    private FrameLayout mglaExportContextViewWrapper;
     private DialogsActivityTopPanelLayout topPanelLayout;
     private DialogsActivityTopBubblesFadeView topBubblesFadeView;
     private ActiveGiftAuctionsHintCell activeGiftAuctionsHintCell;
@@ -4897,6 +4900,20 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             fragmentContextView.isInsideBubble = true;
             fragmentContextViewWrapper.addView(fragmentContextView);
 
+            mglaExportContextViewWrapper = new FrameLayout(context);
+            topPanelLayout.addView(mglaExportContextViewWrapper);
+            topPanelLayout.setPriority(mglaExportContextViewWrapper, 3);
+            topPanelLayout.setDebugName(mglaExportContextViewWrapper, "mgla export context");
+            topPanelLayout.setViewVisible(mglaExportContextViewWrapper, false, false);
+
+            mglaExportContextView = new MglaExportContextView(context, this) {
+                @Override
+                public void setVisibility(int visibility) {
+                    topPanelLayout.setViewVisible(mglaExportContextViewWrapper, visibility == VISIBLE);
+                }
+            };
+            mglaExportContextViewWrapper.addView(mglaExportContextView);
+
             dialogsHintCell = new DialogsHintCell(context);
             dialogsHintCell.setBackground(Theme.getSelectorDrawable(false));
             updateDialogsHint();
@@ -7474,6 +7491,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 }
                 if (fragmentLocationContextViewWrapper != null) {
                     topPanelLayout.addView(fragmentLocationContextViewWrapper);
+                }
+                if (mglaExportContextViewWrapper != null) {
+                    topPanelLayout.addView(mglaExportContextViewWrapper);
                 }
             }
         }
@@ -12325,6 +12345,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             }
             if (fragmentLocationContextView != null) {
                 fragmentLocationContextView.updateColors();
+            }
+            if (mglaExportContextView != null) {
+                mglaExportContextView.updateColors();
             }
 
             setSearchAnimationProgress(searchAnimationProgress, false);
