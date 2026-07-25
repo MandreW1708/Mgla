@@ -568,6 +568,8 @@ public class ChatActivity extends BaseFragment implements
     private FrameLayout fragmentContextViewWrapper;
     private FragmentContextView fragmentLocationContextView;
     private FrameLayout fragmentLocationContextViewWrapper;
+    private MglaExportContextView mglaExportContextView;
+    private FrameLayout mglaExportContextViewWrapper;
     private TextView emptyView;
     private FlickerLoadingView hashtagLoadingView;
     private StickerEmptyView hashtagSearchEmptyView;
@@ -3875,7 +3877,7 @@ public class ChatActivity extends BaseFragment implements
                         return;
                     }
                     org.telegram.ui.Components.ExportChatAlert alert = new org.telegram.ui.Components.ExportChatAlert(getParentActivity(), getDialogId(), themeDelegate, ChatActivity.this);
-                    showDialog(alert.create());
+                    alert.create().show();
                 } else if (id == clear_history || id == delete_chat || id == auto_delete_timer) {
                     if (getParentActivity() == null) {
                         return;
@@ -7622,6 +7624,19 @@ public class ChatActivity extends BaseFragment implements
             fragmentLocationContextViewWrapper.addView(fragmentLocationContextView);
             fragmentContextView.setEnabled(!inPreviewMode);
             fragmentLocationContextView.setEnabled(!inPreviewMode);
+
+            mglaExportContextViewWrapper = new FrameLayout(context);
+            topPanelLayout.addView(mglaExportContextViewWrapper);
+            topPanelLayout.setPriority(mglaExportContextViewWrapper, 3);
+            topPanelLayout.setDebugName(mglaExportContextViewWrapper, "mgla export context");
+            topPanelLayout.setViewVisible(mglaExportContextViewWrapper, false, false);
+            mglaExportContextView = new MglaExportContextView(context, this) {
+                @Override
+                public void setVisibility(int visibility) {
+                    topPanelLayout.setViewVisible(mglaExportContextViewWrapper, visibility == VISIBLE);
+                }
+            };
+            mglaExportContextViewWrapper.addView(mglaExportContextView);
 
             if (chatMode != 0) {
                 fragmentContextView.setSupportsCalls(false);
@@ -20408,6 +20423,12 @@ public class ChatActivity extends BaseFragment implements
     @Override
     public void onActivityResultFragment(int requestCode, int resultCode, Intent data) {
         if (resultCode == Activity.RESULT_OK) {
+            if (requestCode == org.telegram.ui.Components.ExportChatAlert.REQUEST_CODE_FOLDER_PICK) {
+                if (data != null && data.getData() != null) {
+                    org.telegram.ui.Components.ExportChatAlert.onFolderPicked(data.getData());
+                }
+                return;
+            }
             if (requestCode == 0 || requestCode == 2) {
                 createChatAttachView();
                 if (chatAttachAlert != null) {
@@ -43471,6 +43492,9 @@ public class ChatActivity extends BaseFragment implements
             }
             if (fragmentContextView != null) {
                 fragmentContextView.updateColors();
+            }
+            if (mglaExportContextView != null) {
+                mglaExportContextView.updateColors();
             }
             if (avatarContainer != null) {
                 avatarContainer.updateColors();

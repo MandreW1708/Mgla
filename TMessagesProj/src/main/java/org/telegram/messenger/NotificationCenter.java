@@ -377,6 +377,11 @@ public class NotificationCenter {
     public static final int mglaHeaderSettingsChanged = totalEvents++;
     public static final int communityPendingRequestsUpdate = totalEvents++;
     public static final int communitySwitchedCollapsed = totalEvents++;
+    public static final int mglaExportProgressChanged = totalEvents++;
+    public static final int mglaExportStarted = totalEvents++;
+    public static final int mglaExportCompleted = totalEvents++;
+    public static final int mglaExportCanceled = totalEvents++;
+    public static final int mglaExportFailed = totalEvents++;
 
     public static boolean alreadyLogged;
 
