@@ -204,13 +204,14 @@ public class ExportChatAlert extends AlertDialog.Builder {
             boolean videos = cbVideos.isChecked();
             boolean voice = cbVoice.isChecked();
             boolean stickers = cbStickers.isChecked();
+            boolean files = cbLimitSize.isChecked();
             String folderName = folderInput.getText().toString().trim();
             if (folderName.isEmpty()) {
                 folderName = "ChatExport_" + dialogId;
             }
             long fileSizeLimit = cbLimitSize.isChecked() ? maxFileSize : 0;
 
-            startExportProcess(context, photos, videos, voice, stickers, htmlFormat, folderName, saveLocation, fileSizeLimit);
+            startExportProcess(context, photos, videos, voice, stickers, files, htmlFormat, folderName, saveLocation, fileSizeLimit);
         });
 
         setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
@@ -290,8 +291,8 @@ public class ExportChatAlert extends AlertDialog.Builder {
         return cell;
     }
 
-    private void startExportProcess(Context context, boolean photos, boolean videos, boolean voice, boolean stickers, boolean htmlFormat, String folderName, String saveLocation, long maxFileSize) {
-        ChatExportManager.startExport(chatActivity.getCurrentAccount(), dialogId, photos, videos, voice, stickers, htmlFormat, folderName, saveLocation, maxFileSize, new ChatExportManager.ExportCallback() {
+    private void startExportProcess(Context context, boolean photos, boolean videos, boolean voice, boolean stickers, boolean files, boolean htmlFormat, String folderName, String saveLocation, long maxFileSize) {
+        ChatExportManager.startExport(chatActivity.getCurrentAccount(), dialogId, photos, videos, voice, stickers, files, htmlFormat, folderName, saveLocation, maxFileSize, new ChatExportManager.ExportCallback() {
             @Override
             public void onProgress(int progress, int total) {
             }
