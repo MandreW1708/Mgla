@@ -3876,6 +3876,7 @@ public class ChatActivity extends BaseFragment implements
                     if (getParentActivity() == null) {
                         return;
                     }
+                    getMessagesController().getGlobalMainSettings().edit().putBoolean("mgla_export_seen", true).apply();
                     org.telegram.ui.Components.ExportChatAlert alert = new org.telegram.ui.Components.ExportChatAlert(getParentActivity(), getDialogId(), themeDelegate, ChatActivity.this);
                     alert.create().show();
                 } else if (id == clear_history || id == delete_chat || id == auto_delete_timer) {
@@ -4481,7 +4482,7 @@ public class ChatActivity extends BaseFragment implements
             if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
                 headerItem.lazilyAddSubItem(mgla_view_deleted, R.drawable.msg_delete, "Посмотреть удаленные");
             }
-            if (getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", false)) {
+            if (getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", true)) {
                 headerItem.lazilyAddSubItem(ai_retell_menu, R.drawable.menu_rewrite, "Пересказ сообщ.");
             }
             if (currentChat != null && !currentChat.creator && !ChatObject.hasAdminRights(currentChat)) {
@@ -4504,7 +4505,10 @@ public class ChatActivity extends BaseFragment implements
             }
             if (chatMode != MODE_MGLA_DELETED) {
                 if (currentUser != null && currentChat == null && getDialogId() != UserObject.VERIFY) {
-                    headerItem.lazilyAddSubItem(export_chat, R.drawable.msg_share, LocaleController.getString("ExportChat", R.string.ExportChat));
+                    ActionBarMenuSubItem exportSubItem = headerItem.addSubItem(export_chat, R.drawable.msg_share, LocaleController.getString("ExportChat", R.string.ExportChat));
+                    if (exportSubItem != null && !getMessagesController().getGlobalMainSettings().getBoolean("mgla_export_seen", false)) {
+                        exportSubItem.setRightBadge("new");
+                    }
                 }
                 if (!isTopic && !ChatObject.isMonoForum(currentChat)) {
                     clearHistoryItem = headerItem.lazilyAddSubItem(clear_history, R.drawable.msg_clear,
@@ -10428,13 +10432,13 @@ public class ChatActivity extends BaseFragment implements
             }
             actionModeViews.add(actionMode.addItemWithWidth(share, R.drawable.msg_shareout, dp(48), LocaleController.getString(R.string.ShareFile)));
             actionModeViews.add(actionMode.addItemWithWidth(delete, R.drawable.msg_delete, dp(48), LocaleController.getString(R.string.Delete)));
-            actionModeViews.add(actionMode.addItemWithWidth(ai_summary_action, R.drawable.msg_translate, dp(48), "Сводка"));
+            actionModeViews.add(actionMode.addItemWithWidth(ai_summary_action, R.drawable.premium_ai_editor, dp(48), "Сводка"));
         } else {
             actionModeViews.add(actionMode.addItemWithWidth(edit, R.drawable.msg_edit, dp(48), LocaleController.getString(R.string.Edit)));
             actionModeViews.add(actionMode.addItemWithWidth(star, R.drawable.msg_fave, dp(48), LocaleController.getString(R.string.AddToFavorites)));
             actionModeViews.add(actionMode.addItemWithWidth(copy, R.drawable.msg_copy, dp(48), LocaleController.getString(R.string.Copy)));
             actionModeViews.add(actionMode.addItemWithWidth(delete, R.drawable.msg_delete, dp(48), LocaleController.getString(R.string.Delete)));
-            actionModeViews.add(actionMode.addItemWithWidth(ai_summary_action, R.drawable.msg_translate, dp(48), "Сводка"));
+            actionModeViews.add(actionMode.addItemWithWidth(ai_summary_action, R.drawable.premium_ai_editor, dp(48), "Сводка"));
         }
         actionMode.setItemVisibility(edit, canEditMessagesCount == 1 && selectedMessagesIds[0].size() + selectedMessagesIds[1].size() == 1 ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(copy, !isPeerNoForwards() && selectedMessagesCanCopyIds[0].size() + selectedMessagesCanCopyIds[1].size() != 0 ? View.VISIBLE : View.GONE);
@@ -10443,7 +10447,7 @@ public class ChatActivity extends BaseFragment implements
         actionMode.setItemVisibility(tag_message, getUserConfig().isPremium() ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(share, View.GONE);
         actionMode.setItemVisibility(ai_summary_action,
-            getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)
+            getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)
             && selectedMessagesIds[0].size() + selectedMessagesIds[1].size() == 1
             ? View.VISIBLE : View.GONE);
     }
@@ -34105,14 +34109,29 @@ public class ChatActivity extends BaseFragment implements
         textView.setMovementMethod(new AndroidUtilities.LinkMovementMethodMy());
         content.addView(textView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 16, 0));
 
+        LinearLayout bottomLayout = new LinearLayout(ctx);
+        bottomLayout.setOrientation(LinearLayout.HORIZONTAL);
+        bottomLayout.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView providerView = new TextView(ctx);
+        String providerName = "gemini".equals(AiAssistant.getProvider()) ? "Gemini" : "Базовый";
+        providerView.setText("Провайдер AI: " + providerName);
+        providerView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        providerView.setTextColor(Theme.getColor(Theme.key_dialogTextGray2));
+        providerView.setPadding(0, dp(8), 0, 0);
+
         TextView cancelBtn = new TextView(ctx);
         cancelBtn.setText("Отмена");
         cancelBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         cancelBtn.setTextColor(Theme.getColor(Theme.key_dialogTextGray2));
         cancelBtn.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        cancelBtn.setPadding(0, dp(8), 0, 0);
+        cancelBtn.setPadding(dp(16), dp(8), 0, 0);
         cancelBtn.setClickable(true);
-        content.addView(cancelBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        bottomLayout.addView(providerView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1.0f));
+        bottomLayout.addView(cancelBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+        content.addView(bottomLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         AlertDialog dialog = new AlertDialog.Builder(getParentActivity())
             .setView(content)
@@ -34129,6 +34148,8 @@ public class ChatActivity extends BaseFragment implements
                     if (getParentActivity() == null) return;
                     textView.setText(formatMarkdown(text));
                     cancelBtn.setText("Закрыть");
+                    String currentProvider = "gemini".equals(AiAssistant.getProvider()) ? "Gemini" : "Базовый";
+                    providerView.setText("Провайдер AI: " + currentProvider);
                 }
 
                 @Override
@@ -34148,6 +34169,8 @@ public class ChatActivity extends BaseFragment implements
                     }
                     textView.setText(msg);
                     cancelBtn.setText("Закрыть");
+                    String currentProvider = "gemini".equals(AiAssistant.getProvider()) ? "Gemini" : "Базовый";
+                    providerView.setText("Провайдер AI: " + currentProvider);
                 }
             }
         );
@@ -34311,7 +34334,8 @@ public class ChatActivity extends BaseFragment implements
                 break;
             }
             case OPTION_AI_SUMMARY: {
-                String messageText = selectedObject.messageOwner.message;
+                CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
+                String messageText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
                 if (TextUtils.isEmpty(messageText)) {
                     break;
                 }
@@ -34319,28 +34343,32 @@ public class ChatActivity extends BaseFragment implements
                 break;
             }
             case OPTION_AI_REPLY_POLITE: {
-                String messageText = selectedObject.messageOwner.message;
+                CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
+                String messageText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
                 if (!TextUtils.isEmpty(messageText)) {
                     generateAiReplyToInput(messageText);
                 }
                 break;
             }
             case OPTION_AI_EXPLAIN_SIMPLE: {
-                String messageText = selectedObject.messageOwner.message;
+                CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
+                String messageText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
                 if (!TextUtils.isEmpty(messageText)) {
                     showAiDialog("Объяснить проще", "Объясни этот текст проще и короче. Верни только результат:\n\n" + messageText);
                 }
                 break;
             }
             case OPTION_AI_TRANSLATE: {
-                String messageText = selectedObject.messageOwner.message;
+                CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
+                String messageText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
                 if (!TextUtils.isEmpty(messageText)) {
                     showAiDialog("AI-перевод", "Переведи этот текст на русский. Если текст уже на русском, переведи его на английский. Верни только перевод:\n\n" + messageText);
                 }
                 break;
             }
             case OPTION_AI_TASKS: {
-                String messageText = selectedObject.messageOwner.message;
+                CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
+                String messageText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
                 if (!TextUtils.isEmpty(messageText)) {
                     showAiDialog("Задачи", "Выдели из текста задачи и договорённости списком. Если задач нет, напиши: «Задач не найдено». Верни только результат:\n\n" + messageText);
                 }
@@ -46772,26 +46800,6 @@ public class ChatActivity extends BaseFragment implements
                     options.add(OPTION_EDIT_HISTORY);
                     icons.add(R.drawable.msg_recent);
                 }
-                if (selectedObject != null && selectedObject.contentType == 0 && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice()
-                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
-                    items.add("Краткая Сводка");
-                    options.add(OPTION_AI_SUMMARY);
-                    icons.add(R.drawable.msg_text_outlined);
-                    if (!ChatObject.isChannelAndNotMegaGroup(currentChat)) {
-                        items.add("Ответить вежливо");
-                        options.add(OPTION_AI_REPLY_POLITE);
-                        icons.add(R.drawable.menu_reply);
-                        items.add("Объяснить проще");
-                        options.add(OPTION_AI_EXPLAIN_SIMPLE);
-                        icons.add(R.drawable.menu_rewrite);
-                    }
-                    items.add("AI-перевод");
-                    options.add(OPTION_AI_TRANSLATE);
-                    icons.add(R.drawable.msg_translate);
-                    items.add("Выделить задачи");
-                    options.add(OPTION_AI_TASKS);
-                    icons.add(R.drawable.menu_proofread);
-                }
                 if (message.canEditMessage(currentChat) && message.type != MessageObject.TYPE_POLL) {
                     items.add(LocaleController.getString(R.string.Edit));
                     options.add(OPTION_EDIT);
@@ -46873,26 +46881,6 @@ public class ChatActivity extends BaseFragment implements
                     items.add("История изменений");
                     options.add(OPTION_EDIT_HISTORY);
                     icons.add(R.drawable.msg_recent);
-                }
-                if (selectedObject.contentType == 0 && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice()
-                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", false)) {
-                    items.add("Краткая Сводка");
-                    options.add(OPTION_AI_SUMMARY);
-                    icons.add(R.drawable.msg_text_outlined);
-                    if (!ChatObject.isChannelAndNotMegaGroup(currentChat)) {
-                        items.add("Ответить вежливо");
-                        options.add(OPTION_AI_REPLY_POLITE);
-                        icons.add(R.drawable.menu_reply);
-                        items.add("Объяснить проще");
-                        options.add(OPTION_AI_EXPLAIN_SIMPLE);
-                        icons.add(R.drawable.menu_rewrite);
-                    }
-                    items.add("AI-перевод");
-                    options.add(OPTION_AI_TRANSLATE);
-                    icons.add(R.drawable.msg_translate);
-                    items.add("Выделить задачи");
-                    options.add(OPTION_AI_TASKS);
-                    icons.add(R.drawable.menu_proofread);
                 }
                 if (!isThreadChat() && chatMode != MODE_SCHEDULED && currentChat != null && primaryMessage != null && (currentChat.has_link || primaryMessage.hasReplies()) && currentChat.megagroup && primaryMessage.canViewThread()) {
                     if (primaryMessage.hasReplies()) {
@@ -47267,6 +47255,31 @@ public class ChatActivity extends BaseFragment implements
                 items.add(LocaleController.getString(chatMode == MODE_SAVED && threadMessageId != getUserConfig().getClientUserId() ? R.string.Remove : R.string.Delete));
                 options.add(OPTION_DELETE);
                 icons.add(deleteIconRes);
+            }
+        }
+        if (selectedObject != null && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice() && !selectedObject.isSticker() && !selectedObject.isAnimatedSticker() && !selectedObject.isRoundVideo() && !selectedObject.isVoice()) {
+            CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
+            String aiText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
+            if (!TextUtils.isEmpty(aiText) && getContext() != null && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)) {
+                if (!options.contains(OPTION_AI_SUMMARY)) {
+                    items.add("Краткая Сводка");
+                    options.add(OPTION_AI_SUMMARY);
+                    icons.add(R.drawable.premium_ai_editor);
+                    if (currentChat == null || !ChatObject.isChannelAndNotMegaGroup(currentChat)) {
+                        items.add("Ответить вежливо");
+                        options.add(OPTION_AI_REPLY_POLITE);
+                        icons.add(R.drawable.menu_reply);
+                        items.add("Объяснить проще");
+                        options.add(OPTION_AI_EXPLAIN_SIMPLE);
+                        icons.add(R.drawable.menu_rewrite);
+                    }
+                    items.add("AI-перевод");
+                    options.add(OPTION_AI_TRANSLATE);
+                    icons.add(R.drawable.msg_translate);
+                    items.add("Выделить задачи");
+                    options.add(OPTION_AI_TASKS);
+                    icons.add(R.drawable.menu_proofread);
+                }
             }
         }
         MglaMessageMenuController.applyToMenu(getContext(), icons, items, options);

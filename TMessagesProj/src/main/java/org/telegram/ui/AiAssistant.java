@@ -7,6 +7,7 @@ import android.text.TextUtils;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.LocaleController;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -34,7 +35,7 @@ public class AiAssistant {
         "google/gemma-4-26b-a4b-it:free"
     };
 
-    public static final int DAILY_LIMIT = 50;
+    public static final int DAILY_LIMIT = 10;
     private static final String PREFS_NAME = "mgla_config";
     private static final String KEY_DATE = "ai_editor_date";
     private static final String KEY_COUNT = "ai_editor_count";
@@ -56,10 +57,18 @@ public class AiAssistant {
     private AiAssistant() {
     }
 
+    public static String getProvider() {
+        return prefs().getString("ai_provider", "openrouter");
+    }
+
     /**
      * Проверяет, задан ли API-ключ.
      */
     public boolean isConfigured() {
+        if ("gemini".equals(getProvider())) {
+            String apiKey = prefs().getString("ai_transcribe_api_key", "");
+            return !TextUtils.isEmpty(apiKey);
+        }
         return !TextUtils.isEmpty(API_KEY);
     }
 
@@ -82,6 +91,9 @@ public class AiAssistant {
     }
 
     public static String getUsageLabel() {
+        if ("gemini".equals(getProvider())) {
+            return "∞";
+        }
         return getUsedToday() + " / " + DAILY_LIMIT;
     }
 
@@ -129,35 +141,43 @@ public class AiAssistant {
     public void sendMessage(String userMessage, AiCallback callback) {
         if (!isConfigured()) {
             if (callback != null) {
-                AndroidUtilities.runOnUIThread(() -> callback.onError("API ключ не задан"));
+                String errorMsg = "gemini".equals(getProvider()) ? "API ключ Gemini не задан в разделе ИИ-расшифровка" : "API ключ не задан";
+                AndroidUtilities.runOnUIThread(() -> callback.onError(errorMsg));
             }
             return;
         }
 
         SharedPreferences prefs = prefs();
-        long now = System.currentTimeMillis();
-        long last = prefs.getLong(KEY_LAST_REQUEST, 0);
-        if (now - last < 10_000) {
-            long remain = 10 - (now - last) / 1000;
-            if (callback != null) {
-                AndroidUtilities.runOnUIThread(() -> callback.onError("Подождите " + remain + " сек."));
+        if (!"gemini".equals(getProvider())) {
+            long now = System.currentTimeMillis();
+            long last = prefs.getLong(KEY_LAST_REQUEST, 0);
+            if (now - last < 10_000) {
+                long remain = 10 - (now - last) / 1000;
+                if (callback != null) {
+                    AndroidUtilities.runOnUIThread(() -> callback.onError("Подождите " + remain + " сек."));
+                }
+                return;
             }
-            return;
-        }
 
-        if (!consumeDailyQuota()) {
-            if (callback != null) {
-                AndroidUtilities.runOnUIThread(() ->
-                    callback.onError("Лимит " + DAILY_LIMIT + " запросов в день исчерпан. До сброса: " + getResetInLabel()));
+            if (!consumeDailyQuota()) {
+                if (callback != null) {
+                    AndroidUtilities.runOnUIThread(() ->
+                        callback.onError("Лимит " + DAILY_LIMIT + " запросов в день исчерпан. До сброса: " + getResetInLabel()));
+                }
+                return;
             }
-            return;
-        }
 
-        prefs.edit().putLong(KEY_LAST_REQUEST, now).apply();
+            prefs.edit().putLong(KEY_LAST_REQUEST, now).apply();
+        }
 
         new Thread(() -> {
             try {
-                String response = callOpenRouter(userMessage);
+                String response;
+                if ("gemini".equals(getProvider())) {
+                    response = callGemini(userMessage);
+                } else {
+                    response = callOpenRouter(userMessage);
+                }
                 if (callback != null) {
                     AndroidUtilities.runOnUIThread(() -> callback.onResponse(response));
                 }
@@ -170,9 +190,24 @@ public class AiAssistant {
         }).start();
     }
 
+    private String getSystemPrompt() {
+        String langName = "Russian";
+        try {
+            LocaleController.LocaleInfo info = LocaleController.getInstance().getCurrentLocaleInfo();
+            if (info != null && !TextUtils.isEmpty(info.name)) {
+                langName = info.name + (!TextUtils.isEmpty(info.nameEnglish) ? " (" + info.nameEnglish + ")" : "");
+            } else if (LocaleController.getInstance().getCurrentLocale() != null) {
+                langName = LocaleController.getInstance().getCurrentLocale().getDisplayName(Locale.ENGLISH);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        return "Ты — инструмент обработки текста. Каждый запрос НЕЗАВИСИМЫЙ. НЕТ истории. НЕТ памяти. НЕ здоровайся. НЕ прощайся. НЕ комментируй. НЕ упоминай предыдущие запросы. ТОЛЬКО результат. ВАЖНО: Всегда отвечай на языке, который установлен в настройках клиента по умолчанию (" + langName + "), если в самом запросе явно не требуется перевод на другой язык.";
+    }
+
     private String callOpenRouter(String userMessage) throws Exception {
         long seed = System.nanoTime() ^ (long)(Math.random() * Long.MAX_VALUE);
-        String systemPrompt = "Ты — инструмент обработки текста. Каждый запрос НЕЗАВИСИМЫЙ. НЕТ истории. НЕТ памяти. НЕ здоровайся. НЕ прощайся. НЕ комментируй. НЕ упоминай предыдущие запросы. ТОЛЬКО результат.";
+        String systemPrompt = getSystemPrompt();
         String userContent = escapeJson(userMessage);
 
         Exception lastException = null;
@@ -285,6 +320,93 @@ public class AiAssistant {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    private String callGemini(String userMessage) throws Exception {
+        SharedPreferences prefs = prefs();
+        String apiKey = prefs.getString("ai_transcribe_api_key", "");
+        String model = prefs.getString("ai_transcribe_model", "gemini-2.0-flash");
+        if (TextUtils.isEmpty(apiKey)) {
+            throw new Exception("API ключ Gemini не задан в разделе ИИ-расшифровка");
+        }
+
+        String systemPrompt = getSystemPrompt();
+        String fullPrompt = systemPrompt + "\n\n" + userMessage;
+
+        String jsonBody = "{"
+            + "\"contents\":[{"
+            +   "\"parts\":[{\"text\":\"" + escapeJson(fullPrompt) + "\"}]"
+            + "}],"
+            + "\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":1024}"
+            + "}";
+
+        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(60000);
+
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+        }
+
+        int code = conn.getResponseCode();
+        if (code == 200) {
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    sb.append(line);
+                }
+            }
+            return parseGeminiResponse(sb.toString());
+        } else {
+            StringBuilder err = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    err.append(line);
+                }
+            }
+            throw new Exception("Gemini ошибка " + code + " (" + model + "): " + err.toString());
+        }
+    }
+
+    private String parseGeminiResponse(String json) {
+        try {
+            String key = "\"text\": \"";
+            int start = json.indexOf(key);
+            if (start < 0) {
+                key = "\"text\":\"";
+                start = json.indexOf(key);
+            }
+            if (start < 0) return json;
+            start += key.length();
+            int end = start;
+            boolean escaped = false;
+            while (end < json.length()) {
+                char c = json.charAt(end);
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    break;
+                }
+                end++;
+            }
+            return json.substring(start, end)
+                .replace("\\n", "\n")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+        } catch (Exception e) {
+            FileLog.e(e);
+            return json;
+        }
     }
 
     public interface AiCallback {
