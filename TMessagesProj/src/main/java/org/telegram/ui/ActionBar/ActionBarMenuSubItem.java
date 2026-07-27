@@ -432,4 +432,26 @@ public class ActionBarMenuSubItem extends FrameLayout {
     public ImageView getRightIcon() {
         return rightIcon;
     }
+
+    private TextView rightBadgeView;
+
+    public void setRightBadge(String text) {
+        if (rightBadgeView == null) {
+            rightBadgeView = new TextView(getContext());
+            rightBadgeView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+            rightBadgeView.setTypeface(org.telegram.messenger.AndroidUtilities.bold());
+            rightBadgeView.setTextColor(0xFFFFFFFF);
+            rightBadgeView.setIncludeFontPadding(false);
+            rightBadgeView.setGravity(Gravity.CENTER);
+            rightBadgeView.setPadding(dp(6), dp(2), dp(6), dp(3));
+            rightBadgeView.setBackground(Theme.createRoundRectDrawable(dp(6), 0xFF3390EC));
+            addView(rightBadgeView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, (LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.CENTER_VERTICAL, 16, 0, 16, 0));
+        }
+        if (text == null) {
+            rightBadgeView.setVisibility(GONE);
+        } else {
+            rightBadgeView.setText(text);
+            rightBadgeView.setVisibility(VISIBLE);
+        }
+    }
 }

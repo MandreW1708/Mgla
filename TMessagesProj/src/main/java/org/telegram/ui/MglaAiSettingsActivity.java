@@ -17,6 +17,8 @@ import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
@@ -34,11 +36,17 @@ public class MglaAiSettingsActivity extends BaseFragment {
     private static final int ROW_SHADOW_2 = 6;
     private static final int ROW_AI_TRANSCRIBE = 7;
     private static final int ROW_SHADOW_3 = 8;
-    private static final int ROW_COUNT = 9;
+    private static final int ROW_PROVIDER_HEADER = 9;
+    private static final int ROW_PROVIDER_BASIC = 10;
+    private static final int ROW_PROVIDER_GEMINI = 11;
+    private static final int ROW_SHADOW_4 = 12;
+    private static final int ROW_COUNT = 13;
 
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_TEXT = 1;
     private static final int VIEW_TYPE_SHADOW = 2;
+    private static final int VIEW_TYPE_HEADER = 3;
+    private static final int VIEW_TYPE_RADIO = 4;
 
     private SharedPreferences prefs;
     private RecyclerListView listView;
@@ -79,11 +87,28 @@ public class MglaAiSettingsActivity extends BaseFragment {
         listView.setOnItemClickListener((view, position) -> {
             if (position == ROW_AI_TRANSCRIBE) {
                 presentFragment(new MglaAiTranscribeActivity());
+            } else if (position == ROW_PROVIDER_BASIC) {
+                if (!"openrouter".equals(prefs.getString("ai_provider", "openrouter"))) {
+                    prefs.edit().putString("ai_provider", "openrouter").apply();
+                    if (listView.getAdapter() != null) {
+                        listView.getAdapter().notifyDataSetChanged();
+                    }
+                }
+            } else if (position == ROW_PROVIDER_GEMINI) {
+                if (!"gemini".equals(prefs.getString("ai_provider", "openrouter"))) {
+                    prefs.edit().putString("ai_provider", "gemini").apply();
+                    if (listView.getAdapter() != null) {
+                        listView.getAdapter().notifyDataSetChanged();
+                    }
+                }
             } else {
                 String key = getSwitchKey(position);
                 if (key != null) {
-                    boolean enabled = !prefs.getBoolean(key, false);
+                    boolean enabled = !prefs.getBoolean(key, true);
                     prefs.edit().putBoolean(key, enabled).apply();
+                    if ("ai_summary".equals(key)) {
+                        MglaMessageMenuController.setEnabled(context, ChatActivity.OPTION_AI_SUMMARY, enabled);
+                    }
                     if (view instanceof TextCheckCell) {
                         ((TextCheckCell) view).setChecked(enabled);
                     }
@@ -127,7 +152,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE;
+            return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE || position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI;
         }
 
         @Override
@@ -137,10 +162,14 @@ public class MglaAiSettingsActivity extends BaseFragment {
 
         @Override
         public int getItemViewType(int position) {
-            if (position == ROW_SHADOW_1 || position == ROW_SHADOW_2 || position == ROW_SHADOW_3) {
+            if (position == ROW_SHADOW_1 || position == ROW_SHADOW_2 || position == ROW_SHADOW_3 || position == ROW_SHADOW_4) {
                 return VIEW_TYPE_SHADOW;
             } else if (position == ROW_AI_EDITOR_LIMIT || position == ROW_AI_TRANSCRIBE) {
                 return VIEW_TYPE_TEXT;
+            } else if (position == ROW_PROVIDER_HEADER) {
+                return VIEW_TYPE_HEADER;
+            } else if (position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI) {
+                return VIEW_TYPE_RADIO;
             }
             return VIEW_TYPE_CHECK;
         }
@@ -153,6 +182,12 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 view = new ShadowSectionCell(context);
             } else if (viewType == VIEW_TYPE_TEXT) {
                 view = new TextSettingsCell(context);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            } else if (viewType == VIEW_TYPE_HEADER) {
+                view = new HeaderCell(context, 22);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            } else if (viewType == VIEW_TYPE_RADIO) {
+                view = new RadioCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else {
                 view = new TextCheckCell(context);
@@ -171,20 +206,30 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                 cell.setText("ИИ-расшифровка", false);
                 cell.setCanDisable(false);
+            } else if (holder.itemView instanceof HeaderCell) {
+                ((HeaderCell) holder.itemView).setText("Провайдер AI");
+            } else if (holder.itemView instanceof RadioCell) {
+                RadioCell cell = (RadioCell) holder.itemView;
+                String provider = prefs.getString("ai_provider", "openrouter");
+                if (position == ROW_PROVIDER_BASIC) {
+                    cell.setText("Базовый", "openrouter".equals(provider), true);
+                } else if (position == ROW_PROVIDER_GEMINI) {
+                    cell.setText("Gemini", "gemini".equals(provider), false);
+                }
             } else if (holder.itemView instanceof TextCheckCell) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
                 switch (position) {
                     case ROW_AI_ENABLED:
-                        cell.setTextAndCheck("Включение AI", prefs.getBoolean("ai_enabled", false), false);
+                        cell.setTextAndCheck("Включение AI", prefs.getBoolean("ai_enabled", true), false);
                         break;
                     case ROW_AI_SUMMARY:
-                        cell.setTextAndCheck("Краткая Сводка", prefs.getBoolean("ai_summary", false), true);
+                        cell.setTextAndCheck("Краткая Сводка", prefs.getBoolean("ai_summary", true), true);
                         break;
                     case ROW_AI_RETELL:
-                        cell.setTextAndCheck("Пересказ сообщений", prefs.getBoolean("ai_retell", false), true);
+                        cell.setTextAndCheck("Пересказ сообщений", prefs.getBoolean("ai_retell", true), true);
                         break;
                     case ROW_AI_EDITOR:
-                        cell.setTextAndCheck("AI-редактор", prefs.getBoolean("ai_editor", false), true);
+                        cell.setTextAndCheck("AI-редактор", prefs.getBoolean("ai_editor", true), true);
                         break;
                 }
             }

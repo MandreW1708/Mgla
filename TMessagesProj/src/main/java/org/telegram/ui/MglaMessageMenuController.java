@@ -50,12 +50,19 @@ public class MglaMessageMenuController {
     }
 
     public static boolean isEnabled(Context context, int option) {
-        return context == null || getPrefs(context).getBoolean(ENABLED_PREFIX + option, true);
+        if (context == null) return true;
+        if (option == ChatActivity.OPTION_AI_SUMMARY && !getPrefs(context).getBoolean("ai_summary", true)) {
+            return false;
+        }
+        return getPrefs(context).getBoolean(ENABLED_PREFIX + option, true);
     }
 
     public static void setEnabled(Context context, int option, boolean enabled) {
         if (context == null) return;
         getPrefs(context).edit().putBoolean(ENABLED_PREFIX + option, enabled).apply();
+        if (option == ChatActivity.OPTION_AI_SUMMARY) {
+            getPrefs(context).edit().putBoolean("ai_summary", enabled).apply();
+        }
     }
 
     public static ArrayList<Integer> getOrder(Context context) {
