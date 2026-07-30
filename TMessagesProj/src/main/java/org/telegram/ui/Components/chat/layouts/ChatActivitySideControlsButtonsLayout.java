@@ -174,7 +174,7 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
                 holder.button.setTranslationY(dp(80) * (1f - visibility) - totalHeight);
             }
 
-            final int height = dp(44);
+            final int height = dp(48);
             final int gap = dp(10 + 10 * counterVisibility);
 
             totalHeight += (height + gap) * visibility;
@@ -206,11 +206,7 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
                 buttonId == BUTTON_ATTACH ? CubicBezierInterpolator.EASE_OUT_QUINT : AnimatorUtils.DECELERATE_INTERPOLATOR,
                 buttonId == BUTTON_ATTACH ? 300 : 280);
 
-            int size = 44, iconSize = 32;
-            if (buttonId == BUTTON_ATTACH) {
-                size = 50;
-                iconSize = 32;
-            }
+            int size = 48, iconSize = 32;
             final ChatActivityBlurredRoundPageDownButton button = ChatActivityBlurredRoundPageDownButton.create(
                 getContext(),
                 size, iconSize,

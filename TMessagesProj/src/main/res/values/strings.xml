@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="AppName">Mgla</string>
     <string name="AppNameBeta">Mgla</string>
@@ -5738,15 +5738,15 @@
     <string name="AppIcon">App Icon</string>
     <string name="AppIconDefault">Default</string>
     <string name="AppIconGoogle">Google</string>
-    <string name="AppIconSimple">РџСЂРѕСЃС‚Р°СЏ</string>
-    <string name="AppIconWhite">Р‘РµР»Р°СЏ</string>
+    <string name="AppIconSimple">Простая</string>
+    <string name="AppIconWhite">Белая</string>
     <string name="AppIconVintage">Vintage</string>
     <string name="AppIconAqua">Aqua</string>
     <string name="AppIconPremium">Premium</string>
     <string name="AppIconTurbo">Turbo</string>
     <string name="AppIconNox">Nox</string>
-    <string name="AppIconGreen">Р—РµР»РµРЅР°СЏ</string>
-    <string name="AppIconPerlamutr">РџРµСЂР»Р°РјСѓС‚СЂРѕРІС‹Р№</string>
+    <string name="AppIconGreen">Зеленая</string>
+    <string name="AppIconPerlamutr">Перламутровый</string>
     <string name="AppIconUfc">UFC</string>
     <string name="AppIconChangedTo">App icon has been changed to %1$s</string>
     <string name="FileTooLarge">File Too Large</string>

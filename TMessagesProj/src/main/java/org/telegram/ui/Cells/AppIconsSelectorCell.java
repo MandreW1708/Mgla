@@ -58,13 +58,13 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
     public AppIconsSelectorCell(Context context, BaseFragment fragment, int currentAccount) {
         super(context);
         this.currentAccount = currentAccount;
-        setPadding(0, AndroidUtilities.dp(12), 0, AndroidUtilities.dp(12));
+        setPadding(AndroidUtilities.dp(14), AndroidUtilities.dp(12), AndroidUtilities.dp(14), AndroidUtilities.dp(12));
 
         setFocusable(false);
         setItemAnimator(null);
         setLayoutAnimation(null);
 
-        setLayoutManager(linearLayoutManager = new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false));
+        setLayoutManager(linearLayoutManager = new androidx.recyclerview.widget.GridLayoutManager(context, 4));
         setAdapter(new Adapter() {
 
             @NonNull
@@ -90,20 +90,7 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
         addItemDecoration(new ItemDecoration() {
             @Override
             public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent, @NonNull State state) {
-                int pos = parent.getChildViewHolder(view).getAdapterPosition();
-                if (pos == 0) {
-                    outRect.left = AndroidUtilities.dp(18);
-                }
-                if (pos == getAdapter().getItemCount() - 1) {
-                    outRect.right = AndroidUtilities.dp(18);
-                } else {
-                    int itemCount = getAdapter().getItemCount();
-                    if (itemCount == 4) {
-                        outRect.right = (getWidth() - AndroidUtilities.dp(36) - AndroidUtilities.dp(58) * itemCount) / (itemCount - 1);
-                    } else {
-                        outRect.right = AndroidUtilities.dp(24);
-                    }
-                }
+                outRect.bottom = AndroidUtilities.dp(16);
             }
         });
         setOnItemClickListener((view, position) -> {

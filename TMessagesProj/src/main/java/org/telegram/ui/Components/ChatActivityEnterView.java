@@ -2732,9 +2732,11 @@ public class ChatActivityEnterView extends FrameLayout implements
             aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
             aiEditorButton.setImageResource(R.drawable.input_bot2);
             aiEditorButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
-            aiEditorButton.setBackground(Theme.createInsetRoundRectDrawable(getThemedColor(Theme.key_listSelector), dp(17), dp(1), dp(3)));
+            aiEditorButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector)));
             int aiBtnPadding = dp(8);
             aiEditorButton.setPadding(aiBtnPadding, aiBtnPadding, aiBtnPadding, aiBtnPadding);
+            aiEditorButton.setScaleX(0.85f);
+            aiEditorButton.setScaleY(0.85f);
             aiEditorButton.setContentDescription("AI-редактор");
             aiEditorButton.setClickable(true);
             aiEditorButton.setFocusable(true);
@@ -4474,7 +4476,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
         });
         senderSelectView.setVisibility(GONE);
-        messageEditTextContainer.addView(senderSelectView, LayoutHelper.createFrame(36, 36, Gravity.BOTTOM | Gravity.LEFT, 4.66f, 4, 4.66f, 4));
+        messageEditTextContainer.addView(senderSelectView, LayoutHelper.createFrame(28, 28, Gravity.BOTTOM | Gravity.LEFT, 10, 0, 0, 5));
     }
 
     private void createBotCommandsMenuButton() {
@@ -7051,6 +7053,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 animators.add(ObjectAnimator.ofFloat(attachButton, View.SCALE_Y, 1.0f));
             }
             animators.add(ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1f));
+            if (aiEditorButton != null) animators.add(ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1f));
             animators.add(ObjectAnimator.ofFloat(messageEditText, MESSAGE_TEXT_TRANSLATION_X, 0));
             if (controlsView != null) {
                 animators.add(ObjectAnimator.ofFloat(controlsView, View.ALPHA, 0));
@@ -7101,15 +7104,23 @@ public class ChatActivityEnterView extends FrameLayout implements
                 exitAnimation.playTogether(animators);
                 if (emojiButtonPaddingAlpha == 1f) {
                     exitAnimation.playTogether(ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1f));
+                    if (aiEditorButton != null) exitAnimation.playTogether(ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1f));
                 } else {
                     ObjectAnimator messageEditTextAniamtor = ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1);
                     messageEditTextAniamtor.setStartDelay(750);
                     messageEditTextAniamtor.setDuration(200);
                     exitAnimation.playTogether(messageEditTextAniamtor);
+                    if (aiEditorButton != null) {
+                        ObjectAnimator aiEditorButtonAnimator = ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1);
+                        aiEditorButtonAnimator.setStartDelay(750);
+                        aiEditorButtonAnimator.setDuration(200);
+                        exitAnimation.playTogether(aiEditorButtonAnimator);
+                    }
                 }
             } else {
                 if (messageEditText != null && emojiButtonPaddingAlpha == 1f) {
                     messageEditText.setAlpha(1f);
+                    if (aiEditorButton != null) aiEditorButton.setAlpha(1f);
                     messageTextTranslationX = 0;
                     updateMessageTextParams();
                 } else {
@@ -7119,6 +7130,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                     messageEditTextAniamtor.setStartDelay(750);
                     messageEditTextAniamtor.setDuration(200);
                     exitAnimation.playTogether(messageEditTextAniamtor);
+                    if (aiEditorButton != null) {
+                        ObjectAnimator aiEditorButtonAnimator = ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1);
+                        aiEditorButtonAnimator.setStartDelay(750);
+                        aiEditorButtonAnimator.setDuration(200);
+                        exitAnimation.playTogether(aiEditorButtonAnimator);
+                    }
                 }
                 animators.add(ObjectAnimator.ofFloat(audioTimelineView, View.ALPHA, 0.0f));
                 animators.add(ObjectAnimator.ofFloat(audioTimelineView, View.TRANSLATION_X, -dp(20)));
@@ -7275,6 +7292,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
         if (messageEditText != null) {
             messageEditText.setAlpha(1f);
+            if (aiEditorButton != null) aiEditorButton.setAlpha(1f);
             messageTextTranslationX = 0;
             updateMessageTextParams();
             messageEditText.requestFocus();
@@ -8993,6 +9011,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             viewTransition.playTogether(
                     ObjectAnimator.ofFloat(messageEditText, MESSAGE_TEXT_TRANSLATION_X, dp(20)),
                     ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 0),
+                    aiEditorButton != null ? ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 0) : ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 0),
                     ObjectAnimator.ofFloat(recordedAudioPanel, View.ALPHA, 1f)
             );
             if (fromPause) {
@@ -9059,6 +9078,9 @@ public class ChatActivityEnterView extends FrameLayout implements
                     }
                     if (messageEditText != null) {
                         messageEditText.setAlpha(0f);
+                    }
+                    if (aiEditorButton != null) {
+                        aiEditorButton.setAlpha(0f);
                     }
                     if (fromPause) {
                         if (audioTimelineView != null) {
@@ -9136,6 +9158,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                         ObjectAnimator.ofFloat(recordTimerView, View.ALPHA, 0.0f),
                         ObjectAnimator.ofFloat(audioVideoButtonContainer, View.ALPHA, 1.0f),
                         ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1),
+                        aiEditorButton != null ? ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1) : ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1),
                         ObjectAnimator.ofFloat(messageEditText, MESSAGE_TEXT_TRANSLATION_X, 0),
                         ObjectAnimator.ofFloat(this, "slideToCancelProgress", 1f)
                 );
@@ -9324,6 +9347,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                     EMOJI_BUTTON_SCALE.set(emojiButton, 0f);
                     EMOJI_BUTTON_ALPHA.set(emojiButton, 0f);
                     messageEditText.setAlpha(0f);
+                    if (aiEditorButton != null) aiEditorButton.setAlpha(0f);
 
                     if (audioVideoSendButton != null) {
                         audioVideoSendButton.setState(isInVideoMode() ? ChatActivityEnterViewAnimatedIconView.State.VIDEO : ChatActivityEnterViewAnimatedIconView.State.VOICE, animated);
@@ -9396,7 +9420,8 @@ public class ChatActivityEnterView extends FrameLayout implements
                             ObjectAnimator.ofFloat(recordDeleteImageView, View.SCALE_X, 1f),
                             ObjectAnimator.ofFloat(emojiButton, EMOJI_BUTTON_SCALE, 0),
                             ObjectAnimator.ofFloat(emojiButton, EMOJI_BUTTON_ALPHA, 0),
-                            ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 0)
+                            ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 0),
+                            aiEditorButton != null ? ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 0) : ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 0)
                     );
                     if (recordDeleteImageView != null) {
                         recordDeleteImageView.setAlpha(0f);
@@ -9630,6 +9655,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                 ObjectAnimator messageEditTextAniamtor = ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1);
                 messageEditTextAniamtor.setStartDelay(emojiButtonPaddingAlpha == 1f ? 300 : 700);
                 messageEditTextAniamtor.setDuration(200);
+                if (aiEditorButton != null) {
+                    ObjectAnimator aiEditorButtonAnimator = ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1);
+                    aiEditorButtonAnimator.setStartDelay(emojiButtonPaddingAlpha == 1f ? 300 : 700);
+                    aiEditorButtonAnimator.setDuration(200);
+                    runningAnimationAudio.playTogether(aiEditorButtonAnimator);
+                }
 
                 runningAnimationAudio.playTogether(
                         iconsAnimator,
@@ -9733,6 +9764,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                 ObjectAnimator messageEditTextAniamtor = ObjectAnimator.ofFloat(messageEditText, View.ALPHA, 1);
                 messageEditTextAniamtor.setStartDelay(emojiButtonPaddingAlpha == 1f ? 150 : 450);
                 messageEditTextAniamtor.setDuration(200);
+                if (aiEditorButton != null) {
+                    ObjectAnimator aiEditorButtonAnimator = ObjectAnimator.ofFloat(aiEditorButton, View.ALPHA, 1);
+                    aiEditorButtonAnimator.setStartDelay(emojiButtonPaddingAlpha == 1f ? 150 : 450);
+                    aiEditorButtonAnimator.setDuration(200);
+                    runningAnimationAudio.playTogether(aiEditorButtonAnimator);
+                }
 
                 runningAnimationAudio.playTogether(
                         iconsAnimator,
@@ -14522,15 +14559,21 @@ public class ChatActivityEnterView extends FrameLayout implements
         } else if (senderSelectView != null && senderSelectView.getVisibility() == View.VISIBLE) {
             int width = senderSelectView.getLayoutParams().width, height = senderSelectView.getLayoutParams().height;
             senderSelectView.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
-            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = dp(7) + width;
+            int emojiMargin = dp(6) + width; // tight gap to avatar
+            ((MarginLayoutParams) emojiButton.getLayoutParams()).leftMargin = emojiMargin;
             if (deleteRichDraftButton != null) {
-                ((MarginLayoutParams) deleteRichDraftButton.getLayoutParams()).leftMargin = dp(7) + width;
+                ((MarginLayoutParams) deleteRichDraftButton.getLayoutParams()).leftMargin = emojiMargin;
             }
             if (messageEditText != null) {
-                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = dp(7 + DEFAULT_HEIGHT + 3) + width;
+                int mlm = emojiMargin + dp(DEFAULT_HEIGHT) + dp(3);
+                if (aiEditorButton != null) mlm = emojiMargin + dp(56); // tight gap after AI button
+                ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = mlm;
+            }
+            if (aiEditorButton != null) {
+                ((MarginLayoutParams) aiEditorButton.getLayoutParams()).leftMargin = emojiMargin + dp(24); // tight gap between emoji and AI
             }
             if (richDraftPreview != null) {
-                ((MarginLayoutParams) richDraftPreview.getLayoutParams()).leftMargin = dp(54) + width;
+                ((MarginLayoutParams) richDraftPreview.getLayoutParams()).leftMargin = dp(45) + width;
             }
         } else {
             int emojiMargin = getInputInnerButtonLeftMargin();
@@ -14540,11 +14583,11 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
             if (messageEditText != null) {
                 int mlm = emojiMargin + dp(DEFAULT_HEIGHT) + dp(3);
-                if (aiEditorButton != null) mlm += DEFAULT_HEIGHT + leftGap + rightGap - dp(3);
+                if (aiEditorButton != null) mlm = emojiMargin + dp(62); // normal gap after AI button
                 ((MarginLayoutParams) messageEditText.getLayoutParams()).leftMargin = mlm;
             }
             if (aiEditorButton != null) {
-                ((MarginLayoutParams) aiEditorButton.getLayoutParams()).leftMargin = emojiMargin + DEFAULT_HEIGHT + leftGap;
+                ((MarginLayoutParams) aiEditorButton.getLayoutParams()).leftMargin = emojiMargin + dp(26); // normal gap between emoji and AI
             }
             if (richDraftPreview != null) {
                 ((MarginLayoutParams) richDraftPreview.getLayoutParams()).leftMargin = dp(50);
