@@ -90,6 +90,7 @@ public class FileLog {
     private static HashSet<String> excludeRequests;
 
     public static void dumpResponseAndRequest(int account, TLObject request, TLObject response, TLRPC.TL_error error, long requestMsgId, long startRequestTimeInMillis, int requestToken) {
+        if (true) return; // Disabled to reduce log spam
         if (!BuildVars.DEBUG_PRIVATE_VERSION || !BuildVars.LOGS_ENABLED || request == null) {
             return;
         }
@@ -141,6 +142,7 @@ public class FileLog {
     }
 
     public static void dumpUnparsedMessage(TLObject message, long messageId, int account) {
+        if (true) return; // Disabled to reduce log spam
         if (!BuildVars.DEBUG_PRIVATE_VERSION || !BuildVars.LOGS_ENABLED || message == null) {
             return;
         }
@@ -560,19 +562,6 @@ public class FileLog {
         }
         ensureInitied();
         Log.d(tag, message);
-        if (getInstance().streamWriter != null) {
-            getInstance().logQueue.postRunnable(() -> {
-                try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " D/tmessages: " + message + "\n");
-                    getInstance().streamWriter.flush();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    if (AndroidUtilities.isENOSPC(e)) {
-                        LaunchActivity.checkFreeDiscSpaceStatic(1);
-                    }
-                }
-            });
-        }
     }
 
     public static void w(final String message) {
@@ -581,16 +570,6 @@ public class FileLog {
         }
         ensureInitied();
         Log.w(tag, message);
-        if (getInstance().streamWriter != null) {
-            getInstance().logQueue.postRunnable(() -> {
-                try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " W/tmessages: " + message + "\n");
-                    getInstance().streamWriter.flush();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            });
-        }
     }
 
     public static void cleanupLogs() {
