@@ -16,6 +16,7 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
@@ -46,8 +47,57 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
 
         LinearLayout rootLayout = new LinearLayout(context);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
+        rootLayout.setLayoutTransition(new android.animation.LayoutTransition());
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
+
+        LinearLayout headerStyleBlock = createBlock(context, "Вид шапки");
+
+        RadioCell standardCell = new RadioCell(context);
+        standardCell.setBackground(null);
+        standardCell.setText("Стандартная", !MglaGlassConfig.isCleanHeaderEnabled(), true);
+
+        RadioCell cleanCell = new RadioCell(context);
+        cleanCell.setBackground(null);
+        cleanCell.setText("Чистая", MglaGlassConfig.isCleanHeaderEnabled(), false);
+
+        headerStyleBlock.addView(standardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        headerStyleBlock.addView(cleanCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        LinearLayout cleanSettingsBlock = new LinearLayout(context);
+        cleanSettingsBlock.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        cleanSettingsBlock.setBackground(bg);
+        cleanSettingsBlock.setClipToOutline(true);
+        cleanSettingsBlock.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+
+        TextSettingsCell cleanConfigureCell = new TextSettingsCell(context);
+        cleanConfigureCell.setBackground(null);
+        cleanConfigureCell.setText("Настроить", false);
+        cleanConfigureCell.setCanDisable(false);
+        cleanConfigureCell.setOnClickListener(v -> presentFragment(new MglaCleanHeaderSettingsActivity()));
+        cleanSettingsBlock.addView(cleanConfigureCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(headerStyleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        rootLayout.addView(cleanSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        
+        cleanSettingsBlock.setVisibility(MglaGlassConfig.isCleanHeaderEnabled() ? android.view.View.VISIBLE : android.view.View.GONE);
+
+        standardCell.setOnClickListener(v -> {
+            MglaGlassConfig.setCleanHeaderEnabled(false);
+            standardCell.setChecked(true, true);
+            cleanCell.setChecked(false, true);
+            cleanSettingsBlock.setVisibility(android.view.View.GONE);
+        });
+
+        cleanCell.setOnClickListener(v -> {
+            MglaGlassConfig.setCleanHeaderEnabled(true);
+            standardCell.setChecked(false, true);
+            cleanCell.setChecked(true, true);
+            cleanSettingsBlock.setVisibility(android.view.View.VISIBLE);
+        });
 
         LinearLayout glassBlock = createBlock(context, "Стекло");
 

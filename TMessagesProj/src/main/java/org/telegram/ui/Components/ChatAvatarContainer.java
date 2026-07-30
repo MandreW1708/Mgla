@@ -54,6 +54,8 @@ import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.ActionBarMenu;
+import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.ActionBarPopupWindow;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.SimpleTextView;
@@ -80,6 +82,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     private Integer storiesForceState;
     private int avatarSizeInDp = 42;
     public BackupImageView avatarImageView;
+    public ImageView menuDotsImageView;
     private boolean avatarImageIsHidden;
     private SimpleTextView titleTextView;
     private AtomicReference<SimpleTextView> titleTextLargerCopyView = new AtomicReference<>();
@@ -257,7 +260,37 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         }
         avatarImageView.setContentDescription(getString(R.string.AccDescrProfilePicture));
         avatarImageView.setRoundRadius(dp(21));
-        addView(avatarImageView);
+        menuDotsImageView = new ImageView(context);
+        menuDotsImageView.setImageResource(R.drawable.ic_ab_other);
+        menuDotsImageView.setScaleType(ImageView.ScaleType.CENTER);
+        menuDotsImageView.setBackground(null);
+        menuDotsImageView.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
+        menuDotsImageView.setOnClickListener(v -> {
+            if (parentFragment instanceof ChatActivity) {
+                ActionBarMenu menu = parentFragment.getActionBar().createMenu();
+                ActionBarMenuItem item = menu.getItem(-2); // chat_menu_options
+                if (item != null) {
+                    item.toggleSubMenu();
+                } else if (!onAvatarClick()) {
+                    openProfile(true);
+                }
+            } else if (!onAvatarClick()) {
+                openProfile(true);
+            }
+        });
+        addView(menuDotsImageView);
+
+        if (avatarImageIsHidden) {
+            avatarImageView.setVisibility(GONE);
+            menuDotsImageView.setVisibility(GONE);
+        } else if (org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
+            avatarImageView.setVisibility(GONE);
+            menuDotsImageView.setVisibility(VISIBLE);
+        } else {
+            avatarImageView.setVisibility(VISIBLE);
+            menuDotsImageView.setVisibility(GONE);
+        }
+
         if (avatarClickable) {
             final TLRPC.Chat chat = parentFragment != null ? parentFragment.getCurrentChat() : null;
             if (chat != null && chat.linked_community_id != 0) {
@@ -666,6 +699,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         int availableWidth = maxWidth - dp(avatarReserve + 16);
         if (avatarInTitle) {
             avatarImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY));
+            menuDotsImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY));
         }
         titleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(24 + 8) + titleTextView.getPaddingRight(), MeasureSpec.AT_MOST));
         if (subtitleTextView != null) {
@@ -823,6 +857,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
         if (avatarImageView.getParent() == this) {
             avatarImageView.layout(leftPadding, viewTop, leftPadding + avatarImageView.getMeasuredWidth(), viewTop + avatarImageView.getMeasuredHeight());
+            menuDotsImageView.layout(leftPadding, viewTop, leftPadding + menuDotsImageView.getMeasuredWidth(), viewTop + menuDotsImageView.getMeasuredHeight());
         }
         int l = leftPadding + (hasVisibleAvatar() ? dp(glassMode ? 48.66f : 54) : 0) + rightAvatarPadding;
         final boolean glassTitleCentered = glassMode && !hasVisibleAvatar();
@@ -1775,7 +1810,8 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     }
 
     public boolean hasVisibleAvatar() {
-        return avatarImageView != null && avatarImageView.getVisibility() == VISIBLE && avatarImageView.getParent() == this;
+        return (avatarImageView != null && avatarImageView.getVisibility() == VISIBLE && avatarImageView.getParent() == this) ||
+               (menuDotsImageView != null && menuDotsImageView.getVisibility() == VISIBLE && menuDotsImageView.getParent() == this);
     }
 
     public int getVisualWidth() {

@@ -9120,10 +9120,7 @@ public class ChatActivity extends BaseFragment implements
         }
 
         checkUi_topPanelLayoutWidth();
-        topPanelLayout.setBlurredBackground(glassBackgroundDrawableFactory.create(topPanelLayout)
-            .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
-            .setRadius(dp(18))
-            .setPadding(dp(7)));
+        updateTopPanelBackgrounds();
 
         if (chatMode == MODE_SEARCH) {
             animatorSearchResultAsListVisibility.setValue(true, false);
@@ -47480,6 +47477,45 @@ public class ChatActivity extends BaseFragment implements
         final float factor = 1f - animatorHideTopPanelByEmojiKeyboardExpanded.getFloatValue();
         topPanelLayout.setAlpha(factor);
         topPanelLayout.setVisibility(factor > 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private void updateTopPanelBackgrounds() {
+        if (topPanelLayout == null) return;
+        if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
+            topPanelLayout.setBlurredBackground(glassBackgroundDrawableFactory.create(topPanelLayout)
+                .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
+                .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
+                .setPadding(org.telegram.messenger.AndroidUtilities.dp(7)));
+            if (pinnedMessageView != null) pinnedMessageView.setBackground(null);
+            if (translateButton != null) translateButton.setBackground(null);
+        } else {
+            topPanelLayout.setBlurredBackground(null);
+            
+            if (pinnedMessageView != null) {
+                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled()) {
+                    if (!(pinnedMessageView.getBackground() instanceof org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable)) {
+                         pinnedMessageView.setBackground(glassBackgroundDrawableFactory.create(pinnedMessageView)
+                             .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
+                             .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
+                             .setPadding(org.telegram.messenger.AndroidUtilities.dp(7)));
+                    }
+                } else {
+                    pinnedMessageView.setBackground(null);
+                }
+            }
+            if (translateButton != null) {
+                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTranslationPanelEnabled()) {
+                    if (!(translateButton.getBackground() instanceof org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable)) {
+                         translateButton.setBackground(glassBackgroundDrawableFactory.create(translateButton)
+                             .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
+                             .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
+                             .setPadding(org.telegram.messenger.AndroidUtilities.dp(7)));
+                    }
+                } else {
+                    translateButton.setBackground(null);
+                }
+            }
+        }
     }
 
     private void checkUi_topPanelLayoutWidth() {

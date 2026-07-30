@@ -2237,7 +2237,9 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
                 final int right = getWidth() - p;
                 chatAvatarContainer.setTranslationX(0);
                 glassDrawable.setBounds(left, t, right, b);
-                glassDrawable.draw(canvas);
+                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || !org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled()) {
+                    glassDrawable.draw(canvas);
+                }
             } else {
             final int menuWidthWithPadding = menuWidth + (hasForcedMenuWidth ? (menuWidth > 0 ? p : 0) : (int) (p * animatorHasMenuItems.getFloatValue()));
             final int rightOffset = lerp(menuWidthWithPadding, Math.max(menuWidthWithPadding, p + s), chatAvatarContainer == null ? 0f : 1f - animatorAvatarContainerHasAvatar.getFloatValue());
@@ -2266,17 +2268,23 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
 
             glassDrawable.setBounds(left, t, right, b);
-            glassDrawable.draw(canvas);
+            if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || !org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled()) {
+                glassDrawable.draw(canvas);
+            }
             }
         }
         if (glassDrawableBack != null && hasBackButton) {
             glassDrawableBack.setBounds(0, t, s + p * 2, b);
-            glassDrawableBack.draw(canvas);
+            if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || !org.telegram.ui.MglaGlassConfig.isCleanHeaderHideBackBtnEnabled()) {
+                glassDrawableBack.draw(canvas);
+            }
         }
         if (glassDrawableMenu != null && menuWidth > 0 && !glassOnlyBack) {
             glassDrawableMenu.setBounds(getWidth() - Math.max(s, menuWidth) - p * 2, t, getWidth(), b);
             glassDrawableMenu.setAlpha(hasForcedMenuWidth ? 255 : (int) (255 * animatorHasMenuItems.getFloatValue()));
-            glassDrawableMenu.draw(canvas);
+            if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
+                glassDrawableMenu.draw(canvas);
+            }
         }
 
         if (blurredBackground && actionBarColor != Color.TRANSPARENT) {

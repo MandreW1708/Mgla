@@ -35,7 +35,6 @@ public class LauncherIconController {
 
     public enum LauncherIcon {
         DEFAULT("DefaultIcon", R.drawable.icon_background_sa, R.drawable.ic_mgla_foreground, R.string.AppIconDefault),
-        GOOGLE("GoogleIcon", R.drawable.icon_background_sa, R.drawable.gogle_foreground, R.string.AppIconGoogle),
         SIMPLE("SimpleIcon", R.drawable.icon_background_sa, R.drawable.simple_foreground, R.string.AppIconSimple),
         WHITE("WhiteIcon", R.drawable.icon_background_sa, R.drawable.white_foreground, R.string.AppIconWhite),
         VINTAGE("VintageIcon", R.drawable.icon_6_background_sa, R.mipmap.icon_6_foreground_sa, R.string.AppIconVintage),
