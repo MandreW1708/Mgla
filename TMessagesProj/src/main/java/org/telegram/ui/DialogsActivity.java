@@ -1634,7 +1634,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     private void updateStoriesViewAlpha(float alpha) {
         final float factorSearch = Utilities.clamp(searchAnimationProgress * 2, 1f, 0f);
-        final boolean mglaStoriesExpandedOnly = MglaSideMenuConfig.isEnabled() && !isArchive();
+        final boolean mglaStoriesExpandedOnly = false;
         float storiesCollapseProgress = Utilities.clamp(-scrollYOffset / dp(DialogStoriesCell.HEIGHT_IN_DP), 1f, 0f);
         if (progressToActionMode == 1f) {
             storiesCollapseProgress = 1f;
@@ -5392,7 +5392,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         };
         dialogStoriesCell.setActionBar(actionBar);
         dialogStoriesCell.setMenuItemsOffset(isArchive() ? dp(68) : dpf2(16.66f));
-        dialogStoriesCell.setStoriesExpandedOnly(MglaSideMenuConfig.isEnabled() && !isArchive());
+        dialogStoriesCell.setStoriesExpandedOnly(false);
         if (MglaSideMenuConfig.isEnabled() && !isArchive()) {
             dialogStoriesCell.setMenuItemsOffset(dp(52));
         }
@@ -10392,7 +10392,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             return;
         }
         final boolean expandedOnly = showSideMenu && !isArchive();
-        dialogStoriesCell.setStoriesExpandedOnly(expandedOnly);
+        dialogStoriesCell.setStoriesExpandedOnly(false);
         float offset = expandedOnly ? dp(52) : (isArchive() ? dp(68) : dpf2(16.66f));
         dialogStoriesCell.setMenuItemsOffset(offset);
         dialogStoriesCell.updateItems(false, true);
