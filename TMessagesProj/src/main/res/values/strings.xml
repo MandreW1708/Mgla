@@ -5746,6 +5746,13 @@
     <string name="AppIconTurbo">Turbo</string>
     <string name="AppIconNox">Nox</string>
     <string name="AppIconGreen">Зеленая</string>
+    <string name="AppIcon3D">3D</string>
+    <string name="AppIconAbstraction">Абстракция</string>
+    <string name="AppIconIt">IT</string>
+    <string name="AppIconRace">Гонка</string>
+    <string name="AppIconSummer">Лето</string>
+    <string name="AppIconWinter">Зима</string>
+    <string name="AppIconGirls">Женский</string>
     <string name="AppIconPerlamutr">Перламутровый</string>
     <string name="AppIconUfc">UFC</string>
     <string name="AppIconChangedTo">App icon has been changed to %1$s</string>
