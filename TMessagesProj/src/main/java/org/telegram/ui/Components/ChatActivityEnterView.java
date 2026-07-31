@@ -14907,7 +14907,7 @@ public class ChatActivityEnterView extends FrameLayout implements
 
         if (aiEditorButton != null) {
             FrameLayout.LayoutParams aiLp = (FrameLayout.LayoutParams) aiEditorButton.getLayoutParams();
-            final int aiLeft = getInputInnerButtonLeftMargin() + dp(DEFAULT_HEIGHT) + dp(12);
+            final int aiLeft = getInputInnerButtonLeftMargin() + dp(26);
             if (aiLp.leftMargin != aiLeft) {
                 aiLp.leftMargin = aiLeft;
                 aiEditorButton.setLayoutParams(aiLp);

@@ -30,8 +30,8 @@ public class BuildVars {
     public static String MGLA_DEV_CHANNEL_USERNAME = "mgla_fork";
     public static String MGLA_SUPPORT_USERNAME = "lkpk_k";
 
-    public static int APP_ID = 36633907;
-    public static String APP_HASH = "ebfa5487e826fe22692743fdbe58f4f8";
+    public static int APP_ID = BuildConfig.APP_ID;
+    public static String APP_HASH = BuildConfig.APP_HASH;
 
     // SafetyNet key for Google Identity SDK, set it to empty to disable
     public static String SAFETYNET_KEY = "AIzaSyDqt8P-7F7CPCseMkOiVRgb1LY8RN1bvH8";
