@@ -44,7 +44,14 @@ public class LauncherIconController {
         NOX("NoxIcon", R.mipmap.icon_2_background_sa, R.mipmap.icon_foreground_sa, R.string.AppIconNox, true),
         GREEN("GreenIcon", R.drawable.green_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGreen),
         PERLAMUTR("PerlamutrIcon", R.drawable.perlamutr_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconPerlamutr),
-        UFC("UfcIcon", R.drawable.ufc_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconUfc);
+        UFC("UfcIcon", R.drawable.ufc_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconUfc),
+        ICON_3D("Icon3D", R.drawable.icon_3d_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIcon3D),
+        ABSTRACTION("AbstractionIcon", R.drawable.abstraction_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconAbstraction),
+        IT("ItIcon", R.drawable.it_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconIt),
+        RACE("RaceIcon", R.drawable.race_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconRace),
+        SUMMER("SummerIcon", R.drawable.summer_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconSummer),
+        WINTER("WinterIcon", R.drawable.winter_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconWinter),
+        GIRLS("GirlsIcon", R.drawable.girls_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGirls);
 
         public final String key;
         public final int background;
