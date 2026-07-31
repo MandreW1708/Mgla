@@ -10,3 +10,13 @@ TMessagesProj/jniRes/
 **/.DS_Store
 TMessagesProj/afat/
 TMessagesProj_App/afat/
+
+# Secrets and garbage
+*.keystore
+google-services.json
+/*.png
+/*.txt
+/*.py
+/*.vsix
+.venv/
+

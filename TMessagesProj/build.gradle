@@ -119,6 +119,11 @@ android {
         minSdkVersion 21
         targetSdkVersion 35
 
+        def appId = getProps("TELEGRAM_APP_ID")
+        def appHash = getProps("TELEGRAM_APP_HASH")
+        buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
+        buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
+
         vectorDrawables.generatedDensities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi']
 
         multiDexEnabled true
