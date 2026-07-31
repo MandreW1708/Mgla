@@ -283,9 +283,6 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (avatarImageIsHidden) {
             avatarImageView.setVisibility(GONE);
             menuDotsImageView.setVisibility(GONE);
-        } else if (org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
-            avatarImageView.setVisibility(GONE);
-            menuDotsImageView.setVisibility(VISIBLE);
         } else {
             avatarImageView.setVisibility(VISIBLE);
             menuDotsImageView.setVisibility(GONE);
