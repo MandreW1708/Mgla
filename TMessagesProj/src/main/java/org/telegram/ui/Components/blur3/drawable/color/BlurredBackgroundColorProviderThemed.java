@@ -40,8 +40,8 @@ public class BlurredBackgroundColorProviderThemed implements BlurredBackgroundCo
     public void updateColors() {
         final int color = Theme.getColor(backgroundColorId, resourcesProvider);
         float effectiveAlpha = alpha;
-        if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && !MglaGlassConfig.isGlassDarkeningEnabled()) {
-            effectiveAlpha = 0f;
+        if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+            effectiveAlpha = alpha * (org.telegram.ui.MglaGlassConfig.getGlassDarkeningLevel() / 100f);
         }
         backgroundColor = Theme.multAlpha(color, effectiveAlpha);
 

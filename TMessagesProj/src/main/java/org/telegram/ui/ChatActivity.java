@@ -3565,8 +3565,12 @@ public class ChatActivity extends BaseFragment implements
                 }
 
                 final boolean isThemeLight = themeDelegate != null && !themeDelegate.isDark();
-                if (isThemeLight && !(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && !MglaGlassConfig.isGlassDarkeningEnabled())) {
-                    return ColorUtils.setAlphaComponent(super.getBackgroundColor(), 216);
+                if (isThemeLight) {
+                    int finalAlpha = 216;
+                    if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+                        finalAlpha = (int)(216 * (org.telegram.ui.MglaGlassConfig.getGlassDarkeningLevel() / 100f));
+                    }
+                    return androidx.core.graphics.ColorUtils.setAlphaComponent(super.getBackgroundColor(), finalAlpha);
                 }
                 return super.getBackgroundColor();
             }
@@ -3579,8 +3583,12 @@ public class ChatActivity extends BaseFragment implements
                 }
 
                 final boolean isThemeLight = themeDelegate != null && !themeDelegate.isDark();
-                if (isThemeLight && !(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && !MglaGlassConfig.isGlassDarkeningEnabled())) {
-                    return ColorUtils.setAlphaComponent(super.getBackgroundColor(), 216);
+                if (isThemeLight) {
+                    int finalAlpha = 216;
+                    if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+                        finalAlpha = (int)(216 * (org.telegram.ui.MglaGlassConfig.getGlassDarkeningLevel() / 100f));
+                    }
+                    return androidx.core.graphics.ColorUtils.setAlphaComponent(super.getBackgroundColor(), finalAlpha);
                 }
                 return super.getBackgroundColor();
             }

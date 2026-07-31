@@ -101,15 +101,21 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
 
         LinearLayout glassBlock = createBlock(context, "Стекло");
 
-        TextCheckCell darkeningCell = new TextCheckCell(context);
-        darkeningCell.setBackground(null);
-        darkeningCell.setTextAndCheck("Затемнение стекла", MglaGlassConfig.isGlassDarkeningEnabled(), false);
-        darkeningCell.setOnClickListener(v -> {
-            boolean newVal = !MglaGlassConfig.isGlassDarkeningEnabled();
-            MglaGlassConfig.setGlassDarkeningEnabled(newVal);
-            darkeningCell.setChecked(newVal);
-        });
-        glassBlock.addView(darkeningCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        TextView darkeningTitleCell = new TextView(context);
+        darkeningTitleCell.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        darkeningTitleCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        darkeningTitleCell.setText("Уровень затемнения");
+        darkeningTitleCell.setPadding(dp(22), dp(10), dp(22), 0);
+        glassBlock.addView(darkeningTitleCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        org.telegram.ui.Cells.SlideIntChooseView slideView = new org.telegram.ui.Cells.SlideIntChooseView(context, null);
+        slideView.set(
+            MglaGlassConfig.getGlassDarkeningLevel(),
+            org.telegram.ui.Cells.SlideIntChooseView.Options.make(0, 0, 100, (val) -> val + "%"),
+            (val) -> MglaGlassConfig.setGlassDarkeningLevel(val)
+        );
+        glassBlock.addView(slideView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout sideMenuBlock = createBlock(context, "Боковое меню");
