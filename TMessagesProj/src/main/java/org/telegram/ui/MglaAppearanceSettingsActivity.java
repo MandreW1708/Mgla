@@ -110,8 +110,7 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
             darkeningCell.setChecked(newVal);
         });
         glassBlock.addView(darkeningCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
+        rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout sideMenuBlock = createBlock(context, "Боковое меню");
 
