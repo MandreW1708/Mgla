@@ -121,8 +121,16 @@ android {
 
         def appId = getProps("TELEGRAM_APP_ID")
         def appHash = getProps("TELEGRAM_APP_HASH")
+        def openRouterKey = getProps("OPENROUTER_API_KEY")
+        def safetyNetKey = getProps("SAFETYNET_API_KEY")
+        def mapsKey = getProps("MAPS_API_KEY")
+
         buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
         buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
+        buildConfigField "String", "OPENROUTER_API_KEY", "\"" + ((openRouterKey != null && !openRouterKey.isEmpty()) ? openRouterKey : "") + "\""
+        buildConfigField "String", "SAFETYNET_API_KEY", "\"" + ((safetyNetKey != null && !safetyNetKey.isEmpty()) ? safetyNetKey : "") + "\""
+
+        manifestPlaceholders = [mapsApiKey: (mapsKey != null && !mapsKey.isEmpty()) ? mapsKey : ""]
 
         vectorDrawables.generatedDensities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi']
 

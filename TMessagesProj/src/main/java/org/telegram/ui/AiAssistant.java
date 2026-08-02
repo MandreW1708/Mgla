@@ -26,7 +26,7 @@ import java.util.Locale;
  */
 public class AiAssistant {
 
-    private static final String API_KEY = "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";
+    private static final String API_KEY = BuildConfig.OPENROUTER_API_KEY;
 
     private static final String OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
     private static final String[] MODELS = {
