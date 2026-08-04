@@ -126,6 +126,16 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
         });
         glassBlock.addView(md3SwitchesCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        TextCheckCell editedIconCell = new TextCheckCell(context);
+        editedIconCell.setBackground(null);
+        editedIconCell.setTextAndCheck("Значок вместо \"изменено\"", MglaGlassConfig.isEditedIconEnabled(), false);
+        editedIconCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isEditedIconEnabled();
+            MglaGlassConfig.setEditedIconEnabled(newVal);
+            editedIconCell.setChecked(newVal);
+        });
+        glassBlock.addView(editedIconCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout sideMenuBlock = createBlock(context, "Боковое меню");

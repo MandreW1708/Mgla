@@ -5322,7 +5322,15 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
                         dotDividerSpan.setTopPadding(AndroidUtilities.dp(1.5f));
                         dotDividerSpan.setSize(5);
                         spannableStringBuilder.append(" . ").setSpan(dotDividerSpan, spannableStringBuilder.length() - 2, spannableStringBuilder.length() - 1, 0);
-                        spannableStringBuilder.append(getString(R.string.EditedMessage));
+                        if (org.telegram.ui.MglaGlassConfig.isEditedIconEnabled()) {
+                            int start = spannableStringBuilder.length();
+                            spannableStringBuilder.append("✎");
+                            org.telegram.ui.Components.ColoredImageSpan span = new org.telegram.ui.Components.ColoredImageSpan(R.drawable.msg_edit);
+                            span.setSize(AndroidUtilities.dp(12));
+                            spannableStringBuilder.setSpan(span, start, start + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        } else {
+                            spannableStringBuilder.append(getString(R.string.EditedMessage));
+                        }
                         string = spannableStringBuilder;
                     }
                     subtitle = string;
