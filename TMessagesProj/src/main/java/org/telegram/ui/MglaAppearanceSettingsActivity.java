@@ -99,12 +99,12 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
             cleanSettingsBlock.setVisibility(android.view.View.VISIBLE);
         });
 
-        LinearLayout glassBlock = createBlock(context, "Стекло");
+        LinearLayout glassBlock = createBlock(context, "Внешний вид");
 
         TextView darkeningTitleCell = new TextView(context);
         darkeningTitleCell.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         darkeningTitleCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        darkeningTitleCell.setText("Уровень затемнения");
+        darkeningTitleCell.setText("Затемнение стекла");
         darkeningTitleCell.setPadding(dp(22), dp(10), dp(22), 0);
         glassBlock.addView(darkeningTitleCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -115,6 +115,16 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
             (val) -> MglaGlassConfig.setGlassDarkeningLevel(val)
         );
         glassBlock.addView(slideView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextCheckCell md3SwitchesCell = new TextCheckCell(context);
+        md3SwitchesCell.setBackground(null);
+        md3SwitchesCell.setTextAndCheck("Переключатели MD3", MglaGlassConfig.isMd3SwitchesEnabled(), false);
+        md3SwitchesCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isMd3SwitchesEnabled();
+            MglaGlassConfig.setMd3SwitchesEnabled(newVal);
+            md3SwitchesCell.setChecked(newVal);
+        });
+        glassBlock.addView(md3SwitchesCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
