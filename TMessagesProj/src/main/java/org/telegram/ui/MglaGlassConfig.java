@@ -14,6 +14,7 @@ public class MglaGlassConfig {
     public static final String PREF_GLASS_DARKENING_LEVEL = "glass_darkening_level";
     public static final String PREF_MD3_PREDICTIVE_BACK = "md3_predictive_back";
     public static final String PREF_MD3_SWITCHES = "md3_switches";
+    public static final String PREF_EDITED_ICON = "edited_icon_enabled";
     public static final String PREF_CLEAN_HEADER = "clean_header_enabled";
     public static final String PREF_CLEAN_HEADER_HIDE_BACK_BTN = "clean_header_hide_back_btn";
     public static final String PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK = "clean_header_hide_title_block";
@@ -99,6 +100,16 @@ public class MglaGlassConfig {
     public static void setMd3SwitchesEnabled(boolean enabled) {
         if (isMd3SwitchesEnabled() == enabled) return;
         getPrefs().edit().putBoolean(PREF_MD3_SWITCHES, enabled).apply();
+        notifyGlassAppearanceChanged();
+    }
+
+    public static boolean isEditedIconEnabled() {
+        return getPrefs().getBoolean(PREF_EDITED_ICON, false);
+    }
+
+    public static void setEditedIconEnabled(boolean enabled) {
+        if (isEditedIconEnabled() == enabled) return;
+        getPrefs().edit().putBoolean(PREF_EDITED_ICON, enabled).apply();
         notifyGlassAppearanceChanged();
     }
 

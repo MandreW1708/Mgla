@@ -18374,7 +18374,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 signString = null;
             }
         }
-        String timeString;
+        CharSequence timeString;
         TLRPC.User author = null;
         if (currentMessageObject.isFromUser()) {
             author = MessagesController.getInstance(currentAccount).getUser(fromId);
@@ -18406,9 +18406,26 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         } else if (currentMessageObject.isRepostPreview) {
             timeString = LocaleController.formatSmallDateChat(messageObject.messageOwner.date) + ", " + LocaleController.getInstance().getFormatterDay().format((long) (messageObject.messageOwner.date) * 1000);
         } else if (edited) {
-            timeString = AppGlobalConfig.getInstance(currentAccount).messagePrimaryEditedDate.get() ?
-                LocaleController.formatPmEditedDate(currentMessagesGroup != null ? currentMessagesGroup.getMaxEditDate() : messageObject.messageOwner.edit_date) :
-                (getString(R.string.EditedMessage) + " " + LocaleController.getInstance().getFormatterDay().format((long) (messageObject.messageOwner.date) * 1000));
+            if (org.telegram.ui.MglaGlassConfig.isEditedIconEnabled()) {
+                String editedStr = "✎";
+                String text = AppGlobalConfig.getInstance(currentAccount).messagePrimaryEditedDate.get() ?
+                    LocaleController.formatPmEditedDate(currentMessagesGroup != null ? currentMessagesGroup.getMaxEditDate() : messageObject.messageOwner.edit_date) :
+                    (editedStr + " " + LocaleController.getInstance().getFormatterDay().format((long) (messageObject.messageOwner.date) * 1000));
+                
+                android.text.SpannableStringBuilder ssb = new android.text.SpannableStringBuilder(text);
+                int idx = text.indexOf(editedStr);
+                if (idx >= 0) {
+                    org.telegram.ui.Components.ColoredImageSpan span = new org.telegram.ui.Components.ColoredImageSpan(R.drawable.msg_edit);
+                    span.setSize(AndroidUtilities.dp(12));
+                    ssb.setSpan(span, idx, idx + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                timeString = ssb;
+            } else {
+                String editedStr = getString(R.string.EditedMessage);
+                timeString = AppGlobalConfig.getInstance(currentAccount).messagePrimaryEditedDate.get() ?
+                    LocaleController.formatPmEditedDate(currentMessagesGroup != null ? currentMessagesGroup.getMaxEditDate() : messageObject.messageOwner.edit_date) :
+                    (editedStr + " " + LocaleController.getInstance().getFormatterDay().format((long) (messageObject.messageOwner.date) * 1000));
+            }
         } else if (currentMessageObject.isSaved && currentMessageObject.messageOwner.fwd_from != null && (currentMessageObject.messageOwner.fwd_from.date != 0 || currentMessageObject.messageOwner.fwd_from.saved_date != 0)) {
             int date = currentMessageObject.messageOwner.fwd_from.saved_date;
             if (date == 0) {
@@ -18419,15 +18436,24 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             timeString = LocaleController.getInstance().getFormatterDay().format((long) (messageObject.messageOwner.date) * 1000);
         }
         if (currentMessageObject.messageOwner.video_processing_pending) {
-            timeString = formatString(R.string.ScheduledTimeApprox, timeString);
+            android.text.SpannableStringBuilder builder = new android.text.SpannableStringBuilder(getString(R.string.ScheduledTimeApprox));
+            int idx1 = builder.toString().indexOf("%1$s");
+            int idx2 = builder.toString().indexOf("%s");
+            int idx = Math.max(idx1, idx2);
+            if (idx >= 0) {
+                builder.replace(idx, idx + (idx1 >= 0 ? 4 : 2), timeString);
+                timeString = builder;
+            } else {
+                timeString = android.text.TextUtils.concat(timeString, " ~");
+            }
         }
         if (signString != null) {
             if (messageObject.messageOwner.via_business_bot_id != 0) {
-                currentTimeString = timeString + ", ";
+                currentTimeString = android.text.TextUtils.concat(timeString, ", ");
             } else if (messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.imported) {
-                currentTimeString = " " + timeString;
+                currentTimeString = android.text.TextUtils.concat(" ", timeString);
             } else {
-                currentTimeString = ", " + timeString;
+                currentTimeString = android.text.TextUtils.concat(", ", timeString);
             }
         } else {
             currentTimeString = timeString;
@@ -28364,7 +28390,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 }
             }
             if (edited && !lastDrawingEdited && timeLayout != null) {
-                String editedStr = getString("EditedMessage", R.string.EditedMessage);
+                String editedStr = org.telegram.ui.MglaGlassConfig.isEditedIconEnabled() ? "✎" : getString("EditedMessage", R.string.EditedMessage);
                 CharSequence text = timeLayout.getText();
                 int i = text.toString().indexOf(editedStr);
                 if (i >= 0) {
