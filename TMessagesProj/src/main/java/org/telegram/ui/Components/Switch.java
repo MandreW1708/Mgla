@@ -377,11 +377,19 @@ public class Switch extends View {
             return;
         }
 
-        int width = AndroidUtilities.dp(31);
-        int thumb = AndroidUtilities.dp(20);
+        boolean isMd3 = org.telegram.ui.MglaGlassConfig.isMd3SwitchesEnabled();
+        int width = AndroidUtilities.dp(isMd3 ? 52 : 31);
+        int trackHeightDp = isMd3 ? 32 : 14;
+        
         int x = (getMeasuredWidth() - width) / 2;
-        float y = (getMeasuredHeight() - AndroidUtilities.dpf2(14)) / 2;
-        int tx = x + AndroidUtilities.dp(7) + (int) (AndroidUtilities.dp(17) * progress);
+        float y = (getMeasuredHeight() - AndroidUtilities.dpf2(trackHeightDp)) / 2;
+        
+        int tx;
+        if (isMd3) {
+            tx = (int)(x + AndroidUtilities.dp(16) + AndroidUtilities.dp(20) * progress);
+        } else {
+            tx = x + AndroidUtilities.dp(7) + (int) (AndroidUtilities.dp(17) * progress);
+        }
         int ty = getMeasuredHeight() / 2;
 
 
@@ -445,9 +453,11 @@ public class Switch extends View {
             paint.setColor(color);
             paint2.setColor(color);
 
-            rectF.set(x, y, x + width, y + AndroidUtilities.dpf2(14));
-            canvasToDraw.drawRoundRect(rectF, AndroidUtilities.dpf2(7), AndroidUtilities.dpf2(7), paint);
-            canvasToDraw.drawCircle(tx, ty, AndroidUtilities.dpf2(10), paint);
+            rectF.set(x, y, x + width, y + AndroidUtilities.dpf2(trackHeightDp));
+            canvasToDraw.drawRoundRect(rectF, AndroidUtilities.dpf2(isMd3 ? 16 : 7), AndroidUtilities.dpf2(isMd3 ? 16 : 7), paint);
+            if (!isMd3) {
+                canvasToDraw.drawCircle(tx, ty, AndroidUtilities.dpf2(10), paint);
+            }
 
             if (a == 0 && rippleDrawable != null) {
                 rippleDrawable.setBounds(tx - AndroidUtilities.dp(18), ty - AndroidUtilities.dp(18), tx + AndroidUtilities.dp(18), ty + AndroidUtilities.dp(18));
@@ -494,7 +504,12 @@ public class Switch extends View {
             alpha = (int) (a1 + (a2 - a1) * colorProgress);
             paint.setColor(((alpha & 0xff) << 24) | ((red & 0xff) << 16) | ((green & 0xff) << 8) | (blue & 0xff));
 
-            canvasToDraw.drawCircle(tx, ty, AndroidUtilities.dp(8), paint);
+            if (isMd3) {
+                float thumbRadius = AndroidUtilities.dpf2(8 + 4 * progress);
+                canvasToDraw.drawCircle(tx, ty, thumbRadius, paint);
+            } else {
+                canvasToDraw.drawCircle(tx, ty, AndroidUtilities.dp(8), paint);
+            }
 
             if (a == 0) {
                 if (iconDrawable != null) {

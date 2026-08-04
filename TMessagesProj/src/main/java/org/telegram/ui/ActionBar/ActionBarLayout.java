@@ -1292,8 +1292,8 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 if (spatialBack) {
                     // Dim softens as previous screen comes forward from depth
                     float p = Math.min(1f, getSpatialBackProgress());
-                    opacity = lerp(0.72f, 0.08f, p);
-                    maxAlpha = 160;
+                    opacity = lerp(0.80f, 0.0f, p);
+                    maxAlpha = 200;
                 } else {
                     opacity = MathUtils.clamp(widthOffset / (float) width, 0, 0.8f);
                     maxAlpha = 120;
@@ -1644,20 +1644,40 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         return spatialAnimProgress;
     }
 
-    /** Previous screen rises forward from Z-depth. */
+    /** Previous screen rises forward from Z-depth (Carousel). */
     private void applySpatialBackTransform(Canvas canvas, RectF rect) {
         final float raw = getSpatialBackProgress();
         final float p = Math.min(1f, raw);
         final float cx = rect.centerX();
         final float cy = rect.centerY();
-        // Starts recessed in the stack, approaches full size toward the user
-        final float scale = lerp(0.92f, 1.0f, CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(p));
-        final float yShift = Utilities.clamp((predictiveBackY - cy) * -0.06f, -dp(10), dp(10)) * (1f - p);
-        canvas.translate(0, yShift);
-        canvas.scale(scale, scale, cx, cy);
+        final float ease = p; // Linearly tracks finger for smooth 60fps tracking
+        final float dir = predictiveBackLeft ? 1f : -1f;
+        
+        // Starts at -60 degrees (off to the side), approaches 0 degrees (facing user)
+        final float angle = dir * (60.0f * ease - 60.0f); 
+        final float radius = getWidth();
+        
+        predictiveBackCamera.save();
+        predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 2.5f);
+        
+        predictiveBackCamera.translate(0, 0, radius);
+        predictiveBackCamera.rotateY(angle);
+        predictiveBackCamera.translate(0, 0, -radius);
+        
+        predictiveBackCamera.getMatrix(predictiveBackMatrix);
+        predictiveBackCamera.restore();
+
+        predictiveBackMatrix.preTranslate(-cx, -cy);
+        predictiveBackMatrix.postTranslate(cx, cy);
+        
+        // A slight overall scale so the carousel is slightly zoomed out during transition
+        final float overallScale = lerp(0.85f, 1.0f, ease);
+        predictiveBackMatrix.postScale(overallScale, overallScale, cx, cy);
+
+        canvas.concat(predictiveBackMatrix);
     }
 
-    /** Active screen leaves as a floating card with perspective. */
+    /** Active screen leaves as a floating card with perspective (Carousel). */
     private void applySpatialFrontTransform(Canvas canvas, RectF rect) {
         final float raw = getSpatialBackProgress();
         final float p = Math.min(1f, raw);
@@ -1665,31 +1685,36 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         final float cx = rect.centerX();
         final float cy = rect.centerY();
         final float dir = predictiveBackLeft ? 1f : -1f;
-        final float ease = CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(p);
+        final float ease = p; // Linearly tracks finger for smooth 60fps tracking
 
         // No alpha fading so the card doesn't disappear in mid-air
         containerView.setAlpha(1.0f);
 
-        // Lift off the stack: shrink + slide completely off-screen + camera perspective
-        final float scale = lerp(1.0f, 0.88f, ease) * lerp(1f, 0.95f, commit);
-        final float marginX = (getWidth() * 0.05f + dp(6)) * (ease + commit * 0.5f);
-        final float tx = dir * (marginX + getWidth() * 2.5f * commit);
-        final float maxY = Math.max(0, getHeight() / 20f - dp(4));
-        final float ty = Utilities.clamp((predictiveBackY - cy) * 0.35f, -maxY, maxY) * ease;
+        // Starts at 0 degrees (facing user), goes to +60 degrees
+        final float angle = dir * (60.0f * ease + commit * 30.0f);
+        final float radius = getWidth();
 
         predictiveBackCamera.save();
-        predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 1.55f);
-        predictiveBackCamera.translate(0, 0, lerp(0f, dpf2(40), ease) + commit * dpf2(80));
-        predictiveBackCamera.rotateY(dir * lerp(0f, 5.0f, ease) + dir * commit * 2.0f);
-        predictiveBackCamera.rotateX(Utilities.clamp((predictiveBackY - cy) / Math.max(1f, getHeight()), -0.4f, 0.4f) * -1.5f * ease);
+        predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 2.5f);
+        
+        predictiveBackCamera.translate(0, 0, radius);
+        predictiveBackCamera.rotateY(angle);
+        predictiveBackCamera.translate(0, 0, -radius);
+        
+        // Adding the tilt from Y finger position (like tilting the whole cylinder slightly)
+        predictiveBackCamera.rotateX(Utilities.clamp((predictiveBackY - cy) / Math.max(1f, getHeight()), -0.5f, 0.5f) * -5.0f * ease);
+        
         predictiveBackCamera.getMatrix(predictiveBackMatrix);
         predictiveBackCamera.restore();
 
         predictiveBackMatrix.preTranslate(-cx, -cy);
-        predictiveBackMatrix.postTranslate(cx + tx, cy + ty);
-        predictiveBackMatrix.postScale(scale, scale, cx + tx, cy + ty);
+        predictiveBackMatrix.postTranslate(cx, cy);
+        
+        // Shrink slightly to avoid clipping near screen edges and show off 3D
+        final float scale = lerp(1.0f, 0.85f, ease) * lerp(1f, 0.90f, commit);
+        predictiveBackMatrix.postScale(scale, scale, cx, cy);
+
         canvas.concat(predictiveBackMatrix);
-        // Clip stays in local (0,0,w,h) space after concat
     }
 
     private void drawSpatialFrontShadow(Canvas canvas, RectF rect, float radius, float p) {
