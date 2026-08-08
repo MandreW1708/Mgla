@@ -81,7 +81,6 @@ import android.text.style.TypefaceSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
 import android.text.style.URLSpan;
-import android.util.Log;
 import android.util.Pair;
 import android.util.Property;
 import android.util.SparseArray;
@@ -119,6 +118,7 @@ import androidx.collection.LongSparseArray;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.ColorUtils;
+import androidx.core.graphics.Insets;
 import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -225,6 +225,7 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BackDrawable;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
+import org.telegram.ui.ActionBar.EdgeToEdgeSupportMode;
 import org.telegram.ui.ActionBar.EmojiThemes;
 import org.telegram.ui.ActionBar.INavigationLayout;
 import org.telegram.ui.ActionBar.SimpleTextView;
@@ -7629,9 +7630,7 @@ public class ChatActivity extends BaseFragment implements
                     topPanelLayout.setViewVisible(fragmentContextViewWrapper, visibility == VISIBLE);
                 }
             };
-
-            fragmentContextView.isInsideBubble = true;
-            fragmentLocationContextView.isInsideBubble = true;
+            topPanelLayout.setCallFragmentContextView(fragmentContextView);
             fragmentContextViewWrapper.addView(fragmentContextView);
             fragmentLocationContextViewWrapper.addView(fragmentLocationContextView);
             fragmentContextView.setEnabled(!inPreviewMode);
@@ -9156,12 +9155,30 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private boolean lastImeVisible;
+    private int insetSystemLeft;
+    private int insetSystemRight;
 
     @NonNull
     private WindowInsetsCompat onApplyWindowInsets(@NonNull View v, @NonNull WindowInsetsCompat insets) {
+        final Insets systemInsets = AndroidUtilities.getDefaultWindowInsets(insets, false);
+
+        final int insetsLeft = systemInsets.left;
+        final int insetsRight = systemInsets.right;
+        if (insetSystemLeft != insetsLeft || insetSystemRight != insetsRight) {
+            insetSystemLeft = insetsLeft;
+            insetSystemRight = insetsRight;
+            contentView.requestLayout();
+        }
+
         windowInsetsStateHolder.setInsets(insets);
+        
+        if (messagesSearchListContainer != null) {
+            messagesSearchListContainer.setPadding(insetsLeft, 0, insetsRight, 0);
+        }
+        
         checkUi_chatListViewPaddings();
         checkUi_messagesSearchListPadding();
+        invalidateClipRectForBackgroundAndChatList();
 
         final boolean keyboardVisible = insets.isVisible(WindowInsetsCompat.Type.ime());
         if (lastImeVisible != keyboardVisible) {
@@ -12722,7 +12739,7 @@ public class ChatActivity extends BaseFragment implements
                                     }
                                     if (!isVideo && photoEntry.imagePath != null) {
                                         info.path = photoEntry.imagePath;
-                                        if (photoEntry.isHighQuality()) {
+                                        if (!isStickerMode && photoEntry.isHighQuality()) {
                                             info.originalPhotoEntry = photoEntry.clone();
                                         }
                                     } else if (photoEntry.path != null) {
@@ -12744,7 +12761,7 @@ public class ChatActivity extends BaseFragment implements
                                     info.updateStickersOrder = SendMessagesHelper.checkUpdateStickersOrder(photoEntry.caption);
                                     info.hasMediaSpoilers = photoEntry.hasSpoiler;
                                     info.stars = photoEntry.starsAmount;
-                                    info.highQuality = photoEntry.isHighQuality();
+                                    info.highQuality = !isStickerMode && photoEntry.isHighQuality();
                                     photos.add(info);
                                     photoEntry.reset();
                                 }
@@ -14942,7 +14959,7 @@ public class ChatActivity extends BaseFragment implements
                         if (messageObjectToEdit.messageOwner != null) {
                             cs = MessageObject.replaceAnimatedEmoji(cs, messageObjectToEdit.messageOwner.entities, replyObjectTextView.getPaint().getFontMetricsInt());
                         }
-                        replyObjectTextView.setText(AnimatedEmojiSpan.cloneSpans(cs));
+                        replyObjectTextView.setText(AnimatedEmojiSpan.cloneSpans(cs, -1, replyObjectTextView.getPaint().getFontMetricsInt()));
                     }
                 }
 
@@ -15188,24 +15205,25 @@ public class ChatActivity extends BaseFragment implements
                     replyObjectText = Emoji.replaceEmoji(messageObjectToReply.messageOwner.media.game.title, replyObjectTextView.getPaint().getFontMetricsInt(), false);
                     sourceText = messageObjectToReply.messageOwner.media.game.title;
                 } else if (messageObjectToReply.messageText != null || messageObjectToReply.caption != null) {
-                    CharSequence mess = messageObjectToReply.caption != null ? messageObjectToReply.caption : messageObjectToReply.messageText;
+                    CharSequence mess = new SpannableStringBuilder(messageObjectToReply.caption != null ? messageObjectToReply.caption : messageObjectToReply.messageText);
                     mess = FormattedDateSpan.restoreFormatedDateEntities(mess);
                     sourceText = mess;
                     if (mess.length() > 150) {
                         mess = mess.subSequence(0, 150);
                     }
                     mess = AndroidUtilities.replaceNewLines(mess);
+                    mess = Emoji.replaceEmoji(mess, replyObjectTextView.getPaint().getFontMetricsInt(), false);
                     if (messageObjectToReply.messageOwner != null && messageObjectToReply.messageOwner.entities != null) {
                         mess = MessageObject.replaceAnimatedEmoji(mess, messageObjectToReply.messageOwner.entities, replyObjectTextView.getPaint().getFontMetricsInt());
                     }
-                    replyObjectText = Emoji.replaceEmoji(mess, replyObjectTextView.getPaint().getFontMetricsInt(), false);
+                    replyObjectText = mess;
                 }
                 if (replyObjectText != null) {
                     if (replyObjectText instanceof Spannable && sourceText != null) {
                         MediaDataController.addTextStyleRuns(entities, sourceText, (Spannable) replyObjectText);
                     }
 
-                    replyObjectTextView.setText(AnimatedEmojiSpan.cloneSpans(replyObjectText));
+                    replyObjectTextView.setText(AnimatedEmojiSpan.cloneSpans(replyObjectText, -1, replyObjectTextView.getPaint().getFontMetricsInt()));
                 }
                 updateBottomOverlay();
             } else if (messageObjectsToForward != null) {
@@ -16104,7 +16122,7 @@ public class ChatActivity extends BaseFragment implements
                     recyclerChatViewHeight,
                     0,
                     view.getY() + (isKeyboardVisible() ? chatListView.getTop() : actionBar.getMeasuredHeight()) - contentView.getBackgroundTranslationY() - (1f - contentPanTranslationT) * chatListViewPaddingTop,
-                    contentView.getMeasuredWidth(),
+                    chatListView.getMeasuredWidth(),
                     contentView.getBackgroundSizeY(),
                     blurredViewTopOffset,
                     blurredViewBottomOffset,
@@ -18310,13 +18328,25 @@ public class ChatActivity extends BaseFragment implements
             }*/
         }
 
+        private boolean isFullSizeIgnoreInsersChild(View child) {
+            return child != null && (child == backgroundView
+                || child == blurredView || child == searchViewPager
+                || child == fireworksOverlay || child == chatActivityFadeView
+                || child == messagesSearchListContainer
+            );
+        }
+
         @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        protected void onMeasure(int origWidthMeasureSpec, int heightMeasureSpec) {
             invalidateBlurredSourcesView.bringToFrontIfNeeded();
 
-            final int allHeight;
-            int widthSize = View.MeasureSpec.getSize(widthMeasureSpec);
-            int heightSize = allHeight = View.MeasureSpec.getSize(heightMeasureSpec);
+            final int allWidth = MeasureSpec.getSize(origWidthMeasureSpec);
+            final int allHeight = MeasureSpec.getSize(heightMeasureSpec);
+
+            final int widthSize = allWidth - insetSystemLeft - insetSystemRight;
+            final int widthMeasureSpec = MeasureSpec.makeMeasureSpec(widthSize, MeasureSpec.EXACTLY);
+
+            int heightSize = allHeight;
 
             if (navbarContentSourceWallpaper.getSource() instanceof BlurredBackgroundSourceBitmap) {
                 ((BlurredBackgroundSourceBitmap) navbarContentSourceWallpaper.getSource())
@@ -18379,7 +18409,7 @@ public class ChatActivity extends BaseFragment implements
                 globalIgnoreLayout = false;
             }
 
-            setMeasuredDimension(widthSize, heightSize);
+            setMeasuredDimension(allWidth, heightSize);
             heightSize -= getPaddingTop();
 
             if (webBotTitle != null) {
@@ -18457,8 +18487,8 @@ public class ChatActivity extends BaseFragment implements
                 if (child == null || child.getVisibility() == GONE || child == chatActivityEnterView || child == actionBar) {
                     continue;
                 }
-                if (child == backgroundView || child == blurredView || child == searchViewPager) {
-                    int contentWidthSpec = View.MeasureSpec.makeMeasureSpec(widthSize, View.MeasureSpec.EXACTLY);
+                if (isFullSizeIgnoreInsersChild(child)) {
+                    int contentWidthSpec = View.MeasureSpec.makeMeasureSpec(allWidth, View.MeasureSpec.EXACTLY);
                     int contentHeightSpec = View.MeasureSpec.makeMeasureSpec(allHeight, View.MeasureSpec.EXACTLY);
                     child.measure(contentWidthSpec, contentHeightSpec);
                 } else if (child == chatListView || child == chatListThanosEffect || child instanceof TextSelectionHelper.TextSelectionOverlay) {
@@ -18585,6 +18615,9 @@ public class ChatActivity extends BaseFragment implements
             final int count = getChildCount();
             int paddingBottom = 0;
 
+            final int selfWidth = getMeasuredWidth();
+            final int selfWidthWithoutInsets = selfWidth - insetSystemLeft - insetSystemRight;
+
             for (int i = 0; i < count; i++) {
                 final View child = getChildAt(i);
                 if (child == null || child.getVisibility() == GONE) {
@@ -18608,14 +18641,14 @@ public class ChatActivity extends BaseFragment implements
 
                 switch (absoluteGravity & Gravity.HORIZONTAL_GRAVITY_MASK) {
                     case Gravity.CENTER_HORIZONTAL:
-                        childLeft = (r - l - width) / 2 + lp.leftMargin - lp.rightMargin;
+                        childLeft = insetSystemLeft + (selfWidthWithoutInsets - width) / 2 + lp.leftMargin - lp.rightMargin;
                         break;
                     case Gravity.RIGHT:
-                        childLeft = r - width - lp.rightMargin;
+                        childLeft = selfWidth - insetSystemRight - width - lp.rightMargin;
                         break;
                     case Gravity.LEFT:
                     default:
-                        childLeft = lp.leftMargin;
+                        childLeft = insetSystemLeft + lp.leftMargin;
                 }
 
                 switch (verticalGravity) {
@@ -18635,7 +18668,10 @@ public class ChatActivity extends BaseFragment implements
                         childTop = lp.topMargin;
                 }
 
-                if (child == blurredView || child == messageEnterTransitionContainer || child == fireworksOverlay || child == messagesSearchListContainer || child == chatActivityFadeView || child == backgroundView || child == quickShareSelectorOverlay || child == chatInputViewsContainer || child instanceof HintView || child instanceof ChecksHintView) {
+                if (isFullSizeIgnoreInsersChild(child)) {
+                    childLeft = 0;
+                    childTop = 0;
+                } else if (child == messageEnterTransitionContainer || child == quickShareSelectorOverlay || child == chatInputViewsContainer || child instanceof HintView || child instanceof ChecksHintView) {
                     childTop = 0;
                 } else if (child instanceof TextSelectionHelper.TextSelectionOverlay) {
                     childTop = -blurredViewTopOffset;
@@ -18673,7 +18709,7 @@ public class ChatActivity extends BaseFragment implements
                     childTop = 0;
                 } else if (child instanceof MessagePreviewView) {
                     childTop = AndroidUtilities.statusBarHeight;
-                } else if (child == searchViewPager || child == roundVideoRecordBackground || child == messageMetricsView || child == pollAddOptionFieldLayout) {
+                } else if (child == roundVideoRecordBackground || child == messageMetricsView || child == pollAddOptionFieldLayout) {
                     childTop = 0;
                 }
                 child.layout(childLeft, childTop, childLeft + width, childTop + height);
@@ -20175,7 +20211,7 @@ public class ChatActivity extends BaseFragment implements
         PhotoViewer photoViewer = PhotoViewer.getInstance();
         photoViewer.setParentActivity(this);
         return photoViewer.openPhoto(index,
-            new ChatArticlePageBlocksAdapter(richMessage, pageBlocks),
+            new ChatArticlePageBlocksAdapter(richMessage, pageBlocks, messageObject),
             new ChatArticlePhotoViewerProvider(pageBlocks));
     }
 
@@ -20230,10 +20266,12 @@ public class ChatActivity extends BaseFragment implements
     private static class ChatArticlePageBlocksAdapter implements PhotoViewer.PageBlocksAdapter {
         private final TL_iv.RichMessage page;
         private final List<TL_iv.PageBlock> blocks;
+        private final MessageObject messageObject;
 
-        ChatArticlePageBlocksAdapter(TL_iv.RichMessage page, List<TL_iv.PageBlock> blocks) {
+        ChatArticlePageBlocksAdapter(TL_iv.RichMessage page, List<TL_iv.PageBlock> blocks, MessageObject messageObject) {
             this.page = page;
             this.blocks = blocks;
+            this.messageObject = messageObject;
         }
 
         @Override
@@ -20303,10 +20341,14 @@ public class ChatActivity extends BaseFragment implements
         }
 
         @Override
-        public void updateSlideshowCell(TL_iv.PageBlock currentPageBlock) {}
+        public void updateSlideshowCell(TL_iv.PageBlock currentPageBlock) {
+            if (messageObject != null && messageObject.richLayout != null) {
+                messageObject.richLayout.setSlideshowPage(currentPageBlock);
+            }
+        }
 
         @Override
-        public Object getParentObject() { return page; }
+        public Object getParentObject() { return messageObject != null ? messageObject : page; }
 
         @Override
         public boolean isHardwarePlayer(int index) { return false; }
@@ -40202,6 +40244,7 @@ public class ChatActivity extends BaseFragment implements
             forceUpdate(cell, anchorScroll, true, false);
         }
 
+        @Override
         public void forceUpdate(ChatMessageCell cell, boolean anchorScroll, boolean scrollByTop) {
             forceUpdate(cell, anchorScroll, false, scrollByTop);
         }
@@ -44885,7 +44928,7 @@ public class ChatActivity extends BaseFragment implements
                     src.set(0, 0, source.getWidth(), source.getHeight());
                     dst.set(0, 0, serviceBitmap.getWidth(), serviceBitmap.getHeight());
                     serviceCanvas.drawBitmap(source, src, dst, null);
-                    Utilities.blurBitmap(serviceBitmap, 3, 1, serviceBitmap.getWidth(), serviceBitmap.getHeight(), serviceBitmap.getRowBytes());
+                    Utilities.blurBitmap(serviceBitmap, 3);
                     serviceCanvas.drawColor(ColorUtils.setAlphaComponent(0xff000000, (int) (0xFF * dimAmount)));
                     serviceShader = new BitmapShader(serviceBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                     serviceBitmapSource = Bitmap.createBitmap(serviceBitmap);
@@ -47318,6 +47361,12 @@ public class ChatActivity extends BaseFragment implements
     public boolean isSupportEdgeToEdge() {
         return true;
     }
+
+    @Override
+    public EdgeToEdgeSupportMode getEdgeToEdgeSupportMode() {
+        return EdgeToEdgeSupportMode.FULL;
+    }
+
     @Override
     public boolean drawEdgeNavigationBar() {
         return false;
@@ -48241,6 +48290,8 @@ public class ChatActivity extends BaseFragment implements
             return;
         }
 
+        final boolean hasSideInsets = insetSystemLeft > 0 || insetSystemRight > 0;
+
         final int topClip = 0;
         final int bottomClip = (int) Math.max(0,
             windowInsetsStateHolder.getAnimatedImeBottomInset() * windowInsetsStateHolder.getAnimatedKeyboardVisibility() - dp(29));
@@ -48259,7 +48310,7 @@ public class ChatActivity extends BaseFragment implements
                 Math.min(windowInsetsStateHolder.getInAppKeyboardHeight(), windowInsetsStateHolder.getAnimatedImeBottomInset() * windowInsetsStateHolder.getAnimatedKeyboardVisibility()) - dp(29));
 
             clipBoundsTmp.set(0, 0, contentView.getMeasuredWidth(), contentView.getMeasuredHeight() - bottomClip2);
-            chatActivityFadeView.setClipBounds(clipBoundsTmp);
+            chatActivityFadeView.setClipBounds(hasSideInsets ? null : clipBoundsTmp);
         }
     }
 
