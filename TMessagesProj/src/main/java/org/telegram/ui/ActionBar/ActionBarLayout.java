@@ -1205,6 +1205,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 }
             } else if (child == containerViewBack) {
                 if (spatialBack) {
+                    canvas.drawColor(0xFF000000); // Clear window background to prevent ghosting
                     AndroidUtilities.rectTmp.set(0, 0, child.getWidth(), getHeight());
                     applySpatialBackTransform(canvas, AndroidUtilities.rectTmp);
                     final float p = Math.min(1f, getSpatialBackProgress());

@@ -142,13 +142,13 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         deletedSubCells[0] = createDeletedSubCell(context, "Личные чаты", MglaSpyConfig.isSaveDeletedForPrivateEnabled(), MglaSpyConfig::setSaveDeletedForPrivateEnabled);
         spyBlock.addView(deletedSubCells[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        deletedSubCells[1] = createDeletedSubCell(context, "Группы", MglaSpyConfig.isSaveDeletedForGroupsEnabled(), MglaSpyConfig::setSaveDeletedForGroupsEnabled);
+        deletedSubCells[1] = createDeletedSubCell(context, "Группы до 100 человек", MglaSpyConfig.isSaveDeletedForGroupsSmallEnabled(), MglaSpyConfig::setSaveDeletedForGroupsSmallEnabled);
         spyBlock.addView(deletedSubCells[1], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         deletedSubCells[2] = createDeletedSubCell(context, "Каналы", MglaSpyConfig.isSaveDeletedForChannelsEnabled(), MglaSpyConfig::setSaveDeletedForChannelsEnabled);
         spyBlock.addView(deletedSubCells[2], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        deletedSubCells[3] = createDeletedSubCell(context, "Комментарии в каналах", MglaSpyConfig.isSaveDeletedForCommentsEnabled(), MglaSpyConfig::setSaveDeletedForCommentsEnabled);
+        deletedSubCells[3] = createDeletedSubCell(context, "Группы более 100 человек", MglaSpyConfig.isSaveDeletedForGroupsLargeEnabled(), MglaSpyConfig::setSaveDeletedForGroupsLargeEnabled);
         spyBlock.addView(deletedSubCells[3], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         updateDeletedSubCellsState(deletedSubCells, MglaSpyConfig.isSaveDeletedMessagesEnabled());

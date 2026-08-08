@@ -538,6 +538,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         o.setScrimViewBackground(bg);
         o.show();
         return true;
+    }
+
     private boolean hasUnmutedUnreadDialogs(MessagesController.DialogFilter folder) {
         final MessagesController messagesController = getMessagesController();
         final ArrayList<TLRPC.Dialog> dialogs = folder.isDefault()

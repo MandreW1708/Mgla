@@ -14,18 +14,18 @@ public class MglaSpyConfig {
 
     // Categories for saving deleted messages
     public static final String KEY_SAVE_PRIVATE = "spy_save_deleted_private";
-    public static final String KEY_SAVE_GROUPS = "spy_save_deleted_groups";
+    public static final String KEY_SAVE_GROUPS_SMALL = "spy_save_deleted_groups";
     public static final String KEY_SAVE_CHANNELS = "spy_save_deleted_channels";
-    public static final String KEY_SAVE_COMMENTS = "spy_save_deleted_comments";
+    public static final String KEY_SAVE_GROUPS_LARGE = "spy_save_deleted_comments";
 
     // Chat type constants
     public static final int CHAT_TYPE_PRIVATE = 0;
-    public static final int CHAT_TYPE_GROUP = 1;
+    public static final int CHAT_TYPE_GROUP_SMALL = 1;
     public static final int CHAT_TYPE_CHANNEL = 2;
-    public static final int CHAT_TYPE_COMMENTS = 3;
+    public static final int CHAT_TYPE_GROUP_LARGE = 3;
 
     public static final String[] CHAT_TYPE_NAMES = {
-        "Личные чаты", "Группы", "Каналы", "Комментарии в каналах"
+        "Личные чаты", "Группы до 100 участников", "Каналы", "Группы более 100 участников"
     };
 
     // Message type keys for saving deleted messages
@@ -114,15 +114,15 @@ public class MglaSpyConfig {
         }
     }
 
-    public static boolean isSaveDeletedForGroupsEnabled() {
+    public static boolean isSaveDeletedForGroupsSmallEnabled() {
         SharedPreferences prefs = prefs();
-        return prefs != null && prefs.getBoolean(KEY_SAVE_GROUPS, true);
+        return prefs != null && prefs.getBoolean(KEY_SAVE_GROUPS_SMALL, true);
     }
 
-    public static void setSaveDeletedForGroupsEnabled(boolean enabled) {
+    public static void setSaveDeletedForGroupsSmallEnabled(boolean enabled) {
         SharedPreferences prefs = prefs();
         if (prefs != null) {
-            prefs.edit().putBoolean(KEY_SAVE_GROUPS, enabled).apply();
+            prefs.edit().putBoolean(KEY_SAVE_GROUPS_SMALL, enabled).apply();
         }
     }
 
@@ -138,15 +138,15 @@ public class MglaSpyConfig {
         }
     }
 
-    public static boolean isSaveDeletedForCommentsEnabled() {
+    public static boolean isSaveDeletedForGroupsLargeEnabled() {
         SharedPreferences prefs = prefs();
-        return prefs != null && prefs.getBoolean(KEY_SAVE_COMMENTS, true);
+        return prefs != null && prefs.getBoolean(KEY_SAVE_GROUPS_LARGE, true);
     }
 
-    public static void setSaveDeletedForCommentsEnabled(boolean enabled) {
+    public static void setSaveDeletedForGroupsLargeEnabled(boolean enabled) {
         SharedPreferences prefs = prefs();
         if (prefs != null) {
-            prefs.edit().putBoolean(KEY_SAVE_COMMENTS, enabled).apply();
+            prefs.edit().putBoolean(KEY_SAVE_GROUPS_LARGE, enabled).apply();
         }
     }
 
@@ -154,12 +154,12 @@ public class MglaSpyConfig {
         switch (chatType) {
             case CHAT_TYPE_PRIVATE:
                 return isSaveDeletedForPrivateEnabled();
-            case CHAT_TYPE_GROUP:
-                return isSaveDeletedForGroupsEnabled();
+            case CHAT_TYPE_GROUP_SMALL:
+                return isSaveDeletedForGroupsSmallEnabled();
             case CHAT_TYPE_CHANNEL:
                 return isSaveDeletedForChannelsEnabled();
-            case CHAT_TYPE_COMMENTS:
-                return isSaveDeletedForCommentsEnabled();
+            case CHAT_TYPE_GROUP_LARGE:
+                return isSaveDeletedForGroupsLargeEnabled();
             default:
                 return true;
         }
