@@ -1051,6 +1051,11 @@ public class ChatActivity extends BaseFragment implements
     public ActionBarPopupWindow scrimPopupWindow;
     private boolean scrimPopupWindowHideDimOnDismiss = true;
     private int scrimPopupX, scrimPopupY;
+    private int scrimViewIosTargetY;
+    private int scrimViewIosTargetHeight;
+    private float scrimViewIosTargetScale;
+    private android.widget.Space scrimViewIosGapView;
+    private boolean scrimViewIosStyle;
     private ActionBarMenuSubItem[] scrimPopupWindowItems;
     private ActionBarMenuSubItem menuDeleteItem;
     private final Runnable updateDeleteItemRunnable = new Runnable() {
@@ -18024,10 +18029,18 @@ public class ChatActivity extends BaseFragment implements
                         viewClipBottom -= clipBottom;
 
                         if (cell == null || !cell.getTransitionParams().animateBackgroundBoundsInner) {
-                            viewClipLeft = Math.max(viewClipLeft, chatListView.getLeft() + child.getX());
-                            viewClipTop = Math.max(viewClipTop, chatListView.getY() + child.getY());
-                            viewClipRight = Math.min(viewClipRight, chatListView.getLeft() + child.getX() + child.getMeasuredWidth());
-                            viewClipBottom = Math.min(viewClipBottom, chatListView.getY() + child.getY() + child.getMeasuredHeight());
+                            if (!scrimViewIosStyle) {
+                                viewClipLeft = Math.max(viewClipLeft, chatListView.getLeft() + child.getX());
+                                viewClipTop = Math.max(viewClipTop, chatListView.getY() + child.getY());
+                                viewClipRight = Math.min(viewClipRight, chatListView.getLeft() + child.getX() + child.getMeasuredWidth());
+                                viewClipBottom = Math.min(viewClipBottom, chatListView.getY() + child.getY() + child.getMeasuredHeight());
+                            }
+                        }
+                        if (scrimViewIosStyle) {
+                            viewClipTop = 0;
+                            viewClipBottom = getMeasuredHeight();
+                            viewClipLeft = 0;
+                            viewClipRight = getMeasuredWidth();
                         }
 
                         viewClipLeft = Math.max(viewClipLeft, getSideMenuWidth());
@@ -18052,7 +18065,20 @@ public class ChatActivity extends BaseFragment implements
                                 actionCell.setScrimReaction(scrimViewReaction);
                             }
                             canvas.clipRect(viewClipLeft, viewClipTop, viewClipRight, viewClipBottom);
-                            canvas.translate(chatListView.getLeft() + child.getX(), chatListView.getY() + child.getY());
+                            float tX = chatListView.getLeft() + child.getX();
+                            float tY = chatListView.getY() + child.getY();
+                            if (scrimViewIosStyle) {
+                                float progress = scrimViewAlpha;
+                                tX = AndroidUtilities.lerp(tX, 0, progress);
+                                tY = AndroidUtilities.lerp(tY, scrimViewIosTargetY, progress);
+                                canvas.translate(tX, tY);
+                                float scale = AndroidUtilities.lerp(1f, scrimViewIosTargetScale, progress);
+                                if (scale != 1f) {
+                                    canvas.scale(scale, scale, 0, 0);
+                                }
+                            } else {
+                                canvas.translate(tX, tY);
+                            }
                             if (cell != null && scrimGroup == null && cell.drawBackgroundInParent()) {
                                 canvas.save();
                                 canvas.translate(0, cell.getPaddingTop());
@@ -32984,6 +33010,20 @@ public class ChatActivity extends BaseFragment implements
                 }
 
                 boolean showNoForwards = (isPeerNoForwards() || message.messageOwner.noforwards && currentUser != null && currentUser.bot) && message.messageOwner.action == null && message.isSent() && !message.isEditing() && chatMode != MODE_SCHEDULED && chatMode != MODE_SAVED && getDialogId() != UserObject.VERIFY;
+                scrimViewIosStyle = org.telegram.messenger.MglaChatsConfig.isIosMenuStyleEnabled();
+                if (scrimViewIosStyle) {
+                    scrimViewIosGapView = new android.widget.Space(contentView.getContext());
+                    int cellHeight = v.getMeasuredHeight();
+                    if (cellHeight > AndroidUtilities.displaySize.y / 2) {
+                        scrimViewIosTargetScale = (float) (AndroidUtilities.displaySize.y / 2) / cellHeight;
+                        cellHeight = AndroidUtilities.displaySize.y / 2;
+                    } else {
+                        scrimViewIosTargetScale = 1.0f;
+                    }
+                    LinearLayout.LayoutParams gapParams = new LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, cellHeight + AndroidUtilities.dp(16));
+                    scrimPopupContainerLayout.addView(scrimViewIosGapView, gapParams);
+                    scrimViewIosTargetHeight = cellHeight;
+                }
                 scrimPopupContainerLayout.addView(popupLayout, LayoutHelper.createLinearRelatively(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT, isReactionsAvailable ? 16 : 0, 0, isReactionsAvailable ? 36 : 0, 0));
                 scrimPopupContainerLayout.setPopupWindowLayout(popupLayout);
                 if (showNoForwards) {
@@ -33190,6 +33230,31 @@ public class ChatActivity extends BaseFragment implements
                 popupY = Utilities.clamp(popupY, maxY, minY);
             } else {
                 popupY = inBubbleMode ? 0 : AndroidUtilities.statusBarHeight;
+            }
+            if (scrimViewIosStyle) {
+                popupX = -backgroundPaddings.left; // No extra dp padding to remove "too much padding on left"
+                int realHeight = scrimPopupContainerLayout.getMeasuredHeight();
+                popupY = AndroidUtilities.displaySize.y - realHeight + backgroundPaddings.bottom;
+                int windowYOffset = 0;
+                if (isInsideContainer) {
+                    int[] location = new int[2];
+                    chatListView.getLocationInWindow(location);
+                    windowYOffset = location[1] - (int) chatListView.getY();
+                    popupY = Math.min(popupY, location[1] + chatListView.getMeasuredHeight() - realHeight - AndroidUtilities.dp(8) + backgroundPaddings.bottom);
+                }
+                int gapTop = 0;
+                if (scrimViewIosGapView != null) {
+                    for (int i = 0; i < scrimPopupContainerLayout.getChildCount(); i++) {
+                        android.view.View child = scrimPopupContainerLayout.getChildAt(i);
+                        if (child == scrimViewIosGapView) break;
+                        gapTop += child.getMeasuredHeight();
+                        if (child.getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams) {
+                            android.widget.LinearLayout.LayoutParams lp = (android.widget.LinearLayout.LayoutParams) child.getLayoutParams();
+                            gapTop += lp.topMargin + lp.bottomMargin;
+                        }
+                    }
+                }
+                scrimViewIosTargetY = popupY - windowYOffset + gapTop - backgroundPaddings.top;
             }
             final int finalPopupX = scrimPopupX = popupX;
             final int finalPopupY = scrimPopupY = popupY;

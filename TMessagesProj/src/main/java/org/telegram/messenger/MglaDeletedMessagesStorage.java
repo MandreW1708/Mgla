@@ -754,19 +754,19 @@ public class MglaDeletedMessagesStorage {
             MessagesController controller = MessagesController.getInstance(currentAccount);
             TLRPC.Chat chat = controller.getChat(chatId);
             if (chat == null) {
-                return MglaSpyConfig.CHAT_TYPE_GROUP;
+                return MglaSpyConfig.CHAT_TYPE_GROUP_SMALL;
             }
             if (ChatObject.isChannelAndNotMegaGroup(chat)) {
                 return MglaSpyConfig.CHAT_TYPE_CHANNEL;
             }
-            // Megagroup or regular group — check if it's a discussion group (comments)
-            TLRPC.ChatFull chatFull = controller.getChatFull(chatId);
-            if (ChatObject.isDiscussionGroup(chat, chatFull)) {
-                return MglaSpyConfig.CHAT_TYPE_COMMENTS;
+            // Megagroup or regular group - check if it's small or large
+            if (chat.participants_count <= 100) {
+                return MglaSpyConfig.CHAT_TYPE_GROUP_SMALL;
+            } else {
+                return MglaSpyConfig.CHAT_TYPE_GROUP_LARGE;
             }
-            return MglaSpyConfig.CHAT_TYPE_GROUP;
         }
-        return MglaSpyConfig.CHAT_TYPE_GROUP;
+        return MglaSpyConfig.CHAT_TYPE_GROUP_SMALL;
     }
 
     public static int resolveMessageType(TLRPC.Message message) {
