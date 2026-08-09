@@ -4757,6 +4757,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         drawBackground(canvas, true);
     }
 
+    private android.graphics.RectF bgRectF = new android.graphics.RectF();
+
     public void drawBackground(Canvas canvas, boolean withComposeShadowDrawable) {
         if (!shouldDrawBackground) {
             return;
@@ -4768,22 +4770,43 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
         int bottom = top + Theme.chat_composeShadowDrawable.getIntrinsicHeight();
 
+        float padding = org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress;
+        float radius = org.telegram.messenger.AndroidUtilities.dp(24) * inputFieldShortProgress;
+
         if (withComposeShadowDrawable) {
             Theme.chat_composeShadowDrawable.setAlpha((int) (composeShadowAlpha * 0xFF));
-            Theme.chat_composeShadowDrawable.setBounds(0, top, getMeasuredWidth(), bottom);
+            Theme.chat_composeShadowDrawable.setBounds((int) padding, top, (int) (getMeasuredWidth() - padding), bottom);
             Theme.chat_composeShadowDrawable.draw(canvas);
         }
+
+        bgRectF.set(padding, bottom, getWidth() - padding, getHeight());
 
         if (allowBlur) {
             backgroundPaint.setColor(getThemedColor(Theme.key_chat_messagePanelBackground));
             if (SharedConfig.chatBlurEnabled() && sizeNotifierLayout != null) {
+                canvas.save();
+                if (radius > 0) {
+                    android.graphics.Path path = new android.graphics.Path();
+                    path.addRoundRect(bgRectF, radius, radius, android.graphics.Path.Direction.CW);
+                    canvas.clipPath(path);
+                }
                 blurBounds.set(0, bottom, getWidth(), getHeight());
                 sizeNotifierLayout.drawBlurRect(canvas, getTop(), blurBounds, backgroundPaint, false);
+                canvas.restore();
             } else {
-                canvas.drawRect(0, bottom, getWidth(), getHeight(), backgroundPaint);
+                if (radius > 0) {
+                    canvas.drawRoundRect(bgRectF, radius, radius, backgroundPaint);
+                } else {
+                    canvas.drawRect(bgRectF, backgroundPaint);
+                }
             }
         } else {
-            canvas.drawRect(0, bottom, getWidth(), getHeight(), getThemedPaint(Theme.key_paint_chatComposeBackground));
+            Paint paint = getThemedPaint(Theme.key_paint_chatComposeBackground);
+            if (radius > 0) {
+                canvas.drawRoundRect(bgRectF, radius, radius, paint);
+            } else {
+                canvas.drawRect(bgRectF, paint);
+            }
         }
     }
 
@@ -9879,6 +9902,7 @@ public class ChatActivityEnterView extends FrameLayout implements
 
     public void setDelegate(ChatActivityEnterViewDelegate chatActivityEnterViewDelegate) {
         delegate = chatActivityEnterViewDelegate;
+        updateInputFieldShortProgress(1f);
     }
 
     public void setCommand(MessageObject messageObject, String command, boolean longPress, boolean username) {
@@ -13235,7 +13259,11 @@ public class ChatActivityEnterView extends FrameLayout implements
         if (searchingType != 0) {
             lastSizeChangeValue1 = height;
             lastSizeChangeValue2 = isWidthGreater;
+            boolean oldKeyboard = keyboardVisible;
             keyboardVisible = height > 0;
+            if (oldKeyboard != keyboardVisible) {
+                animateInputFieldShortProgress(keyboardVisible ? 0f : 1f);
+            }
             checkBotMenu();
             return;
         }
@@ -13333,6 +13361,9 @@ public class ChatActivityEnterView extends FrameLayout implements
 
         boolean oldValue = keyboardVisible;
         keyboardVisible = height > 0;
+        if (oldValue != keyboardVisible) {
+            animateInputFieldShortProgress(keyboardVisible ? 0f : 1f);
+        }
         checkBotMenu();
         if (keyboardVisible && isPopupShowing() && stickersExpansionAnim == null) {
             showPopup(0, currentPopupContentType);
@@ -14841,10 +14872,11 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     public float getStaticAttachBubbleLeftOffset() {
+        float dynamicPadding = org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress;
         if (!useStaticAttachButton() || attachButton == null || attachButton.getVisibility() != View.VISIBLE || attachButton.getAlpha() < 0.5f) {
-            return 0;
+            return dynamicPadding;
         }
-        return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_ATTACH_GAP) - dp(INPUT_BUBBLE_SIDE_TUCK));
+        return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_ATTACH_GAP) - dp(INPUT_BUBBLE_SIDE_TUCK)) + dynamicPadding;
     }
 
     private int getStaticAttachContentLeftOffset() {
@@ -14922,10 +14954,11 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     public float getStaticSendBubbleRightOffset() {
+        float dynamicPadding = org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress;
         if (!useStaticSendButton() || sendButtonContainer == null || sendButtonContainer.getVisibility() != View.VISIBLE || sendButtonContainer.getAlpha() < 0.5f) {
-            return 0;
+            return dynamicPadding;
         }
-        return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_SEND_GAP) - dp(INPUT_BUBBLE_SIDE_TUCK));
+        return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_SEND_GAP) - dp(INPUT_BUBBLE_SIDE_TUCK)) + dynamicPadding;
     }
 
     private int getStaticSendContentRightOffset() {
@@ -15990,4 +16023,45 @@ public class ChatActivityEnterView extends FrameLayout implements
         updateStaticSendLayout();
         onChangedIslandTotalHeight(getIslandTotalHeight(false));
     }
+
+    // --- Dynamic Short Input Field Feature ---
+    private boolean inputFieldShortProgressInitialized = false;
+    private float inputFieldShortProgress = 1f; // 1 = short (keyboard closed), 0 = full (keyboard open)
+    private android.animation.ValueAnimator inputFieldShortAnimator;
+    
+    private void updateInputFieldShortProgress(float progress) {
+        if (inputFieldShortProgressInitialized && Math.abs(inputFieldShortProgress - progress) < 0.001f) return;
+        inputFieldShortProgressInitialized = true;
+        inputFieldShortProgress = progress;
+        
+        if (textFieldContainer != null) {
+            int p = (int) (org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress);
+            textFieldContainer.setPadding(p, 0, p, 0);
+            if (topView != null) {
+                topView.setPadding(p, 0, p, 0);
+            }
+        }
+        
+        updateStaticAttachLayout();
+        updateStaticSendLayout();
+        onChangedIslandTotalHeight(getIslandTotalHeight(false));
+        invalidate();
+        if (messageEditTextContainer != null) {
+            messageEditTextContainer.invalidate();
+        }
+    }
+    
+    private void animateInputFieldShortProgress(float targetProgress) {
+        if (inputFieldShortAnimator != null) {
+            inputFieldShortAnimator.cancel();
+        }
+        inputFieldShortAnimator = android.animation.ValueAnimator.ofFloat(inputFieldShortProgress, targetProgress);
+        inputFieldShortAnimator.setDuration(200);
+        inputFieldShortAnimator.setInterpolator(org.telegram.ui.Components.CubicBezierInterpolator.DEFAULT);
+        inputFieldShortAnimator.addUpdateListener(animation -> {
+            updateInputFieldShortProgress((float) animation.getAnimatedValue());
+        });
+        inputFieldShortAnimator.start();
+    }
+    // ------------------------------------------
 }
