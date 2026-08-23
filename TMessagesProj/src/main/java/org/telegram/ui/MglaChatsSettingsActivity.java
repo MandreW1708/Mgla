@@ -69,16 +69,6 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         menuCell.setOnClickListener(v -> presentFragment(new MglaMessageMenuSettingsActivity()));
         basicBlock.addView(menuCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        TextCheckCell iosStyleCell = new TextCheckCell(context);
-        iosStyleCell.setBackground(null);
-        iosStyleCell.setTextAndCheck("Стиль IOS", MglaChatsConfig.isIosMenuStyleEnabled(), true);
-        iosStyleCell.setOnClickListener(v -> {
-            boolean newVal = !MglaChatsConfig.isIosMenuStyleEnabled();
-            MglaChatsConfig.setIosMenuStyleEnabled(newVal);
-            iosStyleCell.setChecked(newVal);
-        });
-        basicBlock.addView(iosStyleCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
         TextCheckCell timeCell = new TextCheckCell(context);
         timeCell.setBackground(null);
         timeCell.setTextAndCheck("Время с секундами", prefs.getBoolean("chat_time_seconds", false), false);

@@ -14,7 +14,6 @@ public class MglaChatsConfig {
     public static final String PREFS = "mgla_config";
     public static final String PREF_RECENT_STICKERS_LIMIT = "recent_stickers_limit";
     public static final String PREF_HIDE_STICKER_TIME = "hide_sticker_time";
-    public static final String PREF_IOS_MENU_STYLE = "ios_menu_style";
 
     public static final int RECENT_STICKERS_MIN = 10;
     public static final int RECENT_STICKERS_MAX = 200;
@@ -55,14 +54,6 @@ public class MglaChatsConfig {
         }
         getPrefs().edit().putBoolean(PREF_HIDE_STICKER_TIME, hidden).apply();
         notifyStickerTimeChanged();
-    }
-
-    public static boolean isIosMenuStyleEnabled() {
-        return getPrefs().getBoolean(PREF_IOS_MENU_STYLE, false);
-    }
-
-    public static void setIosMenuStyleEnabled(boolean enabled) {
-        getPrefs().edit().putBoolean(PREF_IOS_MENU_STYLE, enabled).apply();
     }
 
     public static void notifyRecentStickersChanged() {
