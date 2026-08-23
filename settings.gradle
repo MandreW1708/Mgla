@@ -1,2 +1,8 @@
 include ':TMessagesProj'
 include ':TMessagesProj_App'
+include ':jlatexmath'
+project(':jlatexmath').projectDir = new File(settingsDir, 'TMessagesProj/lib/jlatexmath/jlatexmath')
+include ':jlatexmath-font-cyrillic'
+project(':jlatexmath-font-cyrillic').projectDir = new File(settingsDir, 'TMessagesProj/lib/jlatexmath/jlatexmath-font-cyrillic')
+include ':jlatexmath-font-greek'
+project(':jlatexmath-font-greek').projectDir = new File(settingsDir, 'TMessagesProj/lib/jlatexmath/jlatexmath-font-greek')
