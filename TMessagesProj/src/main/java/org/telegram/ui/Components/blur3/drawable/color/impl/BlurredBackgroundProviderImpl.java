@@ -7,9 +7,12 @@ import android.graphics.Color;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.math.MathUtils;
 
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProviderBuilder;
@@ -75,6 +78,26 @@ public class BlurredBackgroundProviderImpl {
                 .setShadowColor(0, 0)
                 .setShadowLayer(0, 0, 0)
                 .setStrokeWidth(dpf2(0.43f), dpf2(0.43f))
+                .build();
+    }
+
+    public static BlurredBackgroundProvider messageMenuReactionsBackground(Theme.ResourcesProvider resourcesProvider) {
+        return messageMenuBackground(resourcesProvider);
+    }
+
+    public static BlurredBackgroundProvider messageMenuBackground(Theme.ResourcesProvider resourcesProvider) {
+        return new BlurredBackgroundProviderBuilder(resourcesProvider)
+                .setBackgroundColor((r, isDark) -> {
+                    if (!LiteMode.isEnabled(LiteMode.FLAG_CHAT_BLUR)) {
+                        return Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground);
+                    }
+                    return Theme.multAlpha(Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground), isDark ? 0.85f : 0.825f);
+                })
+                .setStrokeColorTop(0x44FFFFFF, 0)
+                .setStrokeColorBottom(0x22FFFFFF, 0)
+                .setShadowColor(0x38000000, 0)
+                .setShadowLayer(dpf2(3.5f), 0, 0)
+                .setStrokeWidth(dpf2(2 / 3f), dpf2(2 / 3f))
                 .build();
     }
 

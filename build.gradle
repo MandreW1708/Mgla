@@ -14,3 +14,29 @@ buildscript {
 repositories {
     google()
 }
+
+ext {
+    config = [
+            'min-sdk'        : 21, // Updated to match modern Telegram minSdk
+            'target-sdk'     : 34, // Updated to match modern targetSdk
+            'build-tools'    : '34.0.0',
+            'push-aar-gradle': 'https://raw.githubusercontent.com/noties/gradle-mvn-push/master/gradle-mvn-push-aar.gradle'
+    ]
+    deps = [
+            'x-annotations': 'androidx.annotation:annotation:1.1.0',
+            'debug'        : 'io.noties:debug:5.1.0'
+    ]
+    registerArtifact = this.&registerArtifact
+}
+
+def registerArtifact(project) {
+    if (hasProperty('release')) {
+        project.apply from: config['push-aar-gradle']
+    }
+    project.afterEvaluate {
+        def debugTask = project.tasks.findByName('generateDebugBuildConfig')
+        if (debugTask != null) debugTask.enabled = false
+        def releaseTask = project.tasks.findByName('generateReleaseBuildConfig')
+        if (releaseTask != null) releaseTask.enabled = false
+    }
+}
