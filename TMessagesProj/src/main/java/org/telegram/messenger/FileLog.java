@@ -55,6 +55,7 @@ public class FileLog {
     private File networkFile = null;
     private File tonlibFile = null;
     private boolean initied;
+    private boolean initiing;
     public static boolean databaseIsMalformed = false;
 
     private OutputStreamWriter tlStreamWriter = null;
@@ -71,17 +72,17 @@ public class FileLog {
                 localInstance = Instance;
                 if (localInstance == null) {
                     Instance = localInstance = new FileLog();
+                    if (BuildVars.LOGS_ENABLED) {
+                        localInstance.init();
+                    }
                 }
             }
         }
         return localInstance;
     }
 
-    public FileLog() {
-        if (!BuildVars.LOGS_ENABLED) {
-            return;
-        }
-        init();
+    private FileLog() {
+
     }
 
 
@@ -299,10 +300,17 @@ public class FileLog {
     }
 
 
-    public void init() {
+    private void init() {
         if (initied) {
             return;
         }
+        if (initiing) {
+            if (BuildConfig.DEBUG_PRIVATE_VERSION) {
+                throw new IllegalStateException("double init call");
+            }
+        }
+        initiing = true;
+
         dateFormat = FastDateFormat.getInstance("dd_MM_yyyy_HH_mm_ss.SSS", Locale.US);
         fileDateFormat = FastDateFormat.getInstance("dd_MM_yyyy_HH_mm_ss", Locale.US);
         String date = fileDateFormat.format(System.currentTimeMillis());
@@ -330,9 +338,6 @@ public class FileLog {
             tlStreamWriter.flush();
         } catch (Exception e) {
             e.printStackTrace();
-        }
-        if (BuildVars.DEBUG_VERSION) {
-            new ANRDetector(this::dumpANR);
         }
         initied = true;
     }
@@ -485,7 +490,7 @@ public class FileLog {
         }
     }
 
-    private void dumpANR() {
+    public static void dumpANR() {
         StringBuilder sb = new StringBuilder();
         Map<Thread, StackTraceElement[]> allThreads = Thread.getAllStackTraces();
 
@@ -501,7 +506,7 @@ public class FileLog {
         }
 
         FileLog.e("ANR thread dump\n" + sb.toString());
-        dumpMemory(false);
+        getInstance().dumpMemory(false);
     }
 
     public static void fatal(final Throwable e, boolean logToAppCenter) {
@@ -602,32 +607,5 @@ public class FileLog {
             super(e);
         }
 
-    }
-
-    public class ANRDetector {
-        private final long TIMEOUT_MS = 5000; // ANR threshold (5 seconds)
-        private final Handler mainHandler = new Handler(Looper.getMainLooper());
-        private boolean isUIThreadResponsive = true;
-
-        public ANRDetector(Runnable anrDetected) {
-            new Thread(() -> {
-                while (true) {
-                    isUIThreadResponsive = false;
-
-                    // Post a task to the main thread
-                    mainHandler.post(() -> isUIThreadResponsive = true);
-
-                    try {
-                        Thread.sleep(TIMEOUT_MS);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-
-                    if (!isUIThreadResponsive) {
-                        anrDetected.run();
-                    }
-                }
-            }).start();
-        }
     }
 }

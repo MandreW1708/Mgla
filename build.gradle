@@ -5,10 +5,10 @@ buildscript {
         google()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.6.1'
+        classpath 'com.android.tools.build:gradle:8.10.1'
         classpath 'com.google.gms:google-services:4.3.15'
         classpath 'com.google.firebase:firebase-crashlytics-gradle:2.9.0'
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"
     }
 }
 repositories {
@@ -18,8 +18,8 @@ repositories {
 ext {
     config = [
             'min-sdk'        : 21, // Updated to match modern Telegram minSdk
-            'target-sdk'     : 34, // Updated to match modern targetSdk
-            'build-tools'    : '34.0.0',
+            'target-sdk'     : 36, // Updated to match modern targetSdk
+            'build-tools'    : '36.0.0',
             'push-aar-gradle': 'https://raw.githubusercontent.com/noties/gradle-mvn-push/master/gradle-mvn-push-aar.gradle'
     ]
     deps = [
@@ -38,5 +38,23 @@ def registerArtifact(project) {
         if (debugTask != null) debugTask.enabled = false
         def releaseTask = project.tasks.findByName('generateReleaseBuildConfig')
         if (releaseTask != null) releaseTask.enabled = false
+    }
+}
+
+// Strip JLatexMath fonts we don't ship (transitive AAR assets from
+// io.noties.markwon:ext-latex -> ru.noties:jlatexmath-android, ~764 KB total under
+// assets/org/scilab/forge/jlatexmath/fonts/). Has to live in the APK modules — a
+// library's androidResources.ignoreAssetsPattern doesn't filter packaging in apps
+// that consume it. Using subprojects keeps it in one place.
+//   keep:  base/, latin/, maths/, euler/  (\mathbb, \mathcal, \mathfrak still work)
+//   drop:  latin/optional/, maths/optional/  (~290 KB; \textbf/\textit/\mathds fall back)
+//          licences/                          (~20 KB; pure license text files)
+subprojects {
+    plugins.withId('com.android.application') {
+        android {
+            androidResources {
+                ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~:!optional:!licences:!*stmary*:!*eufb*'
+            }
+        }
     }
 }
