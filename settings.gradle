@@ -16,5 +16,5 @@ dependencyResolutionManagement {
 
 if (file("TMessagesProj_Modules/media/core_settings.gradle").exists()) {
     gradle.ext.androidxMediaModulePrefix = 'TMessagesProj_Modules:media3:media-'
-    apply from: file("TMessagesProj_Modules/media/core_settings.gradle")
+    apply from: file("gradle/media_settings.gradle")
 }
