@@ -1,8 +1,20 @@
 include ':TMessagesProj'
 include ':TMessagesProj_App'
 include ':jlatexmath'
-project(':jlatexmath').projectDir = new File(settingsDir, 'TMessagesProj/lib/jlatexmath/jlatexmath')
+project(':jlatexmath').projectDir = file('TMessagesProj/lib/jlatexmath/jlatexmath')
 include ':jlatexmath-font-cyrillic'
-project(':jlatexmath-font-cyrillic').projectDir = new File(settingsDir, 'TMessagesProj/lib/jlatexmath/jlatexmath-font-cyrillic')
+project(':jlatexmath-font-cyrillic').projectDir = file('TMessagesProj/lib/jlatexmath/jlatexmath-font-cyrillic')
 include ':jlatexmath-font-greek'
-project(':jlatexmath-font-greek').projectDir = new File(settingsDir, 'TMessagesProj/lib/jlatexmath/jlatexmath-font-greek')
+project(':jlatexmath-font-greek').projectDir = file('TMessagesProj/lib/jlatexmath/jlatexmath-font-greek')
+
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+if (file("TMessagesProj_Modules/media/core_settings.gradle").exists()) {
+    gradle.ext.androidxMediaModulePrefix = 'TMessagesProj_Modules:media3:media-'
+    apply from: file("TMessagesProj_Modules/media/core_settings.gradle")
+}
