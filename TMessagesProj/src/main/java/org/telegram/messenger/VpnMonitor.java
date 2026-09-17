@@ -95,7 +95,7 @@ public class VpnMonitor {
             // VPN включён — отключаем прокси
             if (mainPrefs.getBoolean("proxy_enabled", false)) {
                 mainPrefs.edit().putBoolean("proxy_enabled", false).putBoolean("proxy_was_enabled", true).commit();
-                ConnectionsManager.setProxySettings(false, "", 0, "", "", "");
+                ConnectionsManager.setProxySettings(false, null);
                 AndroidUtilities.runOnUIThread(() -> {
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
                 });
@@ -107,7 +107,7 @@ public class VpnMonitor {
                 AndroidUtilities.runOnUIThread(() -> {
                     SharedConfig.loadProxyList();
                     if (SharedConfig.currentProxy != null && !SharedConfig.proxyList.isEmpty()) {
-                        ConnectionsManager.setProxySettings(true, SharedConfig.currentProxy.address, SharedConfig.currentProxy.port, SharedConfig.currentProxy.username, SharedConfig.currentProxy.password, SharedConfig.currentProxy.secret);
+                        ConnectionsManager.setProxySettings(true, SharedConfig.currentProxy.settings);
                     }
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
                 });
