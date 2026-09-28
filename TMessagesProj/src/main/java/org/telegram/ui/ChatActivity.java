@@ -179,6 +179,7 @@ import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaEditHistoryStorage;
 import org.telegram.messenger.MglaDeletedMessagesStorage;
+import org.telegram.messenger.MglaChatsConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.R;
@@ -1715,6 +1716,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int share = 69;
     private final static int open_direct = 70;
     private final static int mgla_view_deleted = 71;
+    private final static int mgla_chat_dna = 75;
     private final static int remove_fee = 71;
     private final static int charge_fee = 72;
 
@@ -1936,6 +1938,24 @@ public class ChatActivity extends BaseFragment implements
         @Override
         public boolean hasDoubleTap(View view, int position) {
             if (isQuickRepliesOrWelcomeMessagesMode()) return false;
+            MessageObject messageObject;
+            if (view instanceof ChatMessageCell) {
+                messageObject = ((ChatMessageCell) view).getPrimaryMessageObject();
+            } else if (view instanceof ChatActionCell) {
+                messageObject = ((ChatActionCell) view).getMessageObject();
+            } else {
+                return false;
+            }
+            if (messageObject == null || messageObject.isDateObject || messageObject.isSending() || messageObject.isEditing() || messageObject.isSponsored() || actionBar.isActionModeShowed() || isSecretChat() || isInScheduleMode()) {
+                return false;
+            }
+            int doubleTapAction = MglaChatsConfig.getDoubleTapAction(messageObject.isOut());
+            if (doubleTapAction == MglaChatsConfig.DBL_TAP_NONE) {
+                return false;
+            }
+            if (doubleTapAction != MglaChatsConfig.DBL_TAP_REACTION) {
+                return true;
+            }
             String reactionStringSetting = getMediaDataController().getDoubleTapReaction();
             TLRPC.TL_availableReaction reaction = getMediaDataController().getReactionsMap().get(reactionStringSetting);
             if (reaction == null && (reactionStringSetting == null || !reactionStringSetting.startsWith("animated_"))) {
@@ -1948,15 +1968,7 @@ public class ChatActivity extends BaseFragment implements
             if (!available) {
                 return false;
             }
-            MessageObject messageObject;
-            if (view instanceof ChatMessageCell) {
-                messageObject = ((ChatMessageCell) view).getPrimaryMessageObject();
-            } else if (view instanceof ChatActionCell) {
-                messageObject = ((ChatActionCell) view).getMessageObject();
-            } else {
-                return false;
-            }
-            return messageObject != null && !messageObject.isDateObject && !messageObject.isSending() && messageObject.canSetReaction() && !messageObject.isEditing() && !actionBar.isActionModeShowed() && !isSecretChat() && !isInScheduleMode() && !messageObject.isSponsored();
+            return !messageObject.isDateObject && !messageObject.isSending() && messageObject.canSetReaction() && !messageObject.isEditing() && !actionBar.isActionModeShowed() && !isSecretChat() && !isInScheduleMode() && !messageObject.isSponsored();
         }
 
         @Override
@@ -1975,7 +1987,15 @@ public class ChatActivity extends BaseFragment implements
             } else {
                 return;
             }
-            if (messageObject.isSecret() || !messageObject.canSetReaction() || messageObject.isExpiredStory() || messageObject.type == MessageObject.TYPE_JOINED_CHANNEL) {
+            if (messageObject.isSecret() || messageObject.isExpiredStory() || messageObject.type == MessageObject.TYPE_JOINED_CHANNEL) {
+                return;
+            }
+            int doubleTapAction = MglaChatsConfig.getDoubleTapAction(messageObject.isOut());
+            if (doubleTapAction != MglaChatsConfig.DBL_TAP_REACTION) {
+                processDoubleTapAction(messageObject, doubleTapAction);
+                return;
+            }
+            if (!messageObject.canSetReaction()) {
                 return;
             }
             if (!(currentChat == null || ChatObject.isChannelAndNotMegaGroup(currentChat) || ChatObject.canUserDoAction(currentChat, ChatObject.ACTION_SEND_REACTIONS))) {
@@ -3799,6 +3819,8 @@ public class ChatActivity extends BaseFragment implements
                     presentFragment(ChatActivity.of(-currentChat.linked_monoforum_id));
                 } else if (id == mgla_view_deleted) {
                     openMglaDeletedMessages();
+                } else if (id == mgla_chat_dna) {
+                    MglaChatDnaActivity.openWithPeriodPicker(ChatActivity.this, dialog_id);
                 } else if (id == charge_fee ) {
                     long user_id = dialog_id;
                     long parent_id = 0;
@@ -4531,6 +4553,9 @@ public class ChatActivity extends BaseFragment implements
             updateTranslateItemVisibility();
             if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
                 headerItem.lazilyAddSubItem(mgla_view_deleted, R.drawable.msg_delete, "Посмотреть удаленные");
+            }
+            if (chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
+                headerItem.lazilyAddSubItem(mgla_chat_dna, R.drawable.msg_topics, "Chat DNA");
             }
             if (getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", true)) {
                 headerItem.lazilyAddSubItem(ai_retell_menu, R.drawable.menu_rewrite, "Пересказ сообщ.");
@@ -6958,6 +6983,9 @@ public class ChatActivity extends BaseFragment implements
                         wasManualScroll = true;
                         scrollingChatListView = true;
                     } else if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
+                        if (MglaChatsConfig.isHideKeyboardOnScroll()) {
+                            AndroidUtilities.hideKeyboard(getParentActivity() != null ? getParentActivity().getCurrentFocus() : null);
+                        }
                         pollHintCell = null;
                         wasManualScroll = true;
                         scrollingFloatingDate = true;
@@ -7495,7 +7523,7 @@ public class ChatActivity extends BaseFragment implements
                 } else {
                     String username = ChatObject.getPublicUsername(chat);
                     if (username != null) {
-                        chatActivityEnterView.replaceWithText(start, len, "@" + username + " ", false);
+                        chatActivityEnterView.replaceWithText(start, len, "@" + username + MglaChatsConfig.getMentionSuffix(), false);
                     }
                 }
             } else if (object instanceof TLRPC.User) {
@@ -7504,10 +7532,10 @@ public class ChatActivity extends BaseFragment implements
                     searchUserMessages(user, null);
                 } else {
                     if (UserObject.getPublicUsername(user) != null) {
-                        chatActivityEnterView.replaceWithText(start, len, "@" + UserObject.getPublicUsername(user) + " ", false);
+                        chatActivityEnterView.replaceWithText(start, len, "@" + UserObject.getPublicUsername(user) + MglaChatsConfig.getMentionSuffix(), false);
                     } else {
                         String name = UserObject.getFirstName(user, false);
-                        Spannable spannable = new SpannableString(name + " ");
+                        Spannable spannable = new SpannableString(name + MglaChatsConfig.getMentionSuffix());
                         spannable.setSpan(new URLSpanUserMention("" + user.id, 3), 0, spannable.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                         chatActivityEnterView.replaceWithText(start, len, spannable, false);
                     }
@@ -8821,7 +8849,12 @@ public class ChatActivity extends BaseFragment implements
                             }
                         }
                     } else {
-                        toggleMute(true);
+                        int bottomButtonMode = MglaChatsConfig.getBottomButtonMode();
+                        if (bottomButtonMode == MglaChatsConfig.BOTTOM_BUTTON_DISCUSS) {
+                            openMglaDiscussionChat();
+                        } else if (bottomButtonMode != MglaChatsConfig.BOTTOM_BUTTON_HIDE) {
+                            toggleMute(true);
+                        }
                     }
                 } else {
                     boolean canDeleteHistory = chatInfo != null && chatInfo.can_delete_channel;
@@ -28630,6 +28663,9 @@ public class ChatActivity extends BaseFragment implements
         if (bottomOverlayChatText == null || chatMode == MODE_SCHEDULED || getContext() == null) {
             return;
         }
+        if (chatInputViewsContainer != null) {
+            chatInputViewsContainer.drawInputBackground = true;
+        }
         bottomOverlayChatWaitsReply = false;
         bottomOverlayLinks = false;
         if (mglaDeletedSearchContainer != null) {
@@ -28780,7 +28816,13 @@ public class ChatActivity extends BaseFragment implements
                     bottomOverlayChatText.setTextInfo(LocaleController.getString(R.string.ForumReplyToMessagesInTopic));
                     bottomOverlayChatText.setEnabled(false);
                 } else if (!isThreadChat()) {
-                    if (!getMessagesController().isDialogMuted(dialog_id, getTopicId())) {
+                    int bottomButtonMode = MglaChatsConfig.getBottomButtonMode();
+                    if (bottomButtonMode == MglaChatsConfig.BOTTOM_BUTTON_DISCUSS) {
+                        bottomOverlayChatText.setText("Обсудить");
+                        bottomOverlayChatText.setEnabled(true);
+                    } else if (bottomButtonMode == MglaChatsConfig.BOTTOM_BUTTON_HIDE) {
+                        bottomOverlayChatText.setEnabled(false);
+                    } else if (!getMessagesController().isDialogMuted(dialog_id, getTopicId())) {
                         bottomOverlayChatText.setText(LocaleController.getString(R.string.ChannelMuteNoCaps), false);
                         bottomOverlayChatText.setEnabled(true);
                     } else {
@@ -28788,6 +28830,13 @@ public class ChatActivity extends BaseFragment implements
                         bottomOverlayChatText.setEnabled(true);
                     }
                     showBottomOverlayProgress(false, bottomOverlayProgress.getTag() != null);
+                    if (bottomButtonMode == MglaChatsConfig.BOTTOM_BUTTON_HIDE) {
+                        bottomOverlayChatText.setVisibility(View.GONE);
+                        if (chatInputViewsContainer != null) {
+                            chatInputViewsContainer.drawInputBackground = false;
+                            chatInputViewsContainer.invalidate();
+                        }
+                    }
                     showGiftButton = chatInfo != null && chatInfo.stargifts_available;
                     showSuggestButton = currentChat.broadcast_messages_allowed && currentChat.linked_monoforum_id != 0;
                 } else if (forumTopic != null && forumTopic.closed) {
@@ -35513,6 +35562,73 @@ public class ChatActivity extends BaseFragment implements
         selectedObjectGroup = null;
         selectedObjectToEditCaption = null;
         closeMenu(!preserveDim);
+    }
+
+    /**
+     * Mgla: действие двойного тапа по сообщению (настраивается в «Чаты → Двойной тап»).
+     * Переиспользует обработчики пунктов меню сообщения через {@link #processSelectedOption(int)}.
+     */
+    private void processDoubleTapAction(MessageObject messageObject, int action) {
+        if (messageObject == null || getParentActivity() == null) {
+            return;
+        }
+        if (action == MglaChatsConfig.DBL_TAP_NONE || action == MglaChatsConfig.DBL_TAP_REACTION) {
+            return;
+        }
+        if (action == MglaChatsConfig.DBL_TAP_TRANSLATE) {
+            CharSequence text = messageObject.messageText;
+            if (text == null || text.length() == 0) {
+                return;
+            }
+            String toLang = TranslateAlert2.getToLanguage();
+            String toLangDefault = LocaleController.getInstance().getCurrentLocale().getLanguage();
+            String fromLang = messageObject.messageOwner != null ? messageObject.messageOwner.originalLanguage : null;
+            String toLangValue = fromLang != null && fromLang.equals(toLang) ? toLangDefault : toLang;
+            TranslateAlert2 alert = TranslateAlert2.showAlert(getParentActivity(), this, currentAccount, fromLang, toLangValue, text,
+                messageObject.messageOwner != null ? messageObject.messageOwner.entities : null,
+                messageObject.messageOwner != null && messageObject.messageOwner.noforwards, null, () -> dimBehindView(false));
+            if (alert != null) {
+                alert.setDimBehind(false);
+            }
+            return;
+        }
+        int option;
+        switch (action) {
+            case MglaChatsConfig.DBL_TAP_REPLY:
+                option = OPTION_REPLY;
+                break;
+            case MglaChatsConfig.DBL_TAP_COPY:
+                option = OPTION_COPY;
+                break;
+            case MglaChatsConfig.DBL_TAP_FORWARD:
+                option = OPTION_FORWARD;
+                break;
+            case MglaChatsConfig.DBL_TAP_EDIT:
+                if (!messageObject.isOut()) {
+                    return;
+                }
+                option = OPTION_EDIT;
+                break;
+            case MglaChatsConfig.DBL_TAP_PIN:
+                option = messageObject.messageOwner != null && messageObject.messageOwner.pinned ? OPTION_UNPIN : OPTION_PIN;
+                break;
+            default:
+                return;
+        }
+        selectedObject = messageObject;
+        selectedObjectGroup = null;
+        selectedObjectToEditCaption = null;
+        processSelectedOption(option);
+    }
+
+    /** Mgla: нижняя кнопка в канале → «Обсудить»: открывает чат обсуждения. */
+    private void openMglaDiscussionChat() {
+        if (chatInfo == null || chatInfo.linked_chat_id == 0) {
+            return;
+        }
+        Bundle args = new Bundle();
+        args.putLong("chat_id", chatInfo.linked_chat_id);
+        presentFragment(new ChatActivity(args));
     }
 
     public void showSuggestionOfferForEditMessage(MessageSuggestionParams oldParams) {

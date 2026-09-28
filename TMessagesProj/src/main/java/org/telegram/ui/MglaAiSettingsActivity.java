@@ -7,14 +7,19 @@ import android.content.SharedPreferences;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaChatDna;
+import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
@@ -40,13 +45,18 @@ public class MglaAiSettingsActivity extends BaseFragment {
     private static final int ROW_PROVIDER_BASIC = 10;
     private static final int ROW_PROVIDER_GEMINI = 11;
     private static final int ROW_SHADOW_4 = 12;
-    private static final int ROW_COUNT = 13;
+    private static final int ROW_DNA_HEADER = 13;
+    private static final int ROW_DNA_TOPICS = 14;
+    private static final int ROW_DNA_MODELS = 15;
+    private static final int ROW_DNA_ENGINE = 16;
+    private static final int ROW_COUNT = 17;
 
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_TEXT = 1;
     private static final int VIEW_TYPE_SHADOW = 2;
     private static final int VIEW_TYPE_HEADER = 3;
     private static final int VIEW_TYPE_RADIO = 4;
+    private static final int VIEW_TYPE_DNA_ENGINE = 5;
 
     private SharedPreferences prefs;
     private RecyclerListView listView;
@@ -87,6 +97,10 @@ public class MglaAiSettingsActivity extends BaseFragment {
         listView.setOnItemClickListener((view, position) -> {
             if (position == ROW_AI_TRANSCRIBE) {
                 presentFragment(new MglaAiTranscribeActivity());
+            } else if (position == ROW_DNA_TOPICS) {
+                showDnaTopicsProviderDialog(context);
+            } else if (position == ROW_DNA_MODELS) {
+                presentFragment(new MglaLocalModelsActivity());
             } else if (position == ROW_PROVIDER_BASIC) {
                 if (!"openrouter".equals(prefs.getString("ai_provider", "openrouter"))) {
                     prefs.edit().putString("ai_provider", "openrouter").apply();
@@ -134,6 +148,32 @@ public class MglaAiSettingsActivity extends BaseFragment {
         return null;
     }
 
+    /** Выбор нейросети для генерации главных тем Chat DNA. */
+    private void showDnaTopicsProviderDialog(Context context) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String current = MglaChatDna.getTopicsProvider();
+        String[] names = {"Gemini (Ваш API)", "Локальная модель"};
+        String[] values = {MglaChatDna.PROVIDER_GEMINI, MglaChatDna.PROVIDER_LOCAL};
+        int checked = MglaChatDna.PROVIDER_GEMINI.equals(current) ? 0 : 1;
+
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Главные темы Chat DNA");
+        dlg.setItems(names, (dialog, which) -> {
+            MglaChatDna.setTopicsProvider(values[which]);
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyDataSetChanged();
+            }
+        });
+        showDialog(dlg.create());
+    }
+
+    private String modelSummary() {
+        String id = MglaLocalModelsManager.getSelectedModelId();
+        return id.isEmpty() ? "Не выбрана" : id;
+    }
+
     @Override
     public void onResume() {
         super.onResume();
@@ -152,7 +192,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE || position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI;
+            return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE || position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS;
         }
 
         @Override
@@ -164,12 +204,14 @@ public class MglaAiSettingsActivity extends BaseFragment {
         public int getItemViewType(int position) {
             if (position == ROW_SHADOW_1 || position == ROW_SHADOW_2 || position == ROW_SHADOW_3 || position == ROW_SHADOW_4) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == ROW_AI_EDITOR_LIMIT || position == ROW_AI_TRANSCRIBE) {
+            } else if (position == ROW_AI_EDITOR_LIMIT || position == ROW_AI_TRANSCRIBE || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS) {
                 return VIEW_TYPE_TEXT;
-            } else if (position == ROW_PROVIDER_HEADER) {
+            } else if (position == ROW_PROVIDER_HEADER || position == ROW_DNA_HEADER) {
                 return VIEW_TYPE_HEADER;
             } else if (position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI) {
                 return VIEW_TYPE_RADIO;
+            } else if (position == ROW_DNA_ENGINE) {
+                return VIEW_TYPE_DNA_ENGINE;
             }
             return VIEW_TYPE_CHECK;
         }
@@ -189,6 +231,8 @@ public class MglaAiSettingsActivity extends BaseFragment {
             } else if (viewType == VIEW_TYPE_RADIO) {
                 view = new RadioCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            } else if (viewType == VIEW_TYPE_DNA_ENGINE) {
+                view = new DnaEngineCell(context);
             } else {
                 view = new TextCheckCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -206,15 +250,25 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                 cell.setText("ИИ-расшифровка", false);
                 cell.setCanDisable(false);
+            } else if (position == ROW_DNA_TOPICS) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Главные темы Chat DNA", MglaChatDna.getTopicsProviderTitle(), true);
+                cell.setCanDisable(false);
+            } else if (position == ROW_DNA_MODELS) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Локальные модели", modelSummary(), false);
+                cell.setCanDisable(false);
+            } else if (position == ROW_DNA_ENGINE) {
+                ((DnaEngineCell) holder.itemView).bind();
             } else if (holder.itemView instanceof HeaderCell) {
-                ((HeaderCell) holder.itemView).setText("Провайдер AI");
+                ((HeaderCell) holder.itemView).setText(position == ROW_DNA_HEADER ? "Chat DNA" : "Провайдер AI");
             } else if (holder.itemView instanceof RadioCell) {
                 RadioCell cell = (RadioCell) holder.itemView;
                 String provider = prefs.getString("ai_provider", "openrouter");
                 if (position == ROW_PROVIDER_BASIC) {
                     cell.setText("Базовый", "openrouter".equals(provider), true);
                 } else if (position == ROW_PROVIDER_GEMINI) {
-                    cell.setText("Gemini", "gemini".equals(provider), false);
+                    cell.setText("Gemini (Ваш API)", "gemini".equals(provider), false);
                 }
             } else if (holder.itemView instanceof TextCheckCell) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
@@ -233,6 +287,76 @@ public class MglaAiSettingsActivity extends BaseFragment {
                         break;
                 }
             }
+        }
+    }
+
+    /** Two equally sized choices; GGUF is opt-in because it temporarily uses model RAM. */
+    private class DnaEngineCell extends FrameLayout {
+        private final TextView dictionaryButton;
+        private final TextView ggufButton;
+
+        DnaEngineCell(Context context) {
+            super(context);
+            setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            LinearLayout content = new LinearLayout(context);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(21), dp(8), dp(21), dp(12));
+            addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            TextView title = new TextView(context);
+            title.setText("Режим локального анализа");
+            title.setTextSize(16);
+            title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            content.addView(title, new LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            LinearLayout buttons = new LinearLayout(context);
+            buttons.setOrientation(LinearLayout.HORIZONTAL);
+            buttons.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            content.addView(buttons, new LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, dp(40)) {{ topMargin = dp(8); }});
+
+            dictionaryButton = createEngineButton(context, "Словарь");
+            ggufButton = createEngineButton(context, "GGUF-рантайм");
+            buttons.addView(dictionaryButton, new LinearLayout.LayoutParams(0, dp(40), 1f));
+            LinearLayout.LayoutParams ggufParams = new LinearLayout.LayoutParams(0, dp(40), 1f);
+            ggufParams.leftMargin = dp(8);
+            buttons.addView(ggufButton, ggufParams);
+
+            dictionaryButton.setOnClickListener(v -> selectEngine(MglaChatDna.LOCAL_ENGINE_DICTIONARY));
+            ggufButton.setOnClickListener(v -> {
+                if (MglaLocalModelsManager.isGgufSupported(context)) {
+                    selectEngine(MglaChatDna.LOCAL_ENGINE_GGUF);
+                }
+            });
+        }
+
+        private TextView createEngineButton(Context context, String text) {
+            TextView button = new TextView(context);
+            button.setText(text);
+            button.setTextSize(14);
+            button.setGravity(android.view.Gravity.CENTER);
+            button.setClickable(true);
+            return button;
+        }
+
+        private void selectEngine(String engine) {
+            MglaChatDna.setLocalEngine(engine);
+            bind();
+        }
+
+        void bind() {
+            boolean supported = MglaLocalModelsManager.isGgufSupported(getContext());
+            boolean gguf = supported && MglaChatDna.isGgufRuntimeSelected();
+            styleEngineButton(dictionaryButton, !gguf);
+            styleEngineButton(ggufButton, gguf);
+            ggufButton.setEnabled(supported);
+            ggufButton.setAlpha(supported ? 1f : 0.45f);
+            ggufButton.setText(supported ? "GGUF-рантайм" : "GGUF (нет на устройстве)");
+        }
+
+        private void styleEngineButton(TextView button, boolean selected) {
+            int color = Theme.getColor(selected ? Theme.key_windowBackgroundWhiteBlueText : Theme.key_windowBackgroundWhiteGrayText);
+            button.setTextColor(selected ? Theme.getColor(Theme.key_windowBackgroundWhite) : color);
+            button.setBackground(Theme.createRoundRectDrawable(dp(8), selected ? color : Theme.getColor(Theme.key_windowBackgroundGray)));
         }
     }
 }

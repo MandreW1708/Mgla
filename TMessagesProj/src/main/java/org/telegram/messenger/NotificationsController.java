@@ -1760,7 +1760,11 @@ public class NotificationsController extends BaseController implements Notificat
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.notificationsCountUpdated, currentAccount);
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogsUnreadCounterChanged, pushDialogsCount);
             });
-            showOrUpdateNotification(SystemClock.elapsedRealtime() / 1000 < 60);
+            // уведомления не переживают перезагрузку устройства — восстанавливаем их только в этом случае,
+            // иначе на каждой фоновой пересборке (старт процесса/синки диалогов) шторка мигнет сводкой по старым чатам
+            if (SystemClock.elapsedRealtime() / 1000 < 60) {
+                showOrUpdateNotification(true);
+            }
 
             if (showBadgeNumber) {
                 setBadge(getTotalAllUnreadCount());

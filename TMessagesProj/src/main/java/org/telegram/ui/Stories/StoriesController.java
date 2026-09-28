@@ -4428,6 +4428,9 @@ public class StoriesController {
         }
         for (int i = 0; i < res.views.size(); ++i) {
             TL_stories.StoryView view = res.views.get(i);
+            if (view != null && view.user_id > 0 && view.date > 0) {
+                org.telegram.messenger.MglaLastOnlineController.getInstance(currentAccount).setLastOnline(view.user_id, view.date);
+            }
             if (blockedOverride.containsKey(view.user_id)) {
                 blockedOverride.put(view.user_id, view.blocked_my_stories_from);
             }

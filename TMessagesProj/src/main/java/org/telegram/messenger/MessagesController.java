@@ -6859,6 +6859,13 @@ public class MessagesController extends BaseController implements NotificationCe
         if (user == null) {
             return false;
         }
+        if (user.status != null) {
+            if (user.status instanceof TLRPC.TL_userStatusOnline) {
+                MglaLastOnlineController.getInstance(currentAccount).setLastOnline(user.id, ConnectionsManager.getInstance(currentAccount).getCurrentTime());
+            } else if (user.status instanceof TLRPC.TL_userStatusOffline) {
+                MglaLastOnlineController.getInstance(currentAccount).setLastOnline(user.id, user.status.expires);
+            }
+        }
         fromCache = fromCache && user.id / 1000 != 333 && user.id != 777000;
         TLRPC.User oldUser = users.get(user.id);
         if (oldUser == user && !force) {
@@ -18917,6 +18924,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 } else {
                     markAsReadMessagesOutbox.put(update.peer.user_id, update.max_id);
                     dialogId = update.peer.user_id;
+                    MglaLastOnlineController.getInstance(currentAccount).setLastOnline(update.peer.user_id, getConnectionsManager().getCurrentTime());
                     TLRPC.User user = getUser(update.peer.user_id);
                     if (user != null && user.status != null && user.status.expires <= 0 && Math.abs(getConnectionsManager().getCurrentTime() - date) < 30) {
                         onlinePrivacy.put(update.peer.user_id, date);
@@ -19028,6 +19036,9 @@ public class MessagesController extends BaseController implements NotificationCe
                 if (uid == 0) {
                     uid = userId;
                 }
+                if (userId > 0) {
+                    MglaLastOnlineController.getInstance(currentAccount).setLastOnline(userId, ConnectionsManager.getInstance(currentAccount).getCurrentTime());
+                }
                 if (action instanceof TLRPC.TL_sendMessageTextDraftAction) {
                     AndroidUtilities.runOnUIThread(() -> BotForumHelper.getInstance(currentAccount)
                         .onBotForumDraftUpdate(userId, threadId, (TLRPC.TL_sendMessageTextDraftAction) action));
@@ -19116,7 +19127,12 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
                 chatInfoToUpdate.add(update.participants);
             } else if (baseUpdate instanceof TL_stories.TL_updateStory) {
-                getStoriesController().processUpdate((TL_stories.TL_updateStory) baseUpdate);
+                TL_stories.TL_updateStory updateStory = (TL_stories.TL_updateStory) baseUpdate;
+                if (updateStory.peer instanceof TLRPC.TL_peerUser) {
+                    int storyDate = updateStory.story != null && updateStory.story.date > 0 ? updateStory.story.date : ConnectionsManager.getInstance(currentAccount).getCurrentTime();
+                    MglaLastOnlineController.getInstance(currentAccount).setLastOnline(updateStory.peer.user_id, storyDate);
+                }
+                getStoriesController().processUpdate(updateStory);
             } else if (baseUpdate instanceof TL_update.TL_updateUserStatus) {
                 interfaceUpdateMask |= UPDATE_MASK_STATUS;
                 if (updatesOnMainThread == null) {
@@ -20024,6 +20040,15 @@ public class MessagesController extends BaseController implements NotificationCe
                     } else if (baseUpdate instanceof TL_update.TL_updateUserStatus) {
                         TL_update.TL_updateUserStatus update = (TL_update.TL_updateUserStatus) baseUpdate;
                         TLRPC.User currentUser = getUser(update.user_id);
+
+                        int nowTime = ConnectionsManager.getInstance(currentAccount).getCurrentTime();
+                        if (update.status instanceof TLRPC.TL_userStatusOnline) {
+                            MglaLastOnlineController.getInstance(currentAccount).setLastOnline(update.user_id, nowTime);
+                        } else if (update.status instanceof TLRPC.TL_userStatusOffline) {
+                            MglaLastOnlineController.getInstance(currentAccount).setLastOnline(update.user_id, update.status.expires);
+                        } else if (update.status instanceof TLRPC.TL_userStatusRecently) {
+                            MglaLastOnlineController.getInstance(currentAccount).setLastOnline(update.user_id, nowTime);
+                        }
 
                         if (update.status instanceof TLRPC.TL_userStatusRecently) {
                             update.status.expires = -100;

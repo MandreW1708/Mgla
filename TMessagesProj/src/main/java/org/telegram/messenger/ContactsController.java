@@ -2617,6 +2617,10 @@ public class ContactsController extends BaseController {
                                 status.status.expires = status.status.by_me ? -1001 : -101;
                             } else if (status.status instanceof TLRPC.TL_userStatusLastMonth) {
                                 status.status.expires = status.status.by_me ? -1002 : -102;
+                            } else if (status.status instanceof TLRPC.TL_userStatusOnline) {
+                                MglaLastOnlineController.getInstance(currentAccount).setLastOnline(status.user_id, ConnectionsManager.getInstance(currentAccount).getCurrentTime());
+                            } else if (status.status instanceof TLRPC.TL_userStatusOffline) {
+                                MglaLastOnlineController.getInstance(currentAccount).setLastOnline(status.user_id, status.status.expires);
                             }
 
                             TLRPC.User user = getMessagesController().getUser(status.user_id);

@@ -924,7 +924,6 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     public String getVersionName() {
         try {
             PackageInfo pInfo = ApplicationLoader.applicationContext.getPackageManager().getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
-            int code = pInfo.versionCode / 10;
             String abi = "";
             switch (pInfo.versionCode % 10) {
                 case 1:
@@ -940,7 +939,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                     }
                     break;
             }
-            return formatString(R.string.TelegramVersion, String.format(Locale.US, "v%s (%d)\n%s", pInfo.versionName, code, abi));
+            return String.format(Locale.US, "Mgla для Android %s\n%s", BuildVars.MGLA_VERSION_STRING, abi);
         } catch (Exception e) {
             FileLog.e(e);
         }
