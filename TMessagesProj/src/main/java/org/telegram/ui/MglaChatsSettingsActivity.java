@@ -4,11 +4,15 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.PorterDuff;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -18,6 +22,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
@@ -30,6 +35,8 @@ import org.telegram.ui.Components.SeekBarView;
 public class MglaChatsSettingsActivity extends BaseFragment {
 
     private SharedPreferences prefs;
+    private ImageView previewInIcon;
+    private ImageView previewOutIcon;
 
     public MglaChatsSettingsActivity() {
         this(null);
@@ -60,14 +67,21 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
 
+        ScrollView scrollView = new ScrollView(context);
+        scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+
         LinearLayout basicBlock = createBlock(context, "Базовое");
 
         TextSettingsCell menuCell = new TextSettingsCell(context);
         menuCell.setBackground(null);
-        menuCell.setText("Элементы меню сообщения", true);
+        menuCell.setText("Элементы меню сообщения", false);
         menuCell.setCanDisable(false);
         menuCell.setOnClickListener(v -> presentFragment(new MglaMessageMenuSettingsActivity()));
         basicBlock.addView(menuCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        basicBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         TextCheckCell timeCell = new TextCheckCell(context);
         timeCell.setBackground(null);
@@ -87,9 +101,11 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         TextView[] recentValueRef = new TextView[1];
         addSelectRow(chatsBlock, "Количество недавних стикеров", String.valueOf(MglaChatsConfig.getRecentStickersLimit()), () -> showRecentStickersDialog(recentValueRef[0]), recentValueRef);
 
+        chatsBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         TextCheckCell stickerTimeCell = new TextCheckCell(context);
         stickerTimeCell.setBackground(null);
-        stickerTimeCell.setTextAndCheck("Убрать время на стикерах", MglaChatsConfig.isStickerTimeHidden(), true);
+        stickerTimeCell.setTextAndCheck("Убрать время на стикерах", MglaChatsConfig.isStickerTimeHidden(), false);
         stickerTimeCell.setOnClickListener(v -> {
             boolean newVal = !MglaChatsConfig.isStickerTimeHidden();
             MglaChatsConfig.setStickerTimeHidden(newVal);
@@ -99,7 +115,60 @@ public class MglaChatsSettingsActivity extends BaseFragment {
 
         rootLayout.addView(chatsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
-        fragmentView = rootLayout;
+        LinearLayout doubleTapBlock = createBlock(context, "Двойной тап");
+
+        // The preview used to overlap the divider: its last row extends to the
+        // bottom of the panel while this negative margin pulled the divider up.
+        // Keep a small footer below both bubbles instead.
+        doubleTapBlock.addView(createDoubleTapPreview(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        doubleTapBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView[] outValueRef = new TextView[1];
+        addSelectRow(doubleTapBlock, "Исходящее сообщение", MglaChatsConfig.getDoubleTapActionTitle(MglaChatsConfig.getDoubleTapAction(true)),
+            () -> showDoubleTapActionDialog(true, outValueRef[0]), outValueRef);
+
+        doubleTapBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView[] inValueRef = new TextView[1];
+        addSelectRow(doubleTapBlock, "Входящее сообщение", MglaChatsConfig.getDoubleTapActionTitle(MglaChatsConfig.getDoubleTapAction(false)),
+            () -> showDoubleTapActionDialog(false, inValueRef[0]), inValueRef);
+
+        rootLayout.addView(doubleTapBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
+        LinearLayout chatOptionsBlock = createBlock(context, "Чаты");
+
+        TextView[] bottomButtonValueRef = new TextView[1];
+        addSelectRow(chatOptionsBlock, "Нижняя кнопка", MglaChatsConfig.getBottomButtonModeTitle(MglaChatsConfig.getBottomButtonMode()),
+            () -> showBottomButtonDialog(bottomButtonValueRef[0]), bottomButtonValueRef);
+
+        chatOptionsBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextCheckCell hideKeyboardCell = new TextCheckCell(context);
+        hideKeyboardCell.setBackground(null);
+        hideKeyboardCell.setTextAndCheck("Скрывать клавиатуру при прокрутке", MglaChatsConfig.isHideKeyboardOnScroll(), true);
+        hideKeyboardCell.setOnClickListener(v -> {
+            boolean newVal = !MglaChatsConfig.isHideKeyboardOnScroll();
+            MglaChatsConfig.setHideKeyboardOnScroll(newVal);
+            hideKeyboardCell.setChecked(newVal);
+        });
+        chatOptionsBlock.addView(hideKeyboardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        chatOptionsBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextCheckCell commaCell = new TextCheckCell(context);
+        commaCell.setBackground(null);
+        commaCell.setTextAndCheck("Запятая после упоминания", MglaChatsConfig.isCommaAfterMention(), false);
+        commaCell.setOnClickListener(v -> {
+            boolean newVal = !MglaChatsConfig.isCommaAfterMention();
+            MglaChatsConfig.setCommaAfterMention(newVal);
+            commaCell.setChecked(newVal);
+        });
+        chatOptionsBlock.addView(commaCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(chatOptionsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
+        fragmentView = scrollView;
         return fragmentView;
     }
 
@@ -119,6 +188,131 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         return block;
+    }
+
+    private View createIndentedDivider(Context context) {
+        LinearLayout wrap = new LinearLayout(context);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(21), 0, dp(21), 0);
+        View divider = new View(context);
+        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        wrap.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1));
+        return wrap;
+    }
+
+    /**
+     * Мини-превью чата: входящее (слева) и исходящее (справа) сообщение,
+     * вместо текста — значок выбранного действия двойного тапа (обновляется динамически).
+     */
+    private View createDoubleTapPreview(Context context) {
+        FrameLayout panel = new FrameLayout(context);
+        GradientDrawable panelBg = new GradientDrawable();
+        panelBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        panel.setBackground(panelBg);
+
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(12), 0, dp(12), dp(6));
+        panel.addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        FrameLayout inRow = new FrameLayout(context);
+        LinearLayout inBubble = createPreviewBubble(context, false);
+        previewInIcon = createPreviewIcon(context, false);
+        inBubble.addView(previewInIcon, LayoutHelper.createLinear(20, 20));
+        inRow.addView(inBubble, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+        content.addView(inRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(32), 0, 0, 0, -dp(20)));
+
+        FrameLayout outRow = new FrameLayout(context);
+        LinearLayout outBubble = createPreviewBubble(context, true);
+        previewOutIcon = createPreviewIcon(context, true);
+        outBubble.addView(previewOutIcon, LayoutHelper.createLinear(20, 20));
+        outRow.addView(outBubble, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+        content.addView(outRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(32), 0, -dp(4), 0, 0));
+
+        updateDoubleTapPreview();
+        return panel;
+    }
+
+    private LinearLayout createPreviewBubble(Context context, boolean out) {
+        LinearLayout bubble = new LinearLayout(context);
+        bubble.setOrientation(LinearLayout.HORIZONTAL);
+        bubble.setGravity(Gravity.CENTER);
+        bubble.setPadding(dp(16), dp(6), dp(16), dp(6));
+        bubble.setMinimumWidth(dp(124));
+
+        float r = dp(16);
+        float tail = dp(5);
+        GradientDrawable bg = new GradientDrawable();
+        if (out) {
+            bg.setCornerRadii(new float[]{r, r, r, r, tail, tail, r, r});
+            bg.setColor(Theme.getColor(Theme.key_chat_outBubble));
+        } else {
+            bg.setCornerRadii(new float[]{r, r, r, r, r, r, tail, tail});
+            bg.setColor(Theme.getColor(Theme.key_chat_inBubble));
+        }
+        bubble.setBackground(bg);
+        return bubble;
+    }
+
+    private ImageView createPreviewIcon(Context context, boolean out) {
+        ImageView icon = new ImageView(context);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setColorFilter(Theme.getColor(out ? Theme.key_chat_messageTextOut : Theme.key_chat_messageTextIn), PorterDuff.Mode.SRC_IN);
+        return icon;
+    }
+
+    private void updateDoubleTapPreview() {
+        if (previewInIcon != null) {
+            previewInIcon.setImageResource(MglaChatsConfig.getDoubleTapActionIcon(MglaChatsConfig.getDoubleTapAction(false)));
+        }
+        if (previewOutIcon != null) {
+            previewOutIcon.setImageResource(MglaChatsConfig.getDoubleTapActionIcon(MglaChatsConfig.getDoubleTapAction(true)));
+        }
+    }
+
+    private void showBottomButtonDialog(TextView valueView) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final int[] modes = {MglaChatsConfig.BOTTOM_BUTTON_MUTE, MglaChatsConfig.BOTTOM_BUTTON_HIDE, MglaChatsConfig.BOTTOM_BUTTON_DISCUSS};
+        String[] names = new String[modes.length];
+        for (int i = 0; i < modes.length; i++) {
+            names[i] = MglaChatsConfig.getBottomButtonModeTitle(modes[i]);
+        }
+
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Нижняя кнопка");
+        dlg.setItems(names, (dialog, which) -> {
+            MglaChatsConfig.setBottomButtonMode(modes[which]);
+            if (valueView != null) {
+                valueView.setText(names[which]);
+            }
+        });
+        showDialog(dlg.create());
+    }
+
+    private void showDoubleTapActionDialog(boolean outgoing, TextView valueView) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final int[] actions = MglaChatsConfig.DOUBLE_TAP_ACTIONS;
+        String[] names = new String[actions.length];
+        int[] icons = new int[actions.length];
+        for (int i = 0; i < actions.length; i++) {
+            names[i] = MglaChatsConfig.getDoubleTapActionTitle(actions[i]);
+            icons[i] = MglaChatsConfig.getDoubleTapActionIcon(actions[i]);
+        }
+
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle(outgoing ? "Исходящее сообщение" : "Входящее сообщение");
+        dlg.setItems(names, icons, (dialog, which) -> {
+            MglaChatsConfig.setDoubleTapAction(outgoing, actions[which]);
+            if (valueView != null) {
+                valueView.setText(MglaChatsConfig.getDoubleTapActionTitle(actions[which]));
+            }
+            updateDoubleTapPreview();
+        });
+        showDialog(dlg.create());
     }
 
     private void showRecentStickersDialog(TextView valueView) {
@@ -204,7 +398,7 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         row.setPadding(dp(21), 0, dp(18), 0);
         row.setMinimumHeight(dp(50));
         row.setClickable(true);
-        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 0));
+        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
         row.setOnClickListener(v -> onClick.run());
 
         TextView titleView = new TextView(getContext());

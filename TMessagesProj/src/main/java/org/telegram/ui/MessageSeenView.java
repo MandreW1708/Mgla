@@ -117,6 +117,9 @@ public class MessageSeenView extends FrameLayout {
                     if (object instanceof TLRPC.TL_readParticipantDate) {
                         int date = ((TLRPC.TL_readParticipantDate) object).date;
                         Long peerId = ((TLRPC.TL_readParticipantDate) object).user_id;
+                        if (peerId != null && peerId > 0 && date > 0) {
+                            org.telegram.messenger.MglaLastOnlineController.getInstance(currentAccount).setLastOnline(peerId, date);
+                        }
                         if (finalFromId == peerId) {
                             continue;
                         }

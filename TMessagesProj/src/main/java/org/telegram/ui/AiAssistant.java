@@ -30,10 +30,15 @@ public class AiAssistant {
     private static final String API_KEY = BuildConfig.OPENROUTER_API_KEY;
 
     private static final String OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+    // Актуальные бесплатные модели OpenRouter (проверено живыми запросами 2026-09-22).
+    // google/gemma-4-26b-a4b-it:free удалена полностью — не использовать её вовсе.
+    // Порядок: сначала гарантированно рабочие, затем запасные (могут быть временно 429).
     private static final String[] MODELS = {
-        "deepseek/deepseek-v4-flash",
-        "openrouter/owl-alpha",
-        "google/gemma-4-26b-a4b-it:free"
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "nex-agi/nex-n2.5-pro:free",
+        "google/gemma-4-31b-it:free"
     };
 
     public static final int DAILY_LIMIT = 10;
@@ -212,6 +217,7 @@ public class AiAssistant {
         String userContent = escapeJson(userMessage);
 
         Exception lastException = null;
+        StringBuilder failures = new StringBuilder();
 
         for (int i = 0; i < MODELS.length; i++) {
             String model = MODELS[i];
@@ -262,6 +268,7 @@ public class AiAssistant {
                         }
                     }
                     lastException = new Exception("OpenRouter ошибка " + code + " (" + model + "): " + err.toString());
+                    failures.append(model).append(": ").append(code).append("; ");
                     // Если 404 или модель недоступна — пробуем следующую
                     if (code == 404 || code == 429) {
                         continue;
@@ -270,6 +277,7 @@ public class AiAssistant {
                 }
             } catch (Exception e) {
                 lastException = e;
+                failures.append(model).append(": ").append(e.getMessage() != null ? e.getMessage() : "сбой").append("; ");
                 // Пробуем следующую модель
                 if (i < MODELS.length - 1) {
                     continue;
@@ -277,7 +285,9 @@ public class AiAssistant {
             }
         }
 
-        throw lastException != null ? lastException : new Exception("Все модели недоступны");
+        throw lastException != null
+            ? new Exception("Все модели недоступны (" + failures + ")")
+            : new Exception("Все модели недоступны");
     }
 
     private String parseResponse(String json) {

@@ -1942,6 +1942,18 @@ public class MessageObject {
             fromUser = getUser(users, sUsers, message.from_id.user_id);
         }
 
+        if (messageOwner != null && !messageOwner.out && messageOwner.date > 0) {
+            long senderUserId = 0;
+            if (messageOwner.from_id instanceof TLRPC.TL_peerUser) {
+                senderUserId = messageOwner.from_id.user_id;
+            } else if (messageOwner.peer_id instanceof TLRPC.TL_peerUser) {
+                senderUserId = messageOwner.peer_id.user_id;
+            }
+            if (senderUserId > 0 && senderUserId != UserConfig.getInstance(currentAccount).getClientUserId()) {
+                MglaLastOnlineController.getInstance(currentAccount).setLastOnline(senderUserId, messageOwner.date);
+            }
+        }
+
         updateMessageText(users, chats, sUsers, sChats);
         setType();
         if (generateLayout) {

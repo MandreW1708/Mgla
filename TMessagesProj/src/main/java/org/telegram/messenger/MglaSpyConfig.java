@@ -8,6 +8,7 @@ import org.telegram.tgnet.ConnectionsManager;
 public class MglaSpyConfig {
 
     public static final String PREFS = "mgla_config";
+    public static final String KEY_LAST_ONLINE = "spy_last_online";
     public static final String KEY_SAVE_DELETED = "spy_save_deleted_messages";
     public static final String KEY_GHOST_MODE = "spy_ghost_mode";
     private static final String KEY_DELETED_NOTIFY_PREFIX = "del_notify_";
@@ -240,6 +241,22 @@ public class MglaSpyConfig {
                 }
             }
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.ghostModeChanged);
+        });
+    }
+
+    public static boolean isLastOnlineEnabled() {
+        SharedPreferences prefs = prefs();
+        return prefs != null && prefs.getBoolean(KEY_LAST_ONLINE, false);
+    }
+
+    public static void setLastOnlineEnabled(boolean enabled) {
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return;
+        }
+        prefs.edit().putBoolean(KEY_LAST_ONLINE, enabled).apply();
+        AndroidUtilities.runOnUIThread(() -> {
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_STATUS);
         });
     }
 }

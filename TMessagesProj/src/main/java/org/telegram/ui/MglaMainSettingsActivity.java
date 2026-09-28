@@ -124,6 +124,16 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         LinearLayout spyBlock = createBlock(context, "Шпион");
 
+        TextCheckCell lastOnlineCell = new TextCheckCell(context);
+        lastOnlineCell.setBackground(null);
+        lastOnlineCell.setTextAndCheck("Последний онлайн", MglaSpyConfig.isLastOnlineEnabled(), true);
+        lastOnlineCell.setOnClickListener(v -> {
+            boolean newVal = !MglaSpyConfig.isLastOnlineEnabled();
+            MglaSpyConfig.setLastOnlineEnabled(newVal);
+            lastOnlineCell.setChecked(newVal);
+        });
+        spyBlock.addView(lastOnlineCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         final TextCheckCell[] deletedSubCells = new TextCheckCell[4];
 
         TextCheckCell saveDeletedCell = new TextCheckCell(context);

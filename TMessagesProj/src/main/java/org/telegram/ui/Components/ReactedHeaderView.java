@@ -146,6 +146,9 @@ public class ReactedHeaderView extends FrameLayout {
                             } else if (obj instanceof TLRPC.TL_readParticipantDate) {
                                 long userId = ((TLRPC.TL_readParticipantDate) obj).user_id;
                                 int date = ((TLRPC.TL_readParticipantDate) obj).date;
+                                if (userId > 0 && date > 0) {
+                                    org.telegram.messenger.MglaLastOnlineController.getInstance(currentAccount).setLastOnline(userId, date);
+                                }
                                 if (fromId != userId) {
                                     usersToRequest.add(userId);
                                     dates.add(date);

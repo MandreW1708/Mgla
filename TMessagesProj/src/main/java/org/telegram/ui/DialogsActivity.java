@@ -10349,7 +10349,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     }
 
     private void checkUi_mglaHeaderIcons() {
-        if (proxyHeaderItem == null) {
+        if (proxyHeaderItem == null || actionBar == null) {
             return;
         }
 

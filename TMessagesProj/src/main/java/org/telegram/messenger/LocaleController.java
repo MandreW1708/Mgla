@@ -2723,6 +2723,45 @@ public class LocaleController {
         return "LOC_ERR";
     }
 
+    public static String formatDateOnlineApprox(long date, boolean[] madeShorter) {
+        try {
+            date *= 1000;
+            Calendar rightNow = Calendar.getInstance();
+            int day = rightNow.get(Calendar.DAY_OF_YEAR);
+            int year = rightNow.get(Calendar.YEAR);
+            int hour = rightNow.get(Calendar.HOUR_OF_DAY);
+            rightNow.setTimeInMillis(date);
+            int dateDay = rightNow.get(Calendar.DAY_OF_YEAR);
+            int dateYear = rightNow.get(Calendar.YEAR);
+            int dateHour = rightNow.get(Calendar.HOUR_OF_DAY);
+
+            String approxTime = "~ " + getInstance().getFormatterDay().format(new Date(date));
+
+            if (dateDay == day && year == dateYear) {
+                return LocaleController.formatString(R.string.LastSeenFormatted, LocaleController.formatString("TodayAtFormatted", R.string.TodayAtFormatted, approxTime));
+            } else if (dateDay + 1 == day && year == dateYear) {
+                if (madeShorter != null) {
+                    madeShorter[0] = true;
+                    if (hour <= 6 && dateHour > 18 && is24HourFormat) {
+                        return LocaleController.formatString(R.string.LastSeenFormatted, approxTime);
+                    }
+                    return LocaleController.formatString(R.string.YesterdayAtFormatted, approxTime);
+                } else {
+                    return LocaleController.formatString(R.string.LastSeenFormatted, LocaleController.formatString("YesterdayAtFormatted", R.string.YesterdayAtFormatted, approxTime));
+                }
+            } else if (Math.abs(System.currentTimeMillis() - date) < 31536000000L) {
+                String format = LocaleController.formatString("formatDateAtTime", R.string.formatDateAtTime, getInstance().getFormatterDayMonth().format(new Date(date)), approxTime);
+                return LocaleController.formatString("LastSeenDateFormatted", R.string.LastSeenDateFormatted, format);
+            } else {
+                String format = LocaleController.formatString("formatDateAtTime", R.string.formatDateAtTime, getInstance().getFormatterYear().format(new Date(date)), approxTime);
+                return LocaleController.formatString("LastSeenDateFormatted", R.string.LastSeenDateFormatted, format);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        return "LOC_ERR";
+    }
+
     private FastDateFormat createFormatter(Locale locale, String format, String defaultFormat) {
         if (format == null || format.length() == 0) {
             format = defaultFormat;
@@ -3020,6 +3059,12 @@ public class LocaleController {
             }
         }
         if (user == null || user.status == null || user.status.expires == 0 || UserObject.isDeleted(user) || user instanceof TLRPC.TL_userEmpty) {
+            if (user != null && !UserObject.isDeleted(user) && !(user instanceof TLRPC.TL_userEmpty) && !user.bot && MglaSpyConfig.isLastOnlineEnabled()) {
+                int lastTime = MglaLastOnlineController.getInstance(currentAccount).getLastOnline(user.id);
+                if (lastTime > 0) {
+                    return formatDateOnlineApprox(lastTime, madeShorter);
+                }
+            }
             return getString("ALongTimeAgo", R.string.ALongTimeAgo);
         } else {
             int currentTime = ConnectionsManager.getInstance(currentAccount).getCurrentTime();
@@ -3032,10 +3077,28 @@ public class LocaleController {
                 if (user.status.expires == -1) {
                     return getString("Invisible", R.string.Invisible);
                 } else if (user.status.expires == -100 || user.status.expires == -1000) {
+                    if (MglaSpyConfig.isLastOnlineEnabled() && !user.bot) {
+                        int lastTime = MglaLastOnlineController.getInstance(currentAccount).getLastOnline(user.id);
+                        if (lastTime > 0) {
+                            return formatDateOnlineApprox(lastTime, madeShorter);
+                        }
+                    }
                     return getString("Lately", R.string.Lately);
                 } else if (user.status.expires == -101 || user.status.expires == -1001) {
+                    if (MglaSpyConfig.isLastOnlineEnabled() && !user.bot) {
+                        int lastTime = MglaLastOnlineController.getInstance(currentAccount).getLastOnline(user.id);
+                        if (lastTime > 0) {
+                            return formatDateOnlineApprox(lastTime, madeShorter);
+                        }
+                    }
                     return getString("WithinAWeek", R.string.WithinAWeek);
                 } else if (user.status.expires == -102 || user.status.expires == -1002) {
+                    if (MglaSpyConfig.isLastOnlineEnabled() && !user.bot) {
+                        int lastTime = MglaLastOnlineController.getInstance(currentAccount).getLastOnline(user.id);
+                        if (lastTime > 0) {
+                            return formatDateOnlineApprox(lastTime, madeShorter);
+                        }
+                    }
                     return getString("WithinAMonth", R.string.WithinAMonth);
                 } else {
                     return formatDateOnline(user.status.expires, madeShorter);
