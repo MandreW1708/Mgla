@@ -68,6 +68,7 @@ import org.telegram.ui.Components.SeekBarAccessibilityDelegate;
 import org.telegram.ui.Components.SeekBarView;
 import org.telegram.ui.Components.Switch;
 import org.telegram.ui.Components.ThanosEffect;
+import org.telegram.ui.MglaGlassConfig;
 
 import java.util.ArrayList;
 
@@ -641,7 +642,7 @@ public class LiteModeSettingsActivity extends BaseFragment {
             super.onDraw(canvas);
             if (LocaleController.isRTL) {
                 if (needLine) {
-                    float x = dp(19 + 37 + 19);
+                    float x = dp(19 + (MglaGlassConfig.isMd3SwitchesEnabled() ? Switch.MD3_FRAME_WIDTH_DP : 37) + 19);
                     canvas.drawRect(x - dp(0.66f), (getMeasuredHeight() - dp(20)) / 2f, x, (getMeasuredHeight() + dp(20)) / 2f, Theme.dividerPaint);
                 }
                 if (needDivider) {
@@ -649,7 +650,7 @@ public class LiteModeSettingsActivity extends BaseFragment {
                 }
             } else {
                 if (needLine) {
-                    float x = getMeasuredWidth() - dp(19 + 37 + 19);
+                    float x = getMeasuredWidth() - dp(19 + (MglaGlassConfig.isMd3SwitchesEnabled() ? Switch.MD3_FRAME_WIDTH_DP : 37) + 19);
                     canvas.drawRect(x - dp(0.66f), (getMeasuredHeight() - dp(20)) / 2f, x, (getMeasuredHeight() + dp(20)) / 2f, Theme.dividerPaint);
                 }
                 if (needDivider) {

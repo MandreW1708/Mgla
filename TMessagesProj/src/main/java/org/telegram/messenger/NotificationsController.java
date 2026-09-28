@@ -103,7 +103,9 @@ public class NotificationsController extends BaseController implements Notificat
 
     public static final String EXTRA_VOICE_REPLY = "extra_voice_reply";
     public static String OTHER_NOTIFICATIONS_CHANNEL = null;
+    private static final String OTHER_NOTIFICATIONS_CHANNEL_NAME = "Служебные уведомления";
     public static String MGLA_BACKGROUND_CHANNEL = null;
+    private static final String MGLA_BACKGROUND_CHANNEL_NAME = "Фоновая работа";
 
     private static final DispatchQueue notificationsQueue = new DispatchQueue("notificationsQueue");
     private final ArrayList<MessageObject> pushMessages = new ArrayList<>();
@@ -275,6 +277,15 @@ public class NotificationsController extends BaseController implements Notificat
             OTHER_NOTIFICATIONS_CHANNEL = null;
             notificationChannel = null;
         }
+        if (notificationChannel != null && !OTHER_NOTIFICATIONS_CHANNEL_NAME.contentEquals(notificationChannel.getName())) {
+            // переименование канала на уже существующих установках
+            try {
+                systemNotificationManager.deleteNotificationChannel(OTHER_NOTIFICATIONS_CHANNEL);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            notificationChannel = null;
+        }
         if (OTHER_NOTIFICATIONS_CHANNEL == null) {
             if (preferences == null) {
                 preferences = ApplicationLoader.applicationContext.getSharedPreferences("Notifications", Activity.MODE_PRIVATE);
@@ -283,7 +294,7 @@ public class NotificationsController extends BaseController implements Notificat
             preferences.edit().putString("OtherKey", OTHER_NOTIFICATIONS_CHANNEL).commit();
         }
         if (notificationChannel == null) {
-            notificationChannel = new NotificationChannel(OTHER_NOTIFICATIONS_CHANNEL, "Internal notifications", NotificationManager.IMPORTANCE_DEFAULT);
+            notificationChannel = new NotificationChannel(OTHER_NOTIFICATIONS_CHANNEL, OTHER_NOTIFICATIONS_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT);
             notificationChannel.enableLights(false);
             notificationChannel.enableVibration(false);
             notificationChannel.setSound(null, null);
@@ -320,6 +331,15 @@ public class NotificationsController extends BaseController implements Notificat
             MGLA_BACKGROUND_CHANNEL = null;
             notificationChannel = null;
         }
+        if (notificationChannel != null && !MGLA_BACKGROUND_CHANNEL_NAME.contentEquals(notificationChannel.getName())) {
+            // переименование канала на уже существующих установках
+            try {
+                systemNotificationManager.deleteNotificationChannel(MGLA_BACKGROUND_CHANNEL);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            notificationChannel = null;
+        }
         if (MGLA_BACKGROUND_CHANNEL == null) {
             if (preferences == null) {
                 preferences = ApplicationLoader.applicationContext.getSharedPreferences("Notifications", Activity.MODE_PRIVATE);
@@ -328,7 +348,7 @@ public class NotificationsController extends BaseController implements Notificat
             preferences.edit().putString("MglaBackgroundKey", MGLA_BACKGROUND_CHANNEL).commit();
         }
         if (notificationChannel == null) {
-            notificationChannel = new NotificationChannel(MGLA_BACKGROUND_CHANNEL, "Mgla", NotificationManager.IMPORTANCE_MIN);
+            notificationChannel = new NotificationChannel(MGLA_BACKGROUND_CHANNEL, MGLA_BACKGROUND_CHANNEL_NAME, NotificationManager.IMPORTANCE_MIN);
             notificationChannel.enableLights(false);
             notificationChannel.enableVibration(false);
             notificationChannel.setSound(null, null);
@@ -3349,6 +3369,48 @@ public class NotificationsController extends BaseController implements Notificat
         }
     }
 
+    // Сигнатура текущего содержимого уведомлений. Тихие повторные вызовы showOrUpdateNotification
+    // (пересборка из БД при старте процесса, фоновые синки, уход приложения в фон, реакции на прочтения)
+    // с тем же содержимым не должны дёргать шторку — поэтому сравниваем с тем, что реально постили.
+    private String lastNotificationSignature;
+
+    private String getLastNotificationSignature() {
+        if (lastNotificationSignature == null) {
+            lastNotificationSignature = getAccountInstance().getNotificationsSettings().getString("lastPostedSig", "");
+        }
+        return lastNotificationSignature;
+    }
+
+    private void setLastNotificationSignature(String signature) {
+        lastNotificationSignature = signature;
+        try {
+            getAccountInstance().getNotificationsSettings().edit().putString("lastPostedSig", signature).commit();
+        } catch (Exception ignore) {
+        }
+    }
+
+    private String computeNotificationSignature() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(total_unread_count).append('|');
+        for (int i = 0; i < pushDialogs.size(); i++) {
+            sb.append(pushDialogs.keyAt(i)).append(':').append(pushDialogs.valueAt(i)).append(';');
+        }
+        sb.append('|');
+        for (int i = 0; i < pushMessages.size(); i++) {
+            MessageObject messageObject = pushMessages.get(i);
+            sb.append(messageObject.getDialogId()).append(':')
+                    .append(messageObject.getId()).append(':')
+                    .append(messageObject.messageOwner.date).append(':')
+                    .append(messageObject.messageOwner.message != null ? messageObject.messageOwner.message.hashCode() : 0).append(';');
+        }
+        sb.append('|');
+        for (int i = 0; i < storyPushMessages.size(); i++) {
+            StoryNotification notification = storyPushMessages.get(i);
+            sb.append(notification.dialogId).append(':').append(notification.date).append(':').append(notification.dateByIds.size()).append(';');
+        }
+        return sb.toString();
+    }
+
     public ArrayList<MessageObject> getPushMessagesSnapshot() {
         ArrayList<MessageObject> copy;
         synchronized (this) {
@@ -3805,9 +3867,9 @@ public class NotificationsController extends BaseController implements Notificat
             }
 
             if (channelsId != null || groupsId != null || reactionsId != null || storiesId != null || privateId != null || otherId != null) {
-                final TLRPC.User user = getMessagesController().getUser(getUserConfig().getClientUserId());
+                TLRPC.User user = getMessagesController().getUser(getUserConfig().getClientUserId());
                 if (user == null) {
-                    getUserConfig().getCurrentUser();
+                    user = getUserConfig().getCurrentUser();
                 }
                 String userName;
                 if (user != null) {
@@ -4152,6 +4214,12 @@ public class NotificationsController extends BaseController implements Notificat
             dismissNotification();
             return;
         }
+        final String contentSignature = computeNotificationSignature();
+        if (!notifyAboutLast && contentSignature.equals(getLastNotificationSignature())) {
+            // содержимое не изменилось — тихий репост сводки по старым чатам не нужен
+            return;
+        }
+        setLastNotificationSignature(contentSignature);
         try {
             getConnectionsManager().resumeNetworkMaybe();
 

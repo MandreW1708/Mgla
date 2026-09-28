@@ -28,6 +28,7 @@ import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.util.StateSet;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import androidx.annotation.Keep;
@@ -35,6 +36,7 @@ import androidx.annotation.Keep;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.BaseCell;
+import org.telegram.ui.MglaGlassConfig;
 
 import me.vkryl.android.animator.BoolAnimator;
 
@@ -261,6 +263,37 @@ public class Switch extends View {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         attachedToWindow = true;
+        ensureMd3FrameSize();
+    }
+
+    // MD3-трек 52x32dp не влезает в фиксированные фреймы (37x20 и т.п.), рассчитанные на стоковый свитч 31x14,
+    // и обрезается по краям — расширяем собственные layout params до трека с полями.
+    // При переключении опции все экраны пересоздаются (didSetNewTheme), поэтому хватает проверки при аттаче.
+    public static final int MD3_FRAME_WIDTH_DP = 58;
+    public static final int MD3_FRAME_HEIGHT_DP = 38;
+
+    private void ensureMd3FrameSize() {
+        if (!MglaGlassConfig.isMd3SwitchesEnabled()) {
+            return;
+        }
+        ViewGroup.LayoutParams lp = getLayoutParams();
+        if (lp == null) {
+            return;
+        }
+        boolean changed = false;
+        final int minWidth = AndroidUtilities.dp(MD3_FRAME_WIDTH_DP);
+        final int minHeight = AndroidUtilities.dp(MD3_FRAME_HEIGHT_DP);
+        if (lp.width != ViewGroup.LayoutParams.MATCH_PARENT && lp.width < minWidth) {
+            lp.width = minWidth;
+            changed = true;
+        }
+        if (lp.height != ViewGroup.LayoutParams.MATCH_PARENT && lp.height < minHeight) {
+            lp.height = minHeight;
+            changed = true;
+        }
+        if (changed) {
+            setLayoutParams(lp);
+        }
     }
 
     @Override
@@ -377,7 +410,7 @@ public class Switch extends View {
             return;
         }
 
-        boolean isMd3 = org.telegram.ui.MglaGlassConfig.isMd3SwitchesEnabled();
+        boolean isMd3 = MglaGlassConfig.isMd3SwitchesEnabled();
         int width = AndroidUtilities.dp(isMd3 ? 52 : 31);
         int trackHeightDp = isMd3 ? 32 : 14;
         
