@@ -3,27 +3,22 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
-import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.DatePicker;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaChatDna;
-import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -56,19 +51,9 @@ public class MglaChatDnaActivity extends BaseFragment {
     private ActivityChartView chartView;
     private TextView analysisView;
     private TextView topicsProviderView;
-    private ProgressBar topicsProgress;
     private final String[] statValues = new String[5];
     private final TextView[] statViews = new TextView[5];
     private final TextView[] topicViews = new TextView[TOPIC_COUNT];
-
-    // Оверлей «окна» поверх экрана, пока локальная модель думает.
-    private LinearLayout overlayCard;
-    private TextView overlayStatus;
-    private ProgressBar overlayProgress;
-    private ScrollView overlayLogScroll;
-    private TextView overlayLog;
-    private String overlayLogPrefix = "";
-    private boolean overlayDismissed;
 
     /** Точка входа из меню чата: сначала диалог выбора периода, потом экран. */
     public static void openWithPeriodPicker(BaseFragment fragment, long dialogId) {
@@ -233,13 +218,6 @@ public class MglaChatDnaActivity extends BaseFragment {
             topicsBlock.addView(topicViews[i], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         }
 
-        topicsProgress = new ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal);
-        topicsProgress.setIndeterminate(true);
-        int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
-        topicsProgress.setProgressTintList(ColorStateList.valueOf(accent));
-        topicsProgress.setIndeterminateTintList(ColorStateList.valueOf(accent));
-        topicsBlock.addView(topicsProgress,
-            LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(14), Gravity.CENTER, 21, 4, 21, 4));
 
         topicsProviderView = new TextView(context);
         topicsProviderView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
@@ -257,139 +235,19 @@ public class MglaChatDnaActivity extends BaseFragment {
         analysisBlock.addView(analysisView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 21, 0, 21, 14));
         rootLayout.addView(analysisBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
-        FrameLayout content = new FrameLayout(context);
-        content.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        content.addView(createOverlay(context), LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 28, 0, 28, 0));
-        fragmentView = content;
+        fragmentView = scrollView;
 
         loadDna();
         return fragmentView;
     }
 
-    /** «Окно» поверх экрана: шкала генерации тем локальной моделью + живой лог. */
-    private View createOverlay(Context context) {
-        overlayCard = new LinearLayout(context);
-        overlayCard.setOrientation(LinearLayout.VERTICAL);
-        overlayCard.setPadding(dp(16), dp(12), dp(16), dp(14));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(12));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        overlayCard.setBackground(bg);
-        overlayCard.setTranslationZ(dp(4));
-        overlayCard.setVisibility(View.GONE);
-
-        FrameLayout titleRow = new FrameLayout(context);
-        TextView overlayTitle = new TextView(context);
-        overlayTitle.setText("Локальная модель");
-        overlayTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        overlayTitle.setTypeface(AndroidUtilities.bold());
-        overlayTitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        titleRow.addView(overlayTitle, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-
-        TextView closeButton = new TextView(context);
-        closeButton.setText("✕");
-        closeButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-        closeButton.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        closeButton.setPadding(dp(8), dp(4), dp(8), dp(4));
-        closeButton.setOnClickListener(v -> {
-            overlayDismissed = true;
-            overlayCard.setVisibility(View.GONE);
-        });
-        titleRow.addView(closeButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
-        overlayCard.addView(titleRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        overlayStatus = new TextView(context);
-        overlayStatus.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        overlayStatus.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        overlayCard.addView(overlayStatus, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 10, 0, 6));
-
-        overlayProgress = new ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal);
-        overlayProgress.setIndeterminate(true);
-        int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
-        overlayProgress.setProgressTintList(ColorStateList.valueOf(accent));
-        overlayProgress.setIndeterminateTintList(ColorStateList.valueOf(accent));
-        overlayProgress.setMax(96);
-        overlayCard.addView(overlayProgress, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(14)));
-
-        overlayLogScroll = new ScrollView(context);
-        overlayLog = new TextView(context);
-        overlayLog.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
-        overlayLog.setTypeface(Typeface.MONOSPACE);
-        overlayLog.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        overlayLog.setLineSpacing(dp(2), 1);
-        overlayLogScroll.addView(overlayLog, new ScrollView.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        overlayCard.addView(overlayLogScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(150), 0, 10, 0, 0));
-        return overlayCard;
-    }
-
-    /** Показывает, сколько токенов модель уже сгенерировала (дёргается в UI-потоке). */
-    private final MglaChatDna.ProgressSink progressSink = (generated, max, textSoFar) -> {
-        int pct = max > 0 ? generated * 100 / max : 0;
-        if (generated < 0) {
-            if (overlayStatus != null) {
-                overlayStatus.setText("Загрузка модели…");
-            }
-            if (overlayProgress != null) {
-                overlayProgress.setIndeterminate(true);
-            }
-            if (topicsProgress != null) {
-                topicsProgress.setIndeterminate(true);
-            }
-            if (topicsProviderView != null) {
-                topicsProviderView.setText("Загрузка модели…");
-            }
-        } else {
-            if (overlayProgress != null) {
-                overlayProgress.setIndeterminate(false);
-                overlayProgress.setMax(max);
-                overlayProgress.setProgress(generated);
-            }
-            if (overlayStatus != null) {
-                overlayStatus.setText("Генерация тем… " + pct + "%");
-            }
-            if (topicsProgress != null) {
-                topicsProgress.setIndeterminate(false);
-                topicsProgress.setMax(max);
-                topicsProgress.setProgress(generated);
-            }
-            if (topicsProviderView != null) {
-                topicsProviderView.setText("Генерация тем локальной моделью… " + pct + "%");
-            }
-            if (textSoFar != null && overlayLog != null) {
-                overlayLog.setText(overlayLogPrefix + textSoFar);
-                if (overlayLogScroll != null) {
-                    overlayLogScroll.post(() -> overlayLogScroll.fullScroll(View.FOCUS_DOWN));
-                }
-            }
-        }
-    };
-
     private void loadDna() {
         if (analysisView != null) {
             analysisView.setText("Анализируем переписку…");
         }
-        boolean gguf = MglaChatDna.isGgufRuntimeSelected();
         if (topicsProviderView != null) {
-            topicsProviderView.setText(gguf ? "Загрузка модели…" : "Подбор главных слов…");
+            topicsProviderView.setText("Подбор главных слов…");
         }
-        if (topicsProgress != null) {
-            topicsProgress.setIndeterminate(true);
-            topicsProgress.setVisibility(View.VISIBLE);
-        }
-        if (gguf && overlayCard != null && !overlayDismissed) {
-            overlayLogPrefix = "Модель: " + MglaLocalModelsManager.getSelectedModelId() + "\n";
-            if (overlayLog != null) {
-                overlayLog.setText(overlayLogPrefix);
-            }
-            if (overlayStatus != null) {
-                overlayStatus.setText("Запуск…");
-            }
-            if (overlayProgress != null) {
-                overlayProgress.setIndeterminate(true);
-            }
-            overlayCard.setVisibility(View.VISIBLE);
-        }
-        MglaChatDna.progressSink = progressSink;
         MglaChatDna.collect(currentAccount, dialogId, periodStartSec, periodEndSec, new MglaChatDna.Callback() {
             @Override
             public void onStats(MglaChatDna.Stats stats) {
@@ -405,15 +263,8 @@ public class MglaChatDnaActivity extends BaseFragment {
 
             @Override
             public void onResult(MglaChatDna.Stats stats, ArrayList<String> topics, String provider) {
-                MglaChatDna.progressSink = null;
                 if (rootLayout == null) {
                     return;
-                }
-                if (topicsProgress != null) {
-                    topicsProgress.setVisibility(View.GONE);
-                }
-                if (overlayCard != null) {
-                    overlayCard.setVisibility(View.GONE);
                 }
                 bindTopics(topics, provider);
             }

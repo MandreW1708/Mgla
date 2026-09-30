@@ -1580,6 +1580,14 @@ public class NotificationsController extends BaseController implements Notificat
         getMessagesController().putChats(chats, true);
         getMessagesController().putEncryptedChats(encryptedChats, true);
 
+        // живые счётчики MessagesController читаем на UI-потоке: если в приложении диалог уже прочитан,
+        // а в БД ещё висит устаревший unread_count — в состояние уведомлений он не должен попадать
+        final LongSparseIntArray liveUnreadCounts = new LongSparseIntArray(dialogs.size());
+        for (int a = 0; a < dialogs.size(); a++) {
+            TLRPC.Dialog liveDialog = getMessagesController().dialogs_dict.get(dialogs.keyAt(a));
+            liveUnreadCounts.put(dialogs.keyAt(a), liveDialog != null ? liveDialog.unread_count : -1);
+        }
+
         notificationsQueue.postRunnable(() -> {
             pushDialogs.clear();
             pushMessages.clear();
@@ -1613,11 +1621,14 @@ public class NotificationsController extends BaseController implements Notificat
                         continue;
                     }
                     MessageObject messageObject = new MessageObject(currentAccount, message, false, false);
+                    long dialog_id = messageObject.getDialogId();
+                    long original_dialog_id = dialog_id;
+                    if (liveUnreadCounts.get(original_dialog_id, -1) == 0) {
+                        continue;
+                    }
                     if (isPersonalMessage(messageObject)) {
                         personalCount++;
                     }
-                    long dialog_id = messageObject.getDialogId();
-                    long original_dialog_id = dialog_id;
                     long topicId = MessageObject.getTopicId(currentAccount, messageObject.messageOwner, getMessagesController().isForum(messageObject));
                     if (messageObject.messageOwner.mentioned) {
                         dialog_id = messageObject.getFromChatId();
@@ -1669,6 +1680,10 @@ public class NotificationsController extends BaseController implements Notificat
                 if (!value) {
                     continue;
                 }
+                if (liveUnreadCounts.get(dialog_id, -1) == 0) {
+                    // в приложении диалог уже прочитан — устаревший unread_count из БД игнорируем
+                    continue;
+                }
                 int count = dialogs.valueAt(a);
                 pushDialogs.put(dialog_id, count);
                 if (getMessagesController().isCommunity(dialog_id)) {
@@ -1685,6 +1700,9 @@ public class NotificationsController extends BaseController implements Notificat
                     MessageObject messageObject = push.get(a);
                     int mid = messageObject.getId();
                     if (pushMessagesDict.indexOfKey(mid) >= 0) {
+                        continue;
+                    }
+                    if (liveUnreadCounts.get(messageObject.getDialogId(), -1) == 0) {
                         continue;
                     }
                     if (isPersonalMessage(messageObject)) {
@@ -3392,21 +3410,35 @@ public class NotificationsController extends BaseController implements Notificat
     private String computeNotificationSignature() {
         StringBuilder sb = new StringBuilder();
         sb.append(total_unread_count).append('|');
+        // порядок списков не значим: после пересборки из БД он отличается от живой доставки —
+        // сортируем, чтобы одинаковое содержимое давало одинаковую сигнатуру
+        ArrayList<String> dialogEntries = new ArrayList<>(pushDialogs.size());
         for (int i = 0; i < pushDialogs.size(); i++) {
-            sb.append(pushDialogs.keyAt(i)).append(':').append(pushDialogs.valueAt(i)).append(';');
+            dialogEntries.add(pushDialogs.keyAt(i) + ":" + pushDialogs.valueAt(i));
+        }
+        Collections.sort(dialogEntries);
+        for (String entry : dialogEntries) {
+            sb.append(entry).append(';');
         }
         sb.append('|');
+        ArrayList<String> messageEntries = new ArrayList<>(pushMessages.size());
         for (int i = 0; i < pushMessages.size(); i++) {
             MessageObject messageObject = pushMessages.get(i);
-            sb.append(messageObject.getDialogId()).append(':')
-                    .append(messageObject.getId()).append(':')
-                    .append(messageObject.messageOwner.date).append(':')
-                    .append(messageObject.messageOwner.message != null ? messageObject.messageOwner.message.hashCode() : 0).append(';');
+            messageEntries.add(messageObject.getDialogId() + ":" + messageObject.getId() + ":" + messageObject.messageOwner.date + ":" + (messageObject.messageOwner.message != null ? messageObject.messageOwner.message.hashCode() : 0));
+        }
+        Collections.sort(messageEntries);
+        for (String entry : messageEntries) {
+            sb.append(entry).append(';');
         }
         sb.append('|');
+        ArrayList<String> storyEntries = new ArrayList<>(storyPushMessages.size());
         for (int i = 0; i < storyPushMessages.size(); i++) {
             StoryNotification notification = storyPushMessages.get(i);
-            sb.append(notification.dialogId).append(':').append(notification.date).append(':').append(notification.dateByIds.size()).append(';');
+            storyEntries.add(notification.dialogId + ":" + notification.date + ":" + notification.dateByIds.size());
+        }
+        Collections.sort(storyEntries);
+        for (String entry : storyEntries) {
+            sb.append(entry).append(';');
         }
         return sb.toString();
     }

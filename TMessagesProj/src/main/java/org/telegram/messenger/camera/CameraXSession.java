@@ -11,7 +11,6 @@ import androidx.camera.core.CameraControl;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.Preview;
-import androidx.camera.core.UseCaseGroup;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
 
@@ -19,9 +18,13 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.SharedConfig;
 
-import java.util.concurrent.ExecutionException;
 import androidx.lifecycle.ProcessLifecycleOwner;
 
+/**
+ * CameraX-сессия для полной камеры (CameraView): только превью + фото.
+ * Видео пишется через GL-энкодер Telegram, поэтому VideoCapture-use case не нужен.
+ * Единственная расширенная опция — 60 fps превью (SharedConfig.cameraX60Fps).
+ */
 public class CameraXSession {
 
     public String cameraId;
@@ -30,9 +33,10 @@ public class CameraXSession {
 
     private ProcessCameraProvider cameraProvider;
     private Camera camera;
-    private Camera secondaryCamera;
     private Preview preview;
     private ImageCapture imageCapture;
+
+    private SurfaceTexture surfaceTexture;
 
     private int displayOrientation;
     private int currentOrientation;
@@ -60,33 +64,38 @@ public class CameraXSession {
     }
 
     public void setRecordingVideo(boolean recording) {
-        // Video capture state handling
+        // видео пишется через GL-энкодер, ничего настраивать не надо
     }
 
     public void setScanningBarcode(boolean optimize) {
-        // Barcode optimization state
+        // не поддерживается
     }
 
-    public void setZoom(float zoom) {
+    public void setZoom(float linearZoom) {
         if (camera != null) {
-            CameraControl control = camera.getCameraControl();
-            control.setLinearZoom(zoom);
+            try {
+                camera.getCameraControl().setLinearZoom(Math.max(0f, Math.min(1f, linearZoom)));
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
         }
     }
 
     public void focusToRect(Rect focusRect, Rect meteringRect) {
-        // AutoFocus using CameraControl
+        // не поддерживается
     }
 
     public void destroy(boolean async, Runnable after) {
         if (cameraProvider != null) {
-            if (SharedConfig.cameraXSeamlessSwitch && preview != null && imageCapture != null) {
-                cameraProvider.unbind(preview, imageCapture);
-            } else {
+            // всегда отвязываем всё, иначе камера остаётся занятой после закрытия
+            try {
                 cameraProvider.unbindAll();
+            } catch (Throwable e) {
+                FileLog.e(e);
             }
             cameraProvider = null;
         }
+        camera = null;
         isInitiated = false;
         if (after != null) {
             if (async) {
@@ -98,63 +107,63 @@ public class CameraXSession {
     }
 
     public void open(SurfaceTexture surfaceTexture, Runnable onInit) {
+        this.surfaceTexture = surfaceTexture;
         Context context = ApplicationLoader.applicationContext;
         try {
             cameraProvider = ProcessCameraProvider.getInstance(context).get();
-            
-            // Apply CameraX settings from SharedConfig
-            boolean startWide = SharedConfig.cameraXStartWide && !isFrontFace;
-            CameraSelector cameraSelector;
-            if (isFrontFace) {
-                cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
-            } else {
-                cameraSelector = startWide ? new CameraSelector.Builder()
-                        .requireLensFacing(CameraSelector.LENS_FACING_BACK)
-                        .build() : CameraSelector.DEFAULT_BACK_CAMERA;
-            }
-
-            Preview.Builder previewBuilder = new Preview.Builder();
-
-            // Configure 60 FPS range if enabled
-            if (SharedConfig.cameraX60Fps) {
-                previewBuilder.setTargetFrameRate(new Range<>(60, 60));
-            }
-
-            preview = previewBuilder.build();
-            preview.setSurfaceProvider(request -> {
-                Surface surface = new Surface(surfaceTexture);
-                request.provideSurface(surface, ContextCompat.getMainExecutor(context), result -> {
-                    surface.release();
-                });
-            });
-
-            imageCapture = new ImageCapture.Builder().build();
-
-            // Seamless switching (Dual camera active binding)
-            if (SharedConfig.cameraXSeamlessSwitch) {
-                try {
-                    CameraSelector secondarySelector = isFrontFace ? CameraSelector.DEFAULT_BACK_CAMERA : CameraSelector.DEFAULT_FRONT_CAMERA;
-                    if (cameraProvider.hasCamera(secondarySelector)) {
-                        FileLog.d("CameraX: Seamless switching dual cameras pre-initialized");
-                        // Pre-bind secondary camera to keep the hardware warm
-                        cameraProvider.bindToLifecycle(ProcessLifecycleOwner.get(), secondarySelector);
-                    }
-                } catch (Throwable e) {
-                    FileLog.e(e);
-                }
-            } else {
-                cameraProvider.unbindAll();
-            }
-
-            camera = cameraProvider.bindToLifecycle(ProcessLifecycleOwner.get(), cameraSelector, preview, imageCapture);
-
+        } catch (Throwable e) {
+            FileLog.e("CameraX provider init failed", e);
+            return;
+        }
+        try {
+            bindWithConfig(SharedConfig.cameraX60Fps);
             isInitiated = true;
             if (onInit != null) {
                 onInit.run();
             }
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (Throwable e) {
             FileLog.e("CameraX init failed", e);
+            // неподдерживаемое устройством ограничение (чаще всего 60 fps) — повторяем без него
+            try {
+                bindWithConfig(false);
+                isInitiated = true;
+                if (onInit != null) {
+                    onInit.run();
+                }
+            } catch (Throwable e2) {
+                FileLog.e("CameraX fallback init failed", e2);
+            }
         }
+    }
+
+    private void bindWithConfig(boolean fps60) {
+        Context context = ApplicationLoader.applicationContext;
+
+        Preview.Builder previewBuilder = new Preview.Builder();
+        if (fps60) {
+            previewBuilder.setTargetFrameRate(new Range<>(60, 60));
+        }
+        preview = previewBuilder.build();
+        preview.setSurfaceProvider(request -> {
+            // поверхность пересоздаётся при поворотах/переоткрытиях — берём актуальную текстуру
+            SurfaceTexture texture = CameraXSession.this.surfaceTexture;
+            if (texture == null) {
+                return;
+            }
+            try {
+                texture.setDefaultBufferSize(request.getResolution().getWidth(), request.getResolution().getHeight());
+                Surface surface = new Surface(texture);
+                request.provideSurface(surface, ContextCompat.getMainExecutor(context), result -> surface.release());
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        });
+
+        imageCapture = new ImageCapture.Builder().build();
+
+        CameraSelector cameraSelector = isFrontFace ? CameraSelector.DEFAULT_FRONT_CAMERA : CameraSelector.DEFAULT_BACK_CAMERA;
+        cameraProvider.unbindAll();
+        camera = cameraProvider.bindToLifecycle(ProcessLifecycleOwner.get(), cameraSelector, preview, imageCapture);
     }
 
     public float getMinZoom() {
