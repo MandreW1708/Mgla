@@ -2,11 +2,12 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.animation.ArgbEvaluator;
+import android.animation.LayoutTransition;
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.content.res.ColorStateList;
+import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -23,11 +24,25 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.CubicBezierInterpolator;
-import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.ui.Components.RadioButton;
 
+/**
+ * Настройки камеры: выбор API кнопками «1 / 2 / X», описание выбранного API,
+ * для CameraX — дополнительные опции (60 fps).
+ * Порядок api: 0 — Camera1, 1 — Camera2, 2 — CameraX (SharedConfig.cameraApi).
+ */
 public class MglaCameraSettingsActivity extends BaseFragment {
+
+    private static final int API_1 = 0;
+    private static final int API_2 = 1;
+    private static final int API_X = 2;
+
+    private int selectedApi;
+    private LinearLayout advancedBlock;
+    private LinearLayout descContainer;
+    private TextView descTitle;
+    private TextView descText;
+    private TextView descRecommend;
 
     public MglaCameraSettingsActivity() {
         this(null);
@@ -51,237 +66,254 @@ public class MglaCameraSettingsActivity extends BaseFragment {
             }
         });
 
+        selectedApi = SharedConfig.cameraApi;
+
+        int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
+        int textColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+        int hintColor = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
+
         LinearLayout rootLayout = new LinearLayout(context);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
+        // плавное выдвижение/сокрытие блока доп. настроек
+        LayoutTransition layoutTransition = new LayoutTransition();
+        layoutTransition.enableTransitionType(LayoutTransition.APPEARING);
+        layoutTransition.enableTransitionType(LayoutTransition.DISAPPEARING);
+        layoutTransition.enableTransitionType(LayoutTransition.CHANGING);
+        layoutTransition.setDuration(220);
+        rootLayout.setLayoutTransition(layoutTransition);
 
-        LinearLayout advancedBlock = createBlock(context, "Расширенные настройки");
-        advancedBlock.setVisibility(SharedConfig.cameraApi == 2 ? View.VISIBLE : View.GONE);
+        // --- блок API ---
+        LinearLayout apiBlock = createBlock(context);
+        rootLayout.addView(apiBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
+
+        TextView titleView = new TextView(context);
+        titleView.setText("API");
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        titleView.setTypeface(AndroidUtilities.bold());
+        titleView.setTextColor(textColor);
+        apiBlock.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 20, 18, 20, 2));
+
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        apiBlock.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 10, 20, 18));
+
+        // столбец кнопок 1 / 2 / X
+        LinearLayout buttonColumn = new LinearLayout(context);
+        buttonColumn.setOrientation(LinearLayout.VERTICAL);
+        row.addView(buttonColumn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+        ApiButton[] buttons = new ApiButton[3];
+        String[] labels = {"1", "2", "X"};
+        for (int i = 0; i < 3; i++) {
+            final int api = i;
+            buttons[i] = new ApiButton(context, labels[i], accent);
+            buttons[i].setOnClickListener(v -> select(api, buttons));
+            buttonColumn.addView(buttons[i], LayoutHelper.createLinear(56, 56, 0, 0, 0, i == 2 ? 0 : 12));
+        }
+
+        // описание выбранного API
+        descContainer = new LinearLayout(context);
+        descContainer.setOrientation(LinearLayout.VERTICAL);
+        descContainer.setGravity(Gravity.CENTER);
+        row.addView(descContainer, LayoutHelper.createLinear(0, LayoutHelper.MATCH_PARENT, 1f, 36, 0, 0, 0));
+
+        descTitle = new TextView(context);
+        descTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        descTitle.setTypeface(AndroidUtilities.bold());
+        descContainer.addView(descTitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+        descText = new TextView(context);
+        descText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13.5f);
+        descText.setTextColor(hintColor);
+        descContainer.addView(descText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 5, 0, 0));
+
+        descRecommend = new TextView(context);
+        descRecommend.setText("Рекомендуется");
+        descRecommend.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11.5f);
+        descRecommend.setTypeface(AndroidUtilities.bold());
+        descRecommend.setTextColor(accent);
+        descContainer.addView(descRecommend, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 7, 0, 0));
+
+        applyDescription(selectedApi, false);
+        for (int i = 0; i < 3; i++) {
+            buttons[i].setSelectedState(i == selectedApi, false);
+        }
+
+        // --- доп. настройки (только CameraX) ---
+        advancedBlock = createBlock(context, "Расширенные настройки");
+        advancedBlock.setVisibility(selectedApi == API_X ? View.VISIBLE : View.GONE);
+        rootLayout.addView(advancedBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 14, 16, 0));
 
         TextCheckCell fps60Cell = new TextCheckCell(context);
         fps60Cell.setBackground(null);
-        fps60Cell.setTextAndCheck("60 кадров в секунду при записи", SharedConfig.cameraX60Fps, false);
+        fps60Cell.setTextAndCheck("60 FPS", SharedConfig.cameraX60Fps, false);
         fps60Cell.setOnClickListener(v -> {
             SharedConfig.toggleCameraX60Fps();
             fps60Cell.setChecked(SharedConfig.cameraX60Fps);
         });
         advancedBlock.addView(fps60Cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        HeaderCell apiHeader = new HeaderCell(context, 22);
-        apiHeader.setBackground(null);
-        apiHeader.setText("API камеры");
-        rootLayout.addView(apiHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
-
-        final ApiOptionView[] optionViews = new ApiOptionView[3];
-        optionViews[0] = createApiOption(context, IconBackgroundColors.GRAY.top, IconBackgroundColors.GRAY.bottom,
-            "C1", "Camera 1 API", "Максимальная совместимость со старыми устройствами", false);
-        optionViews[1] = createApiOption(context, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom,
-            "C2", "Camera 2 API", "Стабильная работа на большинстве устройств", false);
-        optionViews[2] = createApiOption(context, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom,
-            "CX", "CameraX", "Современный API с расширенными настройками", true);
-
-        for (int i = 0; i < optionViews.length; i++) {
-            final int api = i;
-            optionViews[i].setOnClickListener(v -> {
-                SharedConfig.setCameraApi(api);
-                for (int j = 0; j < optionViews.length; j++) {
-                    optionViews[j].setChecked(j == api, true);
-                }
-                advancedBlock.setVisibility(api == 2 ? View.VISIBLE : View.GONE);
-            });
-            rootLayout.addView(optionViews[i], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, i == 0 ? 0 : 8, 16, 0));
-        }
-        for (int i = 0; i < optionViews.length; i++) {
-            optionViews[i].setChecked(i == SharedConfig.cameraApi, false);
-        }
-
-        rootLayout.addView(advancedBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
-
         fragmentView = rootLayout;
         return fragmentView;
     }
 
-    private ApiOptionView createApiOption(Context context, int colorTop, int colorBottom, String badge, String title, String subtitle, boolean recommended) {
-        return new ApiOptionView(context, colorTop, colorBottom, badge, title, subtitle, recommended);
+    private void select(int api, ApiButton[] buttons) {
+        if (api == selectedApi) {
+            return;
+        }
+        selectedApi = api;
+        SharedConfig.setCameraApi(api);
+        for (int i = 0; i < buttons.length; i++) {
+            buttons[i].setSelectedState(i == api, true);
+        }
+        applyDescription(api, true);
+        // блок доп. настроек выезжает/убирается самим LayoutTransition
+        advancedBlock.setVisibility(api == API_X ? View.VISIBLE : View.GONE);
     }
 
-    /**
-     * Карточка выбора API камеры: градиентный бейдж, название, описание,
-     * плашка «Рекомендуется» и анимированный радио-индикатор.
-     */
-    private static class ApiOptionView extends FrameLayout {
-
-        private final GradientDrawable background = new GradientDrawable();
-        private final RadioButton radioButton;
-        private final TextView badgeView;
-        private boolean checked;
-        private int currentBgColor;
-        private final int strokeColor;
-        private final int checkedBgColor;
-        private final int uncheckedBgColor;
-        private ValueAnimator animator;
-
-        ApiOptionView(Context context, int colorTop, int colorBottom, String badge, String title, String subtitle, boolean recommended) {
-            super(context);
-
-            strokeColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
-            checkedBgColor = changeColorAlpha(strokeColor, 0.12f);
-            uncheckedBgColor = Theme.getColor(Theme.key_windowBackgroundWhite);
-
-            setPadding(dp(14), dp(10), dp(10), dp(10));
-            setClipToOutline(true);
-            setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-            background.setCornerRadius(dp(10));
-            background.setColor(uncheckedBgColor);
-            currentBgColor = uncheckedBgColor;
-            setBackground(background);
-
-            android.graphics.drawable.RippleDrawable ripple = new RippleDrawable(
-                ColorStateList.valueOf(changeColorAlpha(strokeColor, 0.20f)), null, null);
-            setForeground(ripple);
-
-            LinearLayout content = new LinearLayout(context);
-            content.setOrientation(LinearLayout.HORIZONTAL);
-            content.setGravity(Gravity.CENTER_VERTICAL);
-            addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-
-            // Градиентный бейдж с буквенным обозначением API
-            badgeView = new TextView(context);
-            badgeView.setText(badge);
-            badgeView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-            badgeView.setTypeface(AndroidUtilities.bold());
-            badgeView.setTextColor(0xFFFFFFFF);
-            badgeView.setGravity(Gravity.CENTER);
-            GradientDrawable badgeBg = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR, new int[]{colorTop, colorBottom});
-            badgeBg.setCornerRadius(dp(11));
-            badgeView.setBackground(badgeBg);
-            content.addView(badgeView, LayoutHelper.createLinear(44, 44, Gravity.CENTER_VERTICAL, 0, 0, 12, 0));
-
-            LinearLayout textLayout = new LinearLayout(context);
-            textLayout.setOrientation(LinearLayout.VERTICAL);
-
-            LinearLayout titleRow = new LinearLayout(context);
-            titleRow.setOrientation(LinearLayout.HORIZONTAL);
-            titleRow.setGravity(Gravity.CENTER_VERTICAL);
-
-            TextView titleView = new TextView(context);
-            titleView.setText(title);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-            titleView.setTypeface(AndroidUtilities.bold());
-            titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            titleView.setSingleLine(true);
-            titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            titleRow.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
-
-            if (recommended) {
-                TextView badgeTag = new TextView(context);
-                badgeTag.setText("РЕКОМЕНДУЕТСЯ");
-                badgeTag.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
-                badgeTag.setTypeface(AndroidUtilities.bold());
-                badgeTag.setTextColor(0xFFFFFFFF);
-                badgeTag.setGravity(Gravity.CENTER);
-                badgeTag.setPadding(dp(6), dp(1), dp(6), dp(2));
-                GradientDrawable tagBg = new GradientDrawable();
-                tagBg.setCornerRadius(dp(5));
-                tagBg.setColor(strokeColor);
-                badgeTag.setBackground(tagBg);
-                titleRow.addView(badgeTag, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 8, 0, 0, 0));
-            }
-
-            textLayout.addView(titleRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-            TextView subtitleView = new TextView(context);
-            subtitleView.setText(subtitle);
-            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            subtitleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-            subtitleView.setSingleLine(true);
-            subtitleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            textLayout.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 3, 0, 0));
-
-            content.addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
-
-            radioButton = new RadioButton(context);
-            radioButton.setSize(dp(20));
-            radioButton.setColor(Theme.getColor(Theme.key_radioBackground), strokeColor);
-            content.addView(radioButton, LayoutHelper.createLinear(20, 20, Gravity.CENTER_VERTICAL, 0, 0, 4, 0));
-
-            setClickable(true);
-            setFocusable(true);
+    private void applyDescription(int api, boolean animated) {
+        String title;
+        String text;
+        switch (api) {
+            case API_2:
+                title = "Camera 2 (Telegram)";
+                text = "Продвинутый API. Быстрый запуск и стабильная работа на большинстве современных устройств.";
+                break;
+            case API_X:
+                title = "CameraX";
+                text = "Современный API от Google. Плавный предпросмотр и поддержка записи в 60 кадров в секунду.";
+                break;
+            default:
+                title = "Telegram";
+                text = "Классический движок камеры. Максимальная совместимость и предсказуемая работа на любых устройствах.";
+                break;
         }
+        int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
+        int textColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+        descTitle.setTextColor(api == API_X ? accent : textColor);
+        descRecommend.setVisibility(api == API_X ? View.VISIBLE : View.GONE);
 
-        public void setChecked(boolean checked, boolean animated) {
-            if (this.checked == checked) {
-                return;
-            }
-            this.checked = checked;
-            radioButton.setChecked(checked, animated);
-
-            int fromColor = currentBgColor;
-            int toColor = checked ? checkedBgColor : uncheckedBgColor;
-            int fromStroke = checked ? 0 : 1;
-            int toStroke = checked ? 1 : 0;
-
-            if (animator != null) {
-                animator.cancel();
-            }
-            if (!animated) {
-                currentBgColor = toColor;
-                background.setColor(toColor);
-                background.setStroke(dp(checked ? 1.5f : 0), checked ? strokeColor : 0x00000000);
-                return;
-            }
-            animator = ValueAnimator.ofFloat(0f, 1f);
-            animator.setDuration(180);
-            animator.setInterpolator(CubicBezierInterpolator.EASE_OUT);
-            final int startColor = fromColor;
-            animator.addUpdateListener(a -> {
-                float t = (float) a.getAnimatedValue();
-                currentBgColor = lerpColor(startColor, toColor, t);
-                background.setColor(currentBgColor);
-                float strokeT = lerp(fromStroke, toStroke, t);
-                background.setStroke(Math.round(dp(1.5f) * strokeT), changeColorAlpha(strokeColor, strokeT));
-            });
-            animator.start();
+        if (!animated) {
+            descTitle.setText(title);
+            descText.setText(text);
+            descContainer.setAlpha(1f);
+            descContainer.setTranslationX(0);
+            return;
         }
+        descContainer.animate().cancel();
+        descContainer.animate()
+                .alpha(0f)
+                .translationX(dp(8))
+                .setDuration(110)
+                .setInterpolator(CubicBezierInterpolator.DEFAULT)
+                .withEndAction(() -> {
+                    descTitle.setText(title);
+                    descText.setText(text);
+                    descContainer.animate()
+                            .alpha(1f)
+                            .translationX(0)
+                            .setDuration(210)
+                            .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                            .start();
+                })
+                .start();
+    }
 
-        private static float lerp(float a, float b, float t) {
-            return a + (b - a) * t;
-        }
+    private static int adjustAlpha(int color, float factor) {
+        int a = Math.round(Color.alpha(color) * factor);
+        return (a << 24) | (color & 0x00FFFFFF);
+    }
 
-        private static int lerpColor(int a, int b, float t) {
-            int ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff, aa = (a >>> 24) & 0xff;
-            int br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff, ba = (b >>> 24) & 0xff;
-            int r = Math.round(ar + (br - ar) * t);
-            int g = Math.round(ag + (bg - ag) * t);
-            int bl = Math.round(ab + (bb - ab) * t);
-            int al = Math.round(aa + (ba - aa) * t);
-            return (al << 24) | (r << 16) | (g << 8) | bl;
-        }
-
-        private static int changeColorAlpha(int color, float alpha) {
-            int a = Math.round(((color >>> 24) & 0xff) * alpha);
-            return (a << 24) | (color & 0x00ffffff);
-        }
+    private LinearLayout createBlock(Context context) {
+        return createBlock(context, null);
     }
 
     private LinearLayout createBlock(Context context, String title) {
         LinearLayout block = new LinearLayout(context);
         block.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
+        bg.setCornerRadius(dp(14));
         bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         block.setBackground(bg);
         block.setClipToOutline(true);
         block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
 
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
+        if (title != null) {
+            HeaderCell header = new HeaderCell(context, 22);
+            header.setBackground(null);
+            header.setText(title);
+            block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        }
         return block;
+    }
+
+    /**
+     * Квадратная кнопка выбора API: скруглённый квадрат, у выбранной —
+     * акцентная рамка и подсветка заливки (анимированный переход).
+     */
+    private static class ApiButton extends FrameLayout {
+
+        private final GradientDrawable bg = new GradientDrawable();
+        private final TextView label;
+        private final int accent;
+        private final int strokeNormal;
+        private final int fillNormal;
+        private final int textNormal;
+        private final ArgbEvaluator evaluator = new ArgbEvaluator();
+
+        private float sel;
+        private ValueAnimator animator;
+
+        ApiButton(Context context, String text, int accent) {
+            super(context);
+            this.accent = accent;
+            strokeNormal = adjustAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 0.55f);
+            fillNormal = Theme.getColor(Theme.key_windowBackgroundWhite);
+            textNormal = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+
+            bg.setCornerRadius(dp(14));
+            setBackground(bg);
+
+            label = new TextView(context);
+            label.setText(text);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 19);
+            label.setGravity(Gravity.CENTER);
+            addView(label, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            updateColors();
+        }
+
+        void setSelectedState(boolean selected, boolean animated) {
+            float target = selected ? 1f : 0f;
+            if (!animated) {
+                if (animator != null) {
+                    animator.cancel();
+                    animator = null;
+                }
+                sel = target;
+                updateColors();
+                return;
+            }
+            if (animator != null) {
+                animator.cancel();
+            }
+            animator = ValueAnimator.ofFloat(sel, target);
+            animator.setDuration(240);
+            animator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+            animator.addUpdateListener(a -> {
+                sel = (float) a.getAnimatedValue();
+                updateColors();
+            });
+            animator.start();
+        }
+
+        private void updateColors() {
+            bg.setStroke(dp(2), (Integer) evaluator.evaluate(sel, strokeNormal, accent));
+            bg.setColor((Integer) evaluator.evaluate(sel, fillNormal, adjustAlpha(accent, 0.12f)));
+            label.setTextColor((Integer) evaluator.evaluate(sel, textNormal, accent));
+            label.setTypeface(sel > 0.5f ? AndroidUtilities.bold() : android.graphics.Typeface.DEFAULT);
+        }
     }
 }
