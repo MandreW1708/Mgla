@@ -37,6 +37,3 @@
 [submodule "TMessagesProj_Modules/media"]
 	path = TMessagesProj_Modules/media
 	url = https://github.com/Arseny271/media.git
-[submodule "TMessagesProj/jni/third_party/llama.cpp"]
-	path = TMessagesProj/jni/third_party/llama.cpp
-	url = https://github.com/ggml-org/llama.cpp.git

@@ -32,9 +32,6 @@ public class MglaChatDna {
     public static final String PREF_TOPICS_PROVIDER = "dna_topics_provider";
     public static final String PROVIDER_GEMINI = "gemini";
     public static final String PROVIDER_LOCAL = "local";
-    public static final String PREF_LOCAL_ENGINE = "dna_local_engine";
-    public static final String LOCAL_ENGINE_DICTIONARY = "dictionary";
-    public static final String LOCAL_ENGINE_GGUF = "gguf";
 
     /** Собранная статистика чата. */
     public static class Stats {
@@ -61,14 +58,6 @@ public class MglaChatDna {
         void onResult(Stats stats, ArrayList<String> topics, String provider);
     }
 
-    /** Прогресс нативной генерации: generated < 0 — загрузка модели. */
-    public interface ProgressSink {
-        /** textSoFar — накопленный текст генерации (null при загрузке модели). */
-        void onProgress(int generated, int maxTokens, String textSoFar);
-    }
-
-    /** Активный приёмник прогресса, пока открыт экран Chat DNA. */
-    public static volatile ProgressSink progressSink;
 
     interface TopicsCallback {
         void onDone(ArrayList<String> topics, String provider);
@@ -88,19 +77,6 @@ public class MglaChatDna {
 
     public static String getTopicsProviderTitle() {
         return PROVIDER_GEMINI.equals(getTopicsProvider()) ? "Gemini (Ваш API)" : "Локальная модель";
-    }
-
-    public static String getLocalEngine() {
-        return prefs().getString(PREF_LOCAL_ENGINE, LOCAL_ENGINE_DICTIONARY);
-    }
-
-    public static void setLocalEngine(String engine) {
-        prefs().edit().putString(PREF_LOCAL_ENGINE,
-            LOCAL_ENGINE_GGUF.equals(engine) ? LOCAL_ENGINE_GGUF : LOCAL_ENGINE_DICTIONARY).apply();
-    }
-
-    public static boolean isGgufRuntimeSelected() {
-        return LOCAL_ENGINE_GGUF.equals(getLocalEngine());
     }
 
     /** Запускает сбор статистики и генерацию тем. Статистика приходит в UI-потоке
@@ -357,20 +333,8 @@ public class MglaChatDna {
                     actualSource = "Gemini (Ваш API)";
                 }
             } else {
-                if (isGgufRuntimeSelected()) {
-                    String[] ggufError = new String[1];
-                    topics = generateTopicsGguf(accountId, dialogId, periodStartSec, periodEndSec, ggufError);
-                    if (topics == null || topics.isEmpty()) {
-                        topics = generateTopicsDictionary(accountId, dialogId, periodStartSec, periodEndSec);
-                        actualSource = "Словарь (GGUF недоступен: "
-                            + (ggufError[0] != null ? ggufError[0] : "нет результата") + ")";
-                    } else {
-                        actualSource = "GGUF-рантайм: " + MglaLocalModelsManager.getSelectedModelId();
-                    }
-                } else {
-                    topics = generateTopicsDictionary(accountId, dialogId, periodStartSec, periodEndSec);
-                    actualSource = "Словарь";
-                }
+                topics = generateTopicsDictionary(accountId, dialogId, periodStartSec, periodEndSec);
+                actualSource = "Словарь";
             }
             done.onDone(topics, actualSource);
         }).start();
@@ -428,213 +392,6 @@ public class MglaChatDna {
     public static ArrayList<String> generateTopicsDictionary(int accountId, long dialogId, long periodStartSec, long periodEndSec) {
         ArrayList<String> texts = loadRecentTexts(accountId, dialogId, 200, periodStartSec, periodEndSec);
         return MglaLocalAiEngine.topicsFromTexts(texts);
-    }
-
-    private static ArrayList<String> generateTopicsGguf(int accountId, long dialogId, long periodStartSec, long periodEndSec, String[] errorOut) {
-        java.io.File model = MglaLocalModelsManager.getLoadedModel(ApplicationLoader.applicationContext);
-        if (model == null) {
-            setGgufError(errorOut, "модель не загружена");
-            return null;
-        }
-        // Сообщения за период для кластеризации — их может быть в разы больше,
-        // чем влезло бы в контекст модели: темы выделяем в Java, а модель
-        // получает лишь компактные группы и называет их.
-        ArrayList<String> texts = loadRecentTexts(accountId, dialogId, 500, periodStartSec, periodEndSec);
-        if (texts.isEmpty()) {
-            setGgufError(errorOut, "нет текстовых сообщений");
-            return null;
-        }
-        ArrayList<TopicCluster> clusters = clusterTexts(texts);
-        if (clusters.isEmpty()) {
-            setGgufError(errorOut, "темы не выделились");
-            return null;
-        }
-        String prompt = buildNamingPrompt(clusters);
-        FileLog.d("MglaChatDna: GGUF naming promptChars=" + prompt.length() + " model=" + model.getName());
-        final ProgressSink sink = progressSink;
-        if (sink != null) {
-            MglaGgufRuntime.setProgressListener((generated, max, text) ->
-                AndroidUtilities.runOnUIThread(() -> sink.onProgress(generated, max, text)));
-        }
-        String raw;
-        try {
-            raw = MglaGgufRuntime.generateTopics(model, prompt);
-        } finally {
-            MglaGgufRuntime.setProgressListener(null);
-        }
-        ArrayList<String> topics = finalizeTopics(parseTopicLines(cleanModelText(raw)), clusters);
-        if (topics.isEmpty()) {
-            setGgufError(errorOut, "ответ модели не распознан");
-        }
-        return topics;
-    }
-
-    /** Группа похожих сообщений: словарь, частоты слов, пара примеров. */
-    private static class TopicCluster {
-        final HashSet<String> vocab = new HashSet<>();
-        final HashMap<String, Integer> wordFreq = new HashMap<>();
-        final ArrayList<String> examples = new ArrayList<>();
-        int messages;
-        int wordsTotal;
-
-        void add(String message, ArrayList<String> words) {
-            messages++;
-            wordsTotal += words.size();
-            for (String w : words) {
-                Integer c = wordFreq.get(w);
-                wordFreq.put(w, c == null ? 1 : c + 1);
-                vocab.add(w);
-            }
-            if (examples.size() < 2 && message.length() >= 12 && message.length() <= 160) {
-                examples.add(message);
-            }
-        }
-
-        int repeatedWords() {
-            int n = 0;
-            for (int v : wordFreq.values()) {
-                if (v >= 2) n++;
-            }
-            return n;
-        }
-    }
-
-    /** Жадная кластеризация по пересечению значимых слов. */
-    private static ArrayList<TopicCluster> clusterTexts(ArrayList<String> texts) {
-        ArrayList<TopicCluster> clusters = new ArrayList<>();
-        for (String text : texts) {
-            String trimmed = text.trim();
-            ArrayList<String> words = tokenize(trimmed);
-            if (words.isEmpty()) {
-                continue;
-            }
-            HashSet<String> uniq = new HashSet<>(words);
-            TopicCluster best = null;
-            double bestScore = 0;
-            for (TopicCluster c : clusters) {
-                int common = 0;
-                for (String w : uniq) {
-                    if (c.vocab.contains(w)) {
-                        common++;
-                    }
-                }
-                double score = common / (double) Math.min(uniq.size(), c.vocab.size());
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = c;
-                }
-            }
-            if (best == null || bestScore < 0.34) {
-                best = new TopicCluster();
-                clusters.add(best);
-            }
-            best.add(trimmed, words);
-        }
-        Collections.sort(clusters, (a, b) -> Integer.compare(b.wordsTotal, a.wordsTotal));
-        // Осмысленные темы: с повторяющимися словами или несколькими сообщениями.
-        ArrayList<TopicCluster> meaningful = new ArrayList<>();
-        for (TopicCluster c : clusters) {
-            if (c.messages >= 2 || c.repeatedWords() >= 3) {
-                meaningful.add(c);
-            }
-            if (meaningful.size() >= 6) {
-                break;
-            }
-        }
-        if (meaningful.isEmpty() && !clusters.isEmpty()) {
-            meaningful.add(clusters.get(0));
-        }
-        return meaningful;
-    }
-
-    private static String topWords(TopicCluster cluster, int limit) {
-        ArrayList<HashMap.Entry<String, Integer>> sorted = new ArrayList<>(cluster.wordFreq.entrySet());
-        Collections.sort(sorted, (a, b) -> b.getValue() - a.getValue());
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < Math.min(limit, sorted.size()); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(sorted.get(i).getKey());
-        }
-        return sb.toString();
-    }
-
-    /** Компактный промпт: модель только называет готовые группы, а не читает переписку. */
-    private static String buildNamingPrompt(ArrayList<TopicCluster> clusters) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Темы переписки. Для каждой группы напиши короткое название — описание из 2-4 слов.\n\n");
-        sb.append("Пример:\n");
-        sb.append("Группа 1: слова: работа, проект, дедлайн, сдача; пример: \u00abнадо доделать проект к пятнице\u00bb\n");
-        sb.append("Название: Работа над проектом и сроки\n");
-        sb.append("Группа 2: слова: отпуск, билеты, море; пример: \u00abкупили билеты в сочи\u00bb\n");
-        sb.append("Название: Планирование отпуска и поездки\n\n");
-        sb.append("Теперь твои группы:\n");
-        int n = Math.min(3, clusters.size());
-        for (int i = 0; i < n; i++) {
-            TopicCluster c = clusters.get(i);
-            sb.append("Группа ").append(i + 1).append(": слова: ").append(topWords(c, 6));
-            if (!c.examples.isEmpty()) {
-                String example = c.examples.get(0).replace('\n', ' ');
-                if (example.length() > 80) {
-                    example = example.substring(0, 80);
-                }
-                sb.append("; пример: \u00ab").append(example).append('\u00bb');
-            }
-            sb.append('\n');
-        }
-        return sb.toString();
-    }
-
-    /** Названия от модели; слоты, где модель ответила мусором, закрываем словами кластера. */
-    private static ArrayList<String> finalizeTopics(ArrayList<String> parsed, ArrayList<TopicCluster> clusters) {
-        ArrayList<String> topics = new ArrayList<>();
-        int n = Math.min(3, clusters.size());
-        for (int i = 0; i < n; i++) {
-            String t = i < parsed.size() ? sanitizeTopic(parsed.get(i)) : null;
-            if (!isValidTopic(t)) {
-                t = topWords(clusters.get(i), 3).replace(", ", " \u2022 ");
-            }
-            topics.add(t);
-        }
-        return topics;
-    }
-
-    private static String cleanModelText(String raw) {
-        return raw == null ? "" : raw.replace("*", "");
-    }
-
-    private static String sanitizeTopic(String t) {
-        if (t == null) {
-            return null;
-        }
-        t = t.replace("*", "").replace("\u00ab", "").replace("\u00bb", "").replace("\"", "").trim();
-        while (t.endsWith(".") || t.endsWith(":") || t.endsWith(",")) {
-            t = t.substring(0, t.length() - 1).trim();
-        }
-        return t;
-    }
-
-    private static boolean isValidTopic(String t) {
-        if (t == null || t.length() < 3 || t.length() > 40) {
-            return false;
-        }
-        String lower = t.toLowerCase(Locale.ROOT);
-        String[] meta = {"вот ", "ответ", "вопрос", "тема", "название", "группа", "конечно", "контекст", "примеры", "пример"};
-        for (String m : meta) {
-            if (lower.startsWith(m)) {
-                return false;
-            }
-        }
-        int words = lower.split("\\s+").length;
-        return words >= 2 && words <= 6;
-    }
-
-    private static void setGgufError(String[] errorOut, String reason) {
-        FileLog.e("MglaChatDna: GGUF — " + reason);
-        if (errorOut != null && errorOut.length > 0) {
-            errorOut[0] = reason;
-        }
     }
 
     private static ArrayList<String> loadRecentTexts(int accountId, long dialogId, int limit, long periodStartSec, long periodEndSec) {

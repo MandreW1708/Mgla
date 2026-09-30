@@ -48,7 +48,7 @@ import java.util.Comparator;
 import java.util.List;
 
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-public class Camera2Session {
+public class Camera2Session implements RoundCameraSession {
 
     private boolean isError;
     private boolean isSuccess;

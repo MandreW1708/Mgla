@@ -98,7 +98,7 @@ public class MglaLocalModelsActivity extends BaseFragment {
 
     private static final Pattern WEIGHT_PATTERN = Pattern.compile("(?i)(\\d+(?:\\.\\d+)?)\\s?([mb])(?![a-z])");
     /** Модели тяжелее этого веса в поиске скрываются — не поместятся в память. */
-    private static final long MAX_MODEL_BYTES = 8L * 1024 * 1024 * 1024;
+    private static final long MAX_MODEL_BYTES = 2L * 1024 * 1024 * 1024;
 
     public MglaLocalModelsActivity() {
         this(null);
@@ -562,7 +562,7 @@ public class MglaLocalModelsActivity extends BaseFragment {
                     break;
                 case ROW_NOTE:
                     TextInfoPrivacyCell note = new TextInfoPrivacyCell(context);
-                    note.setText("В выдаче скрываются модели тяжелее 8 ГБ — они не поместятся в память устройства.");
+                    note.setText("В выдаче скрываются модели тяжелее 2 ГБ — они не поместятся в память устройства.");
                     view = note;
                     break;
                 case ROW_SEARCH:

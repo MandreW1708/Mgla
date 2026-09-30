@@ -7,9 +7,6 @@ import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraManager;
-import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -62,53 +59,14 @@ public class MglaCameraSettingsActivity extends BaseFragment {
         LinearLayout advancedBlock = createBlock(context, "Расширенные настройки");
         advancedBlock.setVisibility(SharedConfig.cameraApi == 2 ? View.VISIBLE : View.GONE);
 
-        TextCheckCell seamlessCell = new TextCheckCell(context);
-        seamlessCell.setBackground(null);
-        seamlessCell.setTextAndCheck("Бесшовное переключение", SharedConfig.cameraXSeamlessSwitch, true);
-        seamlessCell.setOnClickListener(v -> {
-            SharedConfig.toggleCameraXSeamlessSwitch();
-            seamlessCell.setChecked(SharedConfig.cameraXSeamlessSwitch);
-        });
-        advancedBlock.addView(seamlessCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
         TextCheckCell fps60Cell = new TextCheckCell(context);
         fps60Cell.setBackground(null);
-        fps60Cell.setTextAndCheck("Расширенный диапазон фпс (60 фпс)", SharedConfig.cameraX60Fps, true);
+        fps60Cell.setTextAndCheck("60 кадров в секунду при записи", SharedConfig.cameraX60Fps, false);
         fps60Cell.setOnClickListener(v -> {
             SharedConfig.toggleCameraX60Fps();
             fps60Cell.setChecked(SharedConfig.cameraX60Fps);
         });
         advancedBlock.addView(fps60Cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        TextCheckCell stabilizationCell = new TextCheckCell(context);
-        stabilizationCell.setBackground(null);
-        stabilizationCell.setTextAndCheck("Стабилизация", SharedConfig.cameraXStabilization, true);
-        stabilizationCell.setOnClickListener(v -> {
-            SharedConfig.toggleCameraXStabilization();
-            stabilizationCell.setChecked(SharedConfig.cameraXStabilization);
-        });
-        advancedBlock.addView(stabilizationCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        TextCheckCell mirrorCell = new TextCheckCell(context);
-        mirrorCell.setBackground(null);
-        mirrorCell.setTextAndCheck("Зеркальный режим", SharedConfig.cameraXMirror, true);
-        mirrorCell.setOnClickListener(v -> {
-            SharedConfig.toggleCameraXMirror();
-            mirrorCell.setChecked(SharedConfig.cameraXMirror);
-        });
-        advancedBlock.addView(mirrorCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        boolean hasWideAngle = hasWideAngleCamera(context);
-        if (hasWideAngle) {
-            TextCheckCell wideAngleCell = new TextCheckCell(context);
-            wideAngleCell.setBackground(null);
-            wideAngleCell.setTextAndCheck("Начинать с широкого угла", SharedConfig.cameraXStartWide, false);
-            wideAngleCell.setOnClickListener(v -> {
-                SharedConfig.toggleCameraXStartWide();
-                wideAngleCell.setChecked(SharedConfig.cameraXStartWide);
-            });
-            advancedBlock.addView(wideAngleCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        }
 
         HeaderCell apiHeader = new HeaderCell(context, 22);
         apiHeader.setBackground(null);
@@ -142,32 +100,6 @@ public class MglaCameraSettingsActivity extends BaseFragment {
 
         fragmentView = rootLayout;
         return fragmentView;
-    }
-
-    private boolean hasWideAngleCamera(Context context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try {
-                CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-                if (manager == null) return false;
-                for (String id : manager.getCameraIdList()) {
-                    CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
-                    Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                    if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
-                        float[] focalLengths = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
-                        if (focalLengths != null) {
-                            for (float focal : focalLengths) {
-                                if (focal < 3.0f) {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-                return manager.getCameraIdList().length > 2;
-            } catch (Throwable ignored) {
-            }
-        }
-        return false;
     }
 
     private ApiOptionView createApiOption(Context context, int colorTop, int colorBottom, String badge, String title, String subtitle, boolean recommended) {
