@@ -24,7 +24,6 @@ import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
-import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
@@ -95,10 +94,9 @@ public class MglaSettingsActivity extends BaseFragment {
 
         LinearLayout extraBlock = createBlock(context, "Дополнительно");
         addMenuItem(extraBlock, () -> openTelegramUsername(BuildVars.MGLA_DEV_CHANNEL_USERNAME),
-            IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_channel, "Канал разработчика",
-            "@" + BuildVars.MGLA_DEV_CHANNEL_USERNAME);
+            IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_channel, "Канал разработчика");
         extraBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(extraBlock, () -> openSupportChat(),
+        addMenuItem(extraBlock, null,
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Поддержка");
         rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
 
@@ -159,8 +157,12 @@ public class MglaSettingsActivity extends BaseFragment {
     private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value, boolean showBetaBadge) {
         SettingCell cell = new SettingCell(getContext(), null);
         cell.set(iconColorTop, iconColorBottom, icon, title, null, value, false, showBetaBadge);
-        cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
-        cell.setOnClickListener(v -> onClick.run());
+        if (onClick != null) {
+            cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
+            cell.setOnClickListener(v -> onClick.run());
+        } else {
+            cell.setAlpha(0.4f);
+        }
         block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         return cell;
     }
@@ -170,13 +172,6 @@ public class MglaSettingsActivity extends BaseFragment {
             return;
         }
         Browser.openUrl(getParentActivity(), "https://t.me/" + username);
-    }
-
-    private void openSupportChat() {
-        if (getParentActivity() == null || TextUtils.isEmpty(BuildVars.MGLA_SUPPORT_USERNAME)) {
-            return;
-        }
-        MessagesController.getInstance(currentAccount).openByUserName(BuildVars.MGLA_SUPPORT_USERNAME, this, 1);
     }
 
     public static class SettingCell extends LinearLayout implements Theme.Colorable {

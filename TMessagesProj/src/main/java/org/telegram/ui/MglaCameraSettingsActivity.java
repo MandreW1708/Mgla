@@ -87,21 +87,22 @@ public class MglaCameraSettingsActivity extends BaseFragment {
         LinearLayout apiBlock = createBlock(context);
         rootLayout.addView(apiBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        apiBlock.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 18, 20, 18));
+
+        // столбец кнопок 1 / 2 / X с заголовком над ними
+        LinearLayout buttonColumn = new LinearLayout(context);
+        buttonColumn.setOrientation(LinearLayout.VERTICAL);
+        row.addView(buttonColumn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
         TextView titleView = new TextView(context);
         titleView.setText("API");
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
         titleView.setTypeface(AndroidUtilities.bold());
         titleView.setTextColor(textColor);
-        apiBlock.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 20, 18, 20, 2));
-
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        apiBlock.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 10, 20, 18));
-
-        // столбец кнопок 1 / 2 / X
-        LinearLayout buttonColumn = new LinearLayout(context);
-        buttonColumn.setOrientation(LinearLayout.VERTICAL);
-        row.addView(buttonColumn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        titleView.setGravity(Gravity.CENTER);
+        buttonColumn.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
 
         ApiButton[] buttons = new ApiButton[3];
         String[] labels = {"1", "2", "X"};

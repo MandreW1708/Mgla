@@ -149,7 +149,7 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
 
         TextCheckCell predictiveBackCell = new TextCheckCell(context);
         predictiveBackCell.setBackground(null);
-        predictiveBackCell.setTextAndCheck("Новая predective back анимация", MglaGlassConfig.isMd3PredictiveBackEnabled(), false);
+        predictiveBackCell.setTextAndCheck("В стиле MD3", MglaGlassConfig.isMd3PredictiveBackEnabled(), false);
         predictiveBackCell.setOnClickListener(v -> {
             boolean newVal = !MglaGlassConfig.isMd3PredictiveBackEnabled();
             MglaGlassConfig.setMd3PredictiveBackEnabled(newVal);
