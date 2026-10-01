@@ -22,7 +22,6 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Camera;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -688,7 +687,6 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private float[] radii = new float[8];
     private final RectF predictiveBackShadowRect = new RectF();
     private final Paint predictiveBackShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Camera predictiveBackCamera = new Camera();
     private final Matrix predictiveBackMatrix = new Matrix();
 
     public ActionBarLayout(Context context, boolean main) {
@@ -1140,7 +1138,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
                         sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
                     }
-                    final float targetRadius = dpf2(32);
+                    final float targetRadius = dpf2(28);
                     radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, targetRadius), p);
                     radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, targetRadius), p);
                     radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, targetRadius), p);
@@ -1221,7 +1219,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
                         sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
                     }
-                    final float deepRadius = dpf2(32);
+                    final float deepRadius = dpf2(28);
                     radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, deepRadius), 1f - p);
                     radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, deepRadius), 1f - p);
                     radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, deepRadius), 1f - p);
@@ -1282,10 +1280,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 float opacity;
                 int maxAlpha;
                 if (spatialBack) {
-                    // Dim softens as previous screen comes forward from depth
+                    // Subtle M3 scrim — adds depth without darkening the previous screen much
                     float p = Math.min(1f, getSpatialBackProgress());
-                    opacity = lerp(0.80f, 0.0f, p);
-                    maxAlpha = 200;
+                    opacity = lerp(1.0f, 0.0f, p);
+                    maxAlpha = 44;
                 } else {
                     opacity = MathUtils.clamp(widthOffset / (float) width, 0, 0.8f);
                     maxAlpha = 120;
@@ -1615,7 +1613,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private boolean predictiveBackLeft;
 
     private float predictivePeekPx() {
-        return dpf2(predictiveBackEnhanced ? 120 : 56);
+        return dpf2(predictiveBackEnhanced ? 90 : 56);
     }
 
     private float getSpatialBackProgress() {
@@ -1636,75 +1634,30 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         return spatialAnimProgress;
     }
 
-    /** Previous screen rises forward from Z-depth (Carousel). */
+    /** Previous screen is revealed flat — Material 3 look, no 3D carousel. */
     private void applySpatialBackTransform(Canvas canvas, RectF rect) {
-        final float raw = getSpatialBackProgress();
-        final float p = Math.min(1f, raw);
-        final float cx = rect.centerX();
-        final float cy = rect.centerY();
-        final float ease = p; // Linearly tracks finger for smooth 60fps tracking
-        final float dir = predictiveBackLeft ? 1f : -1f;
-        
-        // Starts at -60 degrees (off to the side), approaches 0 degrees (facing user)
-        final float angle = dir * (60.0f * ease - 60.0f); 
-        final float radius = getWidth();
-        
-        predictiveBackCamera.save();
-        predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 2.5f);
-        
-        predictiveBackCamera.translate(0, 0, radius);
-        predictiveBackCamera.rotateY(angle);
-        predictiveBackCamera.translate(0, 0, -radius);
-        
-        predictiveBackCamera.getMatrix(predictiveBackMatrix);
-        predictiveBackCamera.restore();
-
-        predictiveBackMatrix.preTranslate(-cx, -cy);
-        predictiveBackMatrix.postTranslate(cx, cy);
-        
-        // A slight overall scale so the carousel is slightly zoomed out during transition
-        final float overallScale = lerp(0.85f, 1.0f, ease);
-        predictiveBackMatrix.postScale(overallScale, overallScale, cx, cy);
-
-        canvas.concat(predictiveBackMatrix);
+        // M3 predictive back: the previous screen stays still, fully visible.
     }
 
-    /** Active screen leaves as a floating card with perspective (Carousel). */
+    /** Active screen leaves as a shrinking rounded card (Material 3 predictive back). */
     private void applySpatialFrontTransform(Canvas canvas, RectF rect) {
         final float raw = getSpatialBackProgress();
         final float p = Math.min(1f, raw);
         final float commit = Math.max(0f, raw - 1f);
         final float cx = rect.centerX();
         final float cy = rect.centerY();
-        final float dir = predictiveBackLeft ? 1f : -1f;
-        final float ease = p; // Linearly tracks finger for smooth 60fps tracking
 
         // No alpha fading so the card doesn't disappear in mid-air
         containerView.setAlpha(1.0f);
 
-        // Starts at 0 degrees (facing user), goes to +60 degrees
-        final float angle = dir * (60.0f * ease + commit * 30.0f);
-        final float radius = getWidth();
-
-        predictiveBackCamera.save();
-        predictiveBackCamera.setLocation(0, 0, -Math.max(getWidth(), getHeight()) * 2.5f);
-        
-        predictiveBackCamera.translate(0, 0, radius);
-        predictiveBackCamera.rotateY(angle);
-        predictiveBackCamera.translate(0, 0, -radius);
-        
-        // Adding the tilt from Y finger position (like tilting the whole cylinder slightly)
-        predictiveBackCamera.rotateX(Utilities.clamp((predictiveBackY - cy) / Math.max(1f, getHeight()), -0.5f, 0.5f) * -5.0f * ease);
-        
-        predictiveBackCamera.getMatrix(predictiveBackMatrix);
-        predictiveBackCamera.restore();
-
-        predictiveBackMatrix.preTranslate(-cx, -cy);
-        predictiveBackMatrix.postTranslate(cx, cy);
-        
-        // Shrink slightly to avoid clipping near screen edges and show off 3D
-        final float scale = lerp(1.0f, 0.85f, ease) * lerp(1f, 0.90f, commit);
+        // M3: flat card that subtly zooms out — no 3D rotation
+        final float scale = lerp(1.0f, 0.93f, p) * lerp(1f, 0.96f, commit);
+        predictiveBackMatrix.reset();
         predictiveBackMatrix.postScale(scale, scale, cx, cy);
+
+        // The card tracks the finger; a swipe from the right edge mirrors the direction
+        final float tx = innerTranslationX * (predictiveBackLeft ? 1f : -1f);
+        predictiveBackMatrix.postTranslate(tx, 0);
 
         canvas.concat(predictiveBackMatrix);
     }
@@ -1822,7 +1775,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             int duration = Math.max((int) (150.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? (enhanced ? 180 : 260) : 50);
             if (enhanced) {
                 // Fly away smoothly completely off-screen
-                duration = Math.max(280, (int) (280 + 120 * (2.0f - spatialFrom)));
+                duration = 300;
             }
             if (!overrideTransition) {
                 if (enhanced) {
@@ -1846,7 +1799,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             distToMove = x;
             int duration = Math.max((int) ((enhanced ? 180.0f : 240.0f) / containerView.getMeasuredWidth() * Math.max(distToMove, 1)), newBackTransitions() ? (enhanced ? 180 : 240) : 100);
             if (enhanced) {
-                duration = Math.max(120, (int) (160 * Math.max(0.15f, spatialFrom)));
+                duration = Math.max(140, (int) (200 * Math.max(0.15f, spatialFrom)));
             }
             if (!overrideTransition) {
                 if (enhanced) {
