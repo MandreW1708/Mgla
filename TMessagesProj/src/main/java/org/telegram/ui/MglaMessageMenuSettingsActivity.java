@@ -3,7 +3,6 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
-import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -18,7 +17,6 @@ import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
@@ -128,21 +126,7 @@ public class MglaMessageMenuSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {

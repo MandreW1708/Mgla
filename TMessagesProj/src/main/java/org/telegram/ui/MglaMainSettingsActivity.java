@@ -4,7 +4,6 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -23,7 +22,6 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -87,7 +85,7 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         TextCheckCell proxyCell = new TextCheckCell(context);
         proxyCell.setBackground(null);
-        proxyCell.setTextAndCheck("Прокси в шапке", MglaHeaderConfig.isProxyInHeader(), true);
+        proxyCell.setTextAndCheck("Прокси в шапке", MglaHeaderConfig.isProxyInHeader(), false);
         proxyCell.setOnClickListener(v -> {
             boolean newVal = !MglaHeaderConfig.isProxyInHeader();
             MglaHeaderConfig.setProxyInHeader(newVal);
@@ -95,9 +93,11 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         });
         block.addView(proxyCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        block.addView(MglaUi.createDivider(context));
+
         TextCheckCell downloadsHeaderCell = new TextCheckCell(context);
         downloadsHeaderCell.setBackground(null);
-        downloadsHeaderCell.setTextAndCheck("Загрузки в шапке", MglaHeaderConfig.isDownloadsInHeader(), true);
+        downloadsHeaderCell.setTextAndCheck("Загрузки в шапке", MglaHeaderConfig.isDownloadsInHeader(), false);
         downloadsHeaderCell.setOnClickListener(v -> {
             boolean newVal = !MglaHeaderConfig.isDownloadsInHeader();
             MglaHeaderConfig.setDownloadsInHeader(newVal);
@@ -105,15 +105,19 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         });
         block.addView(downloadsHeaderCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        block.addView(MglaUi.createDivider(context));
+
         TextCheckCell hapticCell = new TextCheckCell(context);
         hapticCell.setBackground(null);
-        hapticCell.setTextAndCheck("Виброотклик", prefs.getBoolean("haptic_enabled", false), true);
+        hapticCell.setTextAndCheck("Виброотклик", prefs.getBoolean("haptic_enabled", false), false);
         hapticCell.setOnClickListener(v -> {
             boolean newVal = !prefs.getBoolean("haptic_enabled", false);
             prefs.edit().putBoolean("haptic_enabled", newVal).apply();
             hapticCell.setChecked(newVal);
         });
         block.addView(hapticCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        block.addView(MglaUi.createDivider(context));
 
         TextView[] strengthValueRef = new TextView[1];
         addSelectRow(block, "Сила вибрации", MglaHapticManager.STRENGTH_NAMES[MglaHapticManager.getStrength()], () -> {
@@ -126,7 +130,7 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         TextCheckCell lastOnlineCell = new TextCheckCell(context);
         lastOnlineCell.setBackground(null);
-        lastOnlineCell.setTextAndCheck("Последний онлайн", MglaSpyConfig.isLastOnlineEnabled(), true);
+        lastOnlineCell.setTextAndCheck("Последний онлайн", MglaSpyConfig.isLastOnlineEnabled(), false);
         lastOnlineCell.setOnClickListener(v -> {
             boolean newVal = !MglaSpyConfig.isLastOnlineEnabled();
             MglaSpyConfig.setLastOnlineEnabled(newVal);
@@ -134,11 +138,13 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         });
         spyBlock.addView(lastOnlineCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        spyBlock.addView(MglaUi.createDivider(context));
+
         final TextCheckCell[] deletedSubCells = new TextCheckCell[4];
 
         TextCheckCell saveDeletedCell = new TextCheckCell(context);
         saveDeletedCell.setBackground(null);
-        saveDeletedCell.setTextAndCheck("Сохранение удаленных", MglaSpyConfig.isSaveDeletedMessagesEnabled(), true);
+        saveDeletedCell.setTextAndCheck("Сохранение удаленных", MglaSpyConfig.isSaveDeletedMessagesEnabled(), false);
         saveDeletedCell.setOnClickListener(v -> {
             boolean newVal = !MglaSpyConfig.isSaveDeletedMessagesEnabled();
             MglaSpyConfig.setSaveDeletedMessagesEnabled(newVal);
@@ -147,19 +153,27 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         });
         spyBlock.addView(saveDeletedCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        spyBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        spyBlock.addView(createIndentedDivider(context));
 
         deletedSubCells[0] = createDeletedSubCell(context, "Личные чаты", MglaSpyConfig.isSaveDeletedForPrivateEnabled(), MglaSpyConfig::setSaveDeletedForPrivateEnabled);
         spyBlock.addView(deletedSubCells[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        spyBlock.addView(createIndentedDivider(context));
+
         deletedSubCells[1] = createDeletedSubCell(context, "Группы до 100 человек", MglaSpyConfig.isSaveDeletedForGroupsSmallEnabled(), MglaSpyConfig::setSaveDeletedForGroupsSmallEnabled);
         spyBlock.addView(deletedSubCells[1], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        spyBlock.addView(createIndentedDivider(context));
 
         deletedSubCells[2] = createDeletedSubCell(context, "Каналы", MglaSpyConfig.isSaveDeletedForChannelsEnabled(), MglaSpyConfig::setSaveDeletedForChannelsEnabled);
         spyBlock.addView(deletedSubCells[2], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        spyBlock.addView(createIndentedDivider(context));
+
         deletedSubCells[3] = createDeletedSubCell(context, "Группы более 100 человек", MglaSpyConfig.isSaveDeletedForGroupsLargeEnabled(), MglaSpyConfig::setSaveDeletedForGroupsLargeEnabled);
         spyBlock.addView(deletedSubCells[3], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        spyBlock.addView(MglaUi.createDivider(context));
 
         updateDeletedSubCellsState(deletedSubCells, MglaSpyConfig.isSaveDeletedMessagesEnabled());
 
@@ -210,28 +224,11 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     private View createDivider(Context context) {
-        View divider = new View(context);
-        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        divider.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 21, 0, 21, 0));
-        return divider;
+        return MglaUi.createDivider(context);
     }
 
     private void showTransferModeDialog(boolean download, TextView valueView) {
@@ -272,7 +269,7 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         row.setPadding(dp(21), 0, dp(18), 0);
         row.setMinimumHeight(dp(50));
         row.setClickable(true);
-        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 0));
+        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
         row.setOnClickListener(v -> onClick.run());
 
         TextView titleView = new TextView(getContext());
@@ -301,7 +298,7 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
     private TextCheckCell createDeletedSubCell(Context context, String title, boolean checked, MglaDeletedSetter setter) {
         TextCheckCell cell = new TextCheckCell(context);
         cell.setBackground(null);
-        cell.setTextAndCheck(title, checked, true);
+        cell.setTextAndCheck(title, checked, false);
         cell.setPadding(dp(36), cell.getPaddingTop(), cell.getPaddingRight(), cell.getPaddingBottom());
         cell.setOnClickListener(v -> {
             if (!MglaSpyConfig.isSaveDeletedMessagesEnabled()) return;
@@ -315,7 +312,7 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
     private View createIndentedDivider(Context context) {
         View divider = new View(context);
         divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        divider.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 36, 0, 0, 0));
+        divider.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 36, 0, 36, 0));
         return divider;
     }
 

@@ -26,7 +26,6 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
@@ -81,7 +80,7 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         menuCell.setOnClickListener(v -> presentFragment(new MglaMessageMenuSettingsActivity()));
         basicBlock.addView(menuCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        basicBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        basicBlock.addView(MglaUi.createDivider(context));
 
         TextCheckCell timeCell = new TextCheckCell(context);
         timeCell.setBackground(null);
@@ -101,7 +100,7 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         TextView[] recentValueRef = new TextView[1];
         addSelectRow(chatsBlock, "Количество недавних стикеров", String.valueOf(MglaChatsConfig.getRecentStickersLimit()), () -> showRecentStickersDialog(recentValueRef[0]), recentValueRef);
 
-        chatsBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        chatsBlock.addView(MglaUi.createDivider(context));
 
         TextCheckCell stickerTimeCell = new TextCheckCell(context);
         stickerTimeCell.setBackground(null);
@@ -122,13 +121,13 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         // Keep a small footer below both bubbles instead.
         doubleTapBlock.addView(createDoubleTapPreview(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        doubleTapBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        doubleTapBlock.addView(MglaUi.createDivider(context));
 
         TextView[] outValueRef = new TextView[1];
         addSelectRow(doubleTapBlock, "Исходящее сообщение", MglaChatsConfig.getDoubleTapActionTitle(MglaChatsConfig.getDoubleTapAction(true)),
             () -> showDoubleTapActionDialog(true, outValueRef[0]), outValueRef);
 
-        doubleTapBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        doubleTapBlock.addView(MglaUi.createDivider(context));
 
         TextView[] inValueRef = new TextView[1];
         addSelectRow(doubleTapBlock, "Входящее сообщение", MglaChatsConfig.getDoubleTapActionTitle(MglaChatsConfig.getDoubleTapAction(false)),
@@ -142,11 +141,11 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         addSelectRow(chatOptionsBlock, "Нижняя кнопка", MglaChatsConfig.getBottomButtonModeTitle(MglaChatsConfig.getBottomButtonMode()),
             () -> showBottomButtonDialog(bottomButtonValueRef[0]), bottomButtonValueRef);
 
-        chatOptionsBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        chatOptionsBlock.addView(MglaUi.createDivider(context));
 
         TextCheckCell hideKeyboardCell = new TextCheckCell(context);
         hideKeyboardCell.setBackground(null);
-        hideKeyboardCell.setTextAndCheck("Скрывать клавиатуру при прокрутке", MglaChatsConfig.isHideKeyboardOnScroll(), true);
+        hideKeyboardCell.setTextAndCheck("Скрывать клавиатуру при прокрутке", MglaChatsConfig.isHideKeyboardOnScroll(), false);
         hideKeyboardCell.setOnClickListener(v -> {
             boolean newVal = !MglaChatsConfig.isHideKeyboardOnScroll();
             MglaChatsConfig.setHideKeyboardOnScroll(newVal);
@@ -154,7 +153,7 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         });
         chatOptionsBlock.addView(hideKeyboardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        chatOptionsBlock.addView(createIndentedDivider(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        chatOptionsBlock.addView(MglaUi.createDivider(context));
 
         TextCheckCell commaCell = new TextCheckCell(context);
         commaCell.setBackground(null);
@@ -173,31 +172,7 @@ public class MglaChatsSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
-    }
-
-    private View createIndentedDivider(Context context) {
-        LinearLayout wrap = new LinearLayout(context);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(dp(21), 0, dp(21), 0);
-        View divider = new View(context);
-        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        wrap.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1));
-        return wrap;
+        return MglaUi.createBlock(context, title);
     }
 
     /**

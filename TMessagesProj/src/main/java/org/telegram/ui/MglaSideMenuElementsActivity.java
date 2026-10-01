@@ -5,7 +5,6 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.content.Context;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
-import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -25,7 +24,6 @@ import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
@@ -111,8 +109,6 @@ public class MglaSideMenuElementsActivity extends BaseFragment {
                 }
                 Collections.swap(visibleItems, from, to);
                 visibleAdapter.notifyItemMoved(from, to);
-                visibleAdapter.notifyItemChanged(Math.min(from, to));
-                visibleAdapter.notifyItemChanged(Math.max(from, to));
                 saveFullOrder();
                 return true;
             }
@@ -129,9 +125,6 @@ public class MglaSideMenuElementsActivity extends BaseFragment {
             @Override
             public void clearView(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
                 super.clearView(recyclerView, viewHolder);
-                if (visibleAdapter != null) {
-                    visibleAdapter.notifyDataSetChanged();
-                }
                 viewHolder.itemView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
             }
         });
@@ -142,12 +135,15 @@ public class MglaSideMenuElementsActivity extends BaseFragment {
             if (position < 0 || position >= visibleItems.size()) {
                 return false;
             }
-            RecyclerView.ViewHolder holder = visibleList.findViewHolderForAdapterPosition(position);
+            RecyclerView.ViewHolder holder = visibleList.findContainingViewHolder(view);
             if (holder == null) {
-                holder = visibleList.findContainingViewHolder(view);
+                holder = visibleList.findViewHolderForAdapterPosition(position);
             }
             if (holder != null && visibleTouchHelper != null) {
                 visibleTouchHelper.startDrag(holder);
+                // ItemTouchHelper перехватит события, и ACTION_UP сюда не придёт —
+                // без сброса залипнет нажатое состояние и currentChildView.
+                visibleList.cancelClickRunnables(true);
                 return true;
             }
             return false;
@@ -227,21 +223,7 @@ public class MglaSideMenuElementsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     private void setupItemView(FrameLayout container, int item) {
