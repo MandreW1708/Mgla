@@ -2737,13 +2737,9 @@ public class ChatActivityEnterView extends FrameLayout implements
         if (aiEditorEnabled) {
             aiEditorButton = new ImageView(context);
             aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
-            aiEditorButton.setImageResource(R.drawable.input_bot2);
+            aiEditorButton.setImageResource(R.drawable.menu_rewrite);
             aiEditorButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
             aiEditorButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector)));
-            int aiBtnPadding = dp(8);
-            aiEditorButton.setPadding(aiBtnPadding, aiBtnPadding, aiBtnPadding, aiBtnPadding);
-            aiEditorButton.setScaleX(0.85f);
-            aiEditorButton.setScaleY(0.85f);
             aiEditorButton.setContentDescription("AI-редактор");
             aiEditorButton.setClickable(true);
             aiEditorButton.setFocusable(true);
@@ -4532,9 +4528,9 @@ public class ChatActivityEnterView extends FrameLayout implements
                 botCommandsMenuContainer.dismiss();
             }
         });
-        messageEditTextContainer.addView(botCommandsMenuButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 28, Gravity.BOTTOM | Gravity.LEFT, 8, 6, 8, 6));
+        messageEditTextContainer.addView(botCommandsMenuButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 28, Gravity.BOTTOM | Gravity.LEFT, 12, 6, 4, 6));
         AndroidUtilities.updateViewVisibilityAnimated(botCommandsMenuButton, false, 1f, false);
-        botCommandsMenuButton.setExpanded(true, false);
+        botCommandsMenuButton.setExpanded(false, false);
     }
 
     private void createBotWebViewButton() {
@@ -4685,13 +4681,14 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     private void checkBotMenu() {
-        final boolean shouldBeExpanded = (messageEditText == null || TextUtils.isEmpty(messageEditText.getText())) && !(keyboardVisible || waitingForKeyboardOpen || isPopupShowing());
-        if (shouldBeExpanded) {
+        final boolean hasMenu = (messageEditText == null || TextUtils.isEmpty(messageEditText.getText())) && !(keyboardVisible || waitingForKeyboardOpen || isPopupShowing());
+        if (hasMenu) {
             createBotCommandsMenuButton();
         }
         if (botCommandsMenuButton != null) {
             boolean wasExpanded = botCommandsMenuButton.expanded;
-            botCommandsMenuButton.setExpanded(shouldBeExpanded, true);
+            // Mgla: кнопка mini app всегда свёрнута — только значок, без текста
+            botCommandsMenuButton.setExpanded(false, true);
             if (wasExpanded != botCommandsMenuButton.expanded) {
                 beginDelayedTransition();
             }
