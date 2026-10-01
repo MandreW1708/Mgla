@@ -34,21 +34,22 @@ public class MglaAiSettingsActivity extends BaseFragment {
 
     private static final int ROW_AI_ENABLED = 0;
     private static final int ROW_SHADOW_1 = 1;
-    private static final int ROW_AI_SUMMARY = 2;
-    private static final int ROW_AI_RETELL = 3;
-    private static final int ROW_AI_EDITOR = 4;
-    private static final int ROW_AI_EDITOR_LIMIT = 5;
-    private static final int ROW_SHADOW_2 = 6;
-    private static final int ROW_AI_TRANSCRIBE = 7;
-    private static final int ROW_SHADOW_3 = 8;
-    private static final int ROW_PROVIDER_HEADER = 9;
-    private static final int ROW_PROVIDER_BASIC = 10;
-    private static final int ROW_PROVIDER_GEMINI = 11;
-    private static final int ROW_SHADOW_4 = 12;
-    private static final int ROW_DNA_HEADER = 13;
-    private static final int ROW_DNA_TOPICS = 14;
-    private static final int ROW_DNA_MODELS = 15;
-    private static final int ROW_COUNT = 16;
+    private static final int ROW_FUNCTIONS_HEADER = 2;
+    private static final int ROW_AI_SUMMARY = 3;
+    private static final int ROW_AI_RETELL = 4;
+    private static final int ROW_AI_EDITOR = 5;
+    private static final int ROW_AI_EDITOR_LIMIT = 6;
+    private static final int ROW_SHADOW_2 = 7;
+    private static final int ROW_AI_TRANSCRIBE = 8;
+    private static final int ROW_SHADOW_3 = 9;
+    private static final int ROW_PROVIDER_HEADER = 10;
+    private static final int ROW_PROVIDER_BASIC = 11;
+    private static final int ROW_PROVIDER_GEMINI = 12;
+    private static final int ROW_SHADOW_4 = 13;
+    private static final int ROW_DNA_HEADER = 14;
+    private static final int ROW_DNA_TOPICS = 15;
+    private static final int ROW_DNA_MODELS = 16;
+    private static final int ROW_COUNT = 17;
 
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_TEXT = 1;
@@ -169,7 +170,11 @@ public class MglaAiSettingsActivity extends BaseFragment {
 
     private String modelSummary() {
         String id = MglaLocalModelsManager.getSelectedModelId();
-        return id.isEmpty() ? "Не выбрана" : id;
+        if (id.isEmpty()) {
+            return "Не выбрана";
+        }
+        // Короткое значение: заголовок пункта должен оставаться целиком.
+        return id.length() > 14 ? id.substring(0, 14) + "…" : id;
     }
 
     @Override
@@ -204,7 +209,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 return VIEW_TYPE_SHADOW;
             } else if (position == ROW_AI_EDITOR_LIMIT || position == ROW_AI_TRANSCRIBE || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS) {
                 return VIEW_TYPE_TEXT;
-            } else if (position == ROW_PROVIDER_HEADER || position == ROW_DNA_HEADER) {
+            } else if (position == ROW_PROVIDER_HEADER || position == ROW_DNA_HEADER || position == ROW_FUNCTIONS_HEADER) {
                 return VIEW_TYPE_HEADER;
             } else if (position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI) {
                 return VIEW_TYPE_RADIO;
@@ -242,7 +247,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 cell.setCanDisable(false);
             } else if (position == ROW_AI_TRANSCRIBE) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setText("ИИ-расшифровка", false);
+                cell.setTextAndIcon("ИИ-расшифровка", R.drawable.msg_arrowright, false);
                 cell.setCanDisable(false);
             } else if (position == ROW_DNA_TOPICS) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
@@ -253,7 +258,13 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 cell.setTextAndValue("Локальные модели", modelSummary(), false);
                 cell.setCanDisable(false);
             } else if (holder.itemView instanceof HeaderCell) {
-                ((HeaderCell) holder.itemView).setText(position == ROW_DNA_HEADER ? "Chat DNA" : "Провайдер AI");
+                String headerText = "Провайдер AI";
+                if (position == ROW_DNA_HEADER) {
+                    headerText = "Chat DNA";
+                } else if (position == ROW_FUNCTIONS_HEADER) {
+                    headerText = "Функции";
+                }
+                ((HeaderCell) holder.itemView).setText(headerText);
             } else if (holder.itemView instanceof RadioCell) {
                 RadioCell cell = (RadioCell) holder.itemView;
                 String provider = prefs.getString("ai_provider", "openrouter");

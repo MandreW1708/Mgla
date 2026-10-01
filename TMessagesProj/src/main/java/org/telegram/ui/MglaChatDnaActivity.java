@@ -7,7 +7,6 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
-import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -24,7 +23,6 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Components.LayoutHelper;
 
 import java.util.ArrayList;
@@ -189,6 +187,9 @@ public class MglaChatDnaActivity extends BaseFragment {
             "🔗 Ссылок"
         };
         for (int i = 0; i < statLabels.length; i++) {
+            if (i > 0) {
+                statsBlock.addView(MglaUi.createDivider(context));
+            }
             statsBlock.addView(createStatRow(context, statLabels[i], i), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         }
         rootLayout.addView(statsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
@@ -355,22 +356,7 @@ public class MglaChatDnaActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        if (title != null) {
-            HeaderCell header = new HeaderCell(context, 22);
-            header.setBackground(null);
-            header.setText(title);
-            block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        }
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     private View createStatRow(Context context, String label, int index) {

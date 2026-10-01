@@ -3,7 +3,6 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
-import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -15,7 +14,6 @@ import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
@@ -55,23 +53,17 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
 
         RadioCell standardCell = new RadioCell(context);
         standardCell.setBackground(null);
-        standardCell.setText("Стандартная", !MglaGlassConfig.isCleanHeaderEnabled(), true);
+        standardCell.setText("Стандартная", !MglaGlassConfig.isCleanHeaderEnabled(), false);
 
         RadioCell cleanCell = new RadioCell(context);
         cleanCell.setBackground(null);
         cleanCell.setText("Чистая", MglaGlassConfig.isCleanHeaderEnabled(), false);
 
         headerStyleBlock.addView(standardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        headerStyleBlock.addView(MglaUi.createDivider(context));
         headerStyleBlock.addView(cleanCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        LinearLayout cleanSettingsBlock = new LinearLayout(context);
-        cleanSettingsBlock.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        cleanSettingsBlock.setBackground(bg);
-        cleanSettingsBlock.setClipToOutline(true);
-        cleanSettingsBlock.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        LinearLayout cleanSettingsBlock = MglaUi.createBlock(context, null);
 
         TextSettingsCell cleanConfigureCell = new TextSettingsCell(context);
         cleanConfigureCell.setBackground(null);
@@ -116,6 +108,8 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
         );
         glassBlock.addView(slideView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        glassBlock.addView(MglaUi.createDivider(context));
+
         TextCheckCell md3SwitchesCell = new TextCheckCell(context);
         md3SwitchesCell.setBackground(null);
         md3SwitchesCell.setTextAndCheck("Переключатели MD3", MglaGlassConfig.isMd3SwitchesEnabled(), false);
@@ -125,6 +119,8 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
             md3SwitchesCell.setChecked(newVal);
         });
         glassBlock.addView(md3SwitchesCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        glassBlock.addView(MglaUi.createDivider(context));
 
         TextCheckCell editedIconCell = new TextCheckCell(context);
         editedIconCell.setBackground(null);
@@ -168,20 +164,6 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 }

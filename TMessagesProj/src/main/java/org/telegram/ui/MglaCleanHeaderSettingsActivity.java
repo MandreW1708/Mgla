@@ -3,7 +3,6 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
-import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.widget.LinearLayout;
 
@@ -12,7 +11,6 @@ import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
@@ -46,15 +44,15 @@ public class MglaCleanHeaderSettingsActivity extends BaseFragment {
 
         TextCheckCell backBtnCell = new TextCheckCell(context);
         backBtnCell.setBackground(null);
-        backBtnCell.setTextAndCheck("Кнопка назад", MglaGlassConfig.isCleanHeaderHideBackBtnEnabled(), true);
+        backBtnCell.setTextAndCheck("Кнопка назад", MglaGlassConfig.isCleanHeaderHideBackBtnEnabled(), false);
 
         TextCheckCell titleBlockCell = new TextCheckCell(context);
         titleBlockCell.setBackground(null);
-        titleBlockCell.setTextAndCheck("Блок с ником", MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled(), true);
+        titleBlockCell.setTextAndCheck("Блок с ником", MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled(), false);
 
         TextCheckCell pinnedBlockCell = new TextCheckCell(context);
         pinnedBlockCell.setBackground(null);
-        pinnedBlockCell.setTextAndCheck("Блок с закрепом", MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled(), true);
+        pinnedBlockCell.setTextAndCheck("Блок с закрепом", MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled(), false);
 
         TextCheckCell translationPanelCell = new TextCheckCell(context);
         translationPanelCell.setBackground(null);
@@ -105,8 +103,11 @@ public class MglaCleanHeaderSettingsActivity extends BaseFragment {
         });
 
         backgroundBlock.addView(backBtnCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        backgroundBlock.addView(MglaUi.createDivider(context));
         backgroundBlock.addView(titleBlockCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        backgroundBlock.addView(MglaUi.createDivider(context));
         backgroundBlock.addView(pinnedBlockCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        backgroundBlock.addView(MglaUi.createDivider(context));
         backgroundBlock.addView(translationPanelCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         rootLayout.addView(backgroundBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
@@ -116,20 +117,6 @@ public class MglaCleanHeaderSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 }

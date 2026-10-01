@@ -4,7 +4,6 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -17,7 +16,6 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -58,7 +56,7 @@ public class MglaNotificationsSettingsActivity extends BaseFragment {
 
         TextCheckCell popupCell = new TextCheckCell(context);
         popupCell.setBackground(null);
-        popupCell.setTextAndCheck("Всплывающие уведомления", prefs.getBoolean("mgla_popup_notifications_enabled", false), true);
+        popupCell.setTextAndCheck("Всплывающие уведомления", prefs.getBoolean("mgla_popup_notifications_enabled", false), false);
         popupCell.setOnClickListener(v -> {
             boolean newVal = !prefs.getBoolean("mgla_popup_notifications_enabled", false);
             prefs.edit().putBoolean("mgla_popup_notifications_enabled", newVal).apply();
@@ -66,8 +64,12 @@ public class MglaNotificationsSettingsActivity extends BaseFragment {
         });
         block.addView(popupCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        block.addView(MglaUi.createDivider(context));
+
         TextView[] durationValueRef = new TextView[1];
         addSelectRow(block, "Время отображения", getPopupDurationName(), () -> showPopupDurationDialog(durationValueRef[0]), durationValueRef);
+
+        block.addView(MglaUi.createDivider(context));
 
         TextView[] alphaValueRef = new TextView[1];
         addSelectRow(block, "Прозрачность", getPopupAlphaName(), () -> showPopupAlphaDialog(alphaValueRef[0]), alphaValueRef);
@@ -79,21 +81,7 @@ public class MglaNotificationsSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     private String getPopupDurationName() {
@@ -141,7 +129,7 @@ public class MglaNotificationsSettingsActivity extends BaseFragment {
         row.setPadding(dp(21), 0, dp(18), 0);
         row.setMinimumHeight(dp(50));
         row.setClickable(true);
-        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 0));
+        row.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
         row.setOnClickListener(v -> onClick.run());
 
         TextView titleView = new TextView(getContext());

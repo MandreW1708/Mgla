@@ -21,7 +21,6 @@ import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
@@ -227,26 +226,11 @@ public class MglaCameraSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context) {
-        return createBlock(context, null);
+        return MglaUi.createBlock(context, null);
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(14));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        if (title != null) {
-            HeaderCell header = new HeaderCell(context, 22);
-            header.setBackground(null);
-            header.setText(title);
-            block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        }
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     /**

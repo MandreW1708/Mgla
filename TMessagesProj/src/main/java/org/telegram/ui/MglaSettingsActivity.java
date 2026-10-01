@@ -31,7 +31,6 @@ import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
@@ -77,14 +76,19 @@ public class MglaSettingsActivity extends BaseFragment {
         LinearLayout mainBlock = createBlock(context, "Главное");
         addMenuItem(mainBlock, () -> presentFragment(new MglaMainSettingsActivity()),
             IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_features, "Общие настройки");
+        mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaChatsSettingsActivity()),
             IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.filled_chatlist2, "Чаты");
+        mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaNotificationsSettingsActivity()),
             IconBackgroundColors.RED.top, IconBackgroundColors.RED.bottom, R.drawable.settings_sounds, "Уведомления");
+        mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAppearanceSettingsActivity()),
             IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.msg_palette, "Внешний вид");
+        mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaCameraSettingsActivity()),
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
+        mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
             IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект", null, true);
         rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
@@ -93,6 +97,7 @@ public class MglaSettingsActivity extends BaseFragment {
         addMenuItem(extraBlock, () -> openTelegramUsername(BuildVars.MGLA_DEV_CHANNEL_USERNAME),
             IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_channel, "Канал разработчика",
             "@" + BuildVars.MGLA_DEV_CHANNEL_USERNAME);
+        extraBlock.addView(MglaUi.createDivider(context));
         addMenuItem(extraBlock, () -> openSupportChat(),
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Поддержка");
         rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
@@ -140,21 +145,7 @@ public class MglaSettingsActivity extends BaseFragment {
     }
 
     private LinearLayout createBlock(Context context, String title) {
-        LinearLayout block = new LinearLayout(context);
-        block.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        block.setBackground(bg);
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        HeaderCell header = new HeaderCell(context, 22);
-        header.setBackground(null);
-        header.setText(title);
-        block.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        return block;
+        return MglaUi.createBlock(context, title);
     }
 
     private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title) {
@@ -168,7 +159,7 @@ public class MglaSettingsActivity extends BaseFragment {
     private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value, boolean showBetaBadge) {
         SettingCell cell = new SettingCell(getContext(), null);
         cell.set(iconColorTop, iconColorBottom, icon, title, null, value, false, showBetaBadge);
-        cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 0));
+        cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
         cell.setOnClickListener(v -> onClick.run());
         block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         return cell;
