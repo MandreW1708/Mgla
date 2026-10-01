@@ -4,6 +4,8 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -93,6 +95,27 @@ public class MglaAiSettingsActivity extends BaseFragment {
         listView.setClipToPadding(false);
         listView.setSections();
         listView.setAdapter(new ListAdapter(context));
+        listView.addItemDecoration(new RecyclerView.ItemDecoration() {
+            private final Paint dividerPaint = new Paint();
+
+            {
+                dividerPaint.setColor(Theme.getColor(Theme.key_divider));
+            }
+
+            @Override
+            public void onDrawOver(@NonNull Canvas c, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+                for (int i = 0; i < parent.getChildCount(); i++) {
+                    View child = parent.getChildAt(i);
+                    int position = parent.getChildAdapterPosition(child);
+                    if (position != ROW_AI_SUMMARY && position != ROW_AI_RETELL && position != ROW_AI_EDITOR
+                            && position != ROW_PROVIDER_BASIC && position != ROW_DNA_TOPICS) {
+                        continue;
+                    }
+                    float bottom = child.getBottom() + child.getTranslationY();
+                    c.drawRect(child.getLeft() + dp(21), bottom - dp(1), child.getRight() - dp(21), bottom, dividerPaint);
+                }
+            }
+        });
         listView.setOnItemClickListener((view, position) -> {
             if (position == ROW_AI_TRANSCRIBE) {
                 presentFragment(new MglaAiTranscribeActivity());
@@ -251,7 +274,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 cell.setCanDisable(false);
             } else if (position == ROW_DNA_TOPICS) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("Главные темы Chat DNA", MglaChatDna.getTopicsProviderTitle(), true);
+                cell.setTextAndValue("Главные темы Chat DNA", MglaChatDna.getTopicsProviderTitle(), false);
                 cell.setCanDisable(false);
             } else if (position == ROW_DNA_MODELS) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
@@ -269,7 +292,7 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 RadioCell cell = (RadioCell) holder.itemView;
                 String provider = prefs.getString("ai_provider", "openrouter");
                 if (position == ROW_PROVIDER_BASIC) {
-                    cell.setText("Базовый", "openrouter".equals(provider), true);
+                    cell.setText("Базовый", "openrouter".equals(provider), false);
                 } else if (position == ROW_PROVIDER_GEMINI) {
                     cell.setText("Gemini (Ваш API)", "gemini".equals(provider), false);
                 }
@@ -280,13 +303,13 @@ public class MglaAiSettingsActivity extends BaseFragment {
                         cell.setTextAndCheck("Включение AI", prefs.getBoolean("ai_enabled", true), false);
                         break;
                     case ROW_AI_SUMMARY:
-                        cell.setTextAndCheck("Краткая Сводка", prefs.getBoolean("ai_summary", true), true);
+                        cell.setTextAndCheck("Краткая Сводка", prefs.getBoolean("ai_summary", true), false);
                         break;
                     case ROW_AI_RETELL:
-                        cell.setTextAndCheck("Пересказ сообщений", prefs.getBoolean("ai_retell", true), true);
+                        cell.setTextAndCheck("Пересказ сообщений", prefs.getBoolean("ai_retell", true), false);
                         break;
                     case ROW_AI_EDITOR:
-                        cell.setTextAndCheck("AI-редактор", prefs.getBoolean("ai_editor", true), true);
+                        cell.setTextAndCheck("AI-редактор", prefs.getBoolean("ai_editor", true), false);
                         break;
                 }
             }

@@ -4,6 +4,8 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.View;
@@ -77,6 +79,26 @@ public class MglaAiTranscribeActivity extends BaseFragment {
         listView.setClipToPadding(false);
         listView.setSections();
         listView.setAdapter(new ListAdapter(context));
+        listView.addItemDecoration(new RecyclerView.ItemDecoration() {
+            private final Paint dividerPaint = new Paint();
+
+            {
+                dividerPaint.setColor(Theme.getColor(Theme.key_divider));
+            }
+
+            @Override
+            public void onDrawOver(@NonNull Canvas c, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+                for (int i = 0; i < parent.getChildCount(); i++) {
+                    View child = parent.getChildAt(i);
+                    int position = parent.getChildAdapterPosition(child);
+                    if (position != ROW_ENABLED && position != ROW_API_KEY && position != ROW_MODEL) {
+                        continue;
+                    }
+                    float bottom = child.getBottom() + child.getTranslationY();
+                    c.drawRect(child.getLeft() + dp(21), bottom - dp(1), child.getRight() - dp(21), bottom, dividerPaint);
+                }
+            }
+        });
         listView.setOnItemClickListener((view, position) -> {
             if (position == ROW_ENABLED) {
                 toggleSwitch(view, "ai_transcribe_enabled", false);
@@ -198,14 +220,14 @@ public class MglaAiTranscribeActivity extends BaseFragment {
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             if (position == ROW_ENABLED) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
-                cell.setTextAndCheck("Включить расшифровку", prefs.getBoolean("ai_transcribe_enabled", false), true);
+                cell.setTextAndCheck("Включить расшифровку", prefs.getBoolean("ai_transcribe_enabled", false), false);
             } else if (position == ROW_API_KEY) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("API ключ Gemini", getValuePreview("ai_transcribe_api_key", "Не задан"), true);
+                cell.setTextAndValue("API ключ Gemini", getValuePreview("ai_transcribe_api_key", "Не задан"), false);
                 cell.setCanDisable(false);
             } else if (position == ROW_MODEL) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("Модель", getValuePreview("ai_transcribe_model", "gemini-2.0-flash"), true);
+                cell.setTextAndValue("Модель", getValuePreview("ai_transcribe_model", "gemini-2.0-flash"), false);
                 cell.setCanDisable(false);
             } else if (position == ROW_FALLBACK) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
