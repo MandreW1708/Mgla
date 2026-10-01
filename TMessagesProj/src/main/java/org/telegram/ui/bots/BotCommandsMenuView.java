@@ -118,7 +118,7 @@ public class BotCommandsMenuView extends View {
             textPaint.setTextSize(AndroidUtilities.dp(15));
             lastSize = size;
             CharSequence c = Emoji.replaceEmoji(menuText, textPaint.getFontMetricsInt(), false);
-            int w = (int) (AndroidUtilities.displaySize.x * .6f);
+            int w = AndroidUtilities.dp(160);
             menuTextLayout = StaticLayoutEx.createStaticLayout(c, textPaint, w, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false, TextUtils.TruncateAt.END, w, 1);
             menuTextWidth = menuTextLayout.getLineCount() > 0 ? menuTextLayout.getLineWidth(0) : 0;
         }
@@ -128,7 +128,7 @@ public class BotCommandsMenuView extends View {
             width += (int) menuTextWidth + AndroidUtilities.dp(4);
         }
 
-        super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(32), MeasureSpec.EXACTLY));
+        super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(28), MeasureSpec.EXACTLY));
     }
 
     @Override
@@ -167,7 +167,7 @@ public class BotCommandsMenuView extends View {
 
             if (isWebView) {
                 canvas.save();
-                canvas.translate(AndroidUtilities.dp(9.5f), AndroidUtilities.dp(6));
+                canvas.translate(AndroidUtilities.dp(9.5f), AndroidUtilities.dp(4));
                 RLottieDrawable drawable = webViewAnimation;
                 drawable.setBounds(0, 0, drawable.getMinimumWidth(), drawable.getMinimumHeight());
                 drawable.draw(canvas);
@@ -178,7 +178,7 @@ public class BotCommandsMenuView extends View {
                 }
             } else {
                 canvas.save();
-                canvas.translate(AndroidUtilities.dp(8), AndroidUtilities.dp(4));
+                canvas.translate(AndroidUtilities.dp(8), 0);
                 backDrawable.draw(canvas);
                 canvas.restore();
             }

@@ -189,6 +189,16 @@ public class ReplaceableIconDrawable extends Drawable implements Animator.Animat
     }
 
     @Override
+    public int getIntrinsicWidth() {
+        return currentDrawable != null ? currentDrawable.getIntrinsicWidth() : -1;
+    }
+
+    @Override
+    public int getIntrinsicHeight() {
+        return currentDrawable != null ? currentDrawable.getIntrinsicHeight() : -1;
+    }
+
+    @Override
     public void onAnimationEnd(Animator animation) {
         outDrawable = null;
         invalidateSelf();
