@@ -2891,6 +2891,7 @@ public class ChatActivity extends BaseFragment implements
 
         getNotificationCenter().addPostponeNotificationsCallback(postponeNotificationsWhileLoadingCallback);
         getNotificationCenter().addObserver(this, NotificationCenter.closeChats);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.didSetNewTheme);
 
         if (chatMode != MODE_SCHEDULED) {
             if (threadMessageId == 0) {
@@ -3420,6 +3421,7 @@ public class ChatActivity extends BaseFragment implements
         }
 
         getNotificationCenter().removeObserver(this, NotificationCenter.closeChats);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.didSetNewTheme);
 
         if (chatMode == 0 && AndroidUtilities.isTablet()) {
             getNotificationCenter().postNotificationName(NotificationCenter.openedChatChanged, dialog_id, getTopicId(), true);
@@ -20830,6 +20832,12 @@ public class ChatActivity extends BaseFragment implements
 
     @Override
     public void didReceivedNotification(int id, int account, final Object... args) {
+        if (id == NotificationCenter.didSetNewTheme) {
+            // glass appearance toggles (e.g. clean header settings) are broadcast as theme changes —
+            // re-apply the pinned/translate panel backgrounds so they don't stay stale
+            updateTopPanelBackgrounds();
+            return;
+        }
         if (id == NotificationCenter.messagesDidLoad) {
             didReceivedNotification_messagesDidLoad(id, account, args);
         } else {
@@ -48074,7 +48082,10 @@ public class ChatActivity extends BaseFragment implements
 
     private void updateTopPanelBackgrounds() {
         if (topPanelLayout == null) return;
-        if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
+        final boolean hideTopPanelBackground = org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()
+            && org.telegram.ui.MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled();
+        if (!hideTopPanelBackground) {
+            // standard look: one container background covering the pinned, media and bot-info blocks
             topPanelLayout.setBlurredBackground(glassBackgroundDrawableFactory.create(topPanelLayout)
                 .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
                 .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
@@ -48083,18 +48094,8 @@ public class ChatActivity extends BaseFragment implements
             if (translateButton != null) translateButton.setBackground(null);
         } else {
             topPanelLayout.setBlurredBackground(null);
-            
             if (pinnedMessageView != null) {
-                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled()) {
-                    if (!(pinnedMessageView.getBackground() instanceof org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable)) {
-                         pinnedMessageView.setBackground(glassBackgroundDrawableFactory.create(pinnedMessageView)
-                             .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
-                             .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
-                             .setPadding(org.telegram.messenger.AndroidUtilities.dp(7)));
-                    }
-                } else {
-                    pinnedMessageView.setBackground(null);
-                }
+                pinnedMessageView.setBackground(null);
             }
             if (translateButton != null) {
                 if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTranslationPanelEnabled()) {
