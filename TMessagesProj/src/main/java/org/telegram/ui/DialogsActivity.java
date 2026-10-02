@@ -6801,8 +6801,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionModeCloseView.setOnClickListener(v -> hideActionMode(true));
             actionMode.addView(actionModeCloseView, LayoutHelper.createLinear(54, 54, Gravity.CENTER_VERTICAL));
             if (MglaSideMenuConfig.isEnabled() && !isArchive()) {
-                // draw the close button right of the side menu hamburger without consuming layout space
-                actionModeCloseView.setTranslationX(dp(48));
+                // draw the close button between the side menu hamburger and the counter
+                // (hamburger glyph ends at 36dp, counter starts at 72dp, X glyph is 24dp wide in its 54dp box)
+                actionModeCloseView.setTranslationX(dp(27));
             }
             actionModeViews.add(actionModeCloseView);
         }
