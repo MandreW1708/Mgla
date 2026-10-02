@@ -4019,6 +4019,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
         };
         doneButton.setContentDescription(getString(R.string.EditMessage));
+        doneButton.setCenterBackground(true);
         if (bounceable) {
             ScaleStateListAnimator.apply(doneButton);
         }
@@ -10019,6 +10020,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                 doneButtonAnimation = null;
             }
             createDoneButton(true);
+            if (doneButton.getParent() != textFieldContainer) {
+                if (doneButton.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) doneButton.getParent()).removeView(doneButton);
+                }
+                textFieldContainer.addView(doneButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.RIGHT));
+            }
             doneButton.setOnClickListener(view -> saveBusinessLink());
 
             doneButton.setContentDescription(getString(R.string.Done));
@@ -10125,6 +10132,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                 doneButtonAnimation = null;
             }
             createDoneButton(false);
+            if (doneButton.getParent() != sendButtonContainer) {
+                // place the done button exactly in the send button slot so editing doesn't shift anything
+                if (doneButton.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) doneButton.getParent()).removeView(doneButton);
+                }
+                sendButtonContainer.addView(doneButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.RIGHT));
+            }
             doneButton.setOnClickListener(view -> doneEditingMessage());
 
             if (editingMessageObject.needResendWhenEdit() && paidMessagesPrice > 0) {
@@ -10251,7 +10265,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             openKeyboard();
             if (messageEditText != null) {
                 FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) messageEditText.getLayoutParams();
-                layoutParams.rightMargin = dp(4);
+                layoutParams.rightMargin = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(4);
                 messageEditText.setLayoutParams(layoutParams);
             }
             if (recordedAudioPanel != null) {
@@ -10269,7 +10283,6 @@ public class ChatActivityEnterView extends FrameLayout implements
                 attachButton.setScaleX(0.5f);
                 attachButton.setScaleY(0.5f);
             }
-            sendButtonContainer.setVisibility(GONE);
             if (scheduledButton != null) {
                 scheduledButton.setVisibility(GONE);
             }
@@ -15104,7 +15117,12 @@ public class ChatActivityEnterView extends FrameLayout implements
 
     public float getStaticSendBubbleRightOffset() {
         float dynamicPadding = org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress;
-        if (!useStaticSendButton() || sendButtonContainer == null || sendButtonContainer.getVisibility() != View.VISIBLE || sendButtonContainer.getAlpha() < 0.5f) {
+        boolean rightButtonVisible = sendButtonContainer != null && sendButtonContainer.getVisibility() == VISIBLE && sendButtonContainer.getAlpha() >= 0.5f;
+        if (!rightButtonVisible && doneButton != null && doneButton.getVisibility() == VISIBLE) {
+            // done button occupies the same slot while editing — keep the bubble tucked
+            rightButtonVisible = true;
+        }
+        if (!useStaticSendButton() || !rightButtonVisible) {
             return dynamicPadding;
         }
         return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_SEND_GAP) - dp(INPUT_BUBBLE_SIDE_TUCK)) + dynamicPadding;
@@ -15420,6 +15438,10 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
 
         private int circleWidth = -1, circleHeight = -1;
+        private boolean centerBackground;
+        public void setCenterBackground(boolean centerBackground) {
+            this.centerBackground = centerBackground;
+        }
         public void setCircleSize(int size) {
             this.circleWidth = size;
             this.circleHeight = size;
@@ -15957,6 +15979,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                 Math.max(height, dpf2(10 + 10) + priceText.getCurrentWidth()),
                 height, sameWidthFactor);
             if (externalGlassBackground) {
+                backgroundRect.set(
+                        (getMeasuredWidth() - width) / 2f,
+                        (getMeasuredHeight() - height) / 2f,
+                        (getMeasuredWidth() + width) / 2f,
+                        (getMeasuredHeight() + height) / 2f
+                );
+            } else if (centerBackground) {
                 backgroundRect.set(
                         (getMeasuredWidth() - width) / 2f,
                         (getMeasuredHeight() - height) / 2f,
