@@ -6800,11 +6800,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionModeCloseView.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarActionModeDefaultSelector)));
             actionModeCloseView.setOnClickListener(v -> hideActionMode(true));
             actionMode.addView(actionModeCloseView, LayoutHelper.createLinear(54, 54, Gravity.CENTER_VERTICAL));
-            if (MglaSideMenuConfig.isEnabled() && !isArchive()) {
-                // draw the close button between the side menu hamburger and the counter
-                // (hamburger glyph ends at 36dp, counter starts at 72dp, X glyph is 24dp wide in its 54dp box)
-                actionModeCloseView.setTranslationX(dp(27));
-            }
+            updateActionModeCloseTranslation();
             actionModeViews.add(actionModeCloseView);
         }
 
@@ -10385,6 +10381,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 FragmentFloatingButton.setAnimatedVisibility(mglaSideMenuButton, 0);
             }
         }
+        updateActionModeCloseTranslation();
         updateMglaSideMenuStoriesLayout(showSideMenu);
     }
 
@@ -10408,10 +10405,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         if (MglaSideMenuConfig.isEnabled()) {
             actionBar.setTitleColor(getThemedColor(Theme.key_telegram_color_dialogsLogo));
             actionBar.setTitle("Mgla", statusDrawable);
-        } else if (logoDrawable != null) {
-            SpannableStringBuilder ssb = new SpannableStringBuilder(getString(R.string.AppName));
-            ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            actionBar.setTitle(ssb, statusDrawable);
+        } else {
+            actionBar.setTitle("Mgla", statusDrawable);
         }
         updateMglaActionBarTitleOffset();
     }
@@ -10451,6 +10446,19 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         actionBar.getTitlesContainer().setTranslationX(titleTranslationX);
         actionBar.getAdditionalSubTitleOverlayContainer().setTranslationX(titleTranslationX);
         actionBar.getTitlesContainer().setPivotX(dp(20) + getMglaSideMenuTitleOffset());
+    }
+
+    private void updateActionModeCloseTranslation() {
+        if (actionModeCloseView == null) {
+            return;
+        }
+        if (MglaSideMenuConfig.isEnabled() && !isArchive()) {
+            // draw the close button between the side menu hamburger and the counter
+            // (hamburger glyph ends at 36dp, counter starts at 72dp, X glyph is 24dp wide in its 54dp box)
+            actionModeCloseView.setTranslationX(dp(27));
+        } else {
+            actionModeCloseView.setTranslationX(0);
+        }
     }
 
     private void updateMglaSideMenuButtonLayout() {

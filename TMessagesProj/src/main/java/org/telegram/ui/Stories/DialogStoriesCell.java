@@ -966,11 +966,18 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             if (mglaTitleView != null) {
                 float sideMenuOffset = storiesExpandedOnly ? dp(48) : 0;
                 mglaTitleView.setTranslationX(telegramLogoView.getTranslationX() + sideMenuOffset);
-                mglaTitleView.setTranslationY(telegramLogoView.getTranslationY());
             }
 
-            emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
+            if (mglaTitleView != null && mglaTitleView.getVisibility() == VISIBLE) {
+                emojiStatusView.setTranslationX(mglaTitleView.getTranslationX() + mglaTitleView.getMeasuredWidth() - dpf2(4));
+            } else {
+                emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
+            }
             emojiStatusView.setTranslationY(bottomY + dp(14 - 11 + FAKE_TOP_PADDING + 4.333f) + translationOffset);
+            if (mglaTitleView != null) {
+                // center the Mgla text vertically on the emoji status, like the expanded header title
+                mglaTitleView.setTranslationY(emojiStatusView.getTranslationY() + (emojiStatusView.getMeasuredHeight() - mglaTitleView.getMeasuredHeight()) / 2f);
+            }
 
             subtitleOverlayContainer.setTranslationX(titleView.getTranslationX());
             subtitleOverlayContainer.setTranslationY(bottomY + dp(15 + FAKE_TOP_PADDING + 4.333f + 8));
@@ -2249,32 +2256,17 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             titleView.setAlpha(titleAlpha);
             titleView.setVisibility(titleAlpha > 0 ? VISIBLE : GONE);
         }
-        if (storiesExpandedOnly) {
-            if (telegramLogoView != null) {
-                telegramLogoView.setAlpha(0f);
-                telegramLogoView.setVisibility(GONE);
-            }
-            if (mglaTitleView != null) {
-                mglaTitleView.setAlpha(logoAlpha);
-                mglaTitleView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
-            }
-            if (emojiStatusView != null) {
-                emojiStatusView.setAlpha(0f);
-                emojiStatusView.setVisibility(GONE);
-            }
-        } else {
-            if (mglaTitleView != null) {
-                mglaTitleView.setAlpha(0f);
-                mglaTitleView.setVisibility(GONE);
-            }
-            if (telegramLogoView != null) {
-                telegramLogoView.setAlpha(logoAlpha);
-                telegramLogoView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
-            }
-            if (emojiStatusView != null) {
-                emojiStatusView.setAlpha(logoAlpha);
-                emojiStatusView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
-            }
+        if (telegramLogoView != null) {
+            telegramLogoView.setAlpha(0f);
+            telegramLogoView.setVisibility(GONE);
+        }
+        if (mglaTitleView != null) {
+            mglaTitleView.setAlpha(logoAlpha);
+            mglaTitleView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
+        }
+        if (emojiStatusView != null) {
+            emojiStatusView.setAlpha(logoAlpha);
+            emojiStatusView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
         }
         if (subtitleOverlayContainer != null) {
             subtitleOverlayContainer.setAlpha(progress);
