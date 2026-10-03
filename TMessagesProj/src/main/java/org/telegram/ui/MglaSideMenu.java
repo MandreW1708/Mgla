@@ -67,6 +67,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private static final int NAV_SETTINGS = 5;
     private static final int NAV_QR = 6;
     private static final int NAV_BROWSER = 7;
+    private static final int NAV_MGLA_SETTINGS = 1001;
 
     private final LaunchActivity activity;
     private View scrim;
@@ -80,7 +81,6 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private TextView usernameText;
     private TextView phoneText;
     private ImageView themeToggleBtn;
-    private TextView mglaSettingsBtn;
     private TextView ghostButtonLabel;
     private View ghostButton;
     private LinearLayout accountsBlock;
@@ -94,6 +94,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private ValueAnimator accountsHeightAnimator;
     private boolean themeIconIsDark;
     private LinearLayout profileSection;
+    private FrameLayout profileWrap;
     private LinearLayout navContainer;
     private final ArrayList<View> navRows = new ArrayList<>();
     private final ArrayList<ImageView> navIcons = new ArrayList<>();
@@ -144,8 +145,13 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
         ViewCompat.setOnApplyWindowInsetsListener(panel, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            panel.setPadding(0, bars.top, 0, 0);
+            // keep the panel itself unpadded so the accent header reaches the very top;
+            // the top inset is applied to the profile wrapper's content instead
+            panel.setPadding(0, 0, 0, 0);
             panel.setClipToPadding(true);
+            if (profileWrap != null) {
+                profileWrap.setPadding(0, bars.top, 0, 0);
+            }
             if (bars.top > 0) {
                 AndroidUtilities.statusBarHeight = bars.top;
             }
@@ -166,7 +172,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
         GradientDrawable panelBg = new GradientDrawable();
         panelBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        panelBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), 0, 0, 0, 0});
+        panelBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), dp(20), dp(20), 0, 0});
         p.setBackground(panelBg);
 
         ScrollView scrollView = new ScrollView(context);
@@ -177,8 +183,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         content.setOrientation(LinearLayout.VERTICAL);
 
         content.addView(buildProfileSection(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        content.addView(buildGhostButton(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 8));
-        content.addView(buildAccountsBlock(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 12));
+        content.addView(buildGhostButton(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 8));
+        content.addView(buildAccountsBlock(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 0, 8, 12));
         content.addView(buildNavSection(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, dp(16)));
 
         scrollView.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
@@ -188,42 +194,21 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private View buildProfileSection(Context context) {
+        profileWrap = new FrameLayout(context);
+
         profileSection = new LinearLayout(context);
         profileSection.setOrientation(LinearLayout.VERTICAL);
-        profileSection.setPadding(dp(20), dp(18), dp(20), dp(18));
-
-        FrameLayout profileBlock = new FrameLayout(context);
+        profileSection.setPadding(dp(16), dp(16), dp(16), dp(12));
 
         avatarView = new BackupImageView(context);
-        avatarView.setRoundRadius(dp(32));
-        profileBlock.addView(avatarView, LayoutHelper.createFrame(64, 64, Gravity.LEFT | Gravity.TOP));
-
-        LinearLayout actionButtons = new LinearLayout(context);
-        actionButtons.setOrientation(LinearLayout.VERTICAL);
-
-        themeToggleBtn = new ImageView(context);
-        themeToggleBtn.setScaleType(ImageView.ScaleType.CENTER);
-        themeToggleBtn.setBackground(null);
-        themeToggleBtn.setOnClickListener(v -> toggleTheme());
-        actionButtons.addView(themeToggleBtn, LayoutHelper.createLinear(40, 40));
-
-        mglaSettingsBtn = new TextView(context);
-        mglaSettingsBtn.setText("M");
-        mglaSettingsBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
-        mglaSettingsBtn.setTypeface(AndroidUtilities.bold());
-        mglaSettingsBtn.setGravity(Gravity.CENTER);
-        mglaSettingsBtn.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        mglaSettingsBtn.setBackground(createRectSelector());
-        mglaSettingsBtn.setOnClickListener(v -> openFragment(new MglaSettingsActivity()));
-        actionButtons.addView(mglaSettingsBtn, LayoutHelper.createLinear(40, 40, 0, 4, 0, 0));
-
-        profileBlock.addView(actionButtons, LayoutHelper.createFrame(40, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.TOP));
+        avatarView.setRoundRadius(dp(28));
+        profileSection.addView(avatarView, LayoutHelper.createLinear(56, 56));
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
 
         nameText = new TextView(context);
-        nameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        nameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         nameText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         nameText.setTypeface(AndroidUtilities.bold());
         nameText.setSingleLine(true);
@@ -233,16 +218,15 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         usernameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         usernameText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         usernameText.setSingleLine(true);
-        texts.addView(usernameText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        texts.addView(usernameText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 1, 0, 0));
 
         phoneText = new TextView(context);
-        phoneText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        phoneText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         phoneText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         phoneText.setSingleLine(true);
-        texts.addView(phoneText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        texts.addView(phoneText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 1, 0, 0));
 
-        profileBlock.addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 0, 70, 48, 0));
-        profileSection.addView(profileBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        profileSection.addView(texts, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 10, 0, 0));
 
         View.OnClickListener openProfile = v -> {
             Bundle args = new Bundle();
@@ -255,31 +239,34 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         nameText.setOnClickListener(openProfile);
         usernameText.setOnClickListener(openProfile);
         phoneText.setOnClickListener(openProfile);
-        registerAnimatedView(profileSection);
+        profileWrap.addView(profileSection, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        return profileSection;
+        themeToggleBtn = new ImageView(context);
+        themeToggleBtn.setScaleType(ImageView.ScaleType.CENTER);
+        themeToggleBtn.setBackground(Theme.createSelectorDrawable(ColorUtils.setAlphaComponent(Color.WHITE, 70), Theme.RIPPLE_MASK_CIRCLE_20DP));
+        themeToggleBtn.setOnClickListener(v -> toggleTheme());
+        profileWrap.addView(themeToggleBtn, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.TOP, 0, 12, 12, 0));
+        registerAnimatedView(profileWrap);
+
+        return profileWrap;
     }
 
     private View buildGhostButton(Context context) {
         FrameLayout row = new FrameLayout(context);
-        row.setPadding(dp(16), dp(12), dp(16), dp(12));
-
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(22));
-        bg.setColor(Color.TRANSPARENT);
-        bg.setStroke(dp(1.5f), Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        row.setBackground(bg);
+        row.setPadding(dp(20), dp(12), dp(20), dp(12));
+        row.setClickable(true);
+        row.setBackground(createRectSelector());
 
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.mgla_ic_eye);
-        icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.SRC_IN));
+        icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
         row.addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         ghostButtonLabel = new TextView(context);
-        ghostButtonLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        ghostButtonLabel.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        ghostButtonLabel.setTypeface(AndroidUtilities.bold());
-        row.addView(ghostButtonLabel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 36, 0, 0, 0));
+        ghostButtonLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        ghostButtonLabel.setTextColor(Theme.getColor(Theme.key_chats_menuItemText));
+        ghostButtonLabel.setSingleLine(true);
+        row.addView(ghostButtonLabel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 0, 0));
 
         ghostButton = row;
         row.setOnClickListener(v -> {
@@ -294,15 +281,10 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private View buildAccountsBlock(Context context) {
         accountsBlock = new LinearLayout(context);
         accountsBlock.setOrientation(LinearLayout.VERTICAL);
-        accountsBlock.setPadding(dp(12), dp(8), dp(12), dp(8));
+        accountsBlock.setPadding(dp(8), dp(4), dp(8), dp(4));
         accountsBlock.setClipToPadding(false);
         accountsBlock.setClipChildren(false);
-
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(14));
-        bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
-        bg.setStroke(dp(1.5f), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 55));
-        accountsBlock.setBackground(bg);
+        accountsBlock.setBackground(null);
 
         FrameLayout pinnedWrap = new FrameLayout(context);
         accountsPinnedContainer = new LinearLayout(context);
@@ -354,8 +336,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         TextView addLabel = new TextView(context);
         addLabel.setText(LocaleController.getString(R.string.AddAccount));
         addLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        addLabel.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        addRow.addView(addLabel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 48, 0, 0, 0));
+        addLabel.setTextColor(Theme.getColor(Theme.key_chats_menuItemText));
+        addRow.addView(addLabel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 0, 0));
 
         accountsExpandableContainer.addView(addRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         registerAnimatedView(accountsBlock);
@@ -381,10 +363,16 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             }
         }
 
+        View divider = new View(context);
+        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
+        navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 20, 8, 20, 8));
+
+        addNavItem(context, R.drawable.msg_settings, "Настройки Mgla", NAV_MGLA_SETTINGS);
+
         return navContainer;
     }
 
-    private void addNavItem(Context context, int iconRes, String title, int id) {
+    private ImageView addNavItem(Context context, int iconRes, String title, int id) {
         FrameLayout row = new FrameLayout(context);
         row.setPadding(dp(20), dp(12), dp(20), dp(12));
         row.setClickable(true);
@@ -392,13 +380,13 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
         ImageView icon = new ImageView(context);
         icon.setImageResource(iconRes);
-        icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.SRC_IN));
+        icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
         row.addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         TextView label = new TextView(context);
         label.setText(title);
         label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-        label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        label.setTextColor(Theme.getColor(Theme.key_chats_menuItemText));
         label.setSingleLine(true);
         row.addView(label, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 0, 0));
 
@@ -408,6 +396,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         navIcons.add(icon);
         navLabels.add(label);
         registerAnimatedView(row);
+        return icon;
     }
 
     private void handleNavClick(int id) {
@@ -451,6 +440,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 break;
             case MglaSideMenuController.ITEM_NEW_CHANNEL:
                 openFragment(new ChannelCreateActivity(new Bundle()));
+                break;
+            case NAV_MGLA_SETTINGS:
+                openFragment(new MglaSettingsActivity());
                 break;
         }
     }
@@ -514,7 +506,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private void updateThemeIcon(boolean animated) {
         boolean isDark = Theme.isCurrentThemeDark();
         int iconRes = isDark ? R.drawable.mgla_ic_moon : R.drawable.mgla_ic_sun;
-        int color = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+        // the toggle lives on the accent profile header — keep the icon white
+        int color = Color.WHITE;
         if (!animated || themeToggleBtn.getDrawable() == null) {
             themeIconIsDark = isDark;
             themeToggleBtn.setScaleX(1f);
@@ -540,8 +533,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 .setInterpolator(CubicBezierInterpolator.EASE_OUT)
                 .withEndAction(() -> {
                     themeToggleBtn.setImageResource(iconRes);
-                    themeToggleBtn.setColorFilter(new PorterDuffColorFilter(
-                            Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.SRC_IN));
+                    themeToggleBtn.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
                     themeToggleBtn.setRotation(isDark ? -90f : 90f);
                     themeToggleBtn.animate()
                             .scaleX(1f)
@@ -1019,7 +1011,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         avatar.setForUserOrChat(accountUser, drawable);
         accountRow.addView(avatar, LayoutHelper.createFrame(36, 36, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
-        float nameLeft = 48;
+        float nameLeft = 40;
         if (isSelected) {
             ImageView check = new ImageView(context);
             check.setImageResource(R.drawable.msg_check_s);
@@ -1031,7 +1023,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
         TextView name = new TextView(context);
         name.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        name.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        name.setTextColor(Theme.getColor(Theme.key_chats_menuItemText));
         name.setSingleLine(true);
         name.setText(UserObject.getUserName(accountUser));
         accountRow.addView(name, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, nameLeft, 0, isSelected ? 44 : 12, 0));
@@ -1198,37 +1190,33 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void updatePanelColors() {
-        int textColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+        int accent = Theme.getColor(Theme.key_featuredStickers_addButton);
+        int itemText = Theme.getColor(Theme.key_chats_menuItemText);
         int grayText = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
 
-        nameText.setTextColor(textColor);
-        usernameText.setTextColor(grayText);
-        phoneText.setTextColor(grayText);
-        ghostButtonLabel.setTextColor(textColor);
-        if (mglaSettingsBtn != null) {
-            mglaSettingsBtn.setTextColor(textColor);
-        }
+        // profile header sits on the accent fill — use white text for contrast
+        nameText.setTextColor(Color.WHITE);
+        usernameText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 205));
+        phoneText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 205));
+        ghostButtonLabel.setTextColor(itemText);
 
         GradientDrawable panelBg = new GradientDrawable();
-        panelBg.setColor(ColorUtils.blendARGB(
-                Theme.getColor(Theme.key_dialogBackground),
-                Theme.getColor(Theme.key_windowBackgroundWhite),
-                0.78f
-        ));
-        panelBg.setCornerRadius(dp(28));
-        panelBg.setStroke(dp(1), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 36));
+        panelBg.setColor(Theme.getColor(Theme.key_chats_menuBackground));
+        panelBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), dp(20), dp(20), 0, 0});
         panel.setBackground(panelBg);
 
-        profileSection.setBackground(null);
+        if (profileWrap != null) {
+            GradientDrawable profileBg = new GradientDrawable();
+            profileBg.setColor(accent);
+            // follow the panel's rounded top-right corner
+            profileBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), 0, 0, 0, 0});
+            profileWrap.setBackground(profileBg);
+        }
 
         GradientDrawable accountsBg = new GradientDrawable();
-        accountsBg.setCornerRadius(dp(24));
-        accountsBg.setColor(ColorUtils.blendARGB(
-                Theme.getColor(Theme.key_windowBackgroundGray),
-                Theme.getColor(Theme.key_dialogBackgroundGray),
-                0.35f
-        ));
-        accountsBg.setStroke(dp(1.5f), ColorUtils.setAlphaComponent(grayText, 55));
+        accountsBg.setCornerRadius(dp(14));
+        accountsBg.setColor(Color.TRANSPARENT);
+        accountsBg.setStroke(dp(1), ColorUtils.blendARGB(Theme.getColor(Theme.key_featuredStickers_addButton), Color.BLACK, 0.25f));
         accountsBlock.setBackground(accountsBg);
         if (accountsExpandBtn != null) {
             accountsExpandBtn.setColorFilter(new PorterDuffColorFilter(grayText, PorterDuff.Mode.SRC_IN));
@@ -1238,24 +1226,14 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         }
 
         if (ghostButton != null) {
-            GradientDrawable ghostBg = new GradientDrawable();
-            ghostBg.setCornerRadius(dp(24));
-            ghostBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton), 28));
-            ghostBg.setStroke(dp(1), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton), 90));
-            ghostButton.setBackground(ghostBg);
+            ghostButton.setBackground(createRectSelector());
         }
         navContainer.setBackground(null);
 
         for (int i = 0; i < navRows.size(); i++) {
-            int topRadius = i == 0 ? dp(20) : 0;
-            int bottomRadius = i == navRows.size() - 1 ? dp(20) : 0;
-            navRows.get(i).setBackground(Theme.createRadSelectorDrawable(
-                    Theme.getColor(Theme.key_listSelector),
-                    topRadius,
-                    bottomRadius
-            ));
-            navIcons.get(i).setColorFilter(new PorterDuffColorFilter(textColor, PorterDuff.Mode.SRC_IN));
-            navLabels.get(i).setTextColor(textColor);
+            navRows.get(i).setBackground(createRectSelector());
+            navIcons.get(i).setColorFilter(new PorterDuffColorFilter(grayText, PorterDuff.Mode.SRC_IN));
+            navLabels.get(i).setTextColor(itemText);
         }
     }
 
@@ -1282,8 +1260,11 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         if (top > 0) {
             AndroidUtilities.statusBarHeight = top;
         }
-        panel.setPadding(0, top, 0, 0);
+        panel.setPadding(0, 0, 0, 0);
         panel.setClipToPadding(true);
+        if (profileWrap != null) {
+            profileWrap.setPadding(0, top, 0, 0);
+        }
     }
 
     private void registerObserver() {
@@ -1350,7 +1331,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
     private void rebuildAnimatedViews() {
         animatedViews.clear();
-        registerAnimatedView(profileSection);
+        registerAnimatedView(profileWrap);
         registerAnimatedView(ghostButton);
         registerAnimatedView(accountsBlock);
         for (int i = 0; i < accountRows.size(); i++) {

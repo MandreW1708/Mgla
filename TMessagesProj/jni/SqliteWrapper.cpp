@@ -207,11 +207,53 @@ JNIEXPORT jdouble Java_org_telegram_SQLite_SQLiteCursor_columnDoubleValue(JNIEnv
     return sqlite3_column_double(handle, columnIndex);
 }
 
+static bool mgla_check_utf8(const char *data, size_t len) {
+    const char *data_end = data + len;
+    do {
+        unsigned int a = (unsigned char) (*data++);
+        if ((a & 0x80) == 0) {
+            if (data == data_end + 1) {
+                return true;
+            }
+            continue;
+        }
+        if ((a & 0x40) == 0) {
+            return false;
+        }
+        unsigned int b = (unsigned char) (*data++);
+        if ((b & 0xc0) != 0x80) {
+            return false;
+        }
+        if ((a & 0x20) == 0) {
+            if ((a & 0x1e) == 0) {
+                return false;
+            }
+            continue;
+        }
+        unsigned int c = (unsigned char) (*data++);
+        if ((c & 0xc0) != 0x80) {
+            return false;
+        }
+        if ((a & 0x10) == 0) {
+            continue;
+        }
+        unsigned int d = (unsigned char) (*data++);
+        if ((d & 0xc0) != 0x80) {
+            return false;
+        }
+    } while (true);
+}
+
 JNIEXPORT jstring Java_org_telegram_SQLite_SQLiteCursor_columnStringValue(JNIEnv *env, jobject object, jlong statementHandle, jint columnIndex) {
     sqlite3_stmt *handle = (sqlite3_stmt *) (intptr_t) statementHandle;
     const char *str = (const char *) sqlite3_column_text(handle, columnIndex);
     if (str != 0) {
-        return env->NewStringUTF(str);
+        size_t len = (size_t) sqlite3_column_bytes(handle, columnIndex);
+        // db text may carry non-UTF-8 bytes (older clients wrote binary) — CheckJNI aborts on invalid input
+        if (mgla_check_utf8(str, len)) {
+            return env->NewStringUTF(str);
+        }
+        return env->NewStringUTF("");
     }
     return 0;
 }
