@@ -7,17 +7,26 @@ import android.text.TextUtils;
 import org.telegram.messenger.ApplicationLoader;
 
 /**
- * Настройки WS-обхода через kws*.web.telegram.org (и позже — свои релеи).
+ * Настройки WS-обхода: свой релей на mglabot.mooo.com (Германия).
  */
 public final class MglaWsConfig {
 
     public static final String PREFS = "mgla_config";
 
+    /** Хост релея (TLS на 443, путь /apiws?dc=N). */
+    public static final String DEFAULT_RELAY_HOST = "mglabot.mooo.com";
+    /**
+     * Общий секрет с сервером (заголовок X-Mgla-Token).
+     * Должен совпадать с MGLA_WS_TOKEN в /opt/mgla-ws-relay/env на сервере.
+     */
+    public static final String DEFAULT_RELAY_TOKEN = "***REMOVED***";
+
     private static final String PREF_ENABLED = "ws_enabled";
     private static final String PREF_PORT = "ws_port";
     private static final String PREF_SECRET = "ws_secret";
+    private static final String PREF_RELAY_HOST = "ws_relay_host";
+    private static final String PREF_RELAY_TOKEN = "ws_relay_token";
 
-    // Снимок пользовательского прокси
     private static final String PREF_SAVED_EXISTS = "ws_saved_exists";
     private static final String PREF_SAVED_ENABLED = "ws_saved_enabled";
     private static final String PREF_SAVED_IP = "ws_saved_ip";
@@ -61,6 +70,24 @@ public final class MglaWsConfig {
         if (!TextUtils.isEmpty(norm)) {
             getPrefs().edit().putString(PREF_SECRET, norm).apply();
         }
+    }
+
+    public static String getRelayHost() {
+        String host = getPrefs().getString(PREF_RELAY_HOST, DEFAULT_RELAY_HOST);
+        return TextUtils.isEmpty(host) ? DEFAULT_RELAY_HOST : host.trim();
+    }
+
+    public static void setRelayHost(String host) {
+        getPrefs().edit().putString(PREF_RELAY_HOST, host == null ? "" : host.trim()).apply();
+    }
+
+    public static String getRelayToken() {
+        String token = getPrefs().getString(PREF_RELAY_TOKEN, DEFAULT_RELAY_TOKEN);
+        return token == null ? "" : token;
+    }
+
+    public static void setRelayToken(String token) {
+        getPrefs().edit().putString(PREF_RELAY_TOKEN, token == null ? "" : token.trim()).apply();
     }
 
     public static boolean hasSavedUserProxy() {

@@ -333,9 +333,9 @@ public final class WsBypassCore {
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WS_ROUTE_DEADLINE_MS);
             RawWebSocket ws;
             try {
-                ws = connectKws(dc, isMedia, deadline, generation);
+                ws = connectRelay(dc, isMedia, deadline, generation);
             } catch (Throwable e) {
-                dbg("kws connect failed: " + e.getMessage());
+                dbg("relay connect failed: " + e.getMessage());
                 failRecord(dcKey);
                 return;
             }
@@ -365,6 +365,26 @@ public final class WsBypassCore {
         }
     }
 
+    private RawWebSocket connectRelay(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
+        String host = MglaWsConfig.getRelayHost();
+        int effective = dc == 203 ? 2 : dc;
+        String path = "/apiws?dc=" + effective;
+        Map<String, String> headers = new HashMap<>();
+        String token = MglaWsConfig.getRelayToken();
+        if (token != null && !token.isEmpty()) {
+            headers.put("X-Mgla-Token", token);
+        }
+        dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : ""));
+        long attemptDeadline = Math.min(deadlineNanos,
+            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(8000L));
+        RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
+            () -> isBridgeGenerationCurrent(generation));
+        dbg("101 OK via relay " + host);
+        return ws;
+    }
+
+    /** @deprecated оставлен для отладки; основной путь — {@link #connectRelay}. */
+    @SuppressWarnings("unused")
     private RawWebSocket connectKws(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
         List<String> domains = wsDomainsForDc(dc, isMedia);
         long dcKey = poolKey(dc, isMedia);

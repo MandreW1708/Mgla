@@ -130,11 +130,11 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
         // ---- WebSocket / kws (primary experiment)
-        LinearLayout wsBlock = MglaUi.createBlock(context, "WebSocket (kws)");
+        LinearLayout wsBlock = MglaUi.createBlock(context, "WebSocket-релей (Германия)");
 
         wsMasterCell = new TextCheckCell(context);
         wsMasterCell.setBackground(null);
-        wsMasterCell.setTextAndCheck("Обход через web.telegram.org", MglaWsBypass.getInstance().isEnabled(), false);
+        wsMasterCell.setTextAndCheck("Обход через релей mglabot.mooo.com", MglaWsBypass.getInstance().isEnabled(), false);
         wsMasterCell.setOnClickListener(v -> {
             boolean newVal = !wsMasterCell.isChecked();
             MglaWsBypass mgr = MglaWsBypass.getInstance();
@@ -155,10 +155,10 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
         TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Трафик Telegram идёт через домены kws*.web.telegram.org (тот же канал, что у веб-клиента), "
-            + "а не напрямую на IP дата-центров. VPN и свои серверы не нужны.\n\n"
-            + "Если провайдер режет и эти домены — WS не поможет, тогда нужны свои релеи (Германия/Италия) "
-            + "или внешний прокси.");
+        wsInfo.setText("Трафик идёт на ваш сервер mglabot.mooo.com (Германия) по WebSocket, "
+            + "а уже оттуда — к дата-центрам Telegram. Провайдер не видит прямых соединений с IP DC.\n\n"
+            + "Релей должен быть запущен на сервере (см. tools/mgla-ws-relay). "
+            + "Мини-приложение бота на том же домене не затрагивается — используется только путь /apiws.");
         rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 0));
 
         // ---- ByeDPI (secondary)

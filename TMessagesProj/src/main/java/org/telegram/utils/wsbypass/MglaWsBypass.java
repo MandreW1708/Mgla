@@ -161,7 +161,7 @@ public final class MglaWsBypass {
             return "Запускается…";
         }
         if (core.hasActiveBridge() && core.getLastBridgeOkAtMs() > 0) {
-            return "Работает · kws";
+            return "Работает · " + MglaWsConfig.getRelayHost();
         }
         return "Ожидание соединения…";
     }
