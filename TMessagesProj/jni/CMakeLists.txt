@@ -289,5 +289,16 @@ target_link_libraries(${NATIVE_LIB}
 #            c)
 #endif()
 
+#mgladpi: ByeDPI (hufrea/byedpi @ ba53229, as pinned by ByeByeDPI) for the built-in DPI bypass.
+#Separate library: ByeDPI uses generic global names (params, init, run, main).
+file(GLOB MGLA_DPI_SRC ${CMAKE_CURRENT_SOURCE_DIR}/byedpi/*.c)
+add_library(mgladpi SHARED ${MGLA_DPI_SRC} mgla_dpi_jni.c)
+target_include_directories(mgladpi PRIVATE byedpi)
+target_compile_options(mgladpi PRIVATE -O2)
+target_link_options(mgladpi PRIVATE "-Wl,-z,max-page-size=16384")
+target_link_options(mgladpi PRIVATE "-Wl,-z,common-page-size=16384")
+target_link_options(mgladpi PRIVATE "-Wl,--wrap=daemon")
+target_link_options(mgladpi PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/mgla_dpi_exports.map")
+
 include(AndroidNdkModules)
 android_ndk_import_module_cpufeatures()

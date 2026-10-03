@@ -390,6 +390,7 @@ public class NotificationCenter {
     public static final int mglaExportCompleted = totalEvents++;
     public static final int mglaExportCanceled = totalEvents++;
     public static final int mglaExportFailed = totalEvents++;
+    public static final int dpiBypassChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 

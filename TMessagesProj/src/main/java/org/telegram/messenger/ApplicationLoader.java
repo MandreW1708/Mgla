@@ -45,6 +45,7 @@ import org.telegram.ui.Components.ForegroundDetector;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.IUpdateLayout;
 import org.telegram.ui.LauncherIconController;
+import org.telegram.utils.dpi.MglaDpiBypass;
 
 import java.io.File;
 import java.util.Locale;
@@ -246,6 +247,15 @@ public class ApplicationLoader extends Application {
 
         SharedConfig.loadConfig();
         SharedPrefsHelper.init(applicationContext);
+        try {
+            // Локальный прокси обхода должен слушать порт ДО создания ConnectionsManager:
+            // init() каждого аккаунта сам подхватит прокси из mainconfig.
+            // WS (kws) и ByeDPI взаимоисключающие — каждый init сам выключит другой, если был.
+            org.telegram.utils.wsbypass.MglaWsBypass.initOnAppStart();
+            MglaDpiBypass.initOnAppStart();
+        } catch (Throwable e) {
+            e.printStackTrace();
+        }
         VpnMonitor.getInstance().start();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();

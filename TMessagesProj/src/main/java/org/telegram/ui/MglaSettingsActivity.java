@@ -24,6 +24,7 @@ import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
@@ -37,8 +38,12 @@ import org.telegram.ui.Components.Switch;
 import org.telegram.ui.Components.UItem;
 import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
+import org.telegram.utils.dpi.MglaDpiBypass;
+import org.telegram.utils.wsbypass.MglaWsBypass;
 
-public class MglaSettingsActivity extends BaseFragment {
+public class MglaSettingsActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
+
+    private SettingCell dpiBypassCell;
 
     public MglaSettingsActivity() {
         this(null);
@@ -46,6 +51,45 @@ public class MglaSettingsActivity extends BaseFragment {
 
     public MglaSettingsActivity(android.os.Bundle args) {
         super(args);
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.dpiBypassChanged);
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.dpiBypassChanged);
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.dpiBypassChanged) {
+            updateDpiBypassCell();
+        }
+    }
+
+    private void updateDpiBypassCell() {
+        if (dpiBypassCell != null) {
+            dpiBypassCell.set(
+                IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom,
+                R.drawable.mgla_dpi_shield, "Обход блокировок", null,
+                bypassStatusLabel(), false, false
+            );
+        }
+    }
+
+    private static String bypassStatusLabel() {
+        if (MglaWsBypass.getInstance().isEnabled()) {
+            return "WS";
+        }
+        if (MglaDpiBypass.getInstance().isEnabled()) {
+            return "ByeDPI";
+        }
+        return "Выкл";
     }
 
     @Override
@@ -87,6 +131,10 @@ public class MglaSettingsActivity extends BaseFragment {
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaCameraSettingsActivity()),
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
+        mainBlock.addView(MglaUi.createDivider(context));
+        dpiBypassCell = addMenuItem(mainBlock, () -> presentFragment(new MglaDpiBypassActivity()),
+            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.mgla_dpi_shield, "Обход блокировок",
+            bypassStatusLabel());
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
             IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект", null, true);
