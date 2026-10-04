@@ -1,0 +1,17 @@
+## Copy to local.properties (gitignored) and fill in your values.
+## Do NOT commit local.properties.
+
+sdk.dir=C\:\\Users\\YOU\\AppData\\Local\\Android\\Sdk
+
+# Telegram API (https://my.telegram.org) — required for a working login
+TELEGRAM_APP_ID=12345
+TELEGRAM_APP_HASH=your_app_hash_here
+
+# Optional AI / maps / SafetyNet
+OPENROUTER_API_KEY=
+SAFETYNET_API_KEY=
+MAPS_API_KEY=
+
+# WS bypass relay (must match MGLA_WS_TOKEN on the relay server)
+MGLA_WS_RELAY_HOST=your-relay.example.com
+MGLA_WS_RELAY_TOKEN=
