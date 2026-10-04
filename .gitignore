@@ -25,6 +25,8 @@ Tools/**/env
 Tools/**/*.env
 **/secrets.*
 **/*secret*.properties
+_cache4.db
+*.db
 
 TMessagesProj_AppHockeyApp/afat/
 TMessagesProj_AppStandalone/afat/
