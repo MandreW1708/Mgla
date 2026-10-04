@@ -224,10 +224,11 @@ public class MessageObject {
     public String monthKey;
     public boolean deleted;
     public boolean deletedByThanos;
-    public boolean mglaSavedDeleted;
+    /** Mgla: restored from the deleted-messages archive, so it must stay visible. */
+    public boolean mglaDeleted;
 
     public boolean isHiddenDeleted() {
-        return deleted && !mglaSavedDeleted;
+        return deleted && !mglaDeleted;
     }
     public float audioProgress;
     public float forceSeekTo = -1;
@@ -772,7 +773,7 @@ public class MessageObject {
 
     public void copyStableParams(MessageObject old) {
         stableId = old.stableId;
-        mglaSavedDeleted = old.mglaSavedDeleted;
+        mglaDeleted = old.mglaDeleted;
         messageOwner.premiumEffectWasPlayed = old.messageOwner.premiumEffectWasPlayed;
         forcePlayEffect = old.forcePlayEffect;
         wasJustSent = old.wasJustSent;
@@ -1872,7 +1873,6 @@ public class MessageObject {
         localUserName = userName;
         messageText = formattedMessage;
         messageOwner = message;
-        this.mglaSavedDeleted = message.mglaSavedDeleted;
         localChannel = isChannel;
         localSupergroup = supergroup;
         localEdit = edit;
@@ -1928,7 +1928,7 @@ public class MessageObject {
 
         currentAccount = accountNum;
         messageOwner = message;
-        this.mglaSavedDeleted = message.mglaSavedDeleted;
+        mglaDeleted = message.mglaDeleted;
         replyMessageObject = replyToMessage;
         eventId = eid;
         wasUnread = !messageOwner.out && messageOwner.unread;

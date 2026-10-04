@@ -75,7 +75,7 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
     private void updateDpiBypassCell() {
         if (dpiBypassCell != null) {
             dpiBypassCell.set(
-                IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom,
+                IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
                 R.drawable.mgla_dpi_shield, "Обход блокировок", null,
                 bypassStatusLabel(), false, false
             );
@@ -133,7 +133,7 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
         mainBlock.addView(MglaUi.createDivider(context));
         dpiBypassCell = addMenuItem(mainBlock, () -> presentFragment(new MglaDpiBypassActivity()),
-            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.mgla_dpi_shield, "Обход блокировок",
+            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.mgla_dpi_shield, "Обход блокировок",
             bypassStatusLabel());
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),

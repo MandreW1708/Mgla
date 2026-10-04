@@ -35,11 +35,8 @@ import org.telegram.utils.wsbypass.WsBypassCore;
 /**
  * Mgla -> Настройки Mgla -> Обход блокировок.
  * <p>
- * Два режима (взаимоисключающие):
- * <ul>
- *   <li>WebSocket → kws*.web.telegram.org — без своих серверов, обходит блок IP DC;</li>
- *   <li>ByeDPI — десинхронизация пакетов (помогает только при DPI, не при блоке IP).</li>
- * </ul>
+ * Два взаимоисключающих режима: WebSocket-релей и ByeDPI.
+ * При системном VPN обход автоматически приостанавливается.
  */
 public class MglaDpiBypassActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
@@ -65,6 +62,7 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
             if (destroyed) {
                 return;
             }
+            org.telegram.utils.bypass.MglaBypassVpnGuard.syncWithVpn();
             MglaWsBypass.getInstance().ensureRunning();
             MglaDpiBypass.getInstance().ensureRunning();
             refreshDynamic();
@@ -134,7 +132,7 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
 
         wsMasterCell = new TextCheckCell(context);
         wsMasterCell.setBackground(null);
-        wsMasterCell.setTextAndCheck("Обход через релей mglabot.mooo.com", MglaWsBypass.getInstance().isEnabled(), false);
+        wsMasterCell.setTextAndCheck("Обход через WebSocket", MglaWsBypass.getInstance().isEnabled(), false);
         wsMasterCell.setOnClickListener(v -> {
             boolean newVal = !wsMasterCell.isChecked();
             MglaWsBypass mgr = MglaWsBypass.getInstance();
@@ -149,17 +147,12 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
             LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         wsBlock.addView(MglaUi.createDivider(context));
         wsTelegramCell = createStatCell(context, wsBlock, "Соединение Telegram");
+        wsBlock.addView(MglaUi.createDivider(context));
         wsProxyCell = createStatCell(context, wsBlock, "Локальный MTProto");
+        wsBlock.addView(MglaUi.createDivider(context));
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
-
-        TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Трафик идёт на ваш сервер mglabot.mooo.com (Германия) по WebSocket, "
-            + "а уже оттуда — к дата-центрам Telegram. Провайдер не видит прямых соединений с IP DC.\n\n"
-            + "Релей должен быть запущен на сервере (см. tools/mgla-ws-relay). "
-            + "Мини-приложение бота на том же домене не затрагивается — используется только путь /apiws.");
-        rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 0));
 
         // ---- ByeDPI (secondary)
         LinearLayout dpiBlock = MglaUi.createBlock(context, "ByeDPI (если блок только DPI)");
@@ -218,6 +211,8 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
 
         lastTestCell = new TextSettingsCell(context);
         lastTestCell.setBackground(null);
+        lastTestCell.setClipChildren(true);
+        lastTestCell.setClipToPadding(true);
         dpiBlock.addView(lastTestCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         dpiBlock.addView(MglaUi.createDivider(context));
 
@@ -227,12 +222,11 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
 
         rootLayout.addView(dpiBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
-        TextInfoCell dpiInfo = new TextInfoCell(context);
-        dpiInfo.setText("ByeDPI помогает, только если провайдер анализирует содержимое пакетов. "
-            + "При блоке IP дата-центров (как у вас по итогам подбора) он не сработает — "
-            + "используйте WebSocket выше или внешний прокси.\n\n"
-            + "Режимы взаимоисключающие: включение одного выключает другой.");
-        rootLayout.addView(dpiInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, AndroidUtilities.navigationBarHeight + 16));
+        TextInfoCell info = new TextInfoCell(context);
+        info.setText("Обход помогает подключаться к Telegram без системного VPN. "
+            + "Если на устройстве включён VPN, обход автоматически приостанавливается "
+            + "и снова включается после его выключения — в том же режиме, что был выбран.");
+        rootLayout.addView(info, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, AndroidUtilities.navigationBarHeight + 16));
 
         fragmentView = scrollView;
         refreshDynamic();
@@ -364,7 +358,8 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         }
         if (lastTestCell != null) {
             String summary = MglaDpiConfig.getTestSummary();
-            lastTestCell.setTextAndValue("Последний подбор", TextUtils.isEmpty(summary) ? "—" : summary, false);
+            lastTestCell.setTextAndValue("Последний подбор",
+                TextUtils.isEmpty(summary) ? "—" : ellipsizeRightValue(summary), false);
         }
         if (dpiTelegramCell != null) {
             dpiTelegramCell.setValue(dpi.getTelegramConnectionStateText(), false);
@@ -373,6 +368,15 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
             dpiProxyCell.setValue(dpi.isServerRunning() && dpi.getPort() > 0
                 ? "127.0.0.1:" + dpi.getPort() : "—", false);
         }
+    }
+
+    /** Укорачивает правую подпись, чтобы не наезжала на заголовок пункта. */
+    private static CharSequence ellipsizeRightValue(String text) {
+        android.text.TextPaint paint = new android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setTextSize(AndroidUtilities.dp(16));
+        int maxWidth = Math.max(AndroidUtilities.dp(72),
+            (int) (AndroidUtilities.displaySize.x * 0.38f) - AndroidUtilities.dp(28));
+        return TextUtils.ellipsize(text, paint, maxWidth, TextUtils.TruncateAt.END);
     }
 
     private String formatUptime(long seconds) {

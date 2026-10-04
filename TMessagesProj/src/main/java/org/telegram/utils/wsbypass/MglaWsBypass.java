@@ -9,7 +9,9 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.VpnMonitor;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.utils.bypass.MglaBypassVpnGuard;
 import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.proxy.ProxySettings;
 
@@ -45,6 +47,10 @@ public final class MglaWsBypass {
         if (!MglaWsConfig.isEnabled()) {
             return;
         }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            // VPN уже активен — отложим старт до его выключения
+            return;
+        }
         // ByeDPI и WS не должны оба держать прокси
         if (MglaDpiBypass.getInstance().isEnabled()) {
             try {
@@ -65,9 +71,7 @@ public final class MglaWsBypass {
 
     public synchronized boolean setEnabled(boolean enable) {
         if (enable) {
-            if (proxyApplied && isServerRunning()) {
-                return true;
-            }
+            MglaBypassVpnGuard.noteUserEnabled(MglaBypassVpnGuard.MODE_WS);
             // Выключить ByeDPI, если был включён
             if (MglaDpiBypass.getInstance().isEnabled()) {
                 try {
@@ -75,6 +79,18 @@ public final class MglaWsBypass {
                 } catch (Throwable e) {
                     FileLog.e(e);
                 }
+            }
+            MglaWsConfig.setEnabled(true);
+            if (VpnMonitor.getInstance().isVpnActive()) {
+                // VPN сам обходит блокировки — только запомним выбор пользователя
+                lastError = null;
+                MglaBypassVpnGuard.markSuspended();
+                notifyChanged();
+                return true;
+            }
+            if (proxyApplied && isServerRunning()) {
+                notifyChanged();
+                return true;
             }
             String err = startEngine();
             if (err != null) {
@@ -89,6 +105,7 @@ public final class MglaWsBypass {
             sessionStartElapsed = SystemClock.elapsedRealtime();
             lastError = null;
         } else {
+            MglaBypassVpnGuard.noteUserDisabled(MglaBypassVpnGuard.MODE_WS);
             if (proxyApplied) {
                 removeBypassProxyFromList();
                 ConnectionsManager.setProxySettings(false, null);
@@ -97,10 +114,61 @@ public final class MglaWsBypass {
             }
             sessionStartElapsed = 0;
             WsBypassCore.getInstance().stop();
+            MglaWsConfig.setEnabled(false);
+            if (!MglaBypassVpnGuard.isManagingProxy()) {
+                MglaBypassVpnGuard.clearSuspended();
+            }
         }
-        MglaWsConfig.setEnabled(enable);
         notifyChanged();
         return true;
+    }
+
+    /** Остановить движок и снять прокси, не сбрасывая выбор пользователя. */
+    public synchronized void suspendForVpn() {
+        if (proxyApplied) {
+            removeBypassProxyFromList();
+            ConnectionsManager.setProxySettings(false, null);
+            restoreUserProxy();
+            proxyApplied = false;
+        }
+        sessionStartElapsed = 0;
+        WsBypassCore.getInstance().stop();
+        notifyChanged();
+    }
+
+    /** Вернуть обход после выключения VPN, если пользователь его не отключал. */
+    public synchronized void resumeAfterVpn() {
+        if (!MglaWsConfig.isEnabled()) {
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            return;
+        }
+        if (proxyApplied && isServerRunning()) {
+            notifyChanged();
+            return;
+        }
+        if (MglaDpiBypass.getInstance().isEnabled()) {
+            try {
+                MglaDpiBypass.getInstance().setEnabled(false);
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        }
+        String err = startEngine();
+        if (err != null) {
+            lastError = err;
+            FileLog.e("MglaWsBypass: resume after VPN failed: " + err);
+            notifyChanged();
+            return;
+        }
+        writeBypassToMainConfig();
+        addBypassProxyToList();
+        ConnectionsManager.setProxySettings(true, buildLocalSettings());
+        proxyApplied = true;
+        sessionStartElapsed = SystemClock.elapsedRealtime();
+        lastError = null;
+        notifyChanged();
     }
 
     private String startEngine() {
@@ -118,6 +186,9 @@ public final class MglaWsBypass {
 
     public synchronized void ensureRunning() {
         if (!proxyApplied || isServerRunning()) {
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
             return;
         }
         FileLog.e("MglaWsBypass: engine stopped, restarting");
@@ -153,6 +224,9 @@ public final class MglaWsBypass {
         if (!MglaWsConfig.isEnabled()) {
             return "Отключён";
         }
+        if (MglaBypassVpnGuard.shouldShowVpnPaused()) {
+            return "На паузе";
+        }
         WsBypassCore core = WsBypassCore.getInstance();
         if (!core.isRunning()) {
             return lastError != null ? "Ошибка: " + lastError : "Не запущен";
@@ -161,7 +235,7 @@ public final class MglaWsBypass {
             return "Запускается…";
         }
         if (core.hasActiveBridge() && core.getLastBridgeOkAtMs() > 0) {
-            return "Работает · " + MglaWsConfig.getRelayHost();
+            return "Работает";
         }
         return "Ожидание соединения…";
     }

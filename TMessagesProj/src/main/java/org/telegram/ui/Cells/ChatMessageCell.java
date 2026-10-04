@@ -1727,7 +1727,6 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     private float drawTimeX;
     private float drawTimeY;
-    private Drawable mglaDeletedTrashDrawable;
     public StaticLayout timeLayout;
     public int timeWidth;
     private int timeTextWidth;
@@ -1834,6 +1833,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     private final boolean ALPHA_PROPERTY_WORKAROUND = Build.VERSION.SDK_INT == 28;
     private float alphaInternal = 1f;
+    private float mglaDeletedAlpha = 1f;
 
     public final TransitionParams transitionParams = new TransitionParams();
     private boolean edited;
@@ -7417,9 +7417,6 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                     timeMore += dp(20.5f);
                 }
                 timeMore += getExtraTimeX();
-                if (messageObject.mglaSavedDeleted) {
-                    timeMore += dp(18);
-                }
 
                 hasGamePreview = MessageObject.getMedia(messageObject.messageOwner) instanceof TLRPC.TL_messageMediaGame && MessageObject.getMedia(messageObject.messageOwner).game instanceof TLRPC.TL_game;
                 hasInvoicePrice = hasInvoicePreview = MessageObject.getMedia(messageObject.messageOwner) instanceof TLRPC.TL_messageMediaInvoice;
@@ -9109,9 +9106,6 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                             timeMore += dp(20.5f);
                         }
                         timeMore += getExtraTimeX();
-                if (messageObject.mglaSavedDeleted) {
-                    timeMore += dp(18);
-                }
                         if (reactionsLayoutInBubble.lastLineX + timeMore >= backgroundWidth) {
                             reactionsLayoutInBubble.totalHeight += dp(12);
                             reactionsLayoutInBubble.positionOffsetY -= dp(12);
@@ -18570,7 +18564,25 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 currentTimeString = TextUtils.concat(formatString(R.string.MessageScheduledRepeatSeconds, period), ", ", currentTimeString);
             }
         }
+        // Mgla: mark archived deleted messages with a red bin next to the time.
+        final boolean mglaDeletedMark = currentMessageObject.mglaDeleted
+            && !currentMessageObject.notime
+            && !TextUtils.isEmpty(currentTimeString);
+        if (mglaDeletedMark) {
+            android.text.SpannableStringBuilder mark = new android.text.SpannableStringBuilder("\u200B ");
+            org.telegram.ui.Components.ColoredImageSpan trashSpan =
+                new org.telegram.ui.Components.ColoredImageSpan(R.drawable.msg_delete);
+            trashSpan.setSize(dp(12));
+            trashSpan.setOverrideColor(0xFFFF5252);
+            mark.setSpan(trashSpan, 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            currentTimeString = TextUtils.concat(mark, currentTimeString);
+        }
         timeTextWidth = timeWidth = (int) Math.ceil(Theme.chat_timePaint.measureText(currentTimeString, 0, currentTimeString == null ? 0 : currentTimeString.length()));
+        if (mglaDeletedMark) {
+            // measureText ignores replacement spans, so reserve the bin width explicitly.
+            timeTextWidth += dp(14);
+            timeWidth += dp(14);
+        }
         if (currentMessageObject.scheduled && currentMessageObject.messageOwner.date == 0x7FFFFFFE || currentMessageObject.notime) {
             timeWidth -= dp(8);
         }
@@ -20239,7 +20251,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             }
         }
 
-        if (alphaInternal != 1.0f) {
+        final float layerAlpha = alphaInternal * mglaDeletedAlpha;
+        if (layerAlpha != 1.0f) {
             int top = 0;
             int left = 0;
             int bottom = getMeasuredHeight();
@@ -20262,11 +20275,13 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             if (getY() < 0) {
                 top = (int) -getY();
             }
-            if (getY() + getMeasuredHeight() > parentHeight) {
+            // parentHeight is 0 outside ChatActivity until setParentViewSize/setVisiblePart;
+            // clamping against it would invert the layer and clip all content.
+            if (parentHeight > 0 && getY() + getMeasuredHeight() > parentHeight) {
                 bottom = (int) (parentHeight - getY());
             }
             rect.set(left, top, right, bottom);
-            canvas.saveLayerAlpha(rect, (int) (255 * alphaInternal), Canvas.ALL_SAVE_FLAG);
+            canvas.saveLayerAlpha(rect, (int) (255 * layerAlpha), Canvas.ALL_SAVE_FLAG);
         }
         boolean clipContent = false;
         if (transitionParams.animateBackgroundBoundsInner && currentBackgroundDrawable != null && !isRoundVideo && (currentMessageObject == null || !currentMessageObject.sendPreview)) {
@@ -20770,7 +20785,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
 
         if ((drawBackground || transitionParams.animateDrawBackground) && currentBackgroundDrawable != null && (currentPosition == null || isDrawSelectionBackground() && (currentMessageObject.isMusic() || currentMessageObject.isDocument())) && !(enterTransitionInProgress && !currentMessageObject.isVoice())) {
-            float alphaInternal = this.alphaInternal;
+            float alphaInternal = this.alphaInternal * mglaDeletedAlpha;
             if (fromParent) {
                 alphaInternal *= getAlpha();
             }
@@ -24407,32 +24422,20 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 canvas.restore();
             }
         }
-        drawMglaDeletedTrashIcon(canvas);
     }
 
+    /**
+     * Archived deleted messages are drawn slightly faded. Kept separate from {@link #alphaInternal}
+     * so RecyclerView item animations can't clear it.
+     */
     private void applyMglaSavedDeletedStyle(MessageObject messageObject) {
-        float alpha = messageObject != null && messageObject.mglaSavedDeleted ? 0.75f : 1f;
-        if (alphaInternal != alpha) {
-            alphaInternal = alpha;
-            setAlpha(alpha);
+        float alpha = messageObject != null && messageObject.mglaDeleted ? 0.72f : 1f;
+        if (mglaDeletedAlpha != alpha) {
+            mglaDeletedAlpha = alpha;
+            invalidate();
         }
     }
 
-    private void drawMglaDeletedTrashIcon(Canvas canvas) {
-        if (currentMessageObject == null || !currentMessageObject.mglaSavedDeleted || timeLayout == null) {
-            return;
-        }
-        if (mglaDeletedTrashDrawable == null) {
-            mglaDeletedTrashDrawable = getContext().getResources().getDrawable(R.drawable.msg_delete).mutate();
-        }
-        mglaDeletedTrashDrawable.setColorFilter(new PorterDuffColorFilter(0xFFFF5252, PorterDuff.Mode.SRC_IN));
-        int size = dp(14);
-        float trashX = drawTimeX + timeWidth + dp(2);
-        float trashY = drawTimeY + (timeLayout.getHeight() - size) / 2f;
-        mglaDeletedTrashDrawable.setAlpha((int) (255 * getAlpha()));
-        mglaDeletedTrashDrawable.setBounds((int) trashX, (int) trashY, (int) trashX + size, (int) trashY + size);
-        mglaDeletedTrashDrawable.draw(canvas);
-    }
 
     private void createStatusDrawableAnimator(int lastStatusDrawableParams, int currentStatus, boolean fromParent) {
         boolean drawCheck1 = (currentStatus & 1) != 0;

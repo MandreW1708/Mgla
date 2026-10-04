@@ -31,6 +31,8 @@ public class ChatActivityTopPanelLayout extends AnimatedLinearLayout {
 
     public void setBlurredBackground(BlurredBackgroundDrawable background) {
         backgroundDrawable = background;
+        checkBoundsAndClipping();
+        invalidate();
     }
 
     @Override

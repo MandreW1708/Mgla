@@ -57429,7 +57429,8 @@ public class TLRPC {
         public boolean media_unread;
         public boolean out;
         public boolean unread;
-        public boolean mglaSavedDeleted;
+        /** Mgla: message was deleted but is kept from the local archive. Never serialized. */
+        public boolean mglaDeleted;
         public ArrayList<MessageEntity> entities = new ArrayList<>();
         public String via_bot_name;
         public ReplyMarkup reply_markup;

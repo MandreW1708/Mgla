@@ -386,8 +386,8 @@ public class MessagesStorage extends BaseController {
                 }
             }
             databaseCreated = true;
-            MglaDeletedMessagesStorage.ensureTable(database);
             MglaEditHistoryStorage.ensureTable(database);
+            MglaDeletedStorage.ensureTable(database);
         } catch (Exception e) {
             FileLog.e(e);
             if (openTries < 3 && e.getMessage() != null && e.getMessage().contains("malformed")) {
@@ -772,8 +772,8 @@ public class MessagesStorage extends BaseController {
         database.executeFast("CREATE TABLE poll_votes_mentions_topics(message_id INTEGER, state INTEGER, dialog_id INTEGER, topic_id INTEGER, PRIMARY KEY(message_id, dialog_id, topic_id))").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS poll_votes_mentions_topics_did ON poll_votes_mentions_topics(dialog_id, topic_id);").stepThis().dispose();
 
-        MglaDeletedMessagesStorage.ensureTable(database);
         MglaEditHistoryStorage.ensureTable(database);
+        MglaDeletedStorage.ensureTable(database);
         database.executeFast("CREATE TABLE ephemeral_messages (id INTEGER, dialog_id INTEGER, topic_id INTEGER, date INTEGER, data BLOB, PRIMARY KEY(dialog_id, id));").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS ephemeral_messages_date_idx ON ephemeral_messages(date);").stepThis().dispose();
 
@@ -9784,28 +9784,42 @@ public class MessagesStorage extends BaseController {
                     }
                 }
 
-                if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && !DialogObject.isEncryptedDialog(dialogId) && !scheduled && !quickReplies) {
-                    int minIdForDeleted = Integer.MAX_VALUE;
-                    int maxIdForDeleted = Integer.MIN_VALUE;
-                    for (int i = 0; i < res.messages.size(); i++) {
-                        TLRPC.Message message = res.messages.get(i);
-                        if (message.id > 0 && !MessageObject.isEphemeralMessageId(message.id)) {
-                            minIdForDeleted = Math.min(minIdForDeleted, message.id);
-                            maxIdForDeleted = Math.max(maxIdForDeleted, message.id);
+
+                // Mgla: fold archived deleted messages back into the window so they keep their
+                // original place in the timeline. Thread (comment) views are skipped because the
+                // archive is keyed by dialog/topic, not by thread.
+                if (mode == ChatActivity.MODE_DEFAULT && (threadMessageId == 0 || isTopic)
+                        && !DialogObject.isEncryptedDialog(dialogId)
+                        && MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+                    int minLoadedId = Integer.MAX_VALUE;
+                    int maxLoadedId = Integer.MIN_VALUE;
+                    HashSet<Integer> loadedIds = new HashSet<>();
+                    for (int a = 0, N = res.messages.size(); a < N; a++) {
+                        TLRPC.Message m = res.messages.get(a);
+                        if (m == null || m.id <= 0 || MessageObject.isEphemeralMessageId(m.id)) {
+                            continue;
                         }
+                        minLoadedId = Math.min(minLoadedId, m.id);
+                        maxLoadedId = Math.max(maxLoadedId, m.id);
+                        loadedIds.add(m.id);
                     }
-                    if (minIdForDeleted != Integer.MAX_VALUE) {
-                        long topicId = isTopic ? threadMessageId : 0;
-                        ArrayList<TLRPC.Message> deletedMessages = MglaDeletedMessagesStorage.loadDeletedMessagesInRange(database, currentAccount, dialogId, topicId, minIdForDeleted, maxIdForDeleted, 500);
-                        if (deletedMessages != null && !deletedMessages.isEmpty()) {
-                            for (int i = 0; i < deletedMessages.size(); i++) {
-                                TLRPC.Message delMsg = deletedMessages.get(i);
-                                addUsersAndChatsFromMessage(delMsg, usersToLoad, chatsToLoad, animatedEmojiToLoad);
-                                delMsg.mglaSavedDeleted = true;
-                                res.messages.add(delMsg);
-                                messagesCount++;
-                            }
+                    // A deleted newest message has no loaded id above it, so widen the window at
+                    // the bottom whenever this page reaches the dialog's last message.
+                    boolean atNewestEdge = last_message_id <= 0
+                        || maxLoadedId == Integer.MIN_VALUE
+                        || maxLoadedId >= last_message_id;
+                    ArrayList<TLRPC.Message> archived = MglaDeletedStorage.loadInRange(
+                        database, currentAccount, dialogId, isTopic ? threadMessageId : 0,
+                        minLoadedId, maxLoadedId, isEnd, atNewestEdge, 500
+                    );
+                    for (int a = 0, N = archived.size(); a < N; a++) {
+                        TLRPC.Message archivedMessage = archived.get(a);
+                        if (archivedMessage == null || loadedIds.contains(archivedMessage.id)) {
+                            continue;
                         }
+                        addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
+                        res.messages.add(archivedMessage);
+                        messagesCount++;
                     }
                 }
 
@@ -14626,6 +14640,10 @@ public class MessagesStorage extends BaseController {
                 ArrayList<Pair<Long, Integer>> idsToDelete = new ArrayList<>();
                 ArrayList<TopicsController.TopicUpdate> topicUpdatesInUi = null;
                 ArrayList<TLRPC.Message> deletedMessages = currentUser == dialogId || dialogId == 0 ? new ArrayList<>() : null;
+                // Mgla: archive messages before their rows go away, and keep the cached media of
+                // whatever we archived so the saved copy can still be opened later.
+                final boolean archiveDeleted = MglaSpyConfig.isSaveDeletedMessagesEnabled();
+                HashSet<Integer> archivedMids = archiveDeleted ? new HashSet<>() : null;
 
                 if (dialogId != 0) {
                     cursor = database.queryFinalized(String.format(Locale.US, "SELECT uid, data, read_state, out, mention, mid FROM messages_v2 WHERE mid IN(%s) AND uid = %d", ids, dialogId));
@@ -14664,7 +14682,14 @@ public class MessagesStorage extends BaseController {
                         if (data != null) {
                             TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                             message.readAttachPath(data, currentUser);
-                            MglaDeletedMessagesStorage.saveMessageIfEnabled(database, currentAccount, did, message, 0);
+                            if (archiveDeleted && MglaDeletedStorage.shouldSave(currentAccount, did, message)) {
+                                MglaDeletedStorage.save(
+                                    database, currentAccount, did,
+                                    MessageObject.getTopicId(currentAccount, message, getForumTypeFlags(did)),
+                                    message
+                                );
+                                archivedMids.add(mid);
+                            }
                             if (!DialogObject.isEncryptedDialog(did) && !deleteFiles && did != currentUser) {
                                 data.reuse();
                                 continue;
@@ -14673,7 +14698,7 @@ public class MessagesStorage extends BaseController {
                                 deletedMessages.add(message);
                             }
                             data.reuse();
-                            if (DialogObject.isEncryptedDialog(did) || deleteFiles) {
+                            if ((DialogObject.isEncryptedDialog(did) || deleteFiles) && (archivedMids == null || !archivedMids.contains(mid))) {
                                 addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, false);
                             }
 
@@ -14715,7 +14740,9 @@ public class MessagesStorage extends BaseController {
                             TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                             message.readAttachPath(data, getUserConfig().clientUserId);
                             data.reuse();
-                            addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, false);
+                            if (archivedMids == null || !archivedMids.contains(message.id)) {
+                                addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, false);
+                            }
                             if (message.action instanceof TLRPC.TL_messageActionTopicCreate) {
                                 if (topicsToDelete == null) {
                                     topicsToDelete = new ArrayList<>();
@@ -14723,7 +14750,6 @@ public class MessagesStorage extends BaseController {
                                 topicsToDelete.add(TopicKey.of(did, message.id));
                             }
                             topicId = MessageObject.getTopicId(currentAccount, message, getForumTypeFlags(did));
-                            MglaDeletedMessagesStorage.saveMessageIfEnabled(database, currentAccount, did, message, topicId);
                         }
                         if (topicId != 0) {
                             TopicKey topicKey = TopicKey.of(did, topicId);
@@ -15344,101 +15370,38 @@ public class MessagesStorage extends BaseController {
         executeInStorageQueue(() -> updateDialogsWithDeletedMessagesInternal(dialogId, channelId, messages, additionalDialogsToUpdate));
     }
 
-    public void loadMglaDeletedMessages(long dialogId, long topicId, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
-        storageQueue.postRunnable(() -> {
-            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.loadDeletedMessages(database, currentAccount, dialogId, topicId, 500);
-            AndroidUtilities.runOnUIThread(() -> {
-                if (callback != null) {
-                    callback.run(messages);
-                }
-            });
-        });
-    }
-
-    public void loadMglaDeletedMessagesPage(long dialogId, long topicId, int limit, int offset, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
-        storageQueue.postRunnable(() -> {
-            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.loadDeletedMessages(database, currentAccount, dialogId, topicId, limit, offset);
-            AndroidUtilities.runOnUIThread(() -> {
-                if (callback != null) {
-                    callback.run(messages);
-                }
-            });
-        });
-    }
-
-    public void searchMglaDeletedMessages(long dialogId, long topicId, String query, int limit, int offset, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
-        storageQueue.postRunnable(() -> {
-            ArrayList<TLRPC.Message> messages = MglaDeletedMessagesStorage.searchDeletedMessages(database, currentAccount, dialogId, topicId, query, limit, offset);
-            AndroidUtilities.runOnUIThread(() -> {
-                if (callback != null) {
-                    callback.run(messages);
-                }
-            });
-        });
-    }
-
-    public void loadMglaDeletedMessageById(long dialogId, int messageId, Utilities.Callback<TLRPC.Message> callback) {
-        storageQueue.postRunnable(() -> {
-            TLRPC.Message message = MglaDeletedMessagesStorage.loadDeletedMessageById(database, currentAccount, dialogId, messageId);
-            AndroidUtilities.runOnUIThread(() -> {
-                if (callback != null) {
-                    callback.run(message);
-                }
-            });
-        });
-    }
-
-    public void deleteMglaDeletedMessagesByType(long dialogId, long topicId, int msgType, Utilities.Callback<Integer> callback) {
-        storageQueue.postRunnable(() -> {
-            int count = MglaDeletedMessagesStorage.deleteDeletedMessagesByType(database, currentAccount, dialogId, topicId, msgType);
-            AndroidUtilities.runOnUIThread(() -> {
-                if (callback != null) {
-                    callback.run(count);
-                }
-            });
-        });
-    }
-
-    public void processMglaDeletedEnterNotification(int account, long dialogId, long topicId, Utilities.Callback<Integer> callback) {
-        storageQueue.postRunnable(() -> {
-            int count = 0;
-            if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && database != null) {
-                int watermark = MglaSpyConfig.getDeletedNotifyWatermark(account, dialogId, topicId);
-                int maxDate = MglaDeletedMessagesStorage.getMaxDeletedDate(database, dialogId, topicId);
-                if (maxDate > 0) {
-                    if (watermark == 0) {
-                        MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
-                    } else if (maxDate > watermark) {
-                        count = MglaDeletedMessagesStorage.countDeletedSince(database, dialogId, topicId, watermark);
-                        if (count > 0) {
-                            MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
-                        }
-                    }
-                }
-            }
-            final int finalCount = count;
-            AndroidUtilities.runOnUIThread(() -> {
-                if (callback != null) {
-                    callback.run(finalCount);
-                }
-            });
-        });
-    }
-
-    public void markMglaDeletedNotified(int account, long dialogId, long topicId) {
-        storageQueue.postRunnable(() -> {
-            if (database == null) {
-                return;
-            }
-            int maxDate = MglaDeletedMessagesStorage.getMaxDeletedDate(database, dialogId, topicId);
-            if (maxDate > 0) {
-                MglaSpyConfig.setDeletedNotifyWatermark(account, dialogId, topicId, maxDate);
-            }
-        });
-    }
 
     public void saveMglaIncomingEditHistory(TLRPC.Message message) {
         storageQueue.postRunnable(() -> MglaEditHistoryStorage.savePreviousVersionIfIncomingEdit(database, currentAccount, message));
+    }
+
+    public void loadMglaDeletedMessages(long dialogId, long topicId, int limit, int offset, Utilities.Callback<ArrayList<TLRPC.Message>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<TLRPC.Message> messages = MglaDeletedStorage.load(database, currentAccount, dialogId, topicId, limit, offset);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (callback != null) {
+                    callback.run(messages);
+                }
+            });
+        });
+    }
+
+    public void deleteMglaDeletedMessage(long dialogId, int messageId, Runnable after) {
+        storageQueue.postRunnable(() -> {
+            MglaDeletedStorage.deleteMessage(database, dialogId, messageId);
+            if (after != null) {
+                AndroidUtilities.runOnUIThread(after);
+            }
+        });
+    }
+
+    public void clearMglaDeletedMessages(long dialogId, long topicId, Runnable after) {
+        storageQueue.postRunnable(() -> {
+            MglaDeletedStorage.clearChat(database, dialogId, topicId);
+            if (after != null) {
+                AndroidUtilities.runOnUIThread(after);
+            }
+        });
     }
 
     public void loadMglaEditHistory(long dialogId, int messageId, Utilities.Callback<ArrayList<MglaEditHistoryStorage.Entry>> callback) {
@@ -15501,7 +15464,6 @@ public class MessagesStorage extends BaseController {
                     if (data != null) {
                         TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                         message.readAttachPath(data, getUserConfig().clientUserId);
-                        MglaDeletedMessagesStorage.saveMessageIfEnabled(database, currentAccount, did, message, 0);
                         if (!DialogObject.isEncryptedDialog(did) && !deleteFiles) {
                             data.reuse();
                             continue;

@@ -10,7 +10,9 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.VpnMonitor;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.utils.bypass.MglaBypassVpnGuard;
 import org.telegram.utils.proxy.ProxySettings;
 
 /**
@@ -55,6 +57,9 @@ public final class MglaDpiBypass {
         if (!MglaDpiConfig.isEnabled()) {
             return;
         }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            return;
+        }
         int port = startEngine(MglaDpiConfig.getStrategy(), MglaDpiConfig.getPort());
         if (port <= 0) {
             FileLog.e("MglaDpi: failed to start engine on app launch: " + lastError);
@@ -72,9 +77,7 @@ public final class MglaDpiBypass {
     /** Включение/выключение из UI. Возвращает true, если состояние применено успешно. */
     public synchronized boolean setEnabled(boolean enable) {
         if (enable) {
-            if (proxyApplied && isServerRunning()) {
-                return true;
-            }
+            MglaBypassVpnGuard.noteUserEnabled(MglaBypassVpnGuard.MODE_DPI);
             // WS-обход и ByeDPI взаимоисключающие — оба нельзя держать на прокси одновременно
             try {
                 if (org.telegram.utils.wsbypass.MglaWsBypass.getInstance().isEnabled()) {
@@ -82,6 +85,17 @@ public final class MglaDpiBypass {
                 }
             } catch (Throwable e) {
                 FileLog.e(e);
+            }
+            MglaDpiConfig.setEnabled(true);
+            if (VpnMonitor.getInstance().isVpnActive()) {
+                lastError = null;
+                MglaBypassVpnGuard.markSuspended();
+                notifyChanged();
+                return true;
+            }
+            if (proxyApplied && isServerRunning()) {
+                notifyChanged();
+                return true;
             }
             int port = startEngine(MglaDpiConfig.getStrategy(), MglaDpiConfig.getPort());
             if (port <= 0) {
@@ -95,6 +109,7 @@ public final class MglaDpiBypass {
             proxyApplied = true;
             sessionStartElapsed = SystemClock.elapsedRealtime();
         } else {
+            MglaBypassVpnGuard.noteUserDisabled(MglaBypassVpnGuard.MODE_DPI);
             if (proxyApplied) {
                 removeBypassProxyFromList();
                 ConnectionsManager.setProxySettings(false, null);
@@ -103,10 +118,59 @@ public final class MglaDpiBypass {
             }
             sessionStartElapsed = 0;
             stopEngine();
+            MglaDpiConfig.setEnabled(false);
+            if (!MglaBypassVpnGuard.isManagingProxy()) {
+                MglaBypassVpnGuard.clearSuspended();
+            }
         }
-        MglaDpiConfig.setEnabled(enable);
         notifyChanged();
         return true;
+    }
+
+    /** Остановить движок и снять прокси, не сбрасывая выбор пользователя. */
+    public synchronized void suspendForVpn() {
+        if (proxyApplied) {
+            removeBypassProxyFromList();
+            ConnectionsManager.setProxySettings(false, null);
+            restoreUserProxy();
+            proxyApplied = false;
+        }
+        sessionStartElapsed = 0;
+        stopEngine();
+        notifyChanged();
+    }
+
+    /** Вернуть обход после выключения VPN, если пользователь его не отключал. */
+    public synchronized void resumeAfterVpn() {
+        if (!MglaDpiConfig.isEnabled() || testing) {
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            return;
+        }
+        if (proxyApplied && isServerRunning()) {
+            notifyChanged();
+            return;
+        }
+        try {
+            if (org.telegram.utils.wsbypass.MglaWsBypass.getInstance().isEnabled()) {
+                org.telegram.utils.wsbypass.MglaWsBypass.getInstance().setEnabled(false);
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        int port = startEngine(MglaDpiConfig.getStrategy(), MglaDpiConfig.getPort());
+        if (port <= 0) {
+            FileLog.e("MglaDpi: resume after VPN failed: " + lastError);
+            notifyChanged();
+            return;
+        }
+        writeBypassToMainConfig();
+        addBypassProxyToList();
+        ConnectionsManager.setProxySettings(true, buildLocalSettings());
+        proxyApplied = true;
+        sessionStartElapsed = SystemClock.elapsedRealtime();
+        notifyChanged();
     }
 
     /**
@@ -145,6 +209,9 @@ public final class MglaDpiBypass {
     /** Перезапуск движка, если он неожиданно остановился (вызывается периодически из UI). */
     public synchronized void ensureRunning() {
         if (!proxyApplied || testing || isServerRunning()) {
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
             return;
         }
         long now = SystemClock.elapsedRealtime();
@@ -385,6 +452,9 @@ public final class MglaDpiBypass {
     public String getStatusText() {
         if (!MglaDpiConfig.isEnabled()) {
             return "Отключён";
+        }
+        if (MglaBypassVpnGuard.shouldShowVpnPaused()) {
+            return "На паузе";
         }
         if (testing) {
             return "Идёт подбор стратегий…";

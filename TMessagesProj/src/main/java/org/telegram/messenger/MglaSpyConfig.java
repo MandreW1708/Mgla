@@ -97,7 +97,7 @@ public class MglaSpyConfig {
         }
         prefs.edit().putBoolean(KEY_SAVE_DELETED, enabled).apply();
         if (!enabled) {
-            MglaDeletedMessagesStorage.clearAllDeletedMessagesForAllAccounts();
+            MglaDeletedStorage.clearAllAccounts();
             clearDeletedNotifyWatermarks();
         }
         updatePushBackgroundSettings();
@@ -166,9 +166,35 @@ public class MglaSpyConfig {
         }
     }
 
+    private static final String KEY_MSG_TYPES_MIGRATED = "spy_save_deleted_types_migrated";
+    private static boolean msgTypesMigrationChecked;
+
+    /**
+     * The per-type switches used to live in a screen that no longer exists, so installs carry
+     * values nobody can change any more. Drop those orphaned keys once and fall back to defaults.
+     */
+    private static void migrateMsgTypeKeysIfNeeded(SharedPreferences prefs) {
+        if (msgTypesMigrationChecked || prefs == null) {
+            return;
+        }
+        msgTypesMigrationChecked = true;
+        if (prefs.getBoolean(KEY_MSG_TYPES_MIGRATED, false)) {
+            return;
+        }
+        prefs.edit()
+            .remove(KEY_SAVE_MSG_VOICE)
+            .remove(KEY_SAVE_MSG_ROUND)
+            .remove(KEY_SAVE_MSG_TEXT)
+            .remove(KEY_SAVE_MSG_PHOTO)
+            .remove(KEY_SAVE_MSG_VIDEO)
+            .putBoolean(KEY_MSG_TYPES_MIGRATED, true)
+            .apply();
+    }
+
     public static boolean isSaveDeletedMsgTypeEnabled(int msgType) {
         SharedPreferences prefs = prefs();
         if (prefs == null) return true;
+        migrateMsgTypeKeysIfNeeded(prefs);
         switch (msgType) {
             case MSG_TYPE_VOICE:
                 return prefs.getBoolean(KEY_SAVE_MSG_VOICE, true);

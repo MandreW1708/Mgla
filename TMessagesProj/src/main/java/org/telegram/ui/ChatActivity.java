@@ -178,7 +178,7 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaEditHistoryStorage;
-import org.telegram.messenger.MglaDeletedMessagesStorage;
+import org.telegram.messenger.MglaDeletedStorage;
 import org.telegram.messenger.MglaChatsConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
@@ -454,11 +454,6 @@ public class ChatActivity extends BaseFragment implements
     private ActionBarMenu.LazyItem attachItem;
     private ActionBarMenuItem.Item savedChatsItem, savedChatsGap;;
     private ActionBarMenuItem headerItem;
-    private FrameLayout mglaDeletedHeaderView;
-    private FrameLayout mglaDeletedSearchContainer;
-    private EditTextBoldCursor mglaDeletedSearchField;
-    private ImageView mglaDeletedSearchClear;
-    private Bulletin mglaDeletedNotifyBulletin;
     // Mgla: right avatar in the chat/channel header (replaces the "more" three-dots button)
 
     private ActionBarMenu.LazyItem editTextItem;
@@ -697,7 +692,6 @@ public class ChatActivity extends BaseFragment implements
     public static final int MODE_EDIT_BUSINESS_LINK = 6;
     public static final int MODE_SEARCH = 7;
     public static final int MODE_SUGGESTIONS = 8;
-    public static final int MODE_MGLA_DELETED = 9;
     public static final int MODE_WELCOME_MESSAGES = 10;
 
     public static final int SEARCH_THIS_CHAT = 0;
@@ -1715,7 +1709,7 @@ public class ChatActivity extends BaseFragment implements
 
     private final static int share = 69;
     private final static int open_direct = 70;
-    private final static int mgla_view_deleted = 71;
+    private final static int mgla_view_deleted = 76;
     private final static int mgla_chat_dna = 75;
     private final static int remove_fee = 71;
     private final static int charge_fee = 72;
@@ -1729,13 +1723,6 @@ public class ChatActivity extends BaseFragment implements
         public boolean onItemClick(View view, int position, float x, float y) {
             if (isTryingTextSelection() || hasTextSelection() || inPreviewMode || isInsideContainer) {
                 return false;
-            }
-            if (chatMode == MODE_MGLA_DELETED && view instanceof ChatMessageCell) {
-                MessageObject msg = ((ChatMessageCell) view).getMessageObject();
-                if (msg != null && !msg.isDateObject) {
-                    showDeleteDeletedMessageAlert(msg.getId());
-                    return true;
-                }
             }
             wasManualScroll = true;
             boolean result = true;
@@ -1911,13 +1898,6 @@ public class ChatActivity extends BaseFragment implements
                 }
                 processRowSelect(view, outside, x, y);
                 return;
-            }
-            if (chatMode == MODE_MGLA_DELETED && view instanceof ChatMessageCell) {
-                MessageObject msg = ((ChatMessageCell) view).getMessageObject();
-                if (msg != null && !msg.isDateObject) {
-                    openMglaDeletedMessageInChat(msg.getId());
-                    return;
-                }
             }
             if (view instanceof ChatMessageCell) {
                 MessageObject msg = ((ChatMessageCell) view).getMessageObject();
@@ -3044,12 +3024,6 @@ public class ChatActivity extends BaseFragment implements
             int loadIndex = lastLoadIndex++;
             waitingForLoad.add(loadIndex);
             getNotificationCenter().postNotificationName(NotificationCenter.messagesDidLoad, dialog_id, messageObjects.size(), messageObjects, false, 0, last_message_id, 0, 0, 2, true, classGuid, loadIndex, pinnedMessageIds.get(0), 0, MODE_PINNED);
-        } else if (chatMode == MODE_MGLA_DELETED) {
-            endReached[0] = endReached[1] = true;
-            forwardEndReached[0] = forwardEndReached[1] = true;
-            firstLoading = false;
-            loading = false;
-            AndroidUtilities.runOnUIThread(this::loadMglaDeletedModeMessages, 150);
         } else if (!forceHistoryEmpty) {
             loading = true;
         }
@@ -3113,7 +3087,7 @@ public class ChatActivity extends BaseFragment implements
             loading = false;
             checkDispatchHideSkeletons(false);
         }
-        if (chatMode != MODE_PINNED && chatMode != MODE_MGLA_DELETED && !forceHistoryEmpty) {
+        if (chatMode != MODE_PINNED && !forceHistoryEmpty) {
             if (SharedConfig.deviceIsHigh()) {
                 initialMessagesSize = (isThreadChat() && !isTopic) ? 30 : 25;
             } else {
@@ -4341,7 +4315,7 @@ public class ChatActivity extends BaseFragment implements
             });
             getConnectionsManager().bindRequestToGuid(req, classGuid);
         } else {
-            if (chatMode != MODE_MGLA_DELETED) {
+            if (true) {
                 if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
                     actionBar.setPreviewGlassMode(true);
                     actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, dp(6), 0, dp(6), 0));
@@ -4547,7 +4521,7 @@ public class ChatActivity extends BaseFragment implements
             translateItem = headerItem.lazilyAddSubItem(translate, R.drawable.msg_translate, LocaleController.getString(R.string.TranslateMessage));
             updateTranslateItemVisibility();
             if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-                headerItem.lazilyAddSubItem(mgla_view_deleted, R.drawable.msg_delete, "Посмотреть удаленные");
+                headerItem.lazilyAddSubItem(mgla_view_deleted, R.drawable.msg_delete, "Удалённые");
             }
             if (chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
                 headerItem.lazilyAddSubItem(mgla_chat_dna, R.drawable.msg_topics, "Chat DNA");
@@ -4573,7 +4547,7 @@ public class ChatActivity extends BaseFragment implements
             if (currentUser != null && currentUser.self && getDialogId() != UserObject.VERIFY) {
                 headerItem.lazilyAddSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
             }
-            if (chatMode != MODE_MGLA_DELETED) {
+            if (true) {
                 if (currentUser != null && currentChat == null && getDialogId() != UserObject.VERIFY) {
                     ActionBarMenuSubItem exportSubItem = headerItem.addSubItem(export_chat, R.drawable.msg_share, LocaleController.getString("ExportChat", R.string.ExportChat));
                     if (exportSubItem != null && !getMessagesController().getGlobalMainSettings().getBoolean("mgla_export_seen", false)) {
@@ -4734,11 +4708,7 @@ public class ChatActivity extends BaseFragment implements
             glassBackgroundDrawableFactory,
             BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate),
             ChatObject.isForum(currentChat));
-        if (chatMode == MODE_MGLA_DELETED) {
-            actionBar.setSuppressTitleGlass(true);
-            actionBar.setChatAvatarContainer(null);
-            setupMglaDeletedHeader(context);
-        } else if (chatMode == MODE_PINNED) {
+        if (chatMode == MODE_PINNED) {
             actionBar.setChatAvatarContainer(avatarContainer);
             avatarContainer.setActionBar(actionBar);
         } else if (chatMode == MODE_WELCOME_MESSAGES) {
@@ -8695,54 +8665,6 @@ public class ChatActivity extends BaseFragment implements
         };
         bottomChannelButtonsLayout.getContainer().addView(bottomOverlayChatText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, 0));
         
-        mglaDeletedSearchContainer = new FrameLayout(context);
-        mglaDeletedSearchContainer.setClipToOutline(true);
-        mglaDeletedSearchContainer.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(ChatActivityEnterView.DEFAULT_HEIGHT / 2f)));
-        // Add "air" between pill edges and left/right buttons backgrounds
-        mglaDeletedSearchContainer.setPadding(dp(24), 0, dp(24), 0);
-        mglaDeletedSearchContainer.setVisibility(View.GONE);
-
-        mglaDeletedSearchField = new EditTextBoldCursor(context);
-        mglaDeletedSearchField.setHint("Поиск по удалённым...");
-        mglaDeletedSearchField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        mglaDeletedSearchField.setCursorWidth(1.5f);
-        mglaDeletedSearchField.setTextColor(getThemedColor(Theme.key_chat_messagePanelText));
-        mglaDeletedSearchField.setHintTextColor(getThemedColor(Theme.key_chat_messagePanelHint));
-        mglaDeletedSearchField.setSingleLine(true);
-        mglaDeletedSearchField.setIncludeFontPadding(false);
-        mglaDeletedSearchField.setBackground(null);
-        mglaDeletedSearchField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        mglaDeletedSearchField.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-        mglaDeletedSearchField.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL);
-        // Keep text away from pill edges and the clear button (on the right)
-        mglaDeletedSearchField.setPadding(dp(24), 0, dp(44), 0);
-        mglaDeletedSearchContainer.addView(mglaDeletedSearchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-        mglaDeletedSearchClear = new ImageView(context);
-        mglaDeletedSearchClear.setScaleType(ImageView.ScaleType.CENTER);
-        mglaDeletedSearchClear.setImageResource(R.drawable.miniplayer_close);
-        mglaDeletedSearchClear.setVisibility(View.GONE);
-        mglaDeletedSearchClear.setColorFilter(ColorUtils.setAlphaComponent(getThemedColor(Theme.key_windowBackgroundWhiteBlackText), 153), PorterDuff.Mode.MULTIPLY);
-        mglaDeletedSearchClear.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, dp(16)));
-        mglaDeletedSearchClear.setOnClickListener(v -> {
-            mglaDeletedSearchField.setText("");
-            filterMglaDeletedMessages("");
-        });
-        // Clear button sits to the right of the input
-        mglaDeletedSearchContainer.addView(mglaDeletedSearchClear, LayoutHelper.createFrame(36, LayoutHelper.MATCH_PARENT, (LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
-
-        mglaDeletedSearchField.addTextChangedListener(new android.text.TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-            @Override
-            public void afterTextChanged(android.text.Editable s) {
-                mglaDeletedSearchClear.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
-                filterMglaDeletedMessages(s.toString());
-            }
-        });
-        bottomChannelButtonsLayout.getContainer().addView(mglaDeletedSearchContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
         
         bottomOverlayChatText.setOnClickListener(view -> {
             if (getParentActivity() == null || pullingDownOffset != 0) {
@@ -8921,7 +8843,7 @@ public class ChatActivity extends BaseFragment implements
 
         flagSecure = new FlagSecureReason(getParentActivity().getWindow(), () ->
             currentEncryptedChat != null ||
-            (chatMode != MODE_MGLA_DELETED && isPeerNoForwards())
+            isPeerNoForwards()
         );
 
         if (oldMessage != null) {
@@ -11714,6 +11636,7 @@ public class ChatActivity extends BaseFragment implements
         });
         pinnedMessageView.setEnabled(!isInPreviewMode());
         pinnedMessageView.setBackground(Theme.getSelectorDrawable(false));
+        updateTopPanelBackgrounds();
 
         pinnedLineView = new PinnedLineView(getContext(), themeDelegate);
         pinnedMessageView.addView(pinnedLineView, LayoutHelper.createFrame(3, 48, Gravity.LEFT | Gravity.TOP, 13, 0, 0, 0));
@@ -19712,10 +19635,6 @@ public class ChatActivity extends BaseFragment implements
         if (avatarContainer == null) {
             return;
         }
-        if (chatMode == MODE_MGLA_DELETED) {
-            setParentActivityTitle("Удаленные");
-            return;
-        }
         if (chatMode == MODE_SUGGESTIONS && currentChat != null) {
             if (isSubscriberSuggestions) {
                 avatarContainer.setTitle(ForumUtilities.getMonoForumTitle(currentAccount, currentChat), currentChat.scam, currentChat.fake, currentChat.verified, false, null, animated);
@@ -20836,7 +20755,6 @@ public class ChatActivity extends BaseFragment implements
             // glass appearance toggles (e.g. clean header settings) are broadcast as theme changes —
             // re-apply the pinned/translate panel backgrounds so they don't stay stale
             updateTopPanelBackgrounds();
-            return;
         }
         if (id == NotificationCenter.messagesDidLoad) {
             didReceivedNotification_messagesDidLoad(id, account, args);
@@ -22132,616 +22050,10 @@ public class ChatActivity extends BaseFragment implements
                 }
             }
             if (did == dialog_id && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-                scheduleMglaMerge();
             }
         }
     }
 
-    private boolean shouldKeepDeletedMessageVisible(int loadIndex) {
-        return MglaSpyConfig.isSaveDeletedMessagesEnabled()
-            && loadIndex == 0
-            && currentEncryptedChat == null
-            && chatMode == MODE_DEFAULT;
-    }
-
-    private int findInsertIndexInDayArray(ArrayList<MessageObject> dayArray, MessageObject obj) {
-        for (int i = 0, size = dayArray.size(); i < size; i++) {
-            if (MglaDeletedMessagesStorage.compareMessageOrder(dayArray.get(i), obj) < 0) {
-                return i;
-            }
-        }
-        return dayArray.size();
-    }
-
-    private int findInsertIndexForMglaDeletedMessage(MessageObject obj) {
-        for (int i = 0; i < messages.size(); i++) {
-            MessageObject m = messages.get(i);
-            if (m.isDateObject || m.getId() <= 0 || m.type < 0) {
-                continue;
-            }
-            if (MglaDeletedMessagesStorage.compareMessageOrder(m, obj) < 0) {
-                return i;
-            }
-        }
-        return messages.size();
-    }
-
-    private void insertMglaDeletedMessage(MessageObject obj) {
-        ArrayList<MessageObject> dayArray = messagesByDays.get(obj.dateKey);
-        int insertIndex = findInsertIndexForMglaDeletedMessage(obj);
-        if (dayArray == null) {
-            dayArray = new ArrayList<>();
-            messagesByDays.put(obj.dateKey, dayArray);
-            messagesByDaysSorted.put(obj.dateKeyInt, dayArray);
-
-            TLRPC.Message dateMsg = new TLRPC.TL_message();
-            dateMsg.message = LocaleController.formatDateChat(obj.messageOwner.date);
-            dateMsg.id = 0;
-            Calendar calendar = Calendar.getInstance();
-            calendar.setTimeInMillis(((long) obj.messageOwner.date) * 1000);
-            calendar.set(Calendar.HOUR_OF_DAY, 0);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            dateMsg.date = (int) (calendar.getTimeInMillis() / 1000);
-
-            MessageObject dateObj = new MessageObject(currentAccount, dateMsg, false, false);
-            dateObj.type = MessageObject.TYPE_DATE;
-            dateObj.contentType = 1;
-            dateObj.isDateObject = true;
-            dateObj.stableId = getStableIdForDateObject(obj.dateKeyInt);
-            messages.add(insertIndex, dateObj);
-            insertIndex++;
-        }
-        dayArray.add(findInsertIndexInDayArray(dayArray, obj), obj);
-        messages.add(insertIndex, obj);
-        messagesDict[0].put(obj.getId(), obj);
-        obj.stableId = lastStableId++;
-        getMessagesController().getTranslateController().checkTranslation(obj, false);
-    }
-
-    private boolean applyMglaDeletedSnapshotToLoadedMessage(int loadIndex, TLRPC.Message tlMsg) {
-        if (tlMsg == null) {
-            return false;
-        }
-        MessageObject existing = messagesDict[loadIndex].get(tlMsg.id);
-        if (existing == null) {
-            MessageObject obj = new MessageObject(currentAccount, tlMsg, false, false);
-            obj.mglaSavedDeleted = true;
-            obj.deleted = false;
-            obj.deletedByThanos = false;
-            insertMglaDeletedMessage(obj);
-            return true;
-        }
-
-        boolean hasStoredAttachPath = !TextUtils.isEmpty(tlMsg.attachPath);
-        boolean needsUpdate = !existing.mglaSavedDeleted || existing.deleted;
-        if (hasStoredAttachPath && !TextUtils.equals(existing.messageOwner.attachPath, tlMsg.attachPath)) {
-            needsUpdate = true;
-        }
-
-        if (!messages.contains(existing)) {
-            existing.mglaSavedDeleted = true;
-            existing.deleted = false;
-            existing.deletedByThanos = false;
-            if (hasStoredAttachPath) {
-                existing.messageOwner.attachPath = tlMsg.attachPath;
-                existing.attachPathExists = new File(tlMsg.attachPath).exists();
-            }
-            existing.checkMediaExistance(false);
-            insertMglaDeletedMessage(existing);
-            return true;
-        }
-
-        if (!needsUpdate) {
-            return false;
-        }
-
-        if (hasStoredAttachPath) {
-            existing.messageOwner.attachPath = tlMsg.attachPath;
-            existing.attachPathExists = new File(tlMsg.attachPath).exists();
-            existing.mediaExists = existing.attachPathExists;
-        }
-
-        MessageObject replacement = new MessageObject(currentAccount, tlMsg, false, false);
-        replacement.mglaSavedDeleted = true;
-        replacement.deleted = false;
-        replacement.deletedByThanos = false;
-
-        ArrayList<MessageObject> replacementList = new ArrayList<>(1);
-        replacementList.add(replacement);
-        replaceMessageObjects(replacementList, loadIndex, false, false);
-
-        MessageObject updated = messagesDict[loadIndex].get(tlMsg.id);
-        if (updated != null) {
-            updated.mglaSavedDeleted = true;
-            updated.deleted = false;
-            updated.deletedByThanos = false;
-            if (hasStoredAttachPath) {
-                updated.messageOwner.attachPath = tlMsg.attachPath;
-                updated.attachPathExists = new File(tlMsg.attachPath).exists();
-            }
-            updated.checkMediaExistance(false);
-        }
-        return true;
-    }
-
-    private Runnable mglaMergeRunnable;
-
-    private void scheduleMglaMerge() {
-        if (mglaMergeRunnable != null) {
-            AndroidUtilities.cancelRunOnUIThread(mglaMergeRunnable);
-        }
-        mglaMergeRunnable = this::loadAndMergeMglaDeletedMessages;
-        AndroidUtilities.runOnUIThread(mglaMergeRunnable);
-    }
-
-    private int[] getLoadedMessageIdRange() {
-        int minId = Integer.MAX_VALUE;
-        int maxId = Integer.MIN_VALUE;
-        for (int i = 0, size = messages.size(); i < size; i++) {
-            MessageObject m = messages.get(i);
-            if (m.isDateObject || m.getId() <= 0 || m.type < 0) {
-                continue;
-            }
-            minId = Math.min(minId, m.getId());
-            maxId = Math.max(maxId, m.getId());
-        }
-        if (minId == Integer.MAX_VALUE) {
-            return null;
-        }
-        return new int[]{minId, maxId};
-    }
-
-    private void loadAndMergeMglaDeletedMessages() {
-        if (!MglaSpyConfig.isSaveDeletedMessagesEnabled() || currentEncryptedChat != null || chatMode != MODE_DEFAULT) {
-            return;
-        }
-        int[] idRange = getLoadedMessageIdRange();
-        if (idRange == null) {
-            return;
-        }
-        long topicId = isTopic ? getTopicId() : 0;
-        getMessagesStorage().loadMglaDeletedMessages(dialog_id, topicId, deleted -> {
-            if (deleted == null || deleted.isEmpty()) {
-                return;
-            }
-            deleted.sort((a, b) -> {
-                if (a.date != b.date) {
-                    return Integer.compare(a.date, b.date);
-                }
-                return Integer.compare(a.id, b.id);
-            });
-            int merged = 0;
-            for (TLRPC.Message tlMsg : deleted) {
-                if (tlMsg.id < idRange[0] || tlMsg.id > idRange[1]) {
-                    continue;
-                }
-                if (isTopic) {
-                    long msgTopic = MessageObject.getTopicId(currentAccount, tlMsg, true);
-                    if (msgTopic != getTopicId()) {
-                        continue;
-                    }
-                }
-                if (messagesDict[0].indexOfKey(tlMsg.id) >= 0) {
-                    if (applyMglaDeletedSnapshotToLoadedMessage(0, tlMsg)) {
-                        merged++;
-                    }
-                    continue;
-                }
-                if (applyMglaDeletedSnapshotToLoadedMessage(0, tlMsg)) {
-                    merged++;
-                }
-            }
-            if (merged > 0 && chatAdapter != null && !chatAdapter.isFrozen) {
-                chatAdapter.updateRowsInternal();
-                chatAdapter.notifyDataSetChanged(false);
-            }
-            checkMglaDeletedEnterNotification();
-        });
-    }
-
-    private static CharSequence formatMglaDeletedNotifyText(int count) {
-        int mod10 = count % 10;
-        int mod100 = count % 100;
-        String word;
-        if (mod10 == 1 && mod100 != 11) {
-            word = "сообщение";
-        } else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
-            word = "сообщения";
-        } else {
-            word = "сообщений";
-        }
-        return "Было удалено " + count + " " + word;
-    }
-
-    private void checkMglaDeletedEnterNotification() {
-        if (!MglaSpyConfig.isSaveDeletedMessagesEnabled() || currentEncryptedChat != null || chatMode != MODE_DEFAULT || !isFullyVisible || isInPreviewMode() || isReport()) {
-            return;
-        }
-        if (mglaDeletedNotifyBulletin != null) {
-            return;
-        }
-        final long topicId = isTopic ? getTopicId() : 0;
-        getMessagesStorage().processMglaDeletedEnterNotification(currentAccount, dialog_id, topicId, count -> {
-            if (count <= 0 || !isFullyVisible || chatMode != MODE_DEFAULT) {
-                return;
-            }
-            if (mglaDeletedNotifyBulletin != null) {
-                return;
-            }
-            mglaDeletedNotifyBulletin = BulletinFactory.of(ChatActivity.this)
-                .createSimpleBulletin(R.raw.ic_delete, formatMglaDeletedNotifyText(count), "Открыть", () -> {
-                    openMglaDeletedMessages();
-                })
-                .setOnHideListener(() -> mglaDeletedNotifyBulletin = null);
-            mglaDeletedNotifyBulletin.show(true);
-        });
-    }
-
-    private void markMglaDeletedNotified() {
-        final long topicId = isTopic ? getTopicId() : 0;
-        getMessagesStorage().markMglaDeletedNotified(currentAccount, dialog_id, topicId);
-    }
-
-    private static final int MGLA_DELETED_PAGE_SIZE = 50;
-    private int mglaDeletedLoadedOffset;
-    private boolean mglaDeletedAllLoaded;
-    private boolean mglaDeletedLoadingPage;
-
-    private void loadMglaDeletedModeMessages() {
-        if (chatMode != MODE_MGLA_DELETED) {
-            return;
-        }
-        showProgressView(true);
-        long topicId = isTopic ? getTopicId() : 0;
-        messages.clear();
-        messagesDict[0].clear();
-        messagesByDays.clear();
-        messagesByDaysSorted.clear();
-        groupedMessagesMap.clear();
-        threadMessageAdded = false;
-        mglaDeletedAllMessages = new ArrayList<>();
-        mglaDeletedLoadedOffset = 0;
-        mglaDeletedAllLoaded = false;
-        mglaDeletedLoadingPage = false;
-        loadMglaDeletedPage(topicId);
-    }
-
-    private void loadMglaDeletedPage(long topicId) {
-        if (mglaDeletedLoadingPage || mglaDeletedAllLoaded) {
-            return;
-        }
-        mglaDeletedLoadingPage = true;
-        final int offset = mglaDeletedLoadedOffset;
-        getMessagesStorage().loadMglaDeletedMessagesPage(dialog_id, topicId, MGLA_DELETED_PAGE_SIZE, offset, deleted -> {
-            mglaDeletedLoadingPage = false;
-            if (chatMode != MODE_MGLA_DELETED) {
-                return;
-            }
-            if (deleted == null || deleted.isEmpty()) {
-                mglaDeletedAllLoaded = true;
-                showProgressView(false);
-                checkDispatchHideSkeletons(true);
-                if (chatAdapter != null) {
-                    chatAdapter.updateRowsInternal();
-                    chatAdapter.notifyDataSetChanged(true);
-                }
-                return;
-            }
-            if (deleted.size() < MGLA_DELETED_PAGE_SIZE) {
-                mglaDeletedAllLoaded = true;
-            }
-            deleted.sort((a, b) -> {
-                if (a.date != b.date) {
-                    return Integer.compare(a.date, b.date);
-                }
-                return Integer.compare(a.id, b.id);
-            });
-            for (TLRPC.Message tlMsg : deleted) {
-                if (isTopic) {
-                    long msgTopic = MessageObject.getTopicId(currentAccount, tlMsg, true);
-                    if (msgTopic != getTopicId()) {
-                        continue;
-                    }
-                }
-                MessageObject obj = new MessageObject(currentAccount, tlMsg, false, false);
-                obj.mglaSavedDeleted = true;
-                insertMglaDeletedMessage(obj);
-                mglaDeletedAllMessages.add(obj);
-            }
-            mglaDeletedLoadedOffset += deleted.size();
-            showProgressView(false);
-            checkDispatchHideSkeletons(true);
-            if (chatAdapter != null) {
-                chatAdapter.updateRowsInternal();
-                chatAdapter.notifyDataSetChanged(true);
-            }
-            if (!mglaDeletedAllLoaded) {
-                AndroidUtilities.runOnUIThread(() -> loadMglaDeletedPage(topicId), 16);
-            }
-        });
-    }
-
-    private void openMglaDeletedMessageInChat(int messageId) {
-        if (chatActivityDelegate != null) {
-            chatActivityDelegate.openReplyMessage(messageId);
-            finishFragment();
-        }
-    }
-
-    private void setupMglaDeletedHeader(Context context) {
-        if (mglaDeletedHeaderView != null) {
-            return;
-        }
-        final int p = dp(6);
-        final int s = dp(46);
-        final int pillHeight = s + p * 2;
-
-        mglaDeletedHeaderView = new FrameLayout(context) {
-            @Override
-            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                final int maxWidth = View.MeasureSpec.getSize(widthMeasureSpec);
-                final int childWidthSpec = View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST);
-                final int childHeightSpec = View.MeasureSpec.makeMeasureSpec(pillHeight, View.MeasureSpec.EXACTLY);
-                for (int i = 0; i < getChildCount(); i++) {
-                    final View child = getChildAt(i);
-                    if (child.getVisibility() != GONE) {
-                        measureChild(child, childWidthSpec, childHeightSpec);
-                    }
-                }
-                int width = 0;
-                for (int i = 0; i < getChildCount(); i++) {
-                    final View child = getChildAt(i);
-                    if (child.getVisibility() != GONE) {
-                        width = Math.max(width, child.getMeasuredWidth());
-                    }
-                }
-                setMeasuredDimension(width, pillHeight);
-            }
-        };
-        mglaDeletedHeaderView.setClipChildren(false);
-
-        TextView title = new TextView(context);
-        title.setText("Удаленные");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
-        title.setTypeface(AndroidUtilities.bold());
-        title.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
-        title.setGravity(Gravity.CENTER);
-        title.setSingleLine(true);
-        title.setIncludeFontPadding(false);
-        title.setPadding(dp(16), 0, dp(16), 0);
-        mglaDeletedHeaderView.addView(title, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
-
-        BlurredBackgroundDrawable drawable = glassBackgroundDrawableFactory.create(mglaDeletedHeaderView, blurredBackgroundColorProvider);
-        drawable.setRadius(dp(23)).setPadding(dp(6));
-        mglaDeletedHeaderView.setBackground(drawable);
-
-        final int actionBarHeight = ActionBar.getCurrentActionBarHeight();
-        final int statusBarHeight = actionBar.getOccupyStatusBar() ? AndroidUtilities.statusBarHeight : 0;
-        final int topMarginPx = actionBarHeight + statusBarHeight - (actionBarHeight + s) / 2 - p;
-
-        actionBar.addView(mglaDeletedHeaderView, LayoutHelper.createFrameMarginPx(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, topMarginPx, 0, 0));
-
-        ImageView moreButton = new ImageView(context);
-        moreButton.setScaleType(ImageView.ScaleType.CENTER);
-        moreButton.setImageResource(R.drawable.ic_ab_other);
-        moreButton.setColorFilter(getThemedColor(Theme.key_actionBarDefaultIcon));
-        moreButton.setPadding(dp(1), 0, 0, 0);
-        moreButton.setOnClickListener(v -> showMglaDeletedTypesMenu(moreButton));
-        BlurredBackgroundDrawable moreBg = glassBackgroundDrawableFactory.create(moreButton, blurredBackgroundColorProvider);
-        moreBg.setRadius(dp(23)).setPadding(dp(6));
-        moreButton.setBackground(moreBg);
-        actionBar.addView(moreButton, LayoutHelper.createFrame(54, 54, Gravity.RIGHT | Gravity.TOP));
-        if (actionBar.getOccupyStatusBar()) {
-            moreButton.setTranslationY(AndroidUtilities.statusBarHeight);
-        }
-        moreButton.setTranslationX(-dp(2));
-    }
-
-    private void showMglaDeletedTypesMenu(View anchor) {
-        if (getParentActivity() == null) return;
-        ActionBarPopupWindow.ActionBarPopupWindowLayout popupLayout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(getParentActivity(), null);
-        popupLayout.setFitItems(true);
-
-        ActionBarMenuSubItem headerItem = new ActionBarMenuSubItem(getParentActivity(), false, false, false, null);
-        headerItem.setText("Типы сообщений");
-        headerItem.setEnabled(false);
-        popupLayout.addView(headerItem);
-
-        View gap = new View(getParentActivity());
-        gap.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(6)));
-        popupLayout.addView(gap);
-
-        for (int i = 0; i < MglaSpyConfig.MSG_TYPE_NAMES.length; i++) {
-            final int msgType = i;
-            ActionBarMenuSubItem item = new ActionBarMenuSubItem(getParentActivity(), true, false, false, null);
-            item.setText(MglaSpyConfig.MSG_TYPE_NAMES[i]);
-            item.setChecked(MglaSpyConfig.isSaveDeletedMsgTypeEnabled(msgType));
-            item.setOnClickListener(v -> {
-                boolean currentVal = MglaSpyConfig.isSaveDeletedMsgTypeEnabled(msgType);
-                if (currentVal) {
-                    AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-                    builder.setTitle("Отключить сохранение");
-                    builder.setMessage("Все сохранённые удалённые сообщения типа «" + MglaSpyConfig.MSG_TYPE_NAMES[msgType] + "» в этом чате будут удалены. Продолжить?");
-                    builder.setPositiveButton("Удалить", (dialog, which) -> {
-                        MglaSpyConfig.setSaveDeletedMsgTypeEnabled(msgType, false);
-                        long topicId = isTopic ? getTopicId() : 0;
-                        getMessagesStorage().deleteMglaDeletedMessagesByType(dialog_id, topicId, msgType, count -> {
-                            if (count > 0) {
-                                loadMglaDeletedModeMessages();
-                            }
-                        });
-                    });
-                    builder.setNegativeButton("Отмена", null);
-                    showDialog(builder.create());
-                } else {
-                    MglaSpyConfig.setSaveDeletedMsgTypeEnabled(msgType, true);
-                }
-                item.setChecked(!currentVal);
-            });
-            popupLayout.addView(item);
-        }
-
-        ActionBarPopupWindow popupWindow = new ActionBarPopupWindow(popupLayout, LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT);
-        popupWindow.setPauseNotifications(true);
-        popupWindow.setDismissAnimationDuration(150);
-        popupWindow.setOutsideTouchable(true);
-        popupWindow.setClippingEnabled(true);
-        popupWindow.setAnimationStyle(R.style.PopupContextAnimation);
-        popupWindow.showAsDropDown(anchor, 0, -dp(8));
-    }
-
-    private ArrayList<MessageObject> mglaDeletedAllMessages;
-    private ArrayList<MessageObject> mglaDeletedFilteredMessages;
-    private boolean mglaDeletedFilterActive;
-    private String mglaDeletedFilterQuery;
-
-    private void filterMglaDeletedMessages(String query) {
-        if (chatMode != MODE_MGLA_DELETED) return;
-        String raw = query == null ? "" : query.trim();
-        if (raw.isEmpty()) {
-            mglaDeletedFilterActive = false;
-            mglaDeletedFilteredMessages = null;
-            mglaDeletedFilterQuery = null;
-            if (mglaDeletedAllMessages != null) {
-                messages.clear();
-                messagesDict[0].clear();
-                messagesByDays.clear();
-                messagesByDaysSorted.clear();
-                groupedMessagesMap.clear();
-                threadMessageAdded = false;
-                for (int i = 0; i < mglaDeletedAllMessages.size(); i++) {
-                    MessageObject obj = mglaDeletedAllMessages.get(i);
-                    if (obj != null) {
-                        obj.highlightedWords = null;
-                        insertMglaDeletedMessage(obj);
-                    }
-                }
-            }
-            if (chatAdapter != null) {
-                chatAdapter.updateRowsInternal();
-                chatAdapter.notifyDataSetChanged(true);
-            }
-            return;
-        }
-        mglaDeletedFilterActive = true;
-        mglaDeletedFilterQuery = raw;
-        long topicId = isTopic ? getTopicId() : 0;
-        getMessagesStorage().searchMglaDeletedMessages(dialog_id, topicId, raw, 500, 0, found -> {
-            if (chatMode != MODE_MGLA_DELETED || !raw.equals(mglaDeletedFilterQuery)) {
-                return;
-            }
-            messages.clear();
-            messagesDict[0].clear();
-            messagesByDays.clear();
-            messagesByDaysSorted.clear();
-            groupedMessagesMap.clear();
-            threadMessageAdded = false;
-            mglaDeletedFilteredMessages = new ArrayList<>();
-            if (found != null && !found.isEmpty()) {
-                found.sort((a, b) -> {
-                    if (a.date != b.date) {
-                        return Integer.compare(a.date, b.date);
-                    }
-                    return Integer.compare(a.id, b.id);
-                });
-                for (TLRPC.Message tlMsg : found) {
-                    if (isTopic) {
-                        long msgTopic = MessageObject.getTopicId(currentAccount, tlMsg, true);
-                        if (msgTopic != getTopicId()) {
-                            continue;
-                        }
-                    }
-                    MessageObject obj = new MessageObject(currentAccount, tlMsg, false, false);
-                    obj.mglaSavedDeleted = true;
-                    obj.highlightedWords = new ArrayList<>(1);
-                    obj.highlightedWords.add(raw);
-                    insertMglaDeletedMessage(obj);
-                    mglaDeletedFilteredMessages.add(obj);
-                }
-            }
-            if (chatAdapter != null) {
-                chatAdapter.updateRowsInternal();
-                chatAdapter.notifyDataSetChanged(true);
-            }
-        });
-    }
-
-    private void showDeleteDeletedMessageAlert(int messageId) {
-        if (getParentActivity() == null) return;
-        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-        builder.setTitle("Удалить сообщение");
-        builder.setMessage("Удалить это сообщение из сохранённых удалённых?");
-        builder.setPositiveButton("Удалить", (dialog, which) -> {
-            MglaDeletedMessagesStorage.deleteDeletedMessageAsync(currentAccount, dialog_id, messageId);
-            if (mglaDeletedAllMessages != null) {
-                for (int i = mglaDeletedAllMessages.size() - 1; i >= 0; i--) {
-                    if (mglaDeletedAllMessages.get(i).getId() == messageId) {
-                        mglaDeletedAllMessages.remove(i);
-                        break;
-                    }
-                }
-            }
-            for (int i = messages.size() - 1; i >= 0; i--) {
-                if (messages.get(i).getId() == messageId) {
-                    messages.remove(i);
-                    break;
-                }
-            }
-            rebuildMessagesByDays();
-            if (chatAdapter != null) {
-                chatAdapter.notifyDataSetChanged();
-            }
-        });
-        builder.setNegativeButton("Отмена", null);
-        showDialog(builder.create());
-    }
-
-    private void rebuildMessagesByDays() {
-        messagesByDays.clear();
-        for (int i = 0; i < messages.size(); i++) {
-            MessageObject obj = messages.get(i);
-            if (obj.isDateObject) continue;
-            ArrayList<MessageObject> dayArray = messagesByDays.get(obj.dateKey);
-            if (dayArray == null) {
-                dayArray = new ArrayList<>();
-                messagesByDays.put(obj.dateKey, dayArray);
-            }
-            dayArray.add(obj);
-        }
-    }
-
-    private void openMglaDeletedMessages() {
-        markMglaDeletedNotified();
-        Bundle bundle = new Bundle();
-        if (currentChat != null) {
-            bundle.putLong("chat_id", currentChat.id);
-        } else if (currentUser != null) {
-            bundle.putLong("user_id", currentUser.id);
-        } else {
-            return;
-        }
-        if (isTopic && threadMessageId != 0) {
-            bundle.putInt("message_id", (int) threadMessageId);
-        }
-        bundle.putInt("chatMode", MODE_MGLA_DELETED);
-        ChatActivity fragment = new ChatActivity(bundle);
-        fragment.userInfo = userInfo;
-        fragment.chatInfo = chatInfo;
-        fragment.chatActivityDelegate = new ChatActivityDelegate() {
-            @Override
-            public void openReplyMessage(int mid) {
-                scrollToMessageId(mid, 0, true, 0, true, 0);
-            }
-
-            @Override
-            public void openHashtagSearch(String text) {
-                ChatActivity.this.openHashtagSearch(text);
-            }
-        };
-        presentFragment(fragment);
-    }
 
     private void didReceivedNotification2(int id, int account, final Object... args) {
         if (id == NotificationCenter.invalidateMotionBackground) {
@@ -23258,9 +22570,6 @@ public class ChatActivity extends BaseFragment implements
                 scheduleNowDialog = null;
             }
             processDeletedMessages(markAsDeletedMessages, channelId, sent, !movedToScheduled);
-            if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-                AndroidUtilities.runOnUIThread(this::loadAndMergeMglaDeletedMessages, 350);
-            }
             if (movedToScheduled && chatMode != ChatActivity.MODE_SCHEDULED) {
                 getMessagesController().forceNoReload(dialog_id, ChatActivity.MODE_SCHEDULED);
                 openScheduledMessages(scheduledMessageId, true);
@@ -27235,6 +26544,22 @@ public class ChatActivity extends BaseFragment implements
     private void processDeletedMessages(ArrayList<Integer> markAsDeletedMessages, long channelId, boolean sent) {
         processDeletedMessages(markAsDeletedMessages, channelId, sent, true);
     }
+
+    /** Whether a just-deleted message should stay in the open chat as an archived copy. */
+    private boolean keepMglaDeletedVisible(int loadIndex, MessageObject obj) {
+        return loadIndex == 0
+            && chatMode == MODE_DEFAULT
+            && currentEncryptedChat == null
+            && obj != null
+            && !obj.scheduled
+            && !obj.isDateObject
+            && obj.getId() > 0
+            && MglaDeletedStorage.shouldSave(currentAccount, dialog_id, obj.messageOwner);
+    }
+
+    private void openMglaDeletedMessages() {
+        presentFragment(new MglaDeletedMessagesActivity(dialog_id, isTopic ? getTopicId() : 0));
+    }
     private void processDeletedMessages(ArrayList<Integer> markAsDeletedMessages, long channelId, boolean sent, boolean thanos) {
         ArrayList<Integer> removedIndexes = new ArrayList<>();
         ArrayList<Integer> changedIndexes = new ArrayList<>();
@@ -27282,7 +26607,6 @@ public class ChatActivity extends BaseFragment implements
         }
 
         int commentsDeleted = 0;
-        ArrayList<MessageObject> mglaBatchToSave = new ArrayList<>();
         for (int a = 0; a < size; a++) {
             Integer mid = markAsDeletedMessages.get(a);
             MessageObject obj = chatAdapter != null && chatAdapter.isFiltered ? filteredMessagesDict.get(mid) :  messagesDict[loadIndex].get(mid);
@@ -27329,15 +26653,31 @@ public class ChatActivity extends BaseFragment implements
                         }
                     }
                 }
-                boolean keepVisible = shouldKeepDeletedMessageVisible(loadIndex) && !obj.scheduled;
-                if (keepVisible) {
-                    obj.mglaSavedDeleted = true;
+                if (keepMglaDeletedVisible(loadIndex, obj)) {
+                    // Leave the message where it already is: its position is already correct for
+                    // the time it was received, and the archived copy backs it after a reload.
+                    obj.mglaDeleted = true;
                     obj.deleted = false;
                     obj.deletedByThanos = false;
-                    mglaBatchToSave.add(obj);
-                } else {
-                    obj.deleted = true;
+                    if (obj.messageOwner != null) {
+                        obj.messageOwner.mglaDeleted = true;
+                    }
+                    if (editingMessageObject == obj) {
+                        hideFieldPanel(true);
+                    }
+                    // Still drop selection / action mode — keeping the bubble must not leave it checked.
+                    if (selectedMessagesIds[loadIndex].indexOfKey(mid) >= 0) {
+                        updatedSelected = true;
+                        addToSelectedMessages(obj, false, updatedSelectedLast = (a == size - 1));
+                    }
+                    int keptIndex = chatAdapter != null && chatAdapter.isFiltered && filteredMessagesDict != null ? chatAdapter.filteredMessages.indexOf(filteredMessagesDict.get(mid)) : messages.indexOf(obj);
+                    if (keptIndex != -1 && chatAdapter != null) {
+                        changedIndexes.add(chatAdapter.messagesStartRow + keptIndex);
+                    }
+                    updated = true;
+                    continue;
                 }
+                obj.deleted = true;
                 if (obj.scheduled && sent) {
                     obj.scheduledSent = true;
                 }
@@ -27346,16 +26686,6 @@ public class ChatActivity extends BaseFragment implements
                 }
                 int index = chatAdapter != null && chatAdapter.isFiltered && filteredMessagesDict != null ? chatAdapter.filteredMessages.indexOf(filteredMessagesDict.get(mid)) : messages.indexOf(obj);
                 if (index != -1) {
-                    if (keepVisible) {
-                        if (selectedMessagesIds[loadIndex].indexOfKey(mid) >= 0) {
-                            updatedSelected = true;
-                            addToSelectedMessages(obj, false, updatedSelectedLast = (a == size - 1));
-                        }
-                        if (chatAdapter != null) {
-                            changedIndexes.add(chatAdapter.messagesStartRow + index);
-                        }
-                        updated = true;
-                    } else {
                     if (obj.scheduled) {
                         scheduledMessagesCount--;
                         updateScheduled = true;
@@ -27463,32 +26793,8 @@ public class ChatActivity extends BaseFragment implements
                         }
                     }
                     updated = true;
-                    }
-                } else if (keepVisible) {
-                    obj.mglaSavedDeleted = true;
-                    obj.deleted = false;
-                    obj.deletedByThanos = false;
-                    mglaBatchToSave.add(obj);
-                    insertMglaDeletedMessage(obj);
-                    updated = true;
                 }
-            } else if (shouldKeepDeletedMessageVisible(loadIndex)) {
-                updated = true;
-                final int deletedMid = mid;
-                final int loadIndexFinal = loadIndex;
-                getMessagesStorage().loadMglaDeletedMessageById(dialog_id, deletedMid, tlMsg -> {
-                    if (tlMsg == null) {
-                        return;
-                    }
-                    if (applyMglaDeletedSnapshotToLoadedMessage(loadIndexFinal, tlMsg) && chatAdapter != null && !chatAdapter.isFrozen) {
-                        chatAdapter.updateRowsInternal();
-                        chatAdapter.notifyDataSetChanged(false);
-                    }
-                });
             }
-        }
-        if (!mglaBatchToSave.isEmpty()) {
-            MglaDeletedMessagesStorage.saveMessageObjectsBatchIfEnabled(currentAccount, mglaBatchToSave);
         }
         if (updatedReplies) {
             updateReplyMessageHeader(true);
@@ -27635,9 +26941,6 @@ public class ChatActivity extends BaseFragment implements
 
         if (chatMode == MODE_QUICK_REPLIES && messages != null && messages.isEmpty()) {
             threadMessageId = 0;
-        }
-        if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-            AndroidUtilities.runOnUIThread(this::loadAndMergeMglaDeletedMessages, 350);
         }
     }
 
@@ -28078,7 +27381,6 @@ public class ChatActivity extends BaseFragment implements
                 .setOnHideListener(this::checkConversionDateTimeToast)
                 .show(true);
         }
-        AndroidUtilities.runOnUIThread(this::checkMglaDeletedEnterNotification, 400);
     }
 
     private boolean shownConversionDateTimeToast;
@@ -28699,9 +28001,6 @@ public class ChatActivity extends BaseFragment implements
         }
         bottomOverlayChatWaitsReply = false;
         bottomOverlayLinks = false;
-        if (mglaDeletedSearchContainer != null) {
-            mglaDeletedSearchContainer.setVisibility(View.GONE);
-        }
 
         boolean accentTextButton = false;
         boolean forceVisible = false;
@@ -28775,17 +28074,6 @@ public class ChatActivity extends BaseFragment implements
             }
         } else if (isReport()) {
             updateActionModeTitle();
-        } else if (chatMode == MODE_MGLA_DELETED) {
-            if (mglaDeletedSearchContainer != null) {
-                mglaDeletedSearchContainer.setVisibility(View.VISIBLE);
-            }
-            bottomOverlayChatText.setVisibility(View.GONE);
-            bottomOverlayLinksText.setVisibility(View.GONE);
-            if (bottomOverlayStartButton != null) {
-                bottomOverlayStartButton.setVisibility(View.GONE);
-            }
-            showBottomOverlayProgress(false, false);
-            forceVisible = true;
         } else if (chatMode == MODE_PINNED) {
             boolean allowPin;
             if (currentChat != null) {
@@ -29052,7 +28340,6 @@ public class ChatActivity extends BaseFragment implements
                 bottomChannelButtonsLayout.setVisibility(View.VISIBLE);
                 chatActivityEnterView.setVisibility(View.INVISIBLE);
             } else if (chatMode == MODE_PINNED ||
-                    chatMode == MODE_MGLA_DELETED ||
                     currentChat != null && (!ChatObject.isMonoForum(currentChat) || !isSubscriberSuggestions) && ((ChatObject.isNotInChat(currentChat) && !UserObject.isBotForum(currentUser) || !ChatObject.canWriteToChat(currentChat)) && (currentChat.join_to_send || !isThreadChat() || ChatObject.isForum(currentChat)) || forumTopic != null && forumTopic.closed && !ChatObject.canManageTopic(currentAccount, currentChat, forumTopic) || shouldDisplaySwipeToLeftToReplyInForum()) ||
                     currentUser != null && (UserObject.isDeleted(currentUser) || userBlocked || UserObject.isReplyUser(currentUser))) {
                 if (chatActivityEnterView.isEditingMessage()) {
@@ -30840,9 +30127,7 @@ public class ChatActivity extends BaseFragment implements
         if (chatAttachAlert != null) {
             chatAttachAlert.onResume();
         }
-        if (!firstLoading && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
-            scheduleMglaMerge();
-        }
+        updateTopPanelBackgrounds();
         if (contentView != null) {
             contentView.onResume();
         }
@@ -33609,16 +32894,6 @@ public class ChatActivity extends BaseFragment implements
             businessLinksEmptyView = new BusinessLinksEmptyView(getContext(), this, businessLink, getResourceProvider());
             businessLinksEmptyView.setBackground(Theme.createServiceDrawable(AndroidUtilities.dp(24), businessLinksEmptyView, contentView, getThemedPaint(Theme.key_paint_chatActionBackground)));
             emptyViewContainer.addView(businessLinksEmptyView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-        } else if (chatMode == MODE_MGLA_DELETED) {
-            emptyView = new TextView(getContext());
-            emptyView.setText("Нет удалённых сообщений");
-            emptyView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-            emptyView.setGravity(Gravity.CENTER);
-            emptyView.setTextColor(getThemedColor(Theme.key_chat_serviceText));
-            emptyView.setBackground(Theme.createServiceDrawable(AndroidUtilities.dp(30), emptyView, contentView, getThemedPaint(Theme.key_paint_chatActionBackground)));
-            emptyView.setTypeface(AndroidUtilities.bold());
-            emptyView.setPadding(AndroidUtilities.dp(9), AndroidUtilities.dp(2), AndroidUtilities.dp(9), AndroidUtilities.dp(3));
-            emptyViewContainer.addView(emptyView, new FrameLayout.LayoutParams(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
         } else if (preloadedGreetingsSticker != null && currentUser != null && !userBlocked || userInfo != null && getDialogId() != getUserConfig().getClientUserId() && (userInfo.contact_require_premium && !getUserConfig().isPremium() || userInfo.send_paid_messages_stars > StarsController.getInstance(currentAccount).getBalance().amount)) {
             greetingsViewContainer = new ChatGreetingsView(getContext(), currentUser, currentAccount, preloadedGreetingsSticker, themeDelegate) {
                 @Override
@@ -33797,9 +33072,6 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void updateGreetInfo() {
-        if (chatMode == MODE_MGLA_DELETED) {
-            return;
-        }
         showGreetInfo(
             getDialogId() != getUserConfig().getClientUserId() &&
             userInfo != null && userInfo.business_intro != null &&
@@ -39242,8 +38514,6 @@ public class ChatActivity extends BaseFragment implements
                         messageCell.setHighlightedPoll(highlightPollOptionId);
                     } else if (chatMode == MODE_SEARCH && searchingHashtag != null && searchingQuery != null) {
                         messageCell.setHighlightedText(searchingQuery);
-                } else if (chatMode == MODE_MGLA_DELETED) {
-                    messageCell.setHighlightedText(mglaDeletedFilterQuery);
                     }
                     if (highlightMessageId != Integer.MAX_VALUE) {
                         startMessageUnselect();
@@ -40783,7 +40053,7 @@ public class ChatActivity extends BaseFragment implements
                 chatActivityEnterView.closeKeyboard();
             }
             MessageObject messageObject = cell.getMessageObject();
-            if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
+            if (chatMode == MODE_PINNED) {
                 chatActivityDelegate.openReplyMessage(messageObject.getId());
                 finishFragment();
             } else if (chatMode == MODE_SAVED || (chatMode == MODE_SEARCH && searchType == SEARCH_PUBLIC_POSTS) || (UserObject.isReplyUser(currentUser) || UserObject.isUserSelf(currentUser)) && messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.saved_from_peer != null) {
@@ -42512,7 +41782,7 @@ public class ChatActivity extends BaseFragment implements
                             }
                         }, messageObject.getId(), quoteOffset, task_id, option_id);
                     }
-                } else if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED || chatMode == MODE_SCHEDULED) {
+                } else if (chatMode == MODE_PINNED || chatMode == MODE_SCHEDULED) {
                     chatActivityDelegate.openReplyMessage(id);
                     finishFragment();
                 } else {
@@ -43790,7 +43060,7 @@ public class ChatActivity extends BaseFragment implements
                     openDiscussionMessageChat(currentChat.id, null, threadId, 0, -1, 0, null);
                 } else {
                     showScrollToMessageError = true;
-                    if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
+                    if (chatMode == MODE_PINNED) {
                         chatActivityDelegate.openReplyMessage(messageId);
                         finishFragment();
                     } else {
@@ -43831,7 +43101,7 @@ public class ChatActivity extends BaseFragment implements
                             return false;
                         }
                         showScrollToMessageError = true;
-                        if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
+                        if (chatMode == MODE_PINNED) {
                             chatActivityDelegate.openReplyMessage(messageId);
                             finishFragment();
                         } else {
@@ -43854,7 +43124,7 @@ public class ChatActivity extends BaseFragment implements
                         if (threadId != 0 || commentId != 0) {
                             return false;
                         } else {
-                            if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
+                            if (chatMode == MODE_PINNED) {
                                 chatActivityDelegate.openReplyMessage(messageId);
                                 finishFragment();
                             } else {
@@ -43912,7 +43182,7 @@ public class ChatActivity extends BaseFragment implements
                                 }
                             }
                             showScrollToMessageError = true;
-                            if (chatMode == MODE_PINNED || chatMode == MODE_MGLA_DELETED) {
+                            if (chatMode == MODE_PINNED) {
                                 chatActivityDelegate.openReplyMessage(messageId);
                                 finishFragment();
                             } else {
@@ -45852,7 +45122,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void checkLeaveChannelButton() {
-        if (headerItem == null || chatMode == MODE_SAVED || chatMode == MODE_MGLA_DELETED) return;
+        if (headerItem == null || chatMode == MODE_SAVED) return;
         if (!headerItem.hasSubItem(delete_chat)) {
             if (!isTopic) {
                 if (ChatObject.isChannel(currentChat) && !currentChat.creator) {
@@ -48080,20 +47350,28 @@ public class ChatActivity extends BaseFragment implements
         topPanelLayout.setVisibility(factor > 0 ? View.VISIBLE : View.GONE);
     }
 
+    private org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable mglaTopPanelBlurBackground;
+
     private void updateTopPanelBackgrounds() {
-        if (topPanelLayout == null) return;
+        if (topPanelLayout == null || glassBackgroundDrawableFactory == null) return;
         final boolean hideTopPanelBackground = org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()
             && org.telegram.ui.MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled();
         if (!hideTopPanelBackground) {
-            // standard look: one container background covering the pinned, media and bot-info blocks
-            topPanelLayout.setBlurredBackground(glassBackgroundDrawableFactory.create(topPanelLayout)
-                .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
-                .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
-                .setPadding(org.telegram.messenger.AndroidUtilities.dp(7)));
+            if (mglaTopPanelBlurBackground == null) {
+                mglaTopPanelBlurBackground = glassBackgroundDrawableFactory.create(topPanelLayout)
+                    .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
+                    .setRadius(AndroidUtilities.dp(18))
+                    .setPadding(AndroidUtilities.dp(7));
+            } else {
+                mglaTopPanelBlurBackground.updateColors();
+            }
+            topPanelLayout.setBlurredBackground(mglaTopPanelBlurBackground);
+            topPanelLayout.invalidate();
             if (pinnedMessageView != null) pinnedMessageView.setBackground(null);
             if (translateButton != null) translateButton.setBackground(null);
         } else {
             topPanelLayout.setBlurredBackground(null);
+            topPanelLayout.invalidate();
             if (pinnedMessageView != null) {
                 pinnedMessageView.setBackground(null);
             }
@@ -48102,8 +47380,8 @@ public class ChatActivity extends BaseFragment implements
                     if (!(translateButton.getBackground() instanceof org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable)) {
                          translateButton.setBackground(glassBackgroundDrawableFactory.create(translateButton)
                              .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))
-                             .setRadius(org.telegram.messenger.AndroidUtilities.dp(18))
-                             .setPadding(org.telegram.messenger.AndroidUtilities.dp(7)));
+                             .setRadius(AndroidUtilities.dp(18))
+                             .setPadding(AndroidUtilities.dp(7)));
                     }
                 } else {
                     translateButton.setBackground(null);
