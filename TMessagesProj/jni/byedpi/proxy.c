@@ -151,23 +151,69 @@ static int resolve(const char *chost, int len,
 }
 
 
-static int auth_socks5(int fd, const char *buffer, ssize_t n)
+static int auth_socks5_negotiate(int fd, const char *buffer, ssize_t n, int *need_userpass)
 {
     if (n <= 2 || (uint8_t)buffer[1] != (n - 2)) {
         return -1;
     }
+    int want_auth = params.socks_user && params.socks_user[0]
+            && params.socks_pass && params.socks_pass[0];
     uint8_t c = S_AUTH_BAD;
-    for (long i = 2; i < n; i++)
-        if (buffer[i] == S_AUTH_NONE) {
+    for (long i = 2; i < n; i++) {
+        if (want_auth) {
+            if (buffer[i] == S_AUTH_USER) {
+                c = S_AUTH_USER;
+                break;
+            }
+        } else if (buffer[i] == S_AUTH_NONE) {
             c = S_AUTH_NONE;
             break;
         }
+    }
     uint8_t a[2] = { S_VER5, c };
     if (send(fd, (char *)a, sizeof(a), 0) < 0) {
         uniperror("send");
         return -1;
     }
-    return c != S_AUTH_BAD ? 0 : -1;
+    if (c == S_AUTH_BAD) {
+        return -1;
+    }
+    if (need_userpass) {
+        *need_userpass = (c == S_AUTH_USER);
+    }
+    return 0;
+}
+
+static int auth_socks5_userpass(int fd, const char *buffer, ssize_t n)
+{
+    if (n < 3 || (uint8_t)buffer[0] != 0x01) {
+        return -1;
+    }
+    uint8_t ulen = (uint8_t)buffer[1];
+    if (n < (ssize_t)(3 + ulen)) {
+        return -1;
+    }
+    uint8_t plen = (uint8_t)buffer[2 + ulen];
+    if (n < (ssize_t)(3 + ulen + plen)) {
+        return -1;
+    }
+    const char *uname = buffer + 2;
+    const char *passwd = buffer + 3 + ulen;
+    int ok = 0;
+    size_t expect_u = params.socks_user ? strlen(params.socks_user) : 0;
+    size_t expect_p = params.socks_pass ? strlen(params.socks_pass) : 0;
+    if (params.socks_user && params.socks_pass
+            && ulen == expect_u && plen == expect_p
+            && memcmp(uname, params.socks_user, ulen) == 0
+            && memcmp(passwd, params.socks_pass, plen) == 0) {
+        ok = 1;
+    }
+    uint8_t a[2] = { 0x01, ok ? 0x00 : 0x01 };
+    if (send(fd, (char *)a, sizeof(a), 0) < 0) {
+        uniperror("send");
+        return -1;
+    }
+    return ok ? 0 : -1;
 }
 
 
@@ -855,11 +901,19 @@ static int save_buffer(struct poolhd *pool,
 static int handle_s5(struct poolhd *pool, struct eval *val, 
             struct buffer *buff, ssize_t n, union sockaddr_u *dst)
 {
-    if (val->flag != FLAG_S5) {
-        if (auth_socks5(val->fd, buff->data, n)) {
+    if (val->flag == FLAG_S5_AUTH) {
+        if (auth_socks5_userpass(val->fd, buff->data, n)) {
             return -1;
         }
         val->flag = FLAG_S5;
+        return 0;
+    }
+    if (val->flag != FLAG_S5) {
+        int need_userpass = 0;
+        if (auth_socks5_negotiate(val->fd, buff->data, n, &need_userpass)) {
+            return -1;
+        }
+        val->flag = need_userpass ? FLAG_S5_AUTH : FLAG_S5;
         return 0;
     }
     if (n < S_SIZE_MIN) {
@@ -909,7 +963,8 @@ int on_request(struct poolhd *pool, struct eval *val, int et)
     int error = 0;
     bool skip_conn = 0;
     
-    if ((params.mode & MODE_SOCKS5) && *buff->data == S_VER5) {
+    if ((params.mode & MODE_SOCKS5) &&
+            (*buff->data == S_VER5 || (val->flag == FLAG_S5_AUTH && *buff->data == 0x01))) {
         if ((error = handle_s5(pool, val, buff, n, &dst)) > 0) {
             return -1;
         }

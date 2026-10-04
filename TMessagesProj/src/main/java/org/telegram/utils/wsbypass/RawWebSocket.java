@@ -11,11 +11,15 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -101,12 +105,22 @@ public final class RawWebSocket {
 
     static RawWebSocket connectUntil(String connectHost, String sniHost, String path,
                                      Map<String, String> extraHeaders, long deadlineNanos) throws IOException {
-        return connectUntil(connectHost, sniHost, path, extraHeaders, deadlineNanos, null);
+        return connectUntil(connectHost, sniHost, path, extraHeaders, deadlineNanos, null, null);
     }
 
     static RawWebSocket connectUntil(String connectHost, String sniHost, String path,
                                      Map<String, String> extraHeaders, long deadlineNanos,
                                      ConnectPermit permit) throws IOException {
+        return connectUntil(connectHost, sniHost, path, extraHeaders, deadlineNanos, permit, null);
+    }
+
+    /**
+     * @param pinnedSpkiSha256Base64 optional SPKI SHA-256 pins (base64). If non-null/non-empty,
+     *                               the leaf certificate public key must match one of them.
+     */
+    static RawWebSocket connectUntil(String connectHost, String sniHost, String path,
+                                     Map<String, String> extraHeaders, long deadlineNanos,
+                                     ConnectPermit permit, String[] pinnedSpkiSha256Base64) throws IOException {
         checkPermit(permit);
         String sni = sniHost == null ? "" : sniHost.trim();
         if (connectHost == null || connectHost.trim().isEmpty() || sni.isEmpty()) {
@@ -124,8 +138,8 @@ public final class RawWebSocket {
         try {
             raw = openSocket(connectHost.trim(), deadlineNanos, permit);
             checkPermit(permit);
-            wrapped = wrapTls(raw, sni, deadlineNanos, permit);
-            raw = null; 
+            wrapped = wrapTls(raw, sni, deadlineNanos, permit, pinnedSpkiSha256Base64);
+            raw = null;
             checkPermit(permit);
             wrapped.setSoTimeout(remainingMillis(deadlineNanos));
 
@@ -239,7 +253,7 @@ public final class RawWebSocket {
     }
 
     private static SSLSocket wrapTls(Socket raw, String sni, long deadlineNanos,
-                                     ConnectPermit permit) throws IOException {
+                                     ConnectPermit permit, String[] pinnedSpkiSha256Base64) throws IOException {
         checkPermit(permit);
         SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
         SSLSocket ssl;
@@ -250,7 +264,7 @@ public final class RawWebSocket {
             throw e;
         }
         ssl.setUseClientMode(true);
-        
+
         ssl.setSoTimeout(remainingMillis(deadlineNanos));
         try {
             ssl.startHandshake();
@@ -265,7 +279,56 @@ public final class RawWebSocket {
             closeQuietly(ssl);
             throw new SSLPeerUnverifiedException("hostname verification failed for " + sni);
         }
+        if (pinnedSpkiSha256Base64 != null && pinnedSpkiSha256Base64.length > 0) {
+            try {
+                verifySpkiPin(session, pinnedSpkiSha256Base64);
+            } catch (IOException e) {
+                closeQuietly(ssl);
+                throw e;
+            }
+        }
         return ssl;
+    }
+
+    private static void verifySpkiPin(SSLSession session, String[] pinnedSpkiSha256Base64) throws IOException {
+        Set<String> expected = new HashSet<>();
+        for (String pin : pinnedSpkiSha256Base64) {
+            if (pin != null && !pin.isEmpty()) {
+                expected.add(pin.trim());
+            }
+        }
+        if (expected.isEmpty()) {
+            return;
+        }
+        Certificate[] chain;
+        try {
+            chain = session.getPeerCertificates();
+        } catch (SSLPeerUnverifiedException e) {
+            throw new SSLPeerUnverifiedException("no peer certificate for pin check");
+        }
+        if (chain == null || chain.length == 0) {
+            throw new SSLPeerUnverifiedException("empty certificate chain");
+        }
+        Certificate leaf = chain[0];
+        byte[] spki;
+        if (leaf instanceof X509Certificate) {
+            spki = ((X509Certificate) leaf).getPublicKey().getEncoded();
+        } else {
+            spki = leaf.getPublicKey().getEncoded();
+        }
+        if (spki == null || spki.length == 0) {
+            throw new SSLPeerUnverifiedException("empty SPKI");
+        }
+        try {
+            String actual = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki));
+            if (!expected.contains(actual)) {
+                throw new SSLPeerUnverifiedException("SPKI pin mismatch");
+            }
+        } catch (SSLPeerUnverifiedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("SPKI pin check failed", e);
+        }
     }
 
     public void send(byte[] payload) throws IOException {

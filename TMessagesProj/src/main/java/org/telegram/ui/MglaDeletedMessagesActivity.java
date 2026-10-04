@@ -8,6 +8,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -29,9 +30,12 @@ import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BackDrawable;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.ChatActionCell;
 import org.telegram.ui.Cells.ChatMessageCell;
+import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
@@ -48,6 +52,22 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
 
     private static final int PAGE_SIZE = 50;
     private static final int menu_clear = 1;
+    private static final int menu_more = 2;
+
+    private static final int[] MSG_TYPE_ICONS = {
+        R.drawable.msg_voicechat,   // voice
+        R.drawable.input_video_story, // round
+        R.drawable.msg_message,     // text
+        R.drawable.msg_photos,      // photo
+        R.drawable.msg_video,       // video
+    };
+    private static final int[] MSG_TYPE_ICON_COLORS = {
+        0xFF9A8CFF, // voice — purple
+        0xFFFF8A65, // round — coral
+        0xFF5AC8FA, // text — cyan
+        0xFF5FA8D3, // photo — blue
+        0xFFD3585F, // video — red
+    };
 
     private final long dialogId;
     private final long topicId;
@@ -85,11 +105,14 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
                     finishFragment();
                 } else if (id == menu_clear) {
                     showClearAlert();
+                } else if (id == menu_more) {
+                    showSaveFiltersSheet();
                 }
             }
         });
         ActionBarMenu menu = actionBar.createMenu();
         menu.addItem(menu_clear, R.drawable.msg_clear);
+        menu.addItem(menu_more, R.drawable.ic_ab_other).setContentDescription("Ещё");
 
         contentView = new SizeNotifierFrameLayout(context);
         contentView.setBackgroundImage(Theme.getCachedWallpaper(), Theme.isWallpaperMotion());
@@ -242,6 +265,49 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
     // endregion
 
     // region actions
+
+    private void showSaveFiltersSheet() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        Context context = getParentActivity();
+        BottomSheet.Builder builder = new BottomSheet.Builder(context, false, getResourceProvider());
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(0, 0, 0, dp(8));
+
+        HeaderCell header = new HeaderCell(context, getResourceProvider());
+        header.setText("Сохранять при удалении");
+        container.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView hint = new TextView(context);
+        hint.setText("Выберите типы сообщений для этого чата");
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        hint.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, getResourceProvider()));
+        hint.setPadding(dp(22), 0, dp(22), dp(8));
+        container.addView(hint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        for (int i = 0; i < MglaSpyConfig.MSG_TYPE_ORDER.length; i++) {
+            final int msgType = MglaSpyConfig.MSG_TYPE_ORDER[i];
+            boolean checked = MglaSpyConfig.isSaveDeletedMsgTypeEnabled(dialogId, msgType);
+            boolean divider = i < MglaSpyConfig.MSG_TYPE_ORDER.length - 1;
+
+            TextCheckCell cell = new TextCheckCell(context, 21, true, getResourceProvider());
+            cell.setTextAndCheck(MglaSpyConfig.MSG_TYPE_NAMES[msgType], checked, divider);
+            cell.setColorfullIcon(MSG_TYPE_ICON_COLORS[msgType], MSG_TYPE_ICONS[msgType]);
+            cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector, getResourceProvider()), 2));
+            cell.setOnClickListener(v -> {
+                boolean newVal = !cell.isChecked();
+                MglaSpyConfig.setSaveDeletedMsgTypeEnabled(dialogId, msgType, newVal);
+                cell.setChecked(newVal);
+            });
+            container.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        }
+
+        builder.setCustomView(container);
+        showDialog(builder.create());
+    }
 
     private void showDeleteAlert(MessageObject message) {
         if (getParentActivity() == null) {

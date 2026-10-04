@@ -31,9 +31,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.Cipher;
 
 /**
- * Локальный MTProto-прокси → WebSocket к kws*.web.telegram.org/apiws.
- * Без своих серверов: трафик идёт на домены Telegram Web, а не на IP дата-центров.
- * Алгоритм моста — тот же, что у веб-клиента Telegram / tg-ws-proxy.
+ * Локальный MTProto-прокси → WebSocket-релей → TCP Telegram DC.
+ * <p>
+ * Прямой {@code kws*.web.telegram.org} в регионах с блокировкой обычно тоже недоступен
+ * (поэтому и нужен релей). Алгоритм моста — как у tg-ws-proxy / веб-клиента.
  */
 public final class WsBypassCore {
 
@@ -333,9 +334,9 @@ public final class WsBypassCore {
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WS_ROUTE_DEADLINE_MS);
             RawWebSocket ws;
             try {
-                ws = connectRelay(dc, isMedia, deadline, generation);
+                ws = connectUpstream(dc, isMedia, deadline, generation);
             } catch (Throwable e) {
-                dbg("relay connect failed: " + e.getMessage());
+                dbg("upstream connect failed: " + e.getMessage());
                 failRecord(dcKey);
                 return;
             }
@@ -365,26 +366,57 @@ public final class WsBypassCore {
         }
     }
 
+    /**
+     * Основной путь — релей (нужен, когда DC/kws заблокированы).
+     * Прямой kws оставляем запасным: имеет смысл только там, где Telegram Web уже открыт.
+     */
+    private RawWebSocket connectUpstream(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
+        if (!MglaWsConfig.isRelayConfigured()) {
+            throw new IOException("релей не сконфигурирован");
+        }
+        IOException relayError = null;
+        try {
+            return connectRelay(dc, isMedia, deadlineNanos, generation);
+        } catch (IOException e) {
+            relayError = e;
+            dbg("relay failed: " + e.getMessage());
+        }
+        if (!isBridgeGenerationCurrent(generation) || System.nanoTime() >= deadlineNanos) {
+            throw relayError;
+        }
+        try {
+            return connectKws(dc, isMedia, deadlineNanos, generation);
+        } catch (IOException e) {
+            if (relayError != null) {
+                e.addSuppressed(relayError);
+            }
+            throw e;
+        }
+    }
+
     private RawWebSocket connectRelay(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
         String host = MglaWsConfig.getRelayHost();
+        String token = MglaWsConfig.getRelayToken();
+        if (host == null || host.isEmpty() || token == null || token.isEmpty()) {
+            throw new IOException("релей не сконфигурирован");
+        }
         int effective = dc == 203 ? 2 : dc;
         String path = "/apiws?dc=" + effective;
         Map<String, String> headers = new HashMap<>();
-        String token = MglaWsConfig.getRelayToken();
-        if (token != null && !token.isEmpty()) {
-            headers.put("X-Mgla-Token", token);
-        }
+        headers.put("X-Mgla-Token", token);
         dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : ""));
         long attemptDeadline = Math.min(deadlineNanos,
             System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(8000L));
+        // Pin only the known default host; custom hosts rely on system CAs + hostname verify.
+        String[] pins = "mglabot.mooo.com".equalsIgnoreCase(host)
+            ? new String[]{MglaWsConfig.RELAY_SPKI_SHA256_BASE64}
+            : null;
         RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
-            () -> isBridgeGenerationCurrent(generation));
+            () -> isBridgeGenerationCurrent(generation), pins);
         dbg("101 OK via relay " + host);
         return ws;
     }
 
-    /** @deprecated оставлен для отладки; основной путь — {@link #connectRelay}. */
-    @SuppressWarnings("unused")
     private RawWebSocket connectKws(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
         List<String> domains = wsDomainsForDc(dc, isMedia);
         long dcKey = poolKey(dc, isMedia);
@@ -414,7 +446,7 @@ public final class WsBypassCore {
                 long attemptDeadline = Math.min(deadlineNanos,
                     System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2500L));
                 RawWebSocket ws = RawWebSocket.connectUntil(domain, domain, "/apiws", null, attemptDeadline,
-                    () -> isBridgeGenerationCurrent(generation));
+                    () -> isBridgeGenerationCurrent(generation), null);
                 synchronized (failLock) {
                     preferredDomain.put(dcKey, domain);
                 }

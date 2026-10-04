@@ -154,11 +154,15 @@ android {
         def openRouterKey = getProps("OPENROUTER_API_KEY")
         def safetyNetKey = getProps("SAFETYNET_API_KEY")
         def mapsKey = getProps("MAPS_API_KEY")
+        def mglaWsRelayToken = getProps("MGLA_WS_RELAY_TOKEN")
+        def mglaWsRelayHost = getProps("MGLA_WS_RELAY_HOST")
 
         buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
         buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
         buildConfigField "String", "OPENROUTER_API_KEY", "\"" + ((openRouterKey != null && !openRouterKey.isEmpty()) ? openRouterKey : "") + "\""
         buildConfigField "String", "SAFETYNET_API_KEY", "\"" + ((safetyNetKey != null && !safetyNetKey.isEmpty()) ? safetyNetKey : "") + "\""
+        buildConfigField "String", "MGLA_WS_RELAY_TOKEN", "\"" + ((mglaWsRelayToken != null && !mglaWsRelayToken.isEmpty()) ? mglaWsRelayToken : "") + "\""
+        buildConfigField "String", "MGLA_WS_RELAY_HOST", "\"" + ((mglaWsRelayHost != null && !mglaWsRelayHost.isEmpty()) ? mglaWsRelayHost : "mglabot.mooo.com") + "\""
 
         manifestPlaceholders = [mapsApiKey: (mapsKey != null && !mapsKey.isEmpty()) ? mapsKey : ""]
 

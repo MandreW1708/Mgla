@@ -109,7 +109,7 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
     public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle("Обход блокировок");
+        actionBar.setTitle("Подключение");
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -127,8 +127,8 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         rootLayout.setOrientation(LinearLayout.VERTICAL);
         scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-        // ---- WebSocket / kws (primary experiment)
-        LinearLayout wsBlock = MglaUi.createBlock(context, "WebSocket-релей (Германия)");
+        // ---- WebSocket relay (needed when DC/kws are blocked)
+        LinearLayout wsBlock = MglaUi.createBlock(context, "WebSocket-релей");
 
         wsMasterCell = new TextCheckCell(context);
         wsMasterCell.setBackground(null);
@@ -152,7 +152,10 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         wsBlock.addView(MglaUi.createDivider(context));
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
+        TextInfoCell wsInfo = new TextInfoCell(context);
+        wsInfo.setText("Когда режут IP/домены Telegram, прямой kws* тоже обычно недоступен — поэтому трафик идёт через релей. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
+        rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
         // ---- ByeDPI (secondary)
         LinearLayout dpiBlock = MglaUi.createBlock(context, "ByeDPI (если блок только DPI)");

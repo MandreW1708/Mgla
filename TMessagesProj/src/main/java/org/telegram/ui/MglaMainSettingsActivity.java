@@ -140,7 +140,7 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         spyBlock.addView(MglaUi.createDivider(context));
 
-        final TextCheckCell[] deletedSubCells = new TextCheckCell[9];
+        final TextCheckCell[] deletedSubCells = new TextCheckCell[4];
 
         TextCheckCell saveDeletedCell = new TextCheckCell(context);
         saveDeletedCell.setBackground(null);
@@ -172,26 +172,6 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         deletedSubCells[3] = createDeletedSubCell(context, "Группы более 100 человек", MglaSpyConfig.isSaveDeletedForGroupsLargeEnabled(), MglaSpyConfig::setSaveDeletedForGroupsLargeEnabled);
         spyBlock.addView(deletedSubCells[3], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        final int[] msgTypes = {
-            MglaSpyConfig.MSG_TYPE_TEXT,
-            MglaSpyConfig.MSG_TYPE_PHOTO,
-            MglaSpyConfig.MSG_TYPE_VIDEO,
-            MglaSpyConfig.MSG_TYPE_VOICE,
-            MglaSpyConfig.MSG_TYPE_ROUND,
-        };
-        for (int i = 0; i < msgTypes.length; i++) {
-            final int msgType = msgTypes[i];
-            spyBlock.addView(createIndentedDivider(context));
-            TextCheckCell cell = createDeletedSubCell(
-                context,
-                MglaSpyConfig.MSG_TYPE_NAMES[msgType],
-                MglaSpyConfig.isSaveDeletedMsgTypeEnabled(msgType),
-                enabled -> MglaSpyConfig.setSaveDeletedMsgTypeEnabled(msgType, enabled)
-            );
-            deletedSubCells[4 + i] = cell;
-            spyBlock.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        }
 
         spyBlock.addView(MglaUi.createDivider(context));
 

@@ -18,9 +18,11 @@ public final class MglaDpiNative {
     /**
      * Запустить (или перезапустить) прокси на 127.0.0.1 с аргументами ciadpi.
      * @param port желаемый порт; 0 или занятый порт — любой свободный
+     * @param socksUser SOCKS5 username (RFC 1929); пустой — без аутентификации
+     * @param socksPass SOCKS5 password
      * @return фактический порт или код ошибки ERR_*
      */
-    static native int nativeStart(String[] args, int port);
+    static native int nativeStart(String[] args, int port, String socksUser, String socksPass);
 
     static native void nativeStop();
 

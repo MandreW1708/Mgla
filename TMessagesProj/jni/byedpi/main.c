@@ -58,7 +58,9 @@ struct params params = {
     .laddr = {
         .in = { .sin_family = AF_INET }
     },
-    .debug = 0
+    .debug = 0,
+    .socks_user = 0,
+    .socks_pass = 0
 };
 
 

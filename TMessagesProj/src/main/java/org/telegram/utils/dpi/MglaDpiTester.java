@@ -8,8 +8,10 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.Authenticator;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.PasswordAuthentication;
 import java.net.Proxy;
 import java.net.Socket;
 import java.net.URL;
@@ -202,14 +204,33 @@ public final class MglaDpiTester {
 
         List<StrategyResult> results = new ArrayList<>();
         try {
+            MglaDpiConfig.ensureSocksAuth();
+            installLocalSocksAuthenticator();
             runAll(bypass, commands, results, requests, timeoutMs, parallel, callback);
         } catch (Throwable e) {
             FileLog.e(e);
         } finally {
+            Authenticator.setDefault(null);
             bypass.finishTest();
         }
         boolean wasCancelled = cancelled;
         AndroidUtilities.runOnUIThread(() -> callback.onFinished(wasCancelled, results));
+    }
+
+    /** Java SOCKS-клиент берёт логин/пароль через Authenticator. */
+    private static void installLocalSocksAuthenticator() {
+        final String user = MglaDpiConfig.getSocksUser();
+        final char[] pass = MglaDpiConfig.getSocksPass().toCharArray();
+        Authenticator.setDefault(new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                if (getRequestorType() == RequestorType.PROXY
+                        && "127.0.0.1".equals(getRequestingHost())) {
+                    return new PasswordAuthentication(user, pass);
+                }
+                return null;
+            }
+        });
     }
 
     private void runAll(MglaDpiBypass bypass, List<String> commands, List<StrategyResult> results,

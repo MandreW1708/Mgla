@@ -55,6 +55,45 @@ static int g_ctl_fd = -1;
 static int g_argc;
 static char **g_argv;
 
+// SOCKS5 credentials (owned here; params.socks_* point at these while running).
+static char *g_socks_user;
+static char *g_socks_pass;
+
+static void free_socks_auth(void) {
+    params.socks_user = NULL;
+    params.socks_pass = NULL;
+    free(g_socks_user);
+    free(g_socks_pass);
+    g_socks_user = NULL;
+    g_socks_pass = NULL;
+}
+
+static bool set_socks_auth(JNIEnv *env, jstring user, jstring pass) {
+    free_socks_auth();
+    if (!user || !pass) {
+        return true;
+    }
+    const char *u = (*env)->GetStringUTFChars(env, user, NULL);
+    const char *p = (*env)->GetStringUTFChars(env, pass, NULL);
+    if (!u || !p) {
+        if (u) (*env)->ReleaseStringUTFChars(env, user, u);
+        if (p) (*env)->ReleaseStringUTFChars(env, pass, p);
+        return false;
+    }
+    bool ok = true;
+    if (u[0] && p[0]) {
+        g_socks_user = strdup(u);
+        g_socks_pass = strdup(p);
+        ok = g_socks_user && g_socks_pass;
+        if (!ok) {
+            free_socks_auth();
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, user, u);
+    (*env)->ReleaseStringUTFChars(env, pass, p);
+    return ok;
+}
+
 static void free_args(void) {
     if (g_argv) {
         for (int i = 0; i < g_argc; i++) {
@@ -87,6 +126,7 @@ static void stop_locked(void) {
     }
     clear_params(NULL, NULL);
     free_args();
+    free_socks_auth();
 }
 
 static bool copy_args(JNIEnv *env, jobjectArray args) {
@@ -126,7 +166,8 @@ static int bind_loopback(int port) {
 }
 
 JNIEXPORT jint JNICALL
-Java_org_telegram_utils_dpi_MglaDpiNative_nativeStart(JNIEnv *env, jclass clazz, jobjectArray args, jint port) {
+Java_org_telegram_utils_dpi_MglaDpiNative_nativeStart(JNIEnv *env, jclass clazz,
+        jobjectArray args, jint port, jstring socksUser, jstring socksPass) {
     (void) clazz;
     pthread_mutex_lock(&g_lock);
     stop_locked();
@@ -141,20 +182,33 @@ Java_org_telegram_utils_dpi_MglaDpiNative_nativeStart(JNIEnv *env, jclass clazz,
     signal(SIGPIPE, SIG_IGN);
 
     int result;
+    if (!set_socks_auth(env, socksUser, socksPass)) {
+        result = ERR_INIT;
+        goto done;
+    }
     if (!copy_args(env, args)) {
         free_args();
+        free_socks_auth();
         result = ERR_ARGS;
         goto done;
     }
     if (parse_args(g_argc, g_argv) != 0) {
         clear_params(NULL, NULL);
         free_args();
+        free_socks_auth();
         result = ERR_ARGS;
         goto done;
+    }
+    if (g_socks_user && g_socks_pass) {
+        params.socks_user = g_socks_user;
+        params.socks_pass = g_socks_pass;
+        params.mode &= ~MODE_SOCKS4;
+        params.mode |= MODE_SOCKS5;
     }
     if (init() < 0) {
         clear_params(NULL, NULL);
         free_args();
+        free_socks_auth();
         result = ERR_INIT;
         goto done;
     }
@@ -166,6 +220,7 @@ Java_org_telegram_utils_dpi_MglaDpiNative_nativeStart(JNIEnv *env, jclass clazz,
     if (fd < 0) {
         clear_params(NULL, NULL);
         free_args();
+        free_socks_auth();
         result = ERR_BIND;
         goto done;
     }
@@ -185,6 +240,7 @@ Java_org_telegram_utils_dpi_MglaDpiNative_nativeStart(JNIEnv *env, jclass clazz,
         }
         clear_params(NULL, NULL);
         free_args();
+        free_socks_auth();
         result = ERR_THREAD;
         goto done;
     }

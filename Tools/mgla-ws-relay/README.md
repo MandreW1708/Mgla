@@ -1,13 +1,18 @@
 # Mgla WS-релей на Германии (mglabot.mooo.com)
 
-Клиент уже настроен на `wss://mglabot.mooo.com/apiws?dc=N`.
+Клиент ходит на `wss://mglabot.mooo.com/apiws?dc=N` (прямой `kws*` в блокировках обычно мёртв).
 Мини-приложение бота не трогаем — добавляется только location `/apiws`.
 
-Токен (должен совпадать с клиентом):
+Токен должен совпадать с клиентом. В клиенте задаётся в корневом `local.properties`
+(не в git):
 
 ```
-***REMOVED***
+MGLA_WS_RELAY_HOST=mglabot.mooo.com
+MGLA_WS_RELAY_TOKEN=***REMOVED***
 ```
+
+На сервере — тот же токен в `/opt/mgla-ws-relay/env` (`MGLA_WS_TOKEN`).
+После утечки токена — ротация в обоих местах.
 
 ---
 

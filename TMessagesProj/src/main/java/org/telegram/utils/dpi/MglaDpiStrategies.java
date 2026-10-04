@@ -88,6 +88,9 @@ public final class MglaDpiStrategies {
     private static final String SHORT_FLAGS = "DEhv";
     private static final String[] LONG_WITH_VALUE = {"--ip", "--port", "--pidfile", "--cache-file", "--protect-path", "--debug", "--conn-ip"};
     private static final String[] LONG_FLAGS = {"--daemon", "--transparent", "--help", "--version"};
+    // Опции, значение которых может быть путём к файлу — разрешаем только форму ":inline"
+    private static final String FILEISH_SHORT = "Hjl";
+    private static final String[] FILEISH_LONG = {"--hosts", "--ipset", "--fake-data"};
 
     /** Аргументы для движка: подставляет SNI, разбивает строку и убирает запрещённые параметры. */
     public static String[] buildArgs(String command, String sni) {
@@ -101,13 +104,62 @@ public final class MglaDpiStrategies {
         for (int i = 0; i < tokens.size(); i++) {
             String token = tokens.get(i);
             int forbidden = forbiddenKind(token);
-            if (forbidden == 0) {
-                result.add(token);
-            } else if (forbidden == 2) {
-                i++;
+            if (forbidden == 1) {
+                continue;
             }
+            if (forbidden == 2) {
+                i++;
+                continue;
+            }
+            FileishOpt fileish = parseFileish(token);
+            if (fileish != null) {
+                String value = fileish.inlineValue;
+                if (value == null && i + 1 < tokens.size()) {
+                    value = tokens.get(++i);
+                }
+                // Разрешаем только ":inline", пути к файлам отбрасываем
+                if (value != null && value.startsWith(":")) {
+                    result.add(fileish.option);
+                    result.add(value);
+                }
+                continue;
+            }
+            result.add(token);
         }
         return result.toArray(new String[0]);
+    }
+
+    private static final class FileishOpt {
+        final String option;
+        final String inlineValue; // non-null if -Xvalue or --name=value
+
+        FileishOpt(String option, String inlineValue) {
+            this.option = option;
+            this.inlineValue = inlineValue;
+        }
+    }
+
+    private static FileishOpt parseFileish(String token) {
+        if (token.startsWith("--")) {
+            for (String name : FILEISH_LONG) {
+                if (token.equals(name)) {
+                    return new FileishOpt(name, null);
+                }
+                if (token.startsWith(name + "=")) {
+                    return new FileishOpt(name, token.substring(name.length() + 1));
+                }
+            }
+            return null;
+        }
+        if (token.length() >= 2 && token.charAt(0) == '-' && token.charAt(1) != '-') {
+            char opt = token.charAt(1);
+            if (FILEISH_SHORT.indexOf(opt) >= 0) {
+                String option = "-" + opt;
+                String inline = token.length() > 2 ? token.substring(2) : null;
+                return new FileishOpt(option, inline);
+            }
+        }
+        return null;
     }
 
     /** Нормализованная форма для отображения/сохранения: одна строка, одиночные пробелы. */

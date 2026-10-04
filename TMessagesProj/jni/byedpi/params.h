@@ -171,6 +171,10 @@ struct params {
     bool daemonize;
     const char *pid_file;
     int pid_fd;
+
+    /* Optional SOCKS5 username/password (RFC 1929). When set, no-auth is rejected. */
+    const char *socks_user;
+    const char *socks_pass;
 };
 
 extern struct params params;

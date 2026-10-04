@@ -29,7 +29,7 @@ public class MglaSpyConfig {
         "Личные чаты", "Группы до 100 участников", "Каналы", "Группы более 100 участников"
     };
 
-    // Message type keys for saving deleted messages
+    // Message type keys (legacy global — migrated away; per-chat keys use msgTypeKey)
     public static final String KEY_SAVE_MSG_VOICE = "spy_save_deleted_msg_voice";
     public static final String KEY_SAVE_MSG_ROUND = "spy_save_deleted_msg_round";
     public static final String KEY_SAVE_MSG_TEXT = "spy_save_deleted_msg_text";
@@ -45,6 +45,10 @@ public class MglaSpyConfig {
 
     public static final String[] MSG_TYPE_NAMES = {
         "Голосовые", "Видеосообщения", "Текстовые", "Фото", "Видео"
+    };
+
+    public static final int[] MSG_TYPE_ORDER = {
+        MSG_TYPE_TEXT, MSG_TYPE_PHOTO, MSG_TYPE_VIDEO, MSG_TYPE_VOICE, MSG_TYPE_ROUND
     };
 
     private static String deletedNotifyKey(int account, long dialogId, long topicId) {
@@ -170,8 +174,7 @@ public class MglaSpyConfig {
     private static boolean msgTypesMigrationChecked;
 
     /**
-     * The per-type switches used to live in a screen that no longer exists, so installs carry
-     * values nobody can change any more. Drop those orphaned keys once and fall back to defaults.
+     * Drop orphaned global per-type keys from the old settings screen. Filters are now per-chat.
      */
     private static void migrateMsgTypeKeysIfNeeded(SharedPreferences prefs) {
         if (msgTypesMigrationChecked || prefs == null) {
@@ -191,49 +194,44 @@ public class MglaSpyConfig {
             .apply();
     }
 
-    public static boolean isSaveDeletedMsgTypeEnabled(int msgType) {
+    private static String msgTypeKey(long dialogId, int msgType) {
+        String suffix;
+        switch (msgType) {
+            case MSG_TYPE_VOICE:
+                suffix = "voice";
+                break;
+            case MSG_TYPE_ROUND:
+                suffix = "round";
+                break;
+            case MSG_TYPE_TEXT:
+                suffix = "text";
+                break;
+            case MSG_TYPE_PHOTO:
+                suffix = "photo";
+                break;
+            case MSG_TYPE_VIDEO:
+                suffix = "video";
+                break;
+            default:
+                return null;
+        }
+        return "spy_save_deleted_msg_" + suffix + "_" + dialogId;
+    }
+
+    public static boolean isSaveDeletedMsgTypeEnabled(long dialogId, int msgType) {
         SharedPreferences prefs = prefs();
         if (prefs == null) return true;
         migrateMsgTypeKeysIfNeeded(prefs);
-        switch (msgType) {
-            case MSG_TYPE_VOICE:
-                return prefs.getBoolean(KEY_SAVE_MSG_VOICE, true);
-            case MSG_TYPE_ROUND:
-                return prefs.getBoolean(KEY_SAVE_MSG_ROUND, true);
-            case MSG_TYPE_TEXT:
-                return prefs.getBoolean(KEY_SAVE_MSG_TEXT, true);
-            case MSG_TYPE_PHOTO:
-                return prefs.getBoolean(KEY_SAVE_MSG_PHOTO, true);
-            case MSG_TYPE_VIDEO:
-                return prefs.getBoolean(KEY_SAVE_MSG_VIDEO, true);
-            default:
-                return true;
-        }
+        String key = msgTypeKey(dialogId, msgType);
+        if (key == null) return true;
+        return prefs.getBoolean(key, true);
     }
 
-    public static void setSaveDeletedMsgTypeEnabled(int msgType, boolean enabled) {
+    public static void setSaveDeletedMsgTypeEnabled(long dialogId, int msgType, boolean enabled) {
         SharedPreferences prefs = prefs();
         if (prefs == null) return;
-        String key;
-        switch (msgType) {
-            case MSG_TYPE_VOICE:
-                key = KEY_SAVE_MSG_VOICE;
-                break;
-            case MSG_TYPE_ROUND:
-                key = KEY_SAVE_MSG_ROUND;
-                break;
-            case MSG_TYPE_TEXT:
-                key = KEY_SAVE_MSG_TEXT;
-                break;
-            case MSG_TYPE_PHOTO:
-                key = KEY_SAVE_MSG_PHOTO;
-                break;
-            case MSG_TYPE_VIDEO:
-                key = KEY_SAVE_MSG_VIDEO;
-                break;
-            default:
-                return;
-        }
+        String key = msgTypeKey(dialogId, msgType);
+        if (key == null) return;
         prefs.edit().putBoolean(key, enabled).apply();
     }
 

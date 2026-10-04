@@ -53,6 +53,7 @@ struct s5_rep {
 #pragma pack(pop)
 
 #define S_AUTH_NONE 0x00
+#define S_AUTH_USER 0x02
 #define S_AUTH_BAD 0xff
 
 #define S_ATP_I4 0x01

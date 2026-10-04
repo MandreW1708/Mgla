@@ -108,7 +108,7 @@ public class MglaDeletedStorage {
         if (!MglaSpyConfig.isSaveDeletedForCategoryEnabled(resolveChatType(currentAccount, dialogId))) {
             return false;
         }
-        return MglaSpyConfig.isSaveDeletedMsgTypeEnabled(resolveMessageType(message));
+        return MglaSpyConfig.isSaveDeletedMsgTypeEnabled(dialogId, resolveMessageType(message));
     }
 
     // endregion

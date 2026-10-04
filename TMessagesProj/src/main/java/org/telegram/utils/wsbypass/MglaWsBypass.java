@@ -17,7 +17,7 @@ import org.telegram.utils.proxy.ProxySettings;
 
 /**
  * Менеджер WS-обхода: поднимает {@link WsBypassCore} и направляет Telegram
- * через локальный MTProto-прокси (не SOCKS5).
+ * через локальный MTProto-прокси (не SOCKS5) на WebSocket-релей.
  * <p>
  * Взаимоисключает с ByeDPI-обходом: при включении WS выключает ByeDPI и наоборот.
  */
@@ -172,6 +172,10 @@ public final class MglaWsBypass {
     }
 
     private String startEngine() {
+        if (!MglaWsConfig.isRelayConfigured()) {
+            lastError = "Задайте MGLA_WS_RELAY_TOKEN в local.properties (и на сервере)";
+            return lastError;
+        }
         WsBypassCore core = WsBypassCore.getInstance();
         String err = core.start(MglaWsConfig.getPort(), MglaWsConfig.getSecret());
         if (err != null && !err.isEmpty()) {
@@ -233,6 +237,9 @@ public final class MglaWsBypass {
         }
         if (!proxyApplied) {
             return "Запускается…";
+        }
+        if (!MglaWsConfig.isRelayConfigured()) {
+            return "Нет токена релея";
         }
         if (core.hasActiveBridge() && core.getLastBridgeOkAtMs() > 0) {
             return "Работает";

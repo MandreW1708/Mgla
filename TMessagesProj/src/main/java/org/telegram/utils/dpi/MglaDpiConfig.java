@@ -5,9 +5,11 @@ import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.Utilities;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Настройки встроенного обхода блокировок (Mgla -> Настройки Mgla -> Обход блокировок).
@@ -25,6 +27,9 @@ public final class MglaDpiConfig {
     private static final String PREF_FAKE_SNI = "dpi_fake_sni";
     // Локальный порт SOCKS5-прокси (чтобы переживать перезапуски)
     private static final String PREF_PORT = "dpi_port";
+    // Локальная SOCKS5-аутентификация (другие приложения на устройстве не смогут пользоваться прокси)
+    private static final String PREF_SOCKS_USER = "dpi_socks_user";
+    private static final String PREF_SOCKS_PASS = "dpi_socks_pass";
 
     // Снимок пользовательского прокси до включения обхода (восстанавливается при выключении)
     private static final String PREF_SAVED_EXISTS = "dpi_saved_exists";
@@ -88,6 +93,40 @@ public final class MglaDpiConfig {
 
     public static void setPort(int port) {
         getPrefs().edit().putInt(PREF_PORT, port).apply();
+    }
+
+    /** Гарантирует наличие случайных SOCKS5 credentials для локального прокси. */
+    public static void ensureSocksAuth() {
+        SharedPreferences prefs = getPrefs();
+        String user = prefs.getString(PREF_SOCKS_USER, "");
+        String pass = prefs.getString(PREF_SOCKS_PASS, "");
+        if (!TextUtils.isEmpty(user) && !TextUtils.isEmpty(pass)) {
+            return;
+        }
+        prefs.edit()
+            .putString(PREF_SOCKS_USER, "mgla_" + randomHex(8))
+            .putString(PREF_SOCKS_PASS, randomHex(24))
+            .apply();
+    }
+
+    public static String getSocksUser() {
+        ensureSocksAuth();
+        return getPrefs().getString(PREF_SOCKS_USER, "");
+    }
+
+    public static String getSocksPass() {
+        ensureSocksAuth();
+        return getPrefs().getString(PREF_SOCKS_PASS, "");
+    }
+
+    private static String randomHex(int bytes) {
+        byte[] raw = new byte[bytes];
+        Utilities.random.nextBytes(raw);
+        StringBuilder sb = new StringBuilder(bytes * 2);
+        for (byte b : raw) {
+            sb.append(String.format(Locale.US, "%02x", b & 0xff));
+        }
+        return sb.toString();
     }
 
     public static boolean hasSavedUserProxy() {

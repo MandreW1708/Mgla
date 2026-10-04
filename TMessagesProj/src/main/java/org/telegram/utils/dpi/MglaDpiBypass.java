@@ -289,9 +289,11 @@ public final class MglaDpiBypass {
             return MglaDpiNative.ERR_INIT;
         }
         String[] args = MglaDpiStrategies.buildArgs(command, MglaDpiConfig.getFakeSni());
+        MglaDpiConfig.ensureSocksAuth();
         int port;
         try {
-            port = MglaDpiNative.nativeStart(args, preferredPort);
+            port = MglaDpiNative.nativeStart(args, preferredPort,
+                MglaDpiConfig.getSocksUser(), MglaDpiConfig.getSocksPass());
         } catch (Throwable e) {
             FileLog.e(e);
             port = MglaDpiNative.ERR_INIT;
@@ -333,10 +335,13 @@ public final class MglaDpiBypass {
     // ---------------------------------------------------------------- proxy settings plumbing
 
     private ProxySettings buildLocalSettings() {
+        MglaDpiConfig.ensureSocksAuth();
         return ProxySettings.builder()
             .setType(ProxySettings.Type.SOCKS5)
             .setAddress("127.0.0.1")
             .setPort(getPort())
+            .setUser(MglaDpiConfig.getSocksUser())
+            .setPassword(MglaDpiConfig.getSocksPass())
             .build();
     }
 

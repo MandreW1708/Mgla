@@ -5,21 +5,25 @@ import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.BuildConfig;
 
 /**
- * Настройки WS-обхода: свой релей на mglabot.mooo.com (Германия).
+ * Настройки WS-обхода.
+ * <p>
+ * В регионах с блокировкой прямой {@code kws*} обычно тоже недоступен, поэтому
+ * рабочий путь — релей ({@link #getRelayHost()}). Хост/токен берутся из
+ * {@code BuildConfig} ({@code local.properties}: {@code MGLA_WS_RELAY_HOST},
+ * {@code MGLA_WS_RELAY_TOKEN}), с возможностью переопределить в prefs.
  */
 public final class MglaWsConfig {
 
     public static final String PREFS = "mgla_config";
 
-    /** Хост релея (TLS на 443, путь /apiws?dc=N). */
-    public static final String DEFAULT_RELAY_HOST = "mglabot.mooo.com";
     /**
-     * Общий секрет с сервером (заголовок X-Mgla-Token).
-     * Должен совпадать с MGLA_WS_TOKEN в /opt/mgla-ws-relay/env на сервере.
+     * SPKI SHA-256 (base64) сертификата дефолтного релея — pinning при TLS.
+     * При смене ключа на сервере нужно обновить константу.
      */
-    public static final String DEFAULT_RELAY_TOKEN = "***REMOVED***";
+    public static final String RELAY_SPKI_SHA256_BASE64 = "Ae0rI3yMlnvtv5bwOy5r9fqcniG46yrElv0ox6x5g60=";
 
     private static final String PREF_ENABLED = "ws_enabled";
     private static final String PREF_PORT = "ws_port";
@@ -73,21 +77,38 @@ public final class MglaWsConfig {
     }
 
     public static String getRelayHost() {
-        String host = getPrefs().getString(PREF_RELAY_HOST, DEFAULT_RELAY_HOST);
-        return TextUtils.isEmpty(host) ? DEFAULT_RELAY_HOST : host.trim();
+        String override = getPrefs().getString(PREF_RELAY_HOST, null);
+        if (!TextUtils.isEmpty(override)) {
+            return override.trim();
+        }
+        String fromBuild = BuildConfig.MGLA_WS_RELAY_HOST;
+        return TextUtils.isEmpty(fromBuild) ? "mglabot.mooo.com" : fromBuild.trim();
     }
 
     public static void setRelayHost(String host) {
         getPrefs().edit().putString(PREF_RELAY_HOST, host == null ? "" : host.trim()).apply();
     }
 
+    /**
+     * Токен релея: prefs override → BuildConfig ({@code MGLA_WS_RELAY_TOKEN} в local.properties).
+     * Без токена WS-обход не стартует uplink (релей обязателен).
+     */
     public static String getRelayToken() {
-        String token = getPrefs().getString(PREF_RELAY_TOKEN, DEFAULT_RELAY_TOKEN);
-        return token == null ? "" : token;
+        String override = getPrefs().getString(PREF_RELAY_TOKEN, null);
+        if (!TextUtils.isEmpty(override)) {
+            return override.trim();
+        }
+        String fromBuild = BuildConfig.MGLA_WS_RELAY_TOKEN;
+        return fromBuild == null ? "" : fromBuild.trim();
     }
 
     public static void setRelayToken(String token) {
         getPrefs().edit().putString(PREF_RELAY_TOKEN, token == null ? "" : token.trim()).apply();
+    }
+
+    /** Релей готов к использованию: есть хост и непустой токен. */
+    public static boolean isRelayConfigured() {
+        return !TextUtils.isEmpty(getRelayHost()) && !TextUtils.isEmpty(getRelayToken());
     }
 
     public static boolean hasSavedUserProxy() {
