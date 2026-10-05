@@ -3,11 +3,13 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.drawable.Drawable;
+import android.os.Bundle;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -16,11 +18,13 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
+import org.telegram.messenger.ChatThemeController;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
@@ -31,14 +35,19 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BackDrawable;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
+import org.telegram.ui.ActionBar.EmojiThemes;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.ChatActionCell;
 import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.Forum.ForumUtilities;
+import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
+import org.telegram.ui.Stories.recorder.PreviewView;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -114,8 +123,23 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
         menu.addItem(menu_clear, R.drawable.msg_clear);
         menu.addItem(menu_more, R.drawable.ic_ab_other).setContentDescription("Ещё");
 
-        contentView = new SizeNotifierFrameLayout(context);
-        contentView.setBackgroundImage(Theme.getCachedWallpaper(), Theme.isWallpaperMotion());
+        contentView = new SizeNotifierFrameLayout(context) {
+            @Override
+            protected Drawable getNewDrawable() {
+                Drawable drawable = resolveChatWallpaper();
+                return drawable != null ? drawable : super.getNewDrawable();
+            }
+
+            @Override
+            protected boolean getNewDrawableMotion() {
+                TLRPC.WallPaper wallpaper = ChatThemeController.getInstance(currentAccount).getDialogWallpaper(dialogId);
+                if (wallpaper != null) {
+                    return wallpaper.settings != null && wallpaper.settings.motion;
+                }
+                return super.getNewDrawableMotion();
+            }
+        };
+        applyChatWallpaper();
         fragmentView = contentView;
 
         emptyView = new TextView(context);
@@ -145,6 +169,25 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
             showDeleteAlert(message);
             return true;
         });
+        listView.setOnItemClickListener((RecyclerListView.OnItemClickListenerExtended) (view, position, x, y) -> {
+            if (!(view instanceof ChatMessageCell)) {
+                return;
+            }
+            ChatMessageCell cell = (ChatMessageCell) view;
+            MessageObject message = cell.getMessageObject();
+            if (message == null || message.isDateObject) {
+                return;
+            }
+            if (!cell.isInsideBackground(x, y)) {
+                goToChatMessage(message);
+                return;
+            }
+            if (isOpenableMedia(message)) {
+                openMedia(message);
+            } else {
+                showMessageMenu(cell, message);
+            }
+        });
         listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
@@ -166,6 +209,36 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
         }
         TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
         return chat != null ? chat.title : "";
+    }
+
+    /** Same wallpaper the open chat uses: per-dialog custom wall / chat theme, else global. */
+    private Drawable resolveChatWallpaper() {
+        boolean isDark = Theme.getActiveTheme().isDark();
+        ChatThemeController themes = ChatThemeController.getInstance(currentAccount);
+        TLRPC.WallPaper wallpaper = themes.getDialogWallpaper(dialogId);
+        EmojiThemes chatTheme = themes.getDialogTheme(dialogId);
+
+        if (wallpaper != null) {
+            if (!TextUtils.isEmpty(ChatThemeController.getWallpaperEmoticon(wallpaper))) {
+                return PreviewView.getBackgroundDrawable(null, currentAccount, wallpaper, isDark);
+            }
+            return ChatBackgroundDrawable.getOrCreate(null, wallpaper, isDark);
+        }
+        if (chatTheme != null) {
+            return PreviewView.getBackgroundDrawableFromTheme(currentAccount, chatTheme, 0, isDark);
+        }
+        return Theme.getCachedWallpaper();
+    }
+
+    private void applyChatWallpaper() {
+        if (contentView == null) {
+            return;
+        }
+        TLRPC.WallPaper wallpaper = ChatThemeController.getInstance(currentAccount).getDialogWallpaper(dialogId);
+        boolean motion = wallpaper != null
+            ? wallpaper.settings != null && wallpaper.settings.motion
+            : Theme.isWallpaperMotion();
+        contentView.setBackgroundImage(resolveChatWallpaper(), motion);
     }
 
     // region data
@@ -317,12 +390,16 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
         builder.setTitle("Убрать из удалённых");
         builder.setMessage("Удалить сохранённую копию этого сообщения?");
         builder.setPositiveButton(LocaleController.getString(R.string.Delete), (dialog, which) -> {
-            getMessagesStorage().deleteMglaDeletedMessage(dialogId, message.getId(), null);
+            final int messageId = message.getId();
+            getMessagesStorage().deleteMglaDeletedMessage(dialogId, messageId, null);
             messages.remove(message);
             rebuildDateSeparators();
             loadedCount = Math.max(0, loadedCount - 1);
             adapter.notifyDataSetChanged();
             updateEmptyView();
+            ArrayList<Integer> ids = new ArrayList<>();
+            ids.add(messageId);
+            removeCopiesFromOpenChats(ids);
         });
         builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
         AlertDialog dialog = builder.create();
@@ -347,6 +424,7 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
                 allLoaded = true;
                 adapter.notifyDataSetChanged();
                 updateEmptyView();
+                removeCopiesFromOpenChats(null);
             })
         );
         builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
@@ -358,6 +436,26 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
         }
     }
 
+    /** Keeps chats below us in the stack in sync with the archive. {@code null} = everything. */
+    private void removeCopiesFromOpenChats(ArrayList<Integer> messageIds) {
+        if (parentLayout == null) {
+            return;
+        }
+        for (BaseFragment fragment : parentLayout.getFragmentStack()) {
+            if (!(fragment instanceof ChatActivity)) {
+                continue;
+            }
+            ChatActivity chat = (ChatActivity) fragment;
+            if (chat.getDialogId() != dialogId || chat.getChatMode() != ChatActivity.MODE_DEFAULT) {
+                continue;
+            }
+            if (topicId != 0 && chat.getTopicId() != topicId) {
+                continue;
+            }
+            chat.removeMglaDeletedCopies(messageIds);
+        }
+    }
+
     private void openMedia(MessageObject message) {
         if (message == null || getParentActivity() == null) {
             return;
@@ -366,18 +464,89 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
             MediaController.getInstance().playMessage(message);
             return;
         }
-        if (message.isVideo() || message.type == MessageObject.TYPE_PHOTO || message.isGif()
-                || message.type == MessageObject.TYPE_TEXT && !message.isWebpageDocument()) {
+        if (message.isVideo() || message.type == MessageObject.TYPE_PHOTO || message.isGif()) {
             PhotoViewer.getInstance().setParentActivity(this);
             PhotoViewer.getInstance().openPhoto(message, null, 0, 0, 0, new PhotoViewer.EmptyPhotoViewerProvider());
         }
+    }
+
+    private boolean isOpenableMedia(MessageObject message) {
+        if (message == null) {
+            return false;
+        }
+        return message.isVoice()
+            || message.isRoundVideo()
+            || message.isMusic()
+            || message.isVideo()
+            || message.type == MessageObject.TYPE_PHOTO
+            || message.isGif();
+    }
+
+    private void showMessageMenu(ChatMessageCell cell, MessageObject message) {
+        if (cell == null || message == null || getParentActivity() == null) {
+            return;
+        }
+        CharSequence text = message.messageText;
+        if (TextUtils.isEmpty(text) && message.caption != null) {
+            text = message.caption;
+        }
+        final CharSequence copyText = text;
+        ItemOptions options = ItemOptions.makeOptions(this, cell);
+        if (!TextUtils.isEmpty(copyText)) {
+            options.add(R.drawable.msg_copy, LocaleController.getString(R.string.Copy), () -> {
+                AndroidUtilities.addToClipboard(copyText);
+                BulletinFactory.of(this).createCopyBulletin(LocaleController.getString(R.string.TextCopied)).show();
+            });
+        }
+        options.add(R.drawable.msg_message, "Показать в чате", () -> goToChatMessage(message));
+        options.add(R.drawable.msg_delete, "Убрать из удалённых", true, () -> showDeleteAlert(message));
+        options.show();
+    }
+
+    private void goToChatMessage(MessageObject message) {
+        if (message == null) {
+            return;
+        }
+        final int messageId = message.getId();
+        if (parentLayout != null) {
+            for (int i = parentLayout.getFragmentStack().size() - 1; i >= 0; i--) {
+                BaseFragment fragment = parentLayout.getFragmentStack().get(i);
+                if (fragment == this || !(fragment instanceof ChatActivity)) {
+                    continue;
+                }
+                ChatActivity chat = (ChatActivity) fragment;
+                if (chat.getDialogId() != dialogId || chat.getChatMode() != ChatActivity.MODE_DEFAULT) {
+                    continue;
+                }
+                if (topicId != 0 && chat.getTopicId() != topicId) {
+                    continue;
+                }
+                chat.scrollToMessageId(messageId, 0, true, 0, true, 0);
+                finishFragment();
+                return;
+            }
+        }
+
+        Bundle args = new Bundle();
+        if (DialogObject.isUserDialog(dialogId)) {
+            args.putLong("user_id", dialogId);
+        } else {
+            args.putLong("chat_id", -dialogId);
+        }
+        args.putInt("message_id", messageId);
+        args.putBoolean("need_remove_previous_same_chat_activity", false);
+        ChatActivity chatActivity = new ChatActivity(args);
+        if (topicId != 0) {
+            ForumUtilities.applyTopic(chatActivity, MessagesStorage.TopicKey.of(dialogId, topicId));
+        }
+        presentFragment(chatActivity, true);
     }
 
     private void openProfile(long userId) {
         if (userId == 0) {
             return;
         }
-        android.os.Bundle args = new android.os.Bundle();
+        Bundle args = new Bundle();
         args.putLong("user_id", userId);
         presentFragment(new ProfileActivity(args));
     }
@@ -429,7 +598,20 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
 
                     @Override
                     public void didPressOther(ChatMessageCell cell, float otherX, float otherY) {
-                        openMedia(cell.getMessageObject());
+                        MessageObject message = cell.getMessageObject();
+                        if (isOpenableMedia(message)) {
+                            openMedia(message);
+                        } else {
+                            showMessageMenu(cell, message);
+                        }
+                    }
+
+                    @Override
+                    public void didLongPress(ChatMessageCell cell, float x, float y) {
+                        MessageObject message = cell.getMessageObject();
+                        if (message != null && !message.isDateObject) {
+                            showDeleteAlert(message);
+                        }
                     }
 
                     @Override

@@ -1,0 +1,9 @@
+[Unit]
+Description=Send Mgla stats report to Telegram
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mgla-ws-relay
+EnvironmentFile=/opt/mgla-ws-relay/env
+ExecStart=/usr/bin/python3 /opt/mgla-ws-relay/stats_report.py --telegram --days 30

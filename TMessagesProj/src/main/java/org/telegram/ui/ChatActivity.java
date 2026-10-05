@@ -26546,9 +26546,38 @@ public class ChatActivity extends BaseFragment implements
         processDeletedMessages(markAsDeletedMessages, channelId, sent, true);
     }
 
+    private boolean removingMglaDeletedCopies;
+
+    /**
+     * Drops archived copies from the open chat after they were removed from the deleted-messages
+     * archive. {@code messageIds == null} removes every archived copy currently shown.
+     */
+    public void removeMglaDeletedCopies(ArrayList<Integer> messageIds) {
+        ArrayList<Integer> ids = new ArrayList<>();
+        for (int a = 0, N = messages.size(); a < N; a++) {
+            MessageObject obj = messages.get(a);
+            if (obj == null || !obj.mglaDeleted) {
+                continue;
+            }
+            if (messageIds == null || messageIds.contains(obj.getId())) {
+                ids.add(obj.getId());
+            }
+        }
+        if (ids.isEmpty()) {
+            return;
+        }
+        removingMglaDeletedCopies = true;
+        try {
+            processDeletedMessages(ids, ChatObject.isChannel(currentChat) ? -dialog_id : 0, false, false);
+        } finally {
+            removingMglaDeletedCopies = false;
+        }
+    }
+
     /** Whether a just-deleted message should stay in the open chat as an archived copy. */
     private boolean keepMglaDeletedVisible(int loadIndex, MessageObject obj) {
-        return loadIndex == 0
+        return !removingMglaDeletedCopies
+            && loadIndex == 0
             && chatMode == MODE_DEFAULT
             && currentEncryptedChat == null
             && obj != null

@@ -5,6 +5,7 @@ Standard library only. Stores into SQLite; never records client IPs.
 Clients authenticate with the same X-Mgla-Token as the WS relay.
 """
 
+import base64
 import hmac
 import json
 import logging
@@ -15,12 +16,17 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
+
+import stats_report
 
 HOST = os.environ.get("MGLA_STATS_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MGLA_STATS_PORT", "8767"))
 TOKEN = os.environ.get("MGLA_WS_TOKEN", "")
 DB_PATH = os.environ.get("MGLA_STATS_DB", "/opt/mgla-ws-relay/stats.db")
 RETENTION_DAYS = int(os.environ.get("MGLA_STATS_RETENTION_DAYS", "400"))
+REPORT_USER = os.environ.get("MGLA_STATS_REPORT_USER", "admin")
+REPORT_PASSWORD = os.environ.get("MGLA_STATS_REPORT_PASSWORD", "")
 
 MAX_BODY = 256 * 1024
 MAX_DAYS = 14
@@ -223,10 +229,48 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/mgla-stats/v1/health":
+        url = urlsplit(self.path)
+        if url.path == "/mgla-stats/v1/health":
             self._reply(200, b'{"ok":true}')
+        elif url.path == "/mgla-stats/report":
+            self._report(parse_qs(url.query))
         else:
             self._reply(404)
+
+    def _report(self, query):
+        # Without a configured password the page is disabled rather than public.
+        if not REPORT_PASSWORD:
+            self._reply(404)
+            return
+        expected = base64.b64encode(f"{REPORT_USER}:{REPORT_PASSWORD}".encode()).decode()
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Basic ") or not hmac.compare_digest(auth[6:].strip().encode(), expected.encode()):
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Mgla stats", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        try:
+            days = min(400, max(1, int(query.get("days", ["30"])[0])))
+        except ValueError:
+            days = 30
+        try:
+            db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            try:
+                body = stats_report.generate_html(db, days, 25).encode("utf-8")
+            finally:
+                db.close()
+        except sqlite3.Error:
+            log.exception("report failed")
+            self._reply(500)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Robots-Tag", "noindex")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         if self.path != "/mgla-stats/v1/batch":

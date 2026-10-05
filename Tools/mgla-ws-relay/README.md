@@ -178,7 +178,48 @@ Nginx: строку `limit_req_zone` из `nginx-stats.conf` — в http-кон�
 python3 /opt/mgla-ws-relay/stats_report.py             # за 30 дней
 python3 /opt/mgla-ws-relay/stats_report.py --days 7
 python3 /opt/mgla-ws-relay/stats_report.py --name ai:  # все ИИ-счётчики
+python3 /opt/mgla-ws-relay/stats_report.py --html /opt/mgla-ws-relay/report.html  # HTML-страница
 ```
+
+HTML-отчёт — один самодостаточный файл (график активности, карточки, таблицы).
+
+## Отчёт на сайте
+
+Добавьте в `/opt/mgla-ws-relay/env` пароль и перезапустите приёмник:
+
+```bash
+echo "MGLA_STATS_REPORT_PASSWORD=$(openssl rand -hex 12)" >> /opt/mgla-ws-relay/env
+grep REPORT_PASSWORD /opt/mgla-ws-relay/env   # запомните пароль
+systemctl restart mgla-stats
+```
+
+Страница: `https://<RELAY_HOST>/mgla-stats/report` (логин `admin`, сменить —
+`MGLA_STATS_REPORT_USER`). Строится заново при каждом открытии; вверху переключатель 1/7/30/90 дней.
+Без пароля в `env` страница отключена (404).
+
+## Ежедневный отчёт в Telegram
+
+1. Создайте бота у @BotFather (или возьмите существующего), получите токен.
+2. Напишите боту `/start`, затем узнайте свой chat id:
+   `curl -s https://api.telegram.org/bot<ТОКЕН>/getUpdates` → `"chat":{"id":...}`.
+3. Добавьте в `/opt/mgla-ws-relay/env`:
+
+```
+MGLA_STATS_BOT_TOKEN=<токен бота>
+MGLA_STATS_CHAT_ID=<ваш chat id>
+```
+
+4. Проверка и включение (каждый день в 09:00 по времени сервера):
+
+```bash
+python3 /opt/mgla-ws-relay/stats_report.py --telegram   # должен прийти файл
+cp /opt/mgla-ws-relay/mgla-stats-report.service /opt/mgla-ws-relay/mgla-stats-report.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now mgla-stats-report.timer
+```
+
+(`python3 ... --telegram` вручную не видит `env`; для ручной проверки выполните перед ней
+`set -a; . /opt/mgla-ws-relay/env; set +a`.)
 
 Разделы: DAU/WAU/MAU и удержание, ИИ-функции и упоры в лимит, экраны, изменения настроек,
 доля включивших каждую функцию, поиск без результатов (спрос на то, чего нет), версии и устройства.
