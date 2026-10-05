@@ -231,17 +231,18 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     private void ensurePlayerCreated() {
+        // Voice/round: keep startup buffers tiny. With playWhenReady=true during the initial
+        // BUFFERING state ExoPlayer treats it as "rebuffering" and would otherwise wait
+        // DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS (2000ms) before the first sample.
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setAllocator(new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
             .setBufferDurationsMs(
                 DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
                 DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
-                isStory ? 1000 : 100,
-                isStory ? 1000
-                        : DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS)
+                isStory ? 1000 : 50,
+                isStory ? 1000 : 50)
             .setTargetBufferBytes(DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES)
-            .setPrioritizeTimeOverSizeThresholds(
-                DefaultLoadControl.DEFAULT_PRIORITIZE_TIME_OVER_SIZE_THRESHOLDS)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(
                 DefaultLoadControl.DEFAULT_BACK_BUFFER_DURATION_MS,
                 DefaultLoadControl.DEFAULT_RETAIN_BACK_BUFFER_FROM_KEYFRAME)
@@ -254,8 +255,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             } else {
                 factory = new DefaultRenderersFactory(ApplicationLoader.applicationContext);
             }
-            factory.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON);
-            // factory.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
+            // PREFER ffmpeg/opus over platform MediaCodec. MODE_ON (media3 migration) tried
+            // MediaCodec first; on many devices Opus MediaCodec cold-start is ~1–2s of silence
+            // (UI playing, timer at 00:00, system volume glyph crossed out).
+            factory.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
             ExoPlayer.Builder builder = new ExoPlayer.Builder(ApplicationLoader.applicationContext).setRenderersFactory(factory)
                     .setTrackSelector(trackSelector)
                     .setLoadControl(loadControl);
@@ -263,6 +266,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 builder.setLooper(looper);
             }
             player = builder.build();
+            // Apply route before prepare/play so Bluetooth A2DP isn't torn down by a
+            // post-prepare setAudioAttributes (crossed-out headphones for ~1–2s).
+            applyAudioAttributes();
 
             player.addAnalyticsListener(this);
             player.addListener(this);
@@ -1613,6 +1619,8 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
 
     private boolean handleAudioFocus = false;
+    private int nextStreamType = AudioManager.STREAM_MUSIC;
+
     public void handleAudioFocus(boolean handleAudioFocus) {
         this.handleAudioFocus = handleAudioFocus;
         if (player != null) {
@@ -1621,15 +1629,30 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void setStreamType(int type) {
+        nextStreamType = type;
+        applyAudioAttributes();
+    }
+
+    private AudioAttributes buildAudioAttributes(int streamType) {
+        // Must match MediaController.buildPlaybackFocusAttributes — HyperOS 3 mutes the
+        // AudioTrack for ~1–2s when focus attrs and ExoPlayer attrs disagree.
+        boolean voiceCall = streamType == AudioManager.STREAM_VOICE_CALL;
+        return new AudioAttributes.Builder()
+            .setUsage(voiceCall ? C.USAGE_VOICE_COMMUNICATION : C.USAGE_MEDIA)
+            .setContentType(voiceCall ? C.AUDIO_CONTENT_TYPE_SPEECH : C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build();
+    }
+
+    private void applyAudioAttributes() {
+        AudioAttributes attrs = buildAudioAttributes(nextStreamType);
         if (player != null) {
-            player.setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(type == AudioManager.STREAM_VOICE_CALL ? C.USAGE_VOICE_COMMUNICATION : C.USAGE_MEDIA)
-                .build(), handleAudioFocus);
+            AudioAttributes current = player.getAudioAttributes();
+            if (current == null || current.usage != attrs.usage || current.contentType != attrs.contentType) {
+                player.setAudioAttributes(attrs, handleAudioFocus);
+            }
         }
         if (audioPlayer != null) {
-            audioPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(type == AudioManager.STREAM_VOICE_CALL ? C.USAGE_VOICE_COMMUNICATION : C.USAGE_MEDIA)
-                .build(), true);
+            audioPlayer.setAudioAttributes(attrs, true);
         }
     }
 

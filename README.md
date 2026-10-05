@@ -1,46 +1,98 @@
-зучи## Telegram messenger for Android
+# Mgla
 
-[Telegram](https://telegram.org) is a messaging app with a focus on speed and security. It’s superfast, simple and free.
-This repo contains the official source code for [Telegram App for Android](https://play.google.com/store/apps/details?id=org.telegram.messenger).
+Неофициальный клиент Telegram для Android на базе [официального исходного кода](https://github.com/DrKLO/Telegram).
 
-## Creating your Telegram Application
+**Mgla не связана с Telegram FZ-LLC.** Это отдельный форк со своим пакетом (`org.telegram.mgla`), своим названием и своими функциями. Соблюдайте [правила Telegram для разработчиков](https://core.telegram.org/api/obtaining_api_id): свой `api_id`, без официального названия и логотипа Telegram.
 
-We welcome all developers to use our API and source code to create applications on our platform.
-There are several things we require from **all developers** for the moment.
+Канал проекта: [@mgla_fork](https://t.me/mgla_fork)
 
-1. [**Obtain your own api_id**](https://core.telegram.org/api/obtaining_api_id) for your application.
-2. Please **do not** use the name Telegram for your app — or make sure your users understand that it is unofficial.
-3. Kindly **do not** use our standard logo (white paper plane in a blue circle) as your app's logo.
-3. Please study our [**security guidelines**](https://core.telegram.org/mtproto/security_guidelines) and take good care of your users' data and privacy.
-4. Please remember to publish **your** code too in order to comply with the licences.
+Версия форка в приложении: **v1.5.0** (на базе Telegram Android).
 
-### API, Protocol documentation
+---
 
-Telegram API manuals: https://core.telegram.org/api
+## Что внутри
 
-MTproto protocol manuals: https://core.telegram.org/mtproto
+Все настройки форка собраны в **Настройки → Настройки Mgla**.
 
-### Compilation Guide
+### Подключение
 
-**Note**: In order to support [reproducible builds](https://core.telegram.org/reproducible-builds), this repo contains dummy release.keystore,  google-services.json and filled variables inside BuildVars.java. Before publishing your own APKs please make sure to replace all these files with your own.
+Обход блокировок Telegram без системного VPN:
 
-You will require Android Studio 2025.1.4, Android NDK 27.2.12479018 and Android SDK 36.
+- **WebSocket-релей** — MTProto через WSS (удобно, если есть свой или общий сервер)
+- **ByeDPI** — локальный DPI-обход через loopback SOCKS5
 
-1. Clone the Telegram source code with its submodules:
+Режимы взаимоисключающие. Статус, uptime и выбор стратегии — в разделе **Подключение**.
+
+### «Шпион» и приватность
+
+Локальные инструменты (данные остаются на устройстве):
+
+- **Последний онлайн** — показ кэшированного last seen, когда обычный клиент его скрывает
+- **Сохранение удалённых** — архив удалённых сообщений по типам чатов, просмотр в чате
+- **Режим призрака** — без «прочитано», без «печатает», без обновления своего онлайна
+
+### ИИ и Chat DNA
+
+- Облачные провайдеры (OpenRouter / Gemini): краткая сводка, вежливый ответ, упрощение, перевод, выделение задач
+- **Локальные GGUF-модели** — каталог и загрузка на устройство
+- **Chat DNA** — профиль переписки за период: активность, статистика, темы
+
+### Внешний вид и чаты
+
+- Чистый/стандартный заголовок чата и тонкая настройка скрытия элементов
+- **Затемнение стекла** (совместимо с Liquid Glass)
+- Настраиваемое боковое меню из списка чатов
+- Меню сообщения: порядок пунктов, double-tap действия
+- Время с секундами, лимиты стикеров, MD3-переключатели, predictive back
+- Выбор камеры: Camera1 / Camera2 / CameraX
+- Ускорение загрузок/выгрузок, автопауза аудио
+- Расширенный экспорт чатов с прогрессом в приложении
+
+---
+
+## Сборка из исходников
+
+Нужны **Android Studio 2025.1.4+**, **NDK 27.2**, **SDK 36**.
+
+1. Клонируйте репозиторий с сабмодулями:
+
    ```bash
-   git clone --recursive --shallow-submodules https://github.com/DrKLO/Telegram.git Telegram
+   git clone --recursive --shallow-submodules https://github.com/MandreW1708/Mgla.git
+   cd Mgla
    ```
-   In case you forgot the `--recursive` flag, change to the `Telegram` directory and run:
+
+2. Скопируйте шаблон секретов и заполните значения:
+
    ```bash
-   git submodule init && git submodule update --init --recursive --depth=1
+   cp local.properties.example local.properties
    ```
-2. Copy your release.keystore into TMessagesProj/config
-3. Fill out RELEASE_KEY_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_STORE_PASSWORD in gradle.properties to access your  release.keystore
-4.  Go to https://console.firebase.google.com/, create two android apps with application IDs org.telegram.messenger and org.telegram.messenger.beta, turn on firebase messaging and download google-services.json, which should be copied to the same folder as TMessagesProj.
-5. Open the project in the Studio (note that it should be opened, NOT imported).
-6. Fill out values in TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java – there’s a link for each of the variables showing where and which data to obtain.
-7. You are ready to compile Telegram.
 
-### Localization
+   Обязательно: `TELEGRAM_APP_ID` и `TELEGRAM_APP_HASH` с [my.telegram.org](https://my.telegram.org).  
+   Опционально: ключи ИИ/карт, хост и токен WS-релея.  
+   Файл `local.properties` в git не коммитится.
 
-We moved all translations to https://translations.telegram.org/en/android/. Please use it.
+3. Для release-сборки положите свой `release.keystore` в `TMessagesProj/config` и заполните пароли в `gradle.properties`.
+
+4. При необходимости добавьте свой `google-services.json` (Firebase) для package id `org.telegram.mgla` / `org.telegram.mgla.beta`.
+
+5. Откройте проект в Android Studio (**Open**, не Import) и соберите нужный модуль приложения.
+
+Подробности по самохостингу WS-релея: [`Tools/mgla-ws-relay/README.md`](Tools/mgla-ws-relay/README.md).
+
+---
+
+## Важно
+
+- Функции «шпиона» и режима призрака затрагивают ожидания других людей о приватности — используйте осознанно и в рамках закона.
+- Инструменты подключения нужны, чтобы доходить до серверов Telegram там, где обычный клиент режут; это не «обход всего интернета».
+- Не публикуйте `local.properties`, токены релея, API-ключи и keystore.
+
+---
+
+## База и лицензии
+
+Основано на [Telegram for Android](https://github.com/DrKLO/Telegram).  
+API: https://core.telegram.org/api · MTProto: https://core.telegram.org/mtproto  
+Локализации upstream: https://translations.telegram.org/en/android/
+
+Соблюдайте лицензии исходного кода Telegram и требования к публикации своего кода при распространении сборок.

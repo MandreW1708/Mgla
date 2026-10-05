@@ -41,6 +41,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -967,6 +968,8 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     private boolean callInProgress;
     private int audioFocus = AUDIO_NO_FOCUS_NO_DUCK;
     private boolean resumeAudioOnFocusGain;
+    private AudioFocusRequest playbackFocusRequest;
+    private boolean waitingForAudioFocusToPlay;
 
     private static final float VOLUME_DUCK = 0.2f;
     private static final float VOLUME_NORMAL = 1.0f;
@@ -1547,7 +1550,22 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 audioFocus = AUDIO_NO_FOCUS_NO_DUCK;
             } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
                 audioFocus = AUDIO_FOCUSED;
-                if (resumeAudioOnFocusGain) {
+                ignoreTransientAudioFocusLossUntil = SystemClock.elapsedRealtime() + 1500;
+                if (waitingForAudioFocusToPlay) {
+                    waitingForAudioFocusToPlay = false;
+                    resumeAudioOnFocusGain = false;
+                    if (playingMessageObject != null) {
+                        audioVolume = 1f;
+                        setPlayerVolume();
+                        if (audioPlayer != null) {
+                            audioPlayer.setMute(CastSync.isActive());
+                            audioPlayer.play();
+                        } else if (videoPlayer != null) {
+                            videoPlayer.setMute(CastSync.isActive());
+                            videoPlayer.play();
+                        }
+                    }
+                } else if (resumeAudioOnFocusGain) {
                     resumeAudioOnFocusGain = false;
                     if (isPlayingMessage(getPlayingMessageObject()) && isMessagePaused()) {
                         playMessage(getPlayingMessageObject());
@@ -1556,6 +1574,12 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
                 audioFocus = AUDIO_NO_FOCUS_CAN_DUCK;
             } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                if (SystemClock.elapsedRealtime() < ignoreTransientAudioFocusLossUntil) {
+                    // Swallow self-inflicted transient losses right after we take focus for voice/round.
+                    audioFocus = AUDIO_FOCUSED;
+                    setPlayerVolume();
+                    return;
+                }
                 audioFocus = AUDIO_NO_FOCUS_NO_DUCK;
                 if (isPlayingMessage(getPlayingMessageObject()) && !isMessagePaused()) {
                     pauseMessage(playingMessageObject);
@@ -2194,11 +2218,14 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         final boolean allowRecording = !manualRecording && playingMessageObject == null && SharedConfig.enabledRaiseTo(true) && ApplicationLoader.isScreenOn && !inputFieldHasText && allowStartRecord && raiseChat != null && !callInProgress;
         final boolean allowListening = SharedConfig.enabledRaiseTo(false) && playingMessageObject != null && (playingMessageObject.isVoice() || playingMessageObject.isRoundVideo());
         final boolean proximityDetected = proximityTouched;
+        // Holding the phone upright is not raise-to-ear. That false positive routed voice/round
+        // to STREAM_VOICE_CALL (often volume 0) and popped a muted volume HUD.
+        final boolean raiseGestureDetected = raisedToBack == minCount || timeSinceRaise != 0 && Math.abs(System.currentTimeMillis() - timeSinceRaise) < 1000;
         final boolean accelerometerDetected = raisedToBack == minCount || accelerometerVertical || System.currentTimeMillis() - lastAccelerometerDetected < 60;
         final boolean alreadyPlaying = useFrontSpeaker || raiseToEarRecord;
         final boolean wakelockAllowed = (
-            accelerometerDetected ||
-            alreadyPlaying
+            (allowRecording && (accelerometerDetected || alreadyPlaying)) ||
+            (allowListening && (raiseGestureDetected || alreadyPlaying))
         ) && !forbidRaiseToListen() && !VoIPService.isAnyKindOfCallActive() && (allowRecording || allowListening) && !PhotoViewer.getInstance().isVisible();
         if (proximityWakeLock != null) {
             final boolean held = proximityWakeLock.isHeld();
@@ -2234,7 +2261,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
 //                        proximityWakeLock.acquire();
 //                    }
                 }
-            } else if (allowListening) {
+            } else if (allowListening && raiseGestureDetected) {
                 if (!useFrontSpeaker) {
                     if (BuildVars.LOGS_ENABLED) {
                         FileLog.d("start listen");
@@ -2251,20 +2278,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             raisedToTop = 0;
             raisedToTopSign = 0;
             countLess = 0;
-        } else if (proximityTouched && ((accelerometerSensor == null || linearSensor == null) && gravitySensor == null) && !VoIPService.isAnyKindOfCallActive()) {
-            if (playingMessageObject != null && !ApplicationLoader.mainInterfacePaused && allowListening) {
-                if (!useFrontSpeaker && !manualRecording && !forbidRaiseToListen()) {
-                    if (BuildVars.LOGS_ENABLED) {
-                        FileLog.d("start listen by proximity only");
-                    }
-//                    if (proximityHasDifferentValues && proximityWakeLock != null && !proximityWakeLock.isHeld()) {
-//                        proximityWakeLock.acquire();
-//                    }
-                    setUseFrontSpeaker(true);
-                    startAudioAgain(false);
-//                    ignoreOnPause = true;
-                }
-            }
         } else if (!proximityTouched && !manualRecording) {
             if (raiseToEarRecord) {
                 if (BuildVars.LOGS_ENABLED) {
@@ -2280,8 +2293,8 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.d("stop listen");
                 }
-                useFrontSpeaker = false;
-                startAudioAgain(true);
+                setUseFrontSpeaker(false);
+                startAudioAgain(false);
                 ignoreOnPause = false;
 //                if (!ignoreAccelerometerGestures() && proximityHasDifferentValues && proximityWakeLock != null && proximityWakeLock.isHeld()) {
 //                    proximityWakeLock.release();
@@ -2309,6 +2322,11 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
 
     private void setUseFrontSpeaker(boolean value) {
         useFrontSpeaker = value;
+        // Toggling speakerphone while a headset/A2DP device is connected forces a BT
+        // profile renegotiation (crossed-out headphones icon, ~1–2s of silence).
+        if (forbidRaiseToListen()) {
+            return;
+        }
         AudioManager audioManager = NotificationsController.audioManager;
         if (useFrontSpeaker) {
             audioManager.setBluetoothScoOn(false);
@@ -2316,6 +2334,14 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         } else {
             audioManager.setSpeakerphoneOn(true);
         }
+    }
+
+    private int voiceStreamType() {
+        // With headphones/BT connected never use the call stream — it switches A2DP→SCO.
+        if (useFrontSpeaker && !forbidRaiseToListen()) {
+            return AudioManager.STREAM_VOICE_CALL;
+        }
+        return AudioManager.STREAM_MUSIC;
     }
 
     public void startRecordingIfFromSpeaker() {
@@ -2334,7 +2360,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
 
         NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.audioRouteChanged, useFrontSpeaker);
         if (videoPlayer != null) {
-            videoPlayer.setStreamType(useFrontSpeaker ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
+            videoPlayer.setStreamType(voiceStreamType());
             if (!paused) {
                 if (videoPlayer.getCurrentPosition() < 1000) {
                     videoPlayer.seekTo(0);
@@ -2548,8 +2574,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             playingMessageObject = null;
             downloadingCurrentMessage = false;
             if (notify) {
-                NotificationsController.audioManager.abandonAudioFocus(this);
-                hasAudioFocus = 0;
+                abandonPlaybackAudioFocus();
                 int index = -1;
                 if (voiceMessagesPlaylist != null) {
                     if (byVoiceEnd && (index = voiceMessagesPlaylist.indexOf(lastFile)) >= 0) {
@@ -3143,10 +3168,40 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         }
     }
 
-    private void checkAudioFocus(MessageObject messageObject) {
+    private long ignoreTransientAudioFocusLossUntil;
+
+    private android.media.AudioAttributes buildPlaybackFocusAttributes(boolean voiceCallStream) {
+        // Keep in lockstep with VideoPlayer.buildAudioAttributes.
+        return new android.media.AudioAttributes.Builder()
+                .setUsage(voiceCallStream
+                        ? android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION
+                        : android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(voiceCallStream
+                        ? android.media.AudioAttributes.CONTENT_TYPE_SPEECH
+                        : android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build();
+    }
+
+    private void abandonPlaybackAudioFocus() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26 && playbackFocusRequest != null) {
+                NotificationsController.audioManager.abandonAudioFocusRequest(playbackFocusRequest);
+                playbackFocusRequest = null;
+            } else {
+                NotificationsController.audioManager.abandonAudioFocus(this);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        hasAudioFocus = 0;
+        waitingForAudioFocusToPlay = false;
+    }
+
+    /** @return true if the player may call play() now; false if we must wait for AUDIOFOCUS_GAIN. */
+    private boolean checkAudioFocus(MessageObject messageObject) {
         int neededAudioFocus;
         if (messageObject.isVoice() || messageObject.isRoundVideo()) {
-            if (useFrontSpeaker) {
+            if (useFrontSpeaker && !forbidRaiseToListen()) {
                 neededAudioFocus = 3;
             } else {
                 neededAudioFocus = 2;
@@ -3154,26 +3209,67 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         } else {
             neededAudioFocus = 1;
         }
-        if (hasAudioFocus != neededAudioFocus) {
-            hasAudioFocus = neededAudioFocus;
-            int result;
-            if (neededAudioFocus == 3) {
-                result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN);
-            } else {
-                int focusGain;
-                if (MglaAudioConfig.useTransientAutopause(messageObject)) {
-                    focusGain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT;
-                } else if (neededAudioFocus == 2 && !SharedConfig.pauseMusicOnMedia) {
-                    focusGain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK;
-                } else {
-                    focusGain = AudioManager.AUDIOFOCUS_GAIN;
-                }
-                result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focusGain);
-            }
-            if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                audioFocus = AUDIO_FOCUSED;
-            }
+        if (hasAudioFocus == neededAudioFocus && audioFocus == AUDIO_FOCUSED && !waitingForAudioFocusToPlay) {
+            return true;
         }
+        if (hasAudioFocus != 0 || playbackFocusRequest != null) {
+            abandonPlaybackAudioFocus();
+        }
+        hasAudioFocus = neededAudioFocus;
+        int focusGain;
+        if (neededAudioFocus == 3) {
+            focusGain = AudioManager.AUDIOFOCUS_GAIN;
+        } else if (neededAudioFocus == 2 || MglaAudioConfig.useTransientAutopause(messageObject) || SharedConfig.pauseMusicOnMedia) {
+            focusGain = AudioManager.AUDIOFOCUS_GAIN;
+        } else {
+            focusGain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK;
+        }
+
+        int result;
+        if (Build.VERSION.SDK_INT >= 26) {
+            // HyperOS 3 / Android 16: focus request MUST carry the same AudioAttributes as ExoPlayer,
+            // otherwise the AudioTrack stays silent (~2s crossed volume glyph) until the system
+            // grants a delayed focus callback.
+            playbackFocusRequest = new AudioFocusRequest.Builder(focusGain)
+                    .setAudioAttributes(buildPlaybackFocusAttributes(neededAudioFocus == 3))
+                    .setOnAudioFocusChangeListener(this)
+                    // false: HyperOS 3 sometimes returns DELAYED with nothing else playing when
+                    // acceptsDelayed is true, which stalls the first ~2s of voice/round audio.
+                    .setAcceptsDelayedFocusGain(false)
+                    .setWillPauseWhenDucked(false)
+                    .build();
+            result = NotificationsController.audioManager.requestAudioFocus(playbackFocusRequest);
+        } else if (neededAudioFocus == 3) {
+            result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_VOICE_CALL, focusGain);
+        } else {
+            result = NotificationsController.audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focusGain);
+        }
+
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            audioFocus = AUDIO_FOCUSED;
+            waitingForAudioFocusToPlay = false;
+            if (messageObject.isVoice() || messageObject.isRoundVideo()) {
+                ignoreTransientAudioFocusLossUntil = SystemClock.elapsedRealtime() + 3000;
+            }
+            return true;
+        }
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_DELAYED) {
+            // Play only after onAudioFocusChange(GAIN) — starting earlier is muted on HyperOS 3.
+            waitingForAudioFocusToPlay = true;
+            resumeAudioOnFocusGain = true;
+            audioFocus = AUDIO_NO_FOCUS_NO_DUCK;
+            return false;
+        }
+        // FAILED / unknown: still allow play for voice/round — some HyperOS builds refuse
+        // focus spuriously while the AudioTrack would otherwise work.
+        waitingForAudioFocusToPlay = false;
+        audioFocus = AUDIO_NO_FOCUS_NO_DUCK;
+        if (messageObject.isVoice() || messageObject.isRoundVideo()) {
+            hasAudioFocus = neededAudioFocus;
+            return true;
+        }
+        hasAudioFocus = 0;
+        return false;
     }
 
     public boolean isPiPShown() {
@@ -3590,10 +3686,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 return;
             }
             AudioManager audioManager = (AudioManager) ApplicationLoader.applicationContext.getSystemService(Context.AUDIO_SERVICE);
-            int stream = useFrontSpeaker ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC;
+            int stream = voiceStreamType();
             int volume = audioManager.getStreamVolume(stream);
             if (volume == 0) {
-                audioManager.adjustStreamVolume(stream, volume, AudioManager.FLAG_SHOW_UI);
+                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_SAME, AudioManager.FLAG_SHOW_UI);
                 volumeBarLastTimeShown = now;
             }
         } catch (Exception ignore) {}
@@ -3631,6 +3727,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             return false;
         }
         isSilent = silent;
+        // Drop stale earpiece routing before we pick stream / focus attributes.
+        if ((messageObject.isVoice() || messageObject.isRoundVideo()) && useFrontSpeaker && (forbidRaiseToListen() || !proximityTouched)) {
+            useFrontSpeaker = false;
+        }
         checkVolumeBarUI();
         if ((audioPlayer != null || videoPlayer != null) && isSamePlayingMessage(messageObject)) {
             if (isPaused) {
@@ -3760,8 +3860,8 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                         //    currentTextureViewContainer.setVisibility(View.VISIBLE);
                         //}
                     }
-                    if (videoPlayer != null && CastSync.isActive()) {
-                        videoPlayer.setMute(true);
+                    if (videoPlayer != null) {
+                        videoPlayer.setMute(CastSync.isActive());
                     }
                 }
 
@@ -3828,6 +3928,11 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 videoPlayer.setTextureView(currentTextureView);
             }
 
+            if (messageObject.isRoundVideo()) {
+                videoPlayer.setStreamType(voiceStreamType());
+            } else {
+                videoPlayer.setStreamType(AudioManager.STREAM_MUSIC);
+            }
             if (exists) {
                 if (!messageObject.mediaExists && cacheFile != file) {
                     AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.fileLoaded, FileLoader.getAttachFileName(messageObject.getDocument()), cacheFile));
@@ -3853,7 +3958,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 }
             }
             if (messageObject.isRoundVideo()) {
-                videoPlayer.setStreamType(useFrontSpeaker ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
                 if (Math.abs(currentPlaybackSpeed - 1.0f) > 0.001f) {
                     videoPlayer.setPlaybackSpeed(Math.round(currentPlaybackSpeed * 10f) / 10f);
                 }
@@ -3862,8 +3966,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     messageObject.audioProgress = seekToProgressPending = messageObject.forceSeekTo;
                     messageObject.forceSeekTo = -1;
                 }
-            } else {
-                videoPlayer.setStreamType(AudioManager.STREAM_MUSIC);
             }
         } else {
             if (pipRoundVideoView != null) {
@@ -3896,8 +3998,15 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                             lastProgress = seekTo;
                             seekToProgressPending = 0;
                         }
-                        if (audioPlayer != null && CastSync.isActive()) {
-                            audioPlayer.setMute(true);
+                        if (audioPlayer != null) {
+                            audioPlayer.setMute(CastSync.isActive());
+                            if (playbackState == ExoPlayer.STATE_READY && playWhenReady && !isPaused) {
+                                audioVolume = 1f;
+                                setPlayerVolume();
+                                if (!audioPlayer.isPlaying()) {
+                                    audioPlayer.play();
+                                }
+                            }
                         }
                     }
 
@@ -3926,6 +4035,8 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                         return Theme.getCurrentAudiVisualizerDrawable().getParentView() != null;
                     }
                 });
+                // Set route before prepare so the first AudioTrack is created on A2DP/media.
+                audioPlayer.setStreamType(voiceStreamType());
                 if (exists) {
                     if (!messageObject.mediaExists && cacheFile != file) {
                         AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.fileLoaded, FileLoader.getAttachFileName(messageObject.getDocument()), cacheFile));
@@ -4011,8 +4122,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 if (audioPlayer.player != null && reporter != null) {
                     audioPlayer.player.addListener(reporter.getPlayerListener(audioPlayer.player));
                 }
-                audioPlayer.setStreamType(useFrontSpeaker ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
-                audioPlayer.play();
                 if (!messageObject.isVoice()) {
                     if (audioVolumeAnimator != null) {
                         audioVolumeAnimator.removeAllListeners();
@@ -4026,6 +4135,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     audioVolume = 1f;
                     setPlayerVolume();
                 }
+                // Don't play() here — wait until after checkAudioFocus / playingMessageObject are set.
             } catch (Exception e) {
                 FileLog.e(e);
                 NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject != null ? playingMessageObject.getId() : 0);
@@ -4044,9 +4154,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 return false;
             }
         }
-        checkAudioFocus(messageObject);
-        setPlayerVolume();
-
         isPaused = false;
         lastProgress = 0;
         playingMessageObject = messageObject;
@@ -4056,64 +4163,88 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         if (!ApplicationLoader.mainInterfacePaused && proximityWakeLock != null && !proximityWakeLock.isHeld() && (playingMessageObject.isVoice() || playingMessageObject.isRoundVideo()) && SharedConfig.enabledRaiseTo(false)) {
 //            proximityWakeLock.acquire();
         }
+
+        // Focus AFTER prepare + playingMessageObject — on HyperOS 3 DELAYED focus can
+        // fire GAIN before the player exists if we request earlier.
+        boolean canPlayNow = true;
+        if (messageObject.isVoice() || messageObject.isRoundVideo() || messageObject.isVideo()) {
+            canPlayNow = checkAudioFocus(messageObject);
+        } else {
+            checkAudioFocus(messageObject);
+        }
+        audioVolume = Math.max(audioVolume, 1f);
+        setPlayerVolume();
+
         startProgressTimer(playingMessageObject);
         NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingDidStart, messageObject, oldMessageObject);
 
-        if (videoPlayer != null) {
-            try {
-                if (playingMessageObject.audioProgress != 0) {
-                    long duration = videoPlayer.getDuration();
-                    if (duration == C.TIME_UNSET) {
-                        duration = (long) playingMessageObject.getDuration() * 1000;
+        if (canPlayNow) {
+            if (videoPlayer != null) {
+                try {
+                    if (playingMessageObject.audioProgress != 0) {
+                        long duration = videoPlayer.getDuration();
+                        if (duration == C.TIME_UNSET) {
+                            duration = (long) playingMessageObject.getDuration() * 1000;
+                        }
+                        int seekTo = (int) (duration * playingMessageObject.audioProgress);
+                        if (playingMessageObject.audioProgressMs != 0) {
+                            seekTo = playingMessageObject.audioProgressMs;
+                            playingMessageObject.audioProgressMs = 0;
+                        }
+                        videoPlayer.seekTo(seekTo);
                     }
-                    int seekTo = (int) (duration * playingMessageObject.audioProgress);
-                    if (playingMessageObject.audioProgressMs != 0) {
-                        seekTo = playingMessageObject.audioProgressMs;
-                        playingMessageObject.audioProgressMs = 0;
-                    }
-                    videoPlayer.seekTo(seekTo);
+                } catch (Exception e2) {
+                    playingMessageObject.audioProgress = 0;
+                    playingMessageObject.audioProgressSec = 0;
+                    NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
+                    FileLog.e(e2);
                 }
-            } catch (Exception e2) {
-                playingMessageObject.audioProgress = 0;
-                playingMessageObject.audioProgressSec = 0;
-                NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
-                FileLog.e(e2);
-            }
-            videoPlayer.play();
-        } else if (audioPlayer != null) {
-            try {
-                if (playingMessageObject.audioProgress != 0) {
-                    long duration = audioPlayer.getDuration();
-                    if (duration == C.TIME_UNSET) {
-                        duration = (long) playingMessageObject.getDuration() * 1000;
+                videoPlayer.play();
+            } else if (audioPlayer != null) {
+                try {
+                    if (playingMessageObject.audioProgress != 0) {
+                        long duration = audioPlayer.getDuration();
+                        if (duration == C.TIME_UNSET) {
+                            duration = (long) playingMessageObject.getDuration() * 1000;
+                        }
+                        int seekTo = (int) (duration * playingMessageObject.audioProgress);
+                        audioPlayer.seekTo(seekTo);
+                        if (!ignorePlayerUpdate) {
+                            CastSync.seekTo(seekTo);
+                        }
                     }
-                    int seekTo = (int) (duration * playingMessageObject.audioProgress);
-                    audioPlayer.seekTo(seekTo);
-                    if (!ignorePlayerUpdate) {
-                        CastSync.seekTo(seekTo);
-                    }
+                } catch (Exception e2) {
+                    playingMessageObject.resetPlayingProgress();
+                    NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
+                    FileLog.e(e2);
                 }
-            } catch (Exception e2) {
-                playingMessageObject.resetPlayingProgress();
-                NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
-                FileLog.e(e2);
+                audioPlayer.setMute(CastSync.isActive());
+                audioPlayer.play();
             }
+        } else if (BuildVars.LOGS_ENABLED) {
+            FileLog.d("playMessage: waiting for delayed audio focus before play()");
         }
-        if (canStartMusicPlayerService()) {
-            Intent intent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
-            try {
-                /*if (Build.VERSION.SDK_INT >= 26) {
-                    ApplicationLoader.applicationContext.startForegroundService(intent);
-                } else {*/
-                ApplicationLoader.applicationContext.startService(intent);
-                //}
-            } catch (Throwable e) {
-                FileLog.e(e);
+        // MediaSession/RemoteControlClient on HyperOS races the first AudioTrack and shows
+        // a crossed volume glyph for ~2s. Defer longer for voice/round; PhotoViewer has no session.
+        final MessageObject serviceMessage = playingMessageObject;
+        final boolean voiceOrRound = serviceMessage.isVoice() || serviceMessage.isRoundVideo();
+        final int serviceDelayMs = voiceOrRound ? 2500 : 300;
+        AndroidUtilities.runOnUIThread(() -> {
+            if (playingMessageObject != serviceMessage) {
+                return;
             }
-        } else {
-            Intent intent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
-            ApplicationLoader.applicationContext.stopService(intent);
-        }
+            if (canStartMusicPlayerService()) {
+                Intent intent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
+                try {
+                    ApplicationLoader.applicationContext.startService(intent);
+                } catch (Throwable e) {
+                    FileLog.e(e);
+                }
+            } else {
+                Intent intent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
+                ApplicationLoader.applicationContext.stopService(intent);
+            }
+        }, serviceDelayMs);
 
         try {
             CastSync.check(CastSync.TYPE_MUSIC);
@@ -4252,7 +4383,16 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     }
 
     private boolean canStartMusicPlayerService() {
-        return playingMessageObject != null && (playingMessageObject.isMusic() || playingMessageObject.isVoice() || playingMessageObject.isRoundVideo()) && !playingMessageObject.isVoiceOnce() && !playingMessageObject.isRoundOnce();
+        if (playingMessageObject == null || playingMessageObject.isVoiceOnce() || playingMessageObject.isRoundOnce()) {
+            return false;
+        }
+        // HyperOS/MIUI: MediaSession + RemoteControlClient at voice start races AudioTrack
+        // (crossed volume glyph, ~2s silence). PhotoViewer never starts this service — same idea.
+        if ((playingMessageObject.isVoice() || playingMessageObject.isRoundVideo())
+                && !TextUtils.isEmpty(AndroidUtilities.getSystemProperty("ro.miui.ui.version.code"))) {
+            return false;
+        }
+        return playingMessageObject.isMusic() || playingMessageObject.isVoice() || playingMessageObject.isRoundVideo();
     }
     
     public void updateSilent(boolean value) {
@@ -4382,12 +4522,14 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 audioVolume = 1f;
                 setPlayerVolume();
             }
-            if (audioPlayer != null) {
-                audioPlayer.play();
-            } else if (videoPlayer != null) {
-                videoPlayer.play();
+            boolean canPlayNow = checkAudioFocus(messageObject);
+            if (canPlayNow) {
+                if (audioPlayer != null) {
+                    audioPlayer.play();
+                } else if (videoPlayer != null) {
+                    videoPlayer.play();
+                }
             }
-            checkAudioFocus(messageObject);
             isPaused = false;
             NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
 
