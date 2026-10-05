@@ -21,6 +21,8 @@ import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaAppearanceSettingsActivity extends BaseFragment {
 
+    private TextSettingsCell textAnimationCell;
+
     public MglaAppearanceSettingsActivity() {
         this(null);
     }
@@ -157,10 +159,31 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
         });
         animationBlock.addView(predictiveBackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        rootLayout.addView(animationBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        animationBlock.addView(MglaUi.createDivider(context));
 
-        fragmentView = rootLayout;
+        textAnimationCell = new TextSettingsCell(context);
+        textAnimationCell.setBackground(null);
+        textAnimationCell.setTextAndValue("Анимация текста", MglaTextAnimConfig.getSummary(), false);
+        textAnimationCell.setOnClickListener(v -> presentFragment(new MglaTextAnimationActivity()));
+        animationBlock.addView(textAnimationCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        rootLayout.addView(animationBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 16));
+
+        android.widget.ScrollView scrollView = new android.widget.ScrollView(context);
+        scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+
+        fragmentView = scrollView;
         return fragmentView;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (textAnimationCell != null) {
+            textAnimationCell.setTextAndValue("Анимация текста", MglaTextAnimConfig.getSummary(), false);
+        }
     }
 
     private LinearLayout createBlock(Context context, String title) {

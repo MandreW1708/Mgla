@@ -208,6 +208,9 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1070, "Включить боковое меню", hub, sideMenu, appearanceIcon, sideMenuScreen, "Включить боковое меню", "appearance/side-menu/enable"));
         l.add(new Entry(1071, "Настроить элементы", hub, sideMenu, appearanceIcon, sideMenuScreen, "Настроить элементы", "appearance/side-menu/elements"));
         l.add(new Entry(1072, "В стиле MD3", hub, appearance, appearanceIcon, appearanceScreen, "В стиле MD3", "appearance/md3-predictive-back"));
+        l.add(new Entry(1073, "Анимация текста", hub, appearance, appearanceIcon, MglaTextAnimationActivity::new, null, "appearance/text-animation"));
+        l.add(new Entry(1074, "Эффект анимации текста", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Эффект", "appearance/text-animation/effect"));
+        l.add(new Entry(1075, "Каскад при вставке", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Каскад", "appearance/text-animation/cascade"));
 
         l.add(new Entry(1080, "API", hub, camera, cameraIcon, cameraScreen, "API", "camera/api"));
         l.add(new Entry(1081, "60 FPS", hub, camera, cameraIcon, cameraScreen, "60 FPS", "camera/60fps"));
