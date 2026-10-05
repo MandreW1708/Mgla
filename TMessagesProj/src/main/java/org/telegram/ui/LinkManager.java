@@ -297,6 +297,10 @@ public class LinkManager {
         final String fourth = segments.size() > 3 ? segments.get(3) : null;
         final String fifth  = segments.size() > 4 ? segments.get(4) : null;
 
+        if ("mgla".equalsIgnoreCase(first)) {
+            return MglaSettingsSearch.open(fragment -> presentFragment(fragment), segments.subList(1, segments.size()));
+        }
+
         // legacy paths:
         if ("theme".equalsIgnoreCase(first) || "themes".equalsIgnoreCase(first)) { // open_settings = 2;
             presentFragment(new ThemeActivity(ThemeActivity.THEME_TYPE_BASIC));

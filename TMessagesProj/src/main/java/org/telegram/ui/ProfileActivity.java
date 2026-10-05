@@ -14540,7 +14540,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         private static SearchResult[] onCreateSearchArray(final BaseFragment f) {
             final int currentAccount = f.getCurrentAccount();
             final Theme.ResourcesProvider resourcesProvider = f.getResourceProvider();
-            return new SearchResult[]{
+            SearchResult[] array = new SearchResult[]{
                     new SearchResult(500, getString(R.string.EditName), 0, () -> f.presentFragment(new ChangeNameActivity(resourcesProvider))),
                     new SearchResult(501, getString(R.string.ChangePhoneNumber), 0, () -> f.presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANGE_PHONE_NUMBER))).withLink("tg://settings/edit/change-number"),
                     new SearchResult(502, getString(R.string.AddAnotherAccount), 0, () -> {
@@ -14798,6 +14798,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     new SearchResult(403, getString(R.string.TelegramFAQ), getString(R.string.SettingsHelp), R.drawable.msg2_help, () -> Browser.openUrl(f.getParentActivity(), getString(R.string.TelegramFaqUrl))).withLink("tg://settings/faq"),
                     new SearchResult(404, getString(R.string.PrivacyPolicy), getString(R.string.SettingsHelp), R.drawable.msg2_help, () -> Browser.openUrl(f.getParentActivity(), getString(R.string.PrivacyPolicyUrl))).withLink("tg://settings/privacy-policy"),
             };
+            return MglaSettingsSearch.mergeInto(array, f);
         }
 
         private static boolean isPremiumFeatureAvailable(int currentAccount, int feature) {
