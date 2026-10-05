@@ -130,6 +130,7 @@ import androidx.viewpager.widget.ViewPager;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
@@ -15167,6 +15168,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     }
                 }
 
+                MglaStats.settingsSearch(text, results.size() + faqResults.size());
                 AndroidUtilities.runOnUIThread(() -> {
                     if (!text.equals(lastSearchString)) {
                         return;

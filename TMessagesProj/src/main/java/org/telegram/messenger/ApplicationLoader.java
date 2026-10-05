@@ -261,6 +261,11 @@ public class ApplicationLoader extends Application {
             org.telegram.utils.bypass.MglaBypassVpnGuard.reconcileOnAppStart();
         } catch (Throwable ignored) {
         }
+        try {
+            MglaStats.init();
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();
             MessagesController.getInstance(a);

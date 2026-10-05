@@ -39,6 +39,7 @@ import androidx.core.math.MathUtils;
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 
 import org.telegram.messenger.AccountInstance;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
@@ -995,6 +996,7 @@ public class TranscribeButton {
             summaryButton.setEnabled(false);
             summaryButton.setAlpha(0.65f);
             summaryButton.setText("...");
+            MglaStats.count("ai:voice_summary");
             String prompt = "Сделай краткую сводку этой голосовой расшифровки в 1-2 предложениях. Верни только сводку, без комментариев:\n\n" + transcriptionText;
             AiAssistant.getInstance().sendMessage(prompt, new AiAssistant.AiCallback() {
                 @Override
@@ -1062,6 +1064,7 @@ public class TranscribeButton {
         translateButton.setOnClickListener(v -> {
             translateButton.setEnabled(false);
             translateButton.setAlpha(0.65f);
+            MglaStats.count("ai:translate");
             AiAssistant.getInstance().sendMessage(
                 "Переведи этот текст на русский. Если текст уже на русском, переведи его на английский. Верни только перевод:\n\n" + textView.getText(),
                 new AiAssistant.AiCallback() {

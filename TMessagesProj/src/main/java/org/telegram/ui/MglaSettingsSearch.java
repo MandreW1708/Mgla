@@ -2,6 +2,7 @@ package org.telegram.ui;
 
 import android.text.TextUtils;
 
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -89,6 +90,7 @@ public final class MglaSettingsSearch {
         if (!parts.isEmpty() && "dpi".equals(parts.get(0))) {
             parts.set(0, "connection");
         }
+        MglaStats.count("deeplink:mgla/" + TextUtils.join("/", parts));
         // Exact match first, then fall back to the closest parent screen.
         for (int len = parts.size(); len >= 0; len--) {
             Entry entry = findByPath(TextUtils.join("/", parts.subList(0, len)));
@@ -179,7 +181,6 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1017, "Ускорение загрузки", hub, general, generalIcon, generalScreen, "Ускорение загрузки", "general/download-speed"));
         l.add(new Entry(1018, "Ускорение отправки", hub, general, generalIcon, generalScreen, "Ускорение отправки", "general/upload-speed"));
         l.add(new Entry(1019, "Автопауза", hub, general, generalIcon, generalScreen, "Автопауза", "general/autopause"));
-
         l.add(new Entry(1030, "Элементы меню сообщения", hub, chats, chatsIcon, chatsScreen, "Элементы меню сообщения", "chats/message-menu"));
         l.add(new Entry(1031, "Время с секундами", hub, chats, chatsIcon, chatsScreen, "Время с секундами", "chats/time-seconds"));
         l.add(new Entry(1032, "Количество недавних стикеров", hub, chats, chatsIcon, chatsScreen, "Количество недавних стикеров", "chats/recent-stickers"));

@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
@@ -166,6 +167,7 @@ public class AiAssistant {
             }
 
             if (!consumeDailyQuota()) {
+                MglaStats.count("ai:quota_exhausted");
                 if (callback != null) {
                     AndroidUtilities.runOnUIThread(() ->
                         callback.onError("Лимит " + DAILY_LIMIT + " запросов в день исчерпан. До сброса: " + getResetInLabel()));
@@ -176,6 +178,7 @@ public class AiAssistant {
             prefs.edit().putLong(KEY_LAST_REQUEST, now).apply();
         }
 
+        MglaStats.count("ai:request:" + getProvider());
         new Thread(() -> {
             try {
                 String response;
@@ -189,6 +192,7 @@ public class AiAssistant {
                 }
             } catch (Exception e) {
                 FileLog.e("AiAssistant", e);
+                MglaStats.count("ai:error:" + getProvider());
                 if (callback != null) {
                     AndroidUtilities.runOnUIThread(() -> callback.onError(e.getMessage() != null ? e.getMessage() : "Ошибка сети"));
                 }

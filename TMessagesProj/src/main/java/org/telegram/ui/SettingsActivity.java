@@ -63,6 +63,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
 import org.telegram.messenger.BirthdayController;
@@ -804,6 +805,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         } else if (item.instanceOf(SettingsSearchCell.Factory.class)) {
             if (item.object instanceof ProfileActivity.SearchAdapter.SearchResult) {
                 final ProfileActivity.SearchAdapter.SearchResult r = (ProfileActivity.SearchAdapter.SearchResult) item.object;
+                MglaStats.count("search_open:" + r.guid);
                 r.open(getParentLayout());
             } else if (item.object instanceof MessagesController.FaqSearchResult) {
                 final MessagesController.FaqSearchResult r = (MessagesController.FaqSearchResult) item.object;

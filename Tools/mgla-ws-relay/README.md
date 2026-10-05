@@ -134,3 +134,51 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 nc -vz 149.154.167.51 443
 nc -vz 149.154.175.50 443
 ```
+
+---
+
+# Анонимная статистика клиента
+
+Клиент раз в 6 часов отправляет `POST https://<RELAY_HOST>/mgla-stats/v1/batch` с тем же
+`X-Mgla-Token`. Приёмник — `stats_server.py` (только стандартная библиотека Python, SQLite),
+слушает `127.0.0.1:8767`.
+
+Что приходит: случайный id установки (не связан с аккаунтом), версия Mgla/Telegram, модель
+устройства, версия Android, язык; по дням — счётчики открытых экранов, изменённых настроек Mgla,
+использования ИИ-функций (и упоров в дневной лимит), переходов из поиска/по ссылкам, запросы в
+поиске по настройкам, не давшие результатов; снимок настроек Mgla (без токенов, хостов, стратегий
+и прочих значений, которые могут идентифицировать). Не приходит: Telegram id, номер, контакты,
+чаты, тексты сообщений. IP не пишется ни приёмником, ни nginx (`access_log off`).
+
+Статистика обязательна и в клиенте не отключается.
+
+## Установка
+
+Файлы уже лежат в `/opt/mgla-ws-relay` после шага 2 (докопируйте `stats_server.py`,
+`stats_report.py`, `mgla-stats.service`, `nginx-stats.conf`). Токен берётся из того же `env`.
+
+```bash
+cp /opt/mgla-ws-relay/mgla-stats.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now mgla-stats
+journalctl -u mgla-stats -n 5 --no-pager   # listening on 127.0.0.1:8767
+```
+
+Nginx: строку `limit_req_zone` из `nginx-stats.conf` — в http-контекст, `location /mgla-stats/` —
+внутрь `server { ... }` рядом с `/apiws`. Затем `nginx -t && systemctl reload nginx`.
+
+Проверка: `curl -s https://<RELAY_HOST>/mgla-stats/v1/health` → `{"ok":true}`.
+
+Необязательные переменные в `env`: `MGLA_STATS_PORT` (8767), `MGLA_STATS_DB`
+(`/opt/mgla-ws-relay/stats.db`), `MGLA_STATS_RETENTION_DAYS` (400).
+
+## Отчёт
+
+```bash
+python3 /opt/mgla-ws-relay/stats_report.py             # за 30 дней
+python3 /opt/mgla-ws-relay/stats_report.py --days 7
+python3 /opt/mgla-ws-relay/stats_report.py --name ai:  # все ИИ-счётчики
+```
+
+Разделы: DAU/WAU/MAU и удержание, ИИ-функции и упоры в лимит, экраны, изменения настроек,
+доля включивших каждую функцию, поиск без результатов (спрос на то, чего нет), версии и устройства.

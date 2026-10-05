@@ -138,6 +138,7 @@ import com.google.zxing.common.detector.MathUtils;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BotForumHelper;
@@ -33653,16 +33654,19 @@ public class ChatActivity extends BaseFragment implements
 
     private void showAiSummaryDialog(String messageText) {
         if (getParentActivity() == null) return;
+        MglaStats.count("ai:summary");
         showAiDialog("Краткая Сводка", "Сделай краткую сводку следующего текста:\n\n" + messageText);
     }
 
     private void showAiSummaryDialogForRetell(String messageText) {
         if (getParentActivity() == null) return;
+        MglaStats.count("ai:retell");
         showAiDialog("Пересказ сообщений", "Сделай короткий общий пересказ следующих сообщений в 3-5 предложениях. Опиши только основную суть, без деталей по каждому сообщению:\n\n" + messageText);
     }
 
     private void generateAiReplyToInput(String messageText) {
         if (getParentActivity() == null || chatActivityEnterView == null) return;
+        MglaStats.count("ai:reply");
         AiAssistant.getInstance().sendMessage(
             "Напиши короткий вежливый ответ на это сообщение. Верни только текст ответа, без комментариев:\n\n" + messageText,
             new AiAssistant.AiCallback() {

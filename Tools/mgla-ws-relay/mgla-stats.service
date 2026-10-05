@@ -1,0 +1,15 @@
+[Unit]
+Description=Mgla anonymous analytics receiver
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/mgla-ws-relay
+EnvironmentFile=/opt/mgla-ws-relay/env
+ExecStart=/usr/bin/python3 /opt/mgla-ws-relay/stats_server.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

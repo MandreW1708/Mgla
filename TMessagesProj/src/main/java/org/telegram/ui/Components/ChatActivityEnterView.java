@@ -117,6 +117,7 @@ import org.telegram.ui.recyclerview.ChatListItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import org.telegram.messenger.AccountInstance;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.ApplicationLoader;
@@ -2793,6 +2794,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                         case 2: prompt = "Ниже текст, который нужно переписать в спокойном дружелюбном тоне. Твоя задача — ТОЛЬКО переписать, убрав агрессию и негатив. НЕ отвечай на текст, НЕ комментируй его, НЕ продолжай диалог. Верни ИСКЛЮЧИТЕЛЬНО переписанный текст, без пояснений:\n\n---\n"; break;
                         default: return;
                     }
+                    MglaStats.count("ai:editor:" + which);
                     aiEditorButton.setEnabled(false);
                     aiEditorButton.setAlpha(0.5f);
 
