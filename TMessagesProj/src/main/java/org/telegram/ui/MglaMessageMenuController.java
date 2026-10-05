@@ -17,6 +17,7 @@ public class MglaMessageMenuController {
     public static final int[] DEFAULT_ORDER = new int[] {
         ChatActivity.OPTION_REPLY,
         ChatActivity.OPTION_COPY,
+        ChatActivity.OPTION_COPY_PHOTO,
         ChatActivity.OPTION_FORWARD,
         ChatActivity.OPTION_EDIT,
         ChatActivity.OPTION_PIN,
@@ -34,6 +35,7 @@ public class MglaMessageMenuController {
         switch (option) {
             case ChatActivity.OPTION_REPLY: return "Ответить";
             case ChatActivity.OPTION_COPY: return "Копировать";
+            case ChatActivity.OPTION_COPY_PHOTO: return "Копировать фото";
             case ChatActivity.OPTION_FORWARD: return "Переслать";
             case ChatActivity.OPTION_EDIT: return "Изменить";
             case ChatActivity.OPTION_PIN: return "Закрепить";

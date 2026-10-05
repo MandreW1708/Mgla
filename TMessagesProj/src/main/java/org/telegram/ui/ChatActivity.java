@@ -138,6 +138,7 @@ import com.google.zxing.common.detector.MathUtils;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
+import org.telegram.messenger.MglaPhotoClipboard;
 import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -1254,6 +1255,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_AI_EXPLAIN_SIMPLE = 202;
     public final static int OPTION_AI_TRANSLATE = 203;
     public final static int OPTION_AI_TASKS = 204;
+    public final static int OPTION_COPY_PHOTO = 205;
     public final static int OPTION_EDIT_SCHEDULE_TIME = 102;
     public final static int OPTION_SPEED_PROMO = 103;
     public final static int OPTION_OPEN_PROFILE = 104;
@@ -34008,6 +34010,22 @@ public class ChatActivity extends BaseFragment implements
                 }
                 break;
             }
+            case OPTION_COPY_PHOTO: {
+                File photoFile = MglaPhotoClipboard.getMessageFile(selectedObject);
+                if (photoFile == null) {
+                    BulletinFactory.of(this).createErrorBulletin("Фото ещё не загружено").show();
+                    break;
+                }
+                MglaStats.count("copy_photo:chat");
+                MglaPhotoClipboard.copy(photoFile, null, ok -> {
+                    if (!ok) {
+                        BulletinFactory.of(this).createErrorBulletin("Не удалось скопировать фото").show();
+                    } else if (AndroidUtilities.shouldShowClipboardToast()) {
+                        BulletinFactory.of(this).createCopyBulletin("Фото скопировано").show();
+                    }
+                });
+                break;
+            }
             case OPTION_SAVE_TO_GALLERY: {
                 if (Build.VERSION.SDK_INT >= 23 && (Build.VERSION.SDK_INT <= 28 || BuildVars.NO_SCOPED_STORAGE) && getParentActivity().checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                     getParentActivity().requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 4);
@@ -47166,6 +47184,11 @@ public class ChatActivity extends BaseFragment implements
                     icons.add(R.drawable.menu_proofread);
                 }
             }
+        }
+        if (selectedObject != null && selectedObject.isPhoto() && !noforwardsOrPaidMedia && !selectedObject.hasRevealedExtendedMedia() && !selectedObject.needDrawBluredPreview() && !options.contains(OPTION_COPY_PHOTO)) {
+            items.add("Копировать фото");
+            options.add(OPTION_COPY_PHOTO);
+            icons.add(R.drawable.msg_copy);
         }
         
         if (showWelcomeMessageRevertOption(primaryMessage)) {

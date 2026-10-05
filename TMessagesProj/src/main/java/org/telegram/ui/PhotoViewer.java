@@ -182,6 +182,8 @@ import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessageSuggestionParams;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaPhotoClipboard;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
@@ -2195,6 +2197,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private final static int gallery_menu_chromecast = 24;
     private final static int gallery_menu_create_sticker = 25;
     private final static int gallery_menu_delete2 = 26;
+    private final static int gallery_menu_copy_photo = 27;
 
     private final static int ads_sponsor_info = 101;
     private final static int ads_about = 102;
@@ -5523,6 +5526,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     }
                 } else if (id == gallery_menu_share || id == gallery_menu_share2) {
                     onSharePressed();
+                } else if (id == gallery_menu_copy_photo) {
+                    copyCurrentPhoto();
                 } else if (id == gallery_menu_openin) {
                     try {
                         if (isEmbedVideo) {
@@ -5856,6 +5861,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             if (currentMessageObject != null && currentMessageObject.isSponsored()) {
                 openAdsMenu();
             } else if (actionBar.actionBarMenuOnItemClick.canOpenMenu()) {
+                if (canCopyCurrentPhoto()) {
+                    menuItem.showSubItem(gallery_menu_copy_photo);
+                } else {
+                    menuItem.hideSubItem(gallery_menu_copy_photo);
+                }
                 menuItem.toggleSubMenu();
             }
         });
@@ -5904,6 +5914,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         });
         galleryGap = menuItem.addColoredGap();
         galleryGap.setColor(0xff181818);
+        menuItem.addSubItem(gallery_menu_copy_photo, R.drawable.msg_copy, "Копировать фото").setColors(0xfffafafa, 0xfffafafa);
+        menuItem.hideSubItem(gallery_menu_copy_photo);
         menuItem.addSubItem(gallery_menu_openin, R.drawable.msg_openin, getString(R.string.OpenInExternalApp)).setColors(0xfffafafa, 0xfffafafa);
         pipItem = menuItem.addSubItem(gallery_menu_pip, R.drawable.menu_video_pip, getString(R.string.PipMinimize)).setColors(0xfffafafa, 0xfffafafa);
         allMediaItem = menuItem.addSubItem(gallery_menu_showall, R.drawable.msg_media, getString(R.string.ShowAllMedia));
@@ -8455,6 +8467,50 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         if (activityContext != null && containerView != null && isVisible()) {
             BulletinFactory.of(containerView, new DarkThemeResourceProvider()).createSimpleBulletin(R.raw.forward, !TextUtils.isEmpty(deviceName) ? LocaleController.formatString(R.string.ChromecastStartedTo, deviceName) : LocaleController.getString(R.string.ChromecastStarted)).show();
         }
+    }
+
+    private boolean canCopyCurrentPhoto() {
+        if (isEmbedVideo) {
+            return false;
+        }
+        if (currentMessageObject != null) {
+            MessageObject m = currentMessageObject;
+            if (!m.isPhoto() || m.isVideo() || m.needDrawBluredPreview() || m.hasRevealedExtendedMedia()) {
+                return false;
+            }
+            return !MessagesController.getInstance(currentAccount).isPeerNoForwards(m.getDialogId())
+                && (m.messageOwner == null || !m.messageOwner.noforwards);
+        }
+        if (pageBlocksAdapter != null) {
+            return !pageBlocksAdapter.isVideo(currentIndex);
+        }
+        return videoPlayer == null && centerImage.getBitmap() != null;
+    }
+
+    private void copyCurrentPhoto() {
+        File f = null;
+        if (currentMessageObject != null) {
+            f = MglaPhotoClipboard.getMessageFile(currentMessageObject);
+        } else if (pageBlocksAdapter != null) {
+            f = pageBlocksAdapter.getFile(currentIndex);
+        } else if (currentFileLocationVideo != null) {
+            String ext = getFileLocationExt(currentFileLocationVideo);
+            f = FileLoader.getInstance(currentAccount).getPathToAttach(getFileLocation(currentFileLocationVideo), ext, avatarsDialogId != 0 || isEvent);
+            if (f != null && !f.exists()) {
+                f = FileLoader.getInstance(currentAccount).getPathToAttach(getFileLocation(currentFileLocationVideo), ext, false);
+            }
+        }
+        MglaStats.count("copy_photo:viewer");
+        MglaPhotoClipboard.copy(f, centerImage.getBitmap(), ok -> {
+            if (containerView == null) {
+                return;
+            }
+            if (!ok) {
+                BulletinFactory.of(containerView, resourcesProvider).createErrorBulletin("Не удалось скопировать фото").show();
+            } else if (AndroidUtilities.shouldShowClipboardToast()) {
+                BulletinFactory.of(containerView, resourcesProvider).createCopyBulletin("Фото скопировано", resourcesProvider).show();
+            }
+        });
     }
 
     private void updateActionBarTitlePadding() {
