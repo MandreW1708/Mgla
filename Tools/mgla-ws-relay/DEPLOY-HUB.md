@@ -89,7 +89,10 @@ sudo nginx -t && sudo systemctl reload nginx
 # в /opt/mgla-ws-relay/env добавить:
 #   MGLA_HUB_SYNC_TOKEN=...
 #   MGLA_BOT_AI_URL=https://mglabot.mooo.com
-# на mglabot в env — тот же MGLA_HUB_SYNC_TOKEN, затем:
+# на mglabot в env — тот же MGLA_HUB_SYNC_TOKEN, плюс прокси флагов:
+#   MGLA_HUB_FEATURES_TOKEN=<тот же, что MGLA_WS_TOKEN / клиентский токен на хабе>
+#   MGLA_HUB_FEATURES_URL=https://mglahub.mooo.com/mgla-config/v1/features   # опционально
+# затем:
 #   systemctl restart mgla-ai-proxy
 
 sudo systemctl restart mgla-stats
@@ -103,12 +106,23 @@ sudo nginx -t && sudo systemctl reload nginx
 curl -s https://mglahub.mooo.com/mgla-stats/v1/health
 # {"ok":true}
 
-# Feature flags для клиента:
+# Страница обновлений APK (Basic Auth, как /admin):
+#   https://mglahub.mooo.com/admin/updates
+# Клиент: POST /mgla-updates/v1/check , GET /mgla-updates/v1/apk
+# Через релей: POST /mgla-ai/v1/update-check , GET /mgla-ai/v1/update-apk
+
+# Feature flags напрямую на хаб:
 curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \
   -H "Content-Type: application/json" \
-  -H "X-Mgla-Token: ВАШ_ТОКЕН" \
+  -H "X-Mgla-Token: ТОКЕН_ХАБА" \
   -d '{"tg_id":123456789}'
 # {"v":1,"disabled":[...]}
+
+# Тот же ответ через релей (когда клиент сидит на WS-обходе):
+curl -s -X POST https://mglabot.mooo.com/mgla-ai/v1/features \
+  -H "Content-Type: application/json" \
+  -H "X-Mgla-Token: ТОКЕН_РЕЛЕЯ" \
+  -d '{"tg_id":123456789}'
 
 # Панель статистики: https://mglahub.mooo.com/
 # Управление (flags + модели): https://mglahub.mooo.com/admin

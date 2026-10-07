@@ -4527,11 +4527,16 @@ public class ChatActivity extends BaseFragment implements
                 headerItem.lazilyAddSubItem(mgla_view_deleted, R.drawable.msg_delete, "Удалённые");
             }
             if (chatMode == MODE_DEFAULT && currentEncryptedChat == null
-                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_chat_dna")) {
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_chat_dna")
+                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_enabled", true)) {
                 headerItem.lazilyAddSubItem(mgla_chat_dna, R.drawable.msg_topics, "Chat DNA");
             }
-            if (org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_retell")
-                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", true)) {
+            SharedPreferences mglaCfg = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+            if (org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_retell")
+                    && mglaCfg.getBoolean("ai_enabled", true)
+                    && mglaCfg.getBoolean("ai_retell", true)) {
                 headerItem.lazilyAddSubItem(ai_retell_menu, R.drawable.menu_rewrite, "Пересказ сообщ.");
             }
             if (currentChat != null && !currentChat.creator && !ChatObject.hasAdminRights(currentChat)) {
@@ -10511,9 +10516,12 @@ public class ChatActivity extends BaseFragment implements
         actionMode.setItemVisibility(delete, cantDeleteMessagesCount == 0 ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(tag_message, getUserConfig().isPremium() ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(share, View.GONE);
+        SharedPreferences mglaCfgAction = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
         actionMode.setItemVisibility(ai_summary_action,
-            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
-            && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)
+            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
+            && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
+            && mglaCfgAction.getBoolean("ai_enabled", true)
+            && mglaCfgAction.getBoolean("ai_summary", true)
             && selectedMessagesIds[0].size() + selectedMessagesIds[1].size() == 1
             ? View.VISIBLE : View.GONE);
     }
@@ -47171,9 +47179,13 @@ public class ChatActivity extends BaseFragment implements
         if (selectedObject != null && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice() && !selectedObject.isSticker() && !selectedObject.isAnimatedSticker() && !selectedObject.isRoundVideo() && !selectedObject.isVoice()) {
             CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
             String aiText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
-            if (!TextUtils.isEmpty(aiText) && getContext() != null
+            SharedPreferences mglaCfgMenu = getContext() != null
+                ? getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE) : null;
+            if (!TextUtils.isEmpty(aiText) && mglaCfgMenu != null
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
                     && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
-                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)) {
+                    && mglaCfgMenu.getBoolean("ai_enabled", true)
+                    && mglaCfgMenu.getBoolean("ai_summary", true)) {
                 if (!options.contains(OPTION_AI_SUMMARY)) {
                     items.add("Краткая Сводка");
                     options.add(OPTION_AI_SUMMARY);

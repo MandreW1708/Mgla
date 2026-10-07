@@ -229,7 +229,8 @@ form.inline {{ display:inline; margin:0; }}
     </div>
     <div class="nav">
       <a href="/">Статистика</a>
-      <a class="on" href="/admin">Управление</a>
+      <a class="on" href="/admin">Флаги</a>
+      <a href="/admin/updates">Обновления</a>
     </div>
   </div>
   {flash}

@@ -64,6 +64,9 @@ public class MglaHapticManager {
     };
 
     public static boolean isEnabled() {
+        if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("haptic_enabled")) {
+            return false;
+        }
         return ApplicationLoader.applicationContext
             .getSharedPreferences("mgla_config", Context.MODE_PRIVATE)
             .getBoolean("haptic_enabled", false);

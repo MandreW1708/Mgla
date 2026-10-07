@@ -11,12 +11,14 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaNotificationsSettingsActivity extends BaseFragment {
@@ -56,11 +58,18 @@ public class MglaNotificationsSettingsActivity extends BaseFragment {
 
         TextCheckCell popupCell = new TextCheckCell(context);
         popupCell.setBackground(null);
-        popupCell.setTextAndCheck("Всплывающие уведомления", prefs.getBoolean("mgla_popup_notifications_enabled", false), false);
+        boolean popupOn = MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")
+            && prefs.getBoolean("mgla_popup_notifications_enabled", false);
+        popupCell.setTextAndCheck("Всплывающие уведомления", popupOn, false);
         popupCell.setOnClickListener(v -> {
             boolean newVal = !prefs.getBoolean("mgla_popup_notifications_enabled", false);
+            if (newVal && !MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                popupCell.setChecked(false);
+                return;
+            }
             prefs.edit().putBoolean("mgla_popup_notifications_enabled", newVal).apply();
-            popupCell.setChecked(newVal);
+            popupCell.setChecked(newVal && MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled"));
         });
         block.addView(popupCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 

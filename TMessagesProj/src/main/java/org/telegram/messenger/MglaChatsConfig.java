@@ -103,19 +103,47 @@ public class MglaChatsConfig {
         return "Выкл звук";
     }
 
+    public static final String PREF_CHAT_TIME_SECONDS = "chat_time_seconds";
+
+    public static boolean isChatTimeSecondsEnabled() {
+        if (!MglaFeatureFlags.isAllowed(PREF_CHAT_TIME_SECONDS)) {
+            return false;
+        }
+        return getPrefs().getBoolean(PREF_CHAT_TIME_SECONDS, false);
+    }
+
+    public static void setChatTimeSecondsEnabled(boolean enabled) {
+        if (enabled && !MglaFeatureFlags.isAllowed(PREF_CHAT_TIME_SECONDS)) {
+            enabled = false;
+        }
+        getPrefs().edit().putBoolean(PREF_CHAT_TIME_SECONDS, enabled).apply();
+    }
+
     public static boolean isHideKeyboardOnScroll() {
+        if (!MglaFeatureFlags.isAllowed(PREF_HIDE_KEYBOARD_ON_SCROLL)) {
+            return false;
+        }
         return getPrefs().getBoolean(PREF_HIDE_KEYBOARD_ON_SCROLL, false);
     }
 
     public static void setHideKeyboardOnScroll(boolean enabled) {
+        if (enabled && !MglaFeatureFlags.isAllowed(PREF_HIDE_KEYBOARD_ON_SCROLL)) {
+            enabled = false;
+        }
         getPrefs().edit().putBoolean(PREF_HIDE_KEYBOARD_ON_SCROLL, enabled).apply();
     }
 
     public static boolean isCommaAfterMention() {
+        if (!MglaFeatureFlags.isAllowed(PREF_COMMA_AFTER_MENTION)) {
+            return false;
+        }
         return getPrefs().getBoolean(PREF_COMMA_AFTER_MENTION, false);
     }
 
     public static void setCommaAfterMention(boolean enabled) {
+        if (enabled && !MglaFeatureFlags.isAllowed(PREF_COMMA_AFTER_MENTION)) {
+            enabled = false;
+        }
         getPrefs().edit().putBoolean(PREF_COMMA_AFTER_MENTION, enabled).apply();
     }
 

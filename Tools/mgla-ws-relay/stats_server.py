@@ -3,7 +3,10 @@
 
 - POST /mgla-stats/v1/batch — anonymous client analytics (SQLite; no client IPs)
 - POST /mgla-config/v1/features — feature flags for a Telegram user id
+- POST /mgla-updates/v1/check — in-app update check
+- GET  /mgla-updates/v1/apk — download published APK
 - GET/POST /admin — feature flags + OpenRouter model list (Basic Auth)
+- GET/POST /admin/updates — publish APK + changelog (Basic Auth)
 - POST /mgla-ai/v1/* — legacy AI proxy (production clients use mglabot)
 
 Standard library only. Clients authenticate with X-Mgla-Token (MGLA_WS_TOKEN on hub).
@@ -26,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import hub_admin
+import hub_updates
 import stats_report
 
 HOST = os.environ.get("MGLA_STATS_HOST", "127.0.0.1")
@@ -42,6 +46,7 @@ BOT_AI_URL = os.environ.get("MGLA_BOT_AI_URL", "").strip().rstrip("/")
 MAX_BODY = 256 * 1024
 MAX_AI_BODY = 32 * 1024
 MAX_GEMINI_TRANSCRIBE_BODY = 22 * 1024 * 1024
+MAX_UPDATE_UPLOAD = hub_updates.MAX_APK_BYTES + 2 * 1024 * 1024
 MAX_AI_MESSAGE = 12_000
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 MAX_DAYS = 14
@@ -494,6 +499,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "mgla-stats"
     sys_version = ""
     store = None
+    updates = None
 
     def log_message(self, fmt, *args):
         # The default handler logs the client address; analytics must stay anonymous.
@@ -516,6 +522,10 @@ class Handler(BaseHTTPRequestHandler):
             self._report(parse_qs(url.query))
         elif path in ("/admin", "/mgla-admin", "/control"):
             self._admin_get(parse_qs(url.query))
+        elif path in ("/admin/updates", "/mgla-admin/updates"):
+            self._admin_updates_get(parse_qs(url.query))
+        elif path == "/mgla-updates/v1/apk":
+            self._get_update_apk()
         else:
             self._reply(404)
 
@@ -693,10 +703,14 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path.rstrip("/") or "/"
         if path in ("/admin", "/mgla-admin", "/control"):
             self._admin_post()
+        elif path in ("/admin/updates", "/mgla-admin/updates"):
+            self._admin_updates_post()
         elif path == "/mgla-stats/v1/batch":
             self._post_stats()
         elif path == "/mgla-config/v1/features":
             self._post_features()
+        elif path == "/mgla-updates/v1/check":
+            self._post_update_check()
         elif path == "/mgla-ai/v1/chat":
             self._post_ai_chat()
         elif path == "/mgla-ai/v1/gemini":
@@ -705,6 +719,175 @@ class Handler(BaseHTTPRequestHandler):
             self._post_ai_gemini_transcribe()
         else:
             self._reply(404)
+
+    def _admin_updates_get(self, query):
+        if not self._check_basic_auth():
+            return
+        flash_ok = unquote(query.get("ok", [""])[0] or "")
+        flash_err = unquote(query.get("err", [""])[0] or "")
+        try:
+            meta = self.updates.get()
+            body = hub_updates.render_updates_html(meta, flash_ok=flash_ok, flash_err=flash_err).encode("utf-8")
+        except Exception:
+            log.exception("updates admin render failed")
+            self._reply(500)
+            return
+        self._html_reply(body)
+
+    def _admin_updates_post(self):
+        if not self._check_basic_auth():
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if length < 0 or length > MAX_UPDATE_UPLOAD:
+            self._reply(413, b'{"ok":false,"error":"too large"}')
+            return
+        raw = self.rfile.read(length) if length else b""
+        ctype = self.headers.get("Content-Type", "")
+        fields = {}
+        files = {}
+        action = ""
+        try:
+            if "multipart/form-data" in ctype:
+                fields, files = hub_updates.parse_multipart(ctype, raw)
+            else:
+                form = parse_qs(raw.decode("utf-8"), keep_blank_values=True)
+                fields = {k: (v[0] if v else "") for k, v in form.items()}
+            action = (fields.get("action") or "").strip()
+
+            if action == "upload_apk":
+                if "apk" not in files or not files["apk"][1]:
+                    self._reply(400, b'{"ok":false,"error":"no apk"}')
+                    return
+                fname, data = files["apk"]
+                file_meta = self.updates.save_apk_bytes(data, fname)
+                cur = self.updates.get()
+                # Refresh only file_* columns; keep the rest of the release.
+                self.updates.save_meta(
+                    mgla_version=cur.get("mgla_version") or "v0.0.1",
+                    app_version=cur.get("app_version") or "0.0.0",
+                    version_code=int(cur.get("version_code") or 1),
+                    changelog=cur.get("changelog") or "",
+                    mandatory=bool(cur.get("mandatory")),
+                    published=bool(cur.get("published")),
+                    file_meta=file_meta,
+                )
+                body = json.dumps(
+                    {
+                        "ok": True,
+                        "file_name": file_meta["file_name"],
+                        "file_size": file_meta["file_size"],
+                        "file_sha256": file_meta["file_sha256"],
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self._reply(200, body)
+                return
+
+            if action != "save_update":
+                self._redirect(hub_updates.flash_redirect(err="неизвестное действие"))
+                return
+
+            file_meta = None
+            if "apk" in files and files["apk"][1]:
+                fname, data = files["apk"]
+                file_meta = self.updates.save_apk_bytes(data, fname)
+            try:
+                version_code = int((fields.get("version_code") or "0").strip() or "0")
+            except ValueError as e:
+                raise ValueError("version_code должен быть числом") from e
+            self.updates.save_meta(
+                mgla_version=fields.get("mgla_version") or "",
+                app_version=fields.get("app_version") or "",
+                version_code=version_code,
+                changelog=fields.get("changelog") or "",
+                mandatory=bool(fields.get("mandatory")),
+                published=bool(fields.get("published")),
+                file_meta=file_meta,
+            )
+            msg = "релиз сохранён"
+            if file_meta:
+                msg += f"; APK {file_meta['file_size'] // (1024 * 1024)} МБ"
+            elif self.updates.get().get("has_file"):
+                msg += "; APK уже на сервере"
+            self._redirect(hub_updates.flash_redirect(ok=msg))
+        except ValueError as e:
+            if action == "upload_apk":
+                self._reply(
+                    400,
+                    json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8"),
+                )
+            else:
+                self._redirect(hub_updates.flash_redirect(err=str(e)))
+        except Exception:
+            log.exception("updates admin post failed")
+            if action == "upload_apk":
+                self._reply(500, b'{"ok":false,"error":"upload failed"}')
+            else:
+                self._redirect(hub_updates.flash_redirect(err="ошибка сохранения"))
+
+    def _post_update_check(self):
+        if not self._check_token():
+            return
+        raw = self._read_json_body(16 * 1024)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        client_mgla = raw.get("mgla_version") or raw.get("mgla") or ""
+        client_app = raw.get("app_version") or raw.get("tg") or ""
+        try:
+            client_code = int(raw.get("version_code") or raw.get("code") or 0)
+        except (TypeError, ValueError):
+            client_code = 0
+        if not isinstance(client_mgla, str):
+            client_mgla = str(client_mgla)
+        if not isinstance(client_app, str):
+            client_app = str(client_app)
+        try:
+            payload = self.updates.check_for_client(
+                client_mgla=client_mgla.strip(),
+                client_app=client_app.strip(),
+                client_code=client_code,
+            )
+        except Exception:
+            log.exception("update check failed")
+            self._reply(500)
+            return
+        self._reply(200, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+    def _get_update_apk(self):
+        if not self._check_token():
+            return
+        path = self.updates.apk_path()
+        meta = self.updates.get()
+        if not path or not meta.get("published"):
+            self._reply(404, b'{"error":"no apk"}')
+            return
+        try:
+            size = path.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.android.package-archive")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", 'attachment; filename="mgla-update.apk"')
+            if meta.get("file_sha256"):
+                self.send_header("X-Mgla-Sha256", meta["file_sha256"])
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with path.open("rb") as f:
+                while True:
+                    chunk = f.read(1024 * 256)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except BrokenPipeError:
+            return
+        except Exception:
+            log.exception("apk download failed")
+            return
 
     def _post_features(self):
         if not self._check_token():
@@ -891,11 +1074,17 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if not TOKEN:
         raise SystemExit("MGLA_WS_TOKEN is not set")
-    Handler.store = Store(DB_PATH)
+    store = Store(DB_PATH)
+    Handler.store = store
+    Handler.updates = hub_updates.UpdateStore(store._db, store._lock)
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     log.info(
-        "listening on %s:%d, db=%s, openrouter=%s",
-        HOST, PORT, DB_PATH, "yes" if OPENROUTER_API_KEY else "no",
+        "listening on %s:%d, db=%s, openrouter=%s, updates=%s",
+        HOST,
+        PORT,
+        DB_PATH,
+        "yes" if OPENROUTER_API_KEY else "no",
+        hub_updates.UPDATES_DIR,
     )
     httpd.serve_forever()
 

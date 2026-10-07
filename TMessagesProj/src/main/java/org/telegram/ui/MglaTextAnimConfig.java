@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.ui.ActionBar.Theme;
 
 /** Settings of the typing animation in the chat input field («Анимация текста»). */
@@ -96,6 +97,9 @@ public final class MglaTextAnimConfig {
     }
 
     public static boolean isEnabled() {
+        if (!MglaFeatureFlags.isAllowed(KEY_ENABLED)) {
+            return false;
+        }
         ensureLoaded();
         return enabled;
     }
@@ -146,6 +150,9 @@ public final class MglaTextAnimConfig {
     }
 
     public static void setEnabled(boolean value) {
+        if (value && !MglaFeatureFlags.isAllowed(KEY_ENABLED)) {
+            value = false;
+        }
         ensureLoaded();
         enabled = value;
         prefs().edit().putBoolean(KEY_ENABLED, value).apply();

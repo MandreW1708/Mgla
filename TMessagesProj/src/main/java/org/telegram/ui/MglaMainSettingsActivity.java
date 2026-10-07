@@ -13,6 +13,7 @@ import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaAudioConfig;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.MglaHeaderConfig;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaTransferConfig;
@@ -23,6 +24,7 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaMainSettingsActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
@@ -88,8 +90,12 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         proxyCell.setTextAndCheck("Прокси в шапке", MglaHeaderConfig.isProxyInHeader(), false);
         proxyCell.setOnClickListener(v -> {
             boolean newVal = !MglaHeaderConfig.isProxyInHeader();
+            if (newVal && !MglaFeatureFlags.isAllowed(MglaHeaderConfig.KEY_PROXY_IN_HEADER)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                return;
+            }
             MglaHeaderConfig.setProxyInHeader(newVal);
-            proxyCell.setChecked(newVal);
+            proxyCell.setChecked(MglaHeaderConfig.isProxyInHeader());
         });
         block.addView(proxyCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -100,8 +106,12 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         downloadsHeaderCell.setTextAndCheck("Загрузки в шапке", MglaHeaderConfig.isDownloadsInHeader(), false);
         downloadsHeaderCell.setOnClickListener(v -> {
             boolean newVal = !MglaHeaderConfig.isDownloadsInHeader();
+            if (newVal && !MglaFeatureFlags.isAllowed(MglaHeaderConfig.KEY_DOWNLOADS_IN_HEADER)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                return;
+            }
             MglaHeaderConfig.setDownloadsInHeader(newVal);
-            downloadsHeaderCell.setChecked(newVal);
+            downloadsHeaderCell.setChecked(MglaHeaderConfig.isDownloadsInHeader());
         });
         block.addView(downloadsHeaderCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -109,11 +119,16 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
 
         TextCheckCell hapticCell = new TextCheckCell(context);
         hapticCell.setBackground(null);
-        hapticCell.setTextAndCheck("Виброотклик", prefs.getBoolean("haptic_enabled", false), false);
+        boolean hapticOn = MglaFeatureFlags.isAllowed("haptic_enabled") && prefs.getBoolean("haptic_enabled", false);
+        hapticCell.setTextAndCheck("Виброотклик", hapticOn, false);
         hapticCell.setOnClickListener(v -> {
             boolean newVal = !prefs.getBoolean("haptic_enabled", false);
+            if (newVal && !MglaFeatureFlags.isAllowed("haptic_enabled")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                return;
+            }
             prefs.edit().putBoolean("haptic_enabled", newVal).apply();
-            hapticCell.setChecked(newVal);
+            hapticCell.setChecked(newVal && MglaFeatureFlags.isAllowed("haptic_enabled"));
         });
         block.addView(hapticCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -133,8 +148,13 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         lastOnlineCell.setTextAndCheck("Последний онлайн", MglaSpyConfig.isLastOnlineEnabled(), false);
         lastOnlineCell.setOnClickListener(v -> {
             boolean newVal = !MglaSpyConfig.isLastOnlineEnabled();
+            if (newVal && !MglaFeatureFlags.isAllowed("spy_last_online")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                lastOnlineCell.setChecked(false);
+                return;
+            }
             MglaSpyConfig.setLastOnlineEnabled(newVal);
-            lastOnlineCell.setChecked(newVal);
+            lastOnlineCell.setChecked(MglaSpyConfig.isLastOnlineEnabled());
         });
         spyBlock.addView(lastOnlineCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -147,9 +167,15 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         saveDeletedCell.setTextAndCheck("Сохранение удаленных", MglaSpyConfig.isSaveDeletedMessagesEnabled(), false);
         saveDeletedCell.setOnClickListener(v -> {
             boolean newVal = !MglaSpyConfig.isSaveDeletedMessagesEnabled();
+            if (newVal && !MglaFeatureFlags.isAllowed("spy_save_deleted_messages")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                saveDeletedCell.setChecked(false);
+                return;
+            }
             MglaSpyConfig.setSaveDeletedMessagesEnabled(newVal);
-            saveDeletedCell.setChecked(newVal);
-            updateDeletedSubCellsState(deletedSubCells, newVal);
+            boolean on = MglaSpyConfig.isSaveDeletedMessagesEnabled();
+            saveDeletedCell.setChecked(on);
+            updateDeletedSubCellsState(deletedSubCells, on);
         });
         spyBlock.addView(saveDeletedCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -182,8 +208,13 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         ghostModeCell.setTextAndCheck("Режим призрака", MglaSpyConfig.isGhostModeEnabled(), false);
         ghostModeCell.setOnClickListener(v -> {
             boolean newVal = !MglaSpyConfig.isGhostModeEnabled();
+            if (newVal && !MglaFeatureFlags.isAllowed("spy_ghost_mode")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                ghostModeCell.setChecked(false);
+                return;
+            }
             MglaSpyConfig.setGhostModeEnabled(newVal);
-            ghostModeCell.setChecked(newVal);
+            ghostModeCell.setChecked(MglaSpyConfig.isGhostModeEnabled());
         });
         spyBlock.addView(ghostModeCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -212,8 +243,13 @@ public class MglaMainSettingsActivity extends BaseFragment implements Notificati
         autoPauseCell.setTextAndCheck("Автопауза", MglaAudioConfig.isAutoPauseEnabled(), false);
         autoPauseCell.setOnClickListener(v -> {
             boolean newVal = !MglaAudioConfig.isAutoPauseEnabled();
+            if (newVal && !MglaFeatureFlags.isAllowed(MglaAudioConfig.KEY_AUTO_PAUSE)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                autoPauseCell.setChecked(false);
+                return;
+            }
             MglaAudioConfig.setAutoPauseEnabled(newVal);
-            autoPauseCell.setChecked(newVal);
+            autoPauseCell.setChecked(MglaAudioConfig.isAutoPauseEnabled());
         });
         soundBlock.addView(autoPauseCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 

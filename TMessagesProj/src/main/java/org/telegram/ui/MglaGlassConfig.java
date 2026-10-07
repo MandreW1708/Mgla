@@ -104,11 +104,17 @@ public class MglaGlassConfig {
     }
 
     public static boolean isEditedIconEnabled() {
+        if (!org.telegram.messenger.MglaFeatureFlags.isAllowed(PREF_EDITED_ICON)) {
+            return false;
+        }
         return getPrefs().getBoolean(PREF_EDITED_ICON, false);
     }
 
     public static void setEditedIconEnabled(boolean enabled) {
-        if (isEditedIconEnabled() == enabled) return;
+        if (enabled && !org.telegram.messenger.MglaFeatureFlags.isAllowed(PREF_EDITED_ICON)) {
+            enabled = false;
+        }
+        if (getPrefs().getBoolean(PREF_EDITED_ICON, false) == enabled) return;
         getPrefs().edit().putBoolean(PREF_EDITED_ICON, enabled).apply();
         notifyGlassAppearanceChanged();
     }

@@ -19,6 +19,7 @@ import android.widget.TextView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaChatsConfig;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.MglaHiddenChats;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
@@ -31,6 +32,7 @@ import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.SeekBarView;
 
@@ -90,11 +92,16 @@ public class MglaChatsSettingsActivity extends BaseFragment {
 
         TextCheckCell timeCell = new TextCheckCell(context);
         timeCell.setBackground(null);
-        timeCell.setTextAndCheck("Время с секундами", prefs.getBoolean("chat_time_seconds", false), false);
+        timeCell.setTextAndCheck("Время с секундами", MglaChatsConfig.isChatTimeSecondsEnabled(), false);
         timeCell.setOnClickListener(v -> {
-            boolean enabled = !prefs.getBoolean("chat_time_seconds", false);
-            prefs.edit().putBoolean("chat_time_seconds", enabled).apply();
-            timeCell.setChecked(enabled);
+            boolean enabled = !MglaChatsConfig.isChatTimeSecondsEnabled();
+            if (enabled && !MglaFeatureFlags.isAllowed(MglaChatsConfig.PREF_CHAT_TIME_SECONDS)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                timeCell.setChecked(false);
+                return;
+            }
+            MglaChatsConfig.setChatTimeSecondsEnabled(enabled);
+            timeCell.setChecked(MglaChatsConfig.isChatTimeSecondsEnabled());
             notifyTimeFormatChanged();
         });
         basicBlock.addView(timeCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -154,8 +161,13 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         hideKeyboardCell.setTextAndCheck("Скрывать клавиатуру при прокрутке", MglaChatsConfig.isHideKeyboardOnScroll(), false);
         hideKeyboardCell.setOnClickListener(v -> {
             boolean newVal = !MglaChatsConfig.isHideKeyboardOnScroll();
+            if (newVal && !MglaFeatureFlags.isAllowed(MglaChatsConfig.PREF_HIDE_KEYBOARD_ON_SCROLL)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                hideKeyboardCell.setChecked(false);
+                return;
+            }
             MglaChatsConfig.setHideKeyboardOnScroll(newVal);
-            hideKeyboardCell.setChecked(newVal);
+            hideKeyboardCell.setChecked(MglaChatsConfig.isHideKeyboardOnScroll());
         });
         chatOptionsBlock.addView(hideKeyboardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -166,8 +178,13 @@ public class MglaChatsSettingsActivity extends BaseFragment {
         commaCell.setTextAndCheck("Запятая после упоминания", MglaChatsConfig.isCommaAfterMention(), false);
         commaCell.setOnClickListener(v -> {
             boolean newVal = !MglaChatsConfig.isCommaAfterMention();
+            if (newVal && !MglaFeatureFlags.isAllowed(MglaChatsConfig.PREF_COMMA_AFTER_MENTION)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                commaCell.setChecked(false);
+                return;
+            }
             MglaChatsConfig.setCommaAfterMention(newVal);
-            commaCell.setChecked(newVal);
+            commaCell.setChecked(MglaChatsConfig.isCommaAfterMention());
         });
         chatOptionsBlock.addView(commaCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -258,6 +275,10 @@ public class MglaChatsSettingsActivity extends BaseFragment {
     }
 
     private void openHiddenChats() {
+        if (!MglaHiddenChats.isFeatureAllowed()) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+            return;
+        }
         Utilities.Callback<PasscodeActivity> open = fragment -> {
             Bundle args = new Bundle();
             args.putBoolean("mgla_hidden", true);

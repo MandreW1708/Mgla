@@ -11,7 +11,6 @@ import org.telegram.utils.wsbypass.MglaWsConfig;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.cert.Certificate;
@@ -23,15 +22,21 @@ import java.util.Set;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Polls mglahub for remote feature flags ({@code POST /mgla-config/v1/features}).
- * Sends Telegram user ids of activated accounts; never used for anonymous stats.
+ * Polls for remote feature flags.
+ * <p>
+ * When WS-relay bypass is on and not VPN-paused, goes through mglabot
+ * ({@code POST /mgla-ai/v1/features}) so the request reaches the network that
+ * already works for AI/WS. Otherwise hits mglahub directly
+ * ({@code POST /mgla-config/v1/features}).
  */
 public final class MglaRemoteConfig {
 
     private static final String PREFS = "mgla_remote_config";
     private static final String KEY_LAST_FETCH = "last_fetch_ms";
-    private static final long POLL_INTERVAL_MS = 20L * 60 * 1000;
-    private static final long MIN_RETRY_MS = 60L * 1000;
+    private static final String KEY_LAST_ERROR = "last_error";
+    /** How often the client asks for feature flags. */
+    private static final long POLL_INTERVAL_MS = 2L * 60 * 1000;
+    private static final long EMPTY_ACCOUNTS_RETRY_MS = 15_000;
 
     private static final Object lock = new Object();
     private static boolean fetching;
@@ -47,11 +52,33 @@ public final class MglaRemoteConfig {
     }
 
     public static void init() {
-        Utilities.globalQueue.postRunnable(pollRunnable, 5_000);
+        // First attempt soon after accounts are loaded by ApplicationLoader.
+        Utilities.globalQueue.postRunnable(() -> maybeFetch(true), 3_000);
+        Utilities.globalQueue.postRunnable(pollRunnable, POLL_INTERVAL_MS);
+    }
+
+    /**
+     * Relay path when WS bypass is enabled and not suspended by VPN.
+     * VPN pause / relay off → direct mglahub (reachable via VPN or open net).
+     */
+    /** Public for update checker and other hub polls that share the same routing. */
+    public static boolean shouldFetchViaRelay() {
+        try {
+            if (!MglaWsConfig.isEnabled() || !MglaWsConfig.isRelayConfigured()) {
+                return false;
+            }
+            return !VpnMonitor.getInstance().isVpnActive();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static void maybeFetch(boolean force) {
-        if (!MglaWsConfig.isHubConfigured()) {
+        boolean viaRelay = shouldFetchViaRelay();
+        if (viaRelay) {
+            // ok
+        } else if (!MglaWsConfig.isHubConfigured()) {
+            rememberError("hub not configured");
             return;
         }
         long now = System.currentTimeMillis();
@@ -64,10 +91,6 @@ public final class MglaRemoteConfig {
             if (fetching) {
                 return;
             }
-            // Avoid hammering on rapid force calls when last attempt was very recent.
-            if (!force && now - last < MIN_RETRY_MS) {
-                return;
-            }
             fetching = true;
         }
         Utilities.globalQueue.postRunnable(() -> {
@@ -75,14 +98,19 @@ public final class MglaRemoteConfig {
             try {
                 ok = fetchOnce();
             } catch (Throwable e) {
-                if (BuildVars.LOGS_ENABLED) {
-                    FileLog.e("MglaRemoteConfig fetch failed", e);
-                }
+                rememberError(String.valueOf(e.getMessage()));
+                FileLog.e("MglaRemoteConfig fetch failed", e);
             } finally {
                 synchronized (lock) {
                     fetching = false;
-                    if (ok && prefs() != null) {
-                        prefs().edit().putLong(KEY_LAST_FETCH, System.currentTimeMillis()).apply();
+                    if (ok) {
+                        SharedPreferences p = prefs();
+                        if (p != null) {
+                            p.edit()
+                                .putLong(KEY_LAST_FETCH, System.currentTimeMillis())
+                                .remove(KEY_LAST_ERROR)
+                                .apply();
+                        }
                     }
                 }
             }
@@ -92,8 +120,11 @@ public final class MglaRemoteConfig {
     private static boolean fetchOnce() throws Exception {
         List<Long> tgIds = collectAccountIds();
         if (tgIds.isEmpty()) {
+            rememberError("no activated accounts yet");
+            Utilities.globalQueue.postRunnable(() -> maybeFetch(true), EMPTY_ACCOUNTS_RETRY_MS);
             return false;
         }
+
         JSONObject body = new JSONObject();
         if (tgIds.size() == 1) {
             body.put("tg_id", tgIds.get(0));
@@ -106,35 +137,56 @@ public final class MglaRemoteConfig {
             body.put("tg_id", tgIds.get(0));
         }
 
-        String host = MglaWsConfig.getHubHost();
-        URL url = new URL("https://" + host + "/mgla-config/v1/features");
-        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+        boolean viaRelay = shouldFetchViaRelay();
+        final String host;
+        final String path;
+        final String token;
+        final String expectedPin;
+        final boolean pinDefaultHost;
+        if (viaRelay) {
+            host = MglaWsConfig.getRelayHost();
+            path = "/mgla-ai/v1/features";
+            token = MglaWsConfig.getRelayToken();
+            expectedPin = MglaWsConfig.RELAY_SPKI_SHA256_BASE64;
+            pinDefaultHost = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host);
+        } else {
+            host = MglaWsConfig.getHubHost();
+            path = "/mgla-config/v1/features";
+            token = MglaWsConfig.getHubToken();
+            expectedPin = MglaWsConfig.HUB_SPKI_SHA256_BASE64;
+            pinDefaultHost = MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host);
+        }
+
+        String url = "https://" + host + path;
+        HttpsURLConnection conn = MglaDirectHttp.openHttps(url);
         try {
             conn.setConnectTimeout(12_000);
             conn.setReadTimeout(12_000);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getHubToken());
-            conn.connect();
-            if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
-                verifyHubPin(conn.getServerCertificates());
-            }
+            conn.setRequestProperty("X-Mgla-Token", token);
+
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
+                // getOutputStream completes the TLS handshake.
+                if (pinDefaultHost) {
+                    verifySpkiPin(conn.getServerCertificates(), expectedPin);
+                }
                 os.write(payload);
             }
+
             int code = conn.getResponseCode();
             InputStream is = code < 400 ? conn.getInputStream() : conn.getErrorStream();
             String response = readUtf8(is, 64 * 1024);
             if (code != 200) {
-                if (BuildVars.LOGS_ENABLED) {
-                    FileLog.e("MglaRemoteConfig HTTP " + code + ": " + response);
-                }
+                rememberError("HTTP " + code + " via=" + (viaRelay ? "relay" : "hub") + ": " + response);
+                FileLog.e("MglaRemoteConfig HTTP " + code + " via=" + (viaRelay ? "relay" : "hub") + ": " + response);
                 return false;
             }
             Set<String> disabled = MglaFeatureFlags.parseDisabledJson(response);
             MglaFeatureFlags.applyDisabled(disabled);
+            FileLog.d("MglaRemoteConfig applied via=" + (viaRelay ? "relay" : "hub") + " disabled=" + disabled);
             return true;
         } finally {
             conn.disconnect();
@@ -155,14 +207,14 @@ public final class MglaRemoteConfig {
         return ids;
     }
 
-    private static void verifyHubPin(Certificate[] chain) throws Exception {
+    private static void verifySpkiPin(Certificate[] chain, String expectedPin) throws Exception {
         if (chain == null || chain.length == 0) {
             throw new SecurityException("no certificate");
         }
         byte[] spki = chain[0].getPublicKey().getEncoded();
         String actual = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki));
-        if (!MglaWsConfig.HUB_SPKI_SHA256_BASE64.equals(actual)) {
-            throw new SecurityException("SPKI pin mismatch");
+        if (!expectedPin.equals(actual)) {
+            throw new SecurityException("SPKI pin mismatch actual=" + actual + " expected=" + expectedPin);
         }
     }
 
@@ -180,6 +232,13 @@ public final class MglaRemoteConfig {
             out.write(buf, 0, n);
         }
         return out.toString(StandardCharsets.UTF_8.name());
+    }
+
+    private static void rememberError(String message) {
+        SharedPreferences p = prefs();
+        if (p != null && !TextUtils.isEmpty(message)) {
+            p.edit().putString(KEY_LAST_ERROR, message).apply();
+        }
     }
 
     private static SharedPreferences prefs() {

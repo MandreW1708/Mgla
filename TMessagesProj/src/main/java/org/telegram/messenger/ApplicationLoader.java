@@ -266,11 +266,6 @@ public class ApplicationLoader extends Application {
         } catch (Throwable e) {
             FileLog.e(e);
         }
-        try {
-            MglaRemoteConfig.init();
-        } catch (Throwable e) {
-            FileLog.e(e);
-        }
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();
             MessagesController.getInstance(a);
@@ -284,6 +279,13 @@ public class ApplicationLoader extends Application {
                 MessagesController.getInstance(a).putUser(user, true);
                 SendMessagesHelper.getInstance(a).checkUnsentMessages();
             }
+        }
+        try {
+            // After UserConfig so feature-flag poll has tg_id immediately.
+            MglaRemoteConfig.init();
+            MglaUpdateChecker.init();
+        } catch (Throwable e) {
+            FileLog.e(e);
         }
 
         ApplicationLoader app = (ApplicationLoader) ApplicationLoader.applicationContext;

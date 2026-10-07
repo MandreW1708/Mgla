@@ -7023,7 +7023,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         MessagesController.getInstance(currentAccount).sortDialogs(null);
         showLanguageAlert(false);
         MglaStats.count("app_foreground");
-        MglaRemoteConfig.maybeFetch(false);
+        MglaRemoteConfig.maybeFetch(true);
         Utilities.stageQueue.postRunnable(() -> {
             ApplicationLoader.mainInterfacePausedStageQueue = false;
             ApplicationLoader.mainInterfacePausedStageQueueTime = System.currentTimeMillis();
@@ -7076,6 +7076,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             showUpdateActivity(UserConfig.selectedAccount, SharedConfig.pendingAppUpdate, true);
         }
         checkAppUpdate(false, null);
+        try {
+            org.telegram.messenger.MglaUpdateChecker.maybeCheck(true);
+            org.telegram.messenger.MglaUpdateChecker.showPendingIfAny(this);
+        } catch (Throwable ignore) {
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             ApplicationLoader.canDrawOverlays = Settings.canDrawOverlays(this);

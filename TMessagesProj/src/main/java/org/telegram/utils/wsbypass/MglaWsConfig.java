@@ -127,12 +127,16 @@ public final class MglaWsConfig {
 
     /** Хост хаба статистики / панели ({@code mglahub.mooo.com}). */
     public static String getHubHost() {
+        // BuildConfig (local.properties) wins over stale prefs overrides.
+        String fromBuild = BuildConfig.MGLA_HUB_HOST;
+        if (!TextUtils.isEmpty(fromBuild)) {
+            return fromBuild.trim();
+        }
         String override = getPrefs().getString(PREF_HUB_HOST, null);
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
         }
-        String fromBuild = BuildConfig.MGLA_HUB_HOST;
-        return TextUtils.isEmpty(fromBuild) ? DEFAULT_HUB_HOST : fromBuild.trim();
+        return DEFAULT_HUB_HOST;
     }
 
     public static void setHubHost(String host) {
@@ -140,17 +144,19 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Токен хаба (stats/ИИ на mglahub): prefs → {@code MGLA_HUB_TOKEN},
-     * иначе {@link #getRelayToken()} (если токен один на оба сервера).
+     * Токен хаба (stats / feature flags на mglahub): {@code MGLA_HUB_TOKEN} из сборки,
+     * иначе prefs, иначе {@link #getRelayToken()}.
      */
     public static String getHubToken() {
-        String override = getPrefs().getString(PREF_HUB_TOKEN, null);
-        if (!TextUtils.isEmpty(override)) {
-            return override.trim();
-        }
+        // Prefer BuildConfig so a rebuild always picks up local.properties;
+        // an old prefs override previously caused silent 401 on /mgla-config/.
         String fromBuild = BuildConfig.MGLA_HUB_TOKEN;
         if (!TextUtils.isEmpty(fromBuild)) {
             return fromBuild.trim();
+        }
+        String override = getPrefs().getString(PREF_HUB_TOKEN, null);
+        if (!TextUtils.isEmpty(override)) {
+            return override.trim();
         }
         return getRelayToken();
     }

@@ -13,15 +13,22 @@ public class MglaAudioConfig {
     private static boolean standaloneFocusHeld;
 
     public static boolean isAutoPauseEnabled() {
+        if (!MglaFeatureFlags.isAllowed(KEY_AUTO_PAUSE)) {
+            return false;
+        }
         return ApplicationLoader.applicationContext != null
             && prefs().getBoolean(KEY_AUTO_PAUSE, false);
     }
 
     public static void setAutoPauseEnabled(boolean enabled) {
-        if (isAutoPauseEnabled() == enabled) {
+        if (enabled && !MglaFeatureFlags.isAllowed(KEY_AUTO_PAUSE)) {
+            enabled = false;
+        }
+        SharedPreferences p = prefs();
+        if (p.getBoolean(KEY_AUTO_PAUSE, false) == enabled) {
             return;
         }
-        prefs().edit().putBoolean(KEY_AUTO_PAUSE, enabled).apply();
+        p.edit().putBoolean(KEY_AUTO_PAUSE, enabled).apply();
         if (!enabled) {
             abandonStandaloneAutopauseFocus();
         }

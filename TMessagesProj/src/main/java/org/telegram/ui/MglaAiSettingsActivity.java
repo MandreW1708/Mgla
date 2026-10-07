@@ -119,10 +119,22 @@ public class MglaAiSettingsActivity extends BaseFragment {
         });
         listView.setOnItemClickListener((view, position) -> {
             if (position == ROW_AI_TRANSCRIBE) {
+                if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_transcribe_enabled")) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    return;
+                }
                 presentFragment(new MglaAiTranscribeActivity());
             } else if (position == ROW_DNA_TOPICS) {
+                if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_chat_dna")) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    return;
+                }
                 showDnaTopicsProviderDialog(context);
             } else if (position == ROW_DNA_MODELS) {
+                if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_chat_dna")) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    return;
+                }
                 presentFragment(new MglaLocalModelsActivity());
             } else if (position == ROW_PROVIDER_BASIC) {
                 if (!"openrouter".equals(prefs.getString("ai_provider", "openrouter"))) {

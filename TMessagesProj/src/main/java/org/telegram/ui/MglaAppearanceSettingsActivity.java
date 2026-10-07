@@ -10,6 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -17,6 +18,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaAppearanceSettingsActivity extends BaseFragment {
@@ -129,8 +131,13 @@ public class MglaAppearanceSettingsActivity extends BaseFragment {
         editedIconCell.setTextAndCheck("Значок вместо \"изменено\"", MglaGlassConfig.isEditedIconEnabled(), false);
         editedIconCell.setOnClickListener(v -> {
             boolean newVal = !MglaGlassConfig.isEditedIconEnabled();
+            if (newVal && !MglaFeatureFlags.isAllowed(MglaGlassConfig.PREF_EDITED_ICON)) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                editedIconCell.setChecked(false);
+                return;
+            }
             MglaGlassConfig.setEditedIconEnabled(newVal);
-            editedIconCell.setChecked(newVal);
+            editedIconCell.setChecked(MglaGlassConfig.isEditedIconEnabled());
         });
         glassBlock.addView(editedIconCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 

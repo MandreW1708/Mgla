@@ -2769,8 +2769,11 @@ public class ChatActivityEnterView extends FrameLayout implements
         setEmojiButtonImage(false, false);
 
         // AI Editor robot button (to the right of emoji)
-        boolean aiEditorEnabled = org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor")
-            && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_editor", false);
+        SharedPreferences mglaPrefs = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+        boolean aiEditorEnabled = org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
+            && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor")
+            && mglaPrefs.getBoolean("ai_enabled", true)
+            && mglaPrefs.getBoolean("ai_editor", false);
         if (aiEditorEnabled) {
             aiEditorButton = new ImageView(context);
             aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
@@ -15889,8 +15892,20 @@ public class ChatActivityEnterView extends FrameLayout implements
             if (getAlpha() <= 0f) { // for accessibility
                 return false;
             }
-            if (event.getAction() == MotionEvent.ACTION_DOWN && (event.getX() < getWidth() - width() || event.getY() < getHeight() - height())) {
-                return false;
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                if (externalGlassBackground) {
+                    // Glass send sits centered in the view; the stock hit-test below
+                    // assumes bottom-right alignment and leaves a dead zone on the
+                    // top/left of the round button (taps "don't always register").
+                    checkBackgroundRect();
+                    final float pad = dp(2);
+                    if (event.getX() < backgroundRect.left - pad || event.getX() > backgroundRect.right + pad
+                            || event.getY() < backgroundRect.top - pad || event.getY() > backgroundRect.bottom + pad) {
+                        return false;
+                    }
+                } else if (event.getX() < getWidth() - width() || event.getY() < getHeight() - height()) {
+                    return false;
+                }
             }
             return super.onTouchEvent(event);
         }

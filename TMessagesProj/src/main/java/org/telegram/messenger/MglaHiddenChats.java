@@ -116,7 +116,7 @@ public final class MglaHiddenChats {
     }
 
     public static int getHiddenCount(int account) {
-        if (!validAccount(account)) {
+        if (!isFeatureAllowed() || !validAccount(account)) {
             return 0;
         }
         ensureLoaded();

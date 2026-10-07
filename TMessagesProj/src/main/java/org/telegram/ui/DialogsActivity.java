@@ -10025,7 +10025,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             }
         }
         if (mglaHideItem != null) {
-            mglaHideItem.setVisibility(initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect && communityId == 0 ? View.VISIBLE : View.GONE);
+            boolean allowHideMenu = mglaHiddenMode || MglaHiddenChats.isFeatureAllowed();
+            mglaHideItem.setVisibility(allowHideMenu && initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect && communityId == 0 ? View.VISIBLE : View.GONE);
         }
         if (removeFromFolderItem != null) {
             boolean cantRemoveFromFolder = filterTabsView == null || filterTabsView.getVisibility() != View.VISIBLE || filterTabsView.currentTabIsDefault();

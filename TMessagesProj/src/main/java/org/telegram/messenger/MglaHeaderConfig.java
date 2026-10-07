@@ -10,28 +10,42 @@ public class MglaHeaderConfig {
     public static final String KEY_DOWNLOADS_IN_HEADER = "downloads_in_header";
 
     public static boolean isProxyInHeader() {
+        if (!MglaFeatureFlags.isAllowed(KEY_PROXY_IN_HEADER)) {
+            return false;
+        }
         return ApplicationLoader.applicationContext != null
             && prefs().getBoolean(KEY_PROXY_IN_HEADER, false);
     }
 
     public static boolean isDownloadsInHeader() {
+        if (!MglaFeatureFlags.isAllowed(KEY_DOWNLOADS_IN_HEADER)) {
+            return false;
+        }
         return ApplicationLoader.applicationContext != null
             && prefs().getBoolean(KEY_DOWNLOADS_IN_HEADER, false);
     }
 
     public static void setProxyInHeader(boolean enabled) {
-        if (isProxyInHeader() == enabled) {
+        if (enabled && !MglaFeatureFlags.isAllowed(KEY_PROXY_IN_HEADER)) {
+            enabled = false;
+        }
+        SharedPreferences p = prefs();
+        if (p.getBoolean(KEY_PROXY_IN_HEADER, false) == enabled) {
             return;
         }
-        prefs().edit().putBoolean(KEY_PROXY_IN_HEADER, enabled).apply();
+        p.edit().putBoolean(KEY_PROXY_IN_HEADER, enabled).apply();
         notifyChanged();
     }
 
     public static void setDownloadsInHeader(boolean enabled) {
-        if (isDownloadsInHeader() == enabled) {
+        if (enabled && !MglaFeatureFlags.isAllowed(KEY_DOWNLOADS_IN_HEADER)) {
+            enabled = false;
+        }
+        SharedPreferences p = prefs();
+        if (p.getBoolean(KEY_DOWNLOADS_IN_HEADER, false) == enabled) {
             return;
         }
-        prefs().edit().putBoolean(KEY_DOWNLOADS_IN_HEADER, enabled).apply();
+        p.edit().putBoolean(KEY_DOWNLOADS_IN_HEADER, enabled).apply();
         notifyChanged();
     }
 

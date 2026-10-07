@@ -19,6 +19,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -27,6 +28,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
@@ -117,9 +119,20 @@ public class MglaAiTranscribeActivity extends BaseFragment {
 
     private void toggleSwitch(View view, String key, boolean defaultValue) {
         boolean enabled = !prefs.getBoolean(key, defaultValue);
+        if (enabled && "ai_transcribe_enabled".equals(key) && !MglaFeatureFlags.isAllowed("ai_transcribe_enabled")) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+            if (view instanceof TextCheckCell) {
+                ((TextCheckCell) view).setChecked(false);
+            }
+            return;
+        }
         prefs.edit().putBoolean(key, enabled).apply();
         if (view instanceof TextCheckCell) {
-            ((TextCheckCell) view).setChecked(enabled);
+            boolean shown = enabled;
+            if ("ai_transcribe_enabled".equals(key)) {
+                shown = enabled && MglaFeatureFlags.isAllowed("ai_transcribe_enabled");
+            }
+            ((TextCheckCell) view).setChecked(shown);
         }
     }
 
@@ -220,7 +233,8 @@ public class MglaAiTranscribeActivity extends BaseFragment {
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             if (position == ROW_ENABLED) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
-                cell.setTextAndCheck("Включить расшифровку", prefs.getBoolean("ai_transcribe_enabled", false), false);
+                cell.setTextAndCheck("Включить расшифровку",
+                    MglaFeatureFlags.isAllowed("ai_transcribe_enabled") && prefs.getBoolean("ai_transcribe_enabled", false), false);
             } else if (position == ROW_API_KEY) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                 cell.setTextAndValue("API ключ Gemini", getValuePreview("ai_transcribe_api_key", "Не задан"), false);

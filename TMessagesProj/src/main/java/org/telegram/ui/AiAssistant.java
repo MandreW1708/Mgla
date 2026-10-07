@@ -148,7 +148,7 @@ public class AiAssistant {
      * @param callback    вызывается с ответом (на UI-потоке) или ошибкой
      */
     public void sendMessage(String userMessage, AiCallback callback) {
-        if (!MglaFeatureFlags.isAllowed("ai_enabled")) {
+        if (!MglaFeatureFlags.isAllowed("ai_enabled") || !prefs().getBoolean("ai_enabled", true)) {
             if (callback != null) {
                 AndroidUtilities.runOnUIThread(() -> callback.onError("ИИ недоступен"));
             }

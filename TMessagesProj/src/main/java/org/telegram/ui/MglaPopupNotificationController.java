@@ -43,7 +43,8 @@ public class MglaPopupNotificationController {
             return;
         }
         SharedPreferences prefs = ApplicationLoader.applicationContext.getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
-        if (!prefs.getBoolean("mgla_popup_notifications_enabled", false)) {
+        if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")
+                || !prefs.getBoolean("mgla_popup_notifications_enabled", false)) {
             return;
         }
         boolean scheduled = (Boolean) args[2];

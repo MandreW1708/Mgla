@@ -15,6 +15,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -135,6 +136,11 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         wsMasterCell.setTextAndCheck("Обход через WebSocket", MglaWsBypass.getInstance().isEnabled(), false);
         wsMasterCell.setOnClickListener(v -> {
             boolean newVal = !wsMasterCell.isChecked();
+            if (newVal && !MglaFeatureFlags.isAllowed("ws_enabled")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                refreshDynamic();
+                return;
+            }
             MglaWsBypass mgr = MglaWsBypass.getInstance();
             if (!mgr.setEnabled(newVal) && newVal) {
                 showError("Не удалось включить WS-обход", mgr.getLastError());
@@ -165,6 +171,11 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
         dpiMasterCell.setTextAndCheck("Обход через ByeDPI", MglaDpiBypass.getInstance().isEnabled(), false);
         dpiMasterCell.setOnClickListener(v -> {
             boolean newVal = !dpiMasterCell.isChecked();
+            if (newVal && !MglaFeatureFlags.isAllowed("dpi_enabled")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                refreshDynamic();
+                return;
+            }
             MglaDpiBypass mgr = MglaDpiBypass.getInstance();
             if (!mgr.setEnabled(newVal) && newVal) {
                 showError("Не удалось включить ByeDPI", mgr.getLastError());

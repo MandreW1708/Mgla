@@ -54,7 +54,9 @@ public class MglaMessageMenuController {
     public static boolean isEnabled(Context context, int option) {
         if (context == null) return true;
         if (option == ChatActivity.OPTION_AI_SUMMARY) {
-            if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
+            if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
+                    || !org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
+                    || !getPrefs(context).getBoolean("ai_enabled", true)
                     || !getPrefs(context).getBoolean("ai_summary", true)) {
                 return false;
             }
@@ -64,6 +66,11 @@ public class MglaMessageMenuController {
 
     public static void setEnabled(Context context, int option, boolean enabled) {
         if (context == null) return;
+        if (option == ChatActivity.OPTION_AI_SUMMARY
+                && enabled
+                && !org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")) {
+            enabled = false;
+        }
         getPrefs(context).edit().putBoolean(ENABLED_PREFIX + option, enabled).apply();
         if (option == ChatActivity.OPTION_AI_SUMMARY) {
             getPrefs(context).edit().putBoolean("ai_summary", enabled).apply();

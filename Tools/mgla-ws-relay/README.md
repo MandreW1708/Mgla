@@ -74,6 +74,9 @@ MGLA_AI_HOST=127.0.0.1
 MGLA_AI_PORT=8768
 OPENROUTER_API_KEY=sk-or-v1-ВАШ_КЛЮЧ
 MGLA_HUB_SYNC_TOKEN=<тот же секрет, что на mglahub>
+# Прокси feature flags (клиент → mglabot → mglahub), пока включён WS-релей:
+MGLA_HUB_FEATURES_TOKEN=<токен клиента хаба, MGLA_WS_TOKEN на mglahub>
+# MGLA_HUB_FEATURES_URL=https://mglahub.mooo.com/mgla-config/v1/features
 EOF
 
 cp /opt/mgla-ws-relay/mgla-ws-relay.service /etc/systemd/system/
@@ -153,8 +156,17 @@ nc -vz 149.154.175.50 443
 `X-Mgla-Token` хаба. Приёмник — `stats_server.py` (stdlib Python, SQLite),
 слушает `127.0.0.1:8767` на **mglahub**.
 
-Feature flags: клиент периодически делает
-`POST /mgla-config/v1/features` с `tg_id` / `tg_ids` (не в stats batch).
+Feature flags: клиент периодически опрашивает флаги с `tg_id` / `tg_ids`
+(не в stats batch). Маршрут зависит от обхода:
+- WS-релей **включён** и не на паузе из‑за VPN → `POST https://mglabot…/mgla-ai/v1/features`
+  (токен релея); `ai_proxy` проксирует на хаб.
+- релей **выключен** или на паузе (VPN) → `POST https://mglahub…/mgla-config/v1/features`
+  напрямую (токен хаба).
+
+На mglabot в `env` нужны:
+`MGLA_HUB_FEATURES_TOKEN=<токен клиента хаба>` и опционально
+`MGLA_HUB_FEATURES_URL=https://mglahub.mooo.com/mgla-config/v1/features`.
+
 Управление: `https://mglahub…/admin` (Basic Auth). Модели OpenRouter сохраняются
 на хабе и пушатся на mglabot (`MGLA_BOT_AI_URL` + `MGLA_HUB_SYNC_TOKEN`).
 

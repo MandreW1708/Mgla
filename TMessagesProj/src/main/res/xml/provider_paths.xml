@@ -4,5 +4,7 @@
     <files-path name="logs" path="/logs/"/>
     <files-path name="cache" path="/cache/"/>
     <cache-path name="mgla_clipboard" path="mgla_clipboard/"/>
+    <cache-path name="mgla_updates" path="mgla_updates/"/>
+    <files-path name="mgla_updates_files" path="mgla_updates/"/>
     <root-path name="external_files" path="/storage/" />
 </paths>

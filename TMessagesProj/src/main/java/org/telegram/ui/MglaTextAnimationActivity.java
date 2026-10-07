@@ -29,6 +29,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SlideIntChooseView;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.MglaTypingAnimator;
@@ -89,8 +90,13 @@ public class MglaTextAnimationActivity extends BaseFragment {
         enabledCell.setTextAndValueAndCheck("Анимация текста", "Плавное появление символов в поле ввода", MglaTextAnimConfig.isEnabled(), true, false);
         enabledCell.setOnClickListener(v -> {
             boolean value = !MglaTextAnimConfig.isEnabled();
+            if (value && !org.telegram.messenger.MglaFeatureFlags.isAllowed("text_anim_enabled")) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                enabledCell.setChecked(false);
+                return;
+            }
             MglaTextAnimConfig.setEnabled(value);
-            enabledCell.setChecked(value);
+            enabledCell.setChecked(MglaTextAnimConfig.isEnabled());
             updateEnabledState(true);
             restartDemo();
         });
