@@ -770,7 +770,6 @@ class Handler(BaseHTTPRequestHandler):
                     app_version=cur.get("app_version") or "0.0.0",
                     version_code=int(cur.get("version_code") or 1),
                     changelog=cur.get("changelog") or "",
-                    mandatory=bool(cur.get("mandatory")),
                     published=bool(cur.get("published")),
                     file_meta=file_meta,
                 )
@@ -803,7 +802,6 @@ class Handler(BaseHTTPRequestHandler):
                 app_version=fields.get("app_version") or "",
                 version_code=version_code,
                 changelog=fields.get("changelog") or "",
-                mandatory=bool(fields.get("mandatory")),
                 published=bool(fields.get("published")),
                 file_meta=file_meta,
             )

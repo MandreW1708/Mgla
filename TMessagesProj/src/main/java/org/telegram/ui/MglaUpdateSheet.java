@@ -136,12 +136,12 @@ public final class MglaUpdateSheet {
         column.addView(downloadBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 8));
 
         TextView later = new TextView(context);
-        later.setText(info.mandatory ? "" : LocaleController.getString(R.string.AppUpdateRemindMeLater));
+        later.setText(LocaleController.getString(R.string.AppUpdateRemindMeLater));
         later.setTextColor(Theme.getColor(Theme.key_dialogTextGray2));
         later.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         later.setGravity(Gravity.CENTER);
         later.setPadding(0, AndroidUtilities.dp(10), 0, AndroidUtilities.dp(4));
-        later.setVisibility(info.mandatory ? View.GONE : View.VISIBLE);
+        later.setVisibility(View.VISIBLE);
         column.addView(later, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         root.addView(column, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -150,8 +150,8 @@ public final class MglaUpdateSheet {
         builder.setCustomView(root);
         builder.setApplyBottomPadding(false);
         BottomSheet sheet = builder.create();
-        sheet.setCanDismissWithSwipe(!info.mandatory);
-        sheet.setCanDismissWithTouchOutside(!info.mandatory);
+        sheet.setCanDismissWithSwipe(true);
+        sheet.setCanDismissWithTouchOutside(true);
         sheet.setOnDismissListener(d -> {
             if (listener != null) {
                 listener.onDismissed();
@@ -276,7 +276,7 @@ public final class MglaUpdateSheet {
                     button.setLabel("Установить");
                     if (!installApk(activity, apk)) {
                         failUi(button, "Не удалось открыть установщик");
-                    } else if (sheet != null && !info.mandatory) {
+                    } else if (sheet != null) {
                         sheet.dismiss();
                     }
                 });

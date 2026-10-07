@@ -38,6 +38,31 @@ FEATURE_CATALOG: Sequence[Tuple[str, str]] = (
     ("edited_icon_enabled", "Иконка «изменено»"),
 )
 
+FEATURE_ICONS = {
+    "ai_enabled": "✨",
+    "ai_summary": "📝",
+    "ai_retell": "🔁",
+    "ai_editor": "✏️",
+    "ai_transcribe_enabled": "🎙️",
+    "ai_chat_dna": "🧬",
+    "ws_enabled": "🛡️",
+    "dpi_enabled": "🌐",
+    "spy_ghost_mode": "👻",
+    "spy_last_online": "👀",
+    "spy_save_deleted_messages": "🗑️",
+    "hidden_chats": "🙈",
+    "chat_time_seconds": "⏱️",
+    "hide_keyboard_on_scroll": "⌨️",
+    "comma_after_mention": "@",
+    "text_anim_enabled": "✨",
+    "proxy_in_header": "🔗",
+    "downloads_in_header": "⬇️",
+    "haptic_enabled": "📳",
+    "mgla_popup_notifications_enabled": "🔔",
+    "audio_autopause": "⏸️",
+    "edited_icon_enabled": "✏️",
+}
+
 FEATURE_IDS = frozenset(f for f, _ in FEATURE_CATALOG)
 FEATURE_LABELS = {f: label for f, label in FEATURE_CATALOG}
 
@@ -97,26 +122,28 @@ def render_admin_html(
     rows = []
     for fid, label in FEATURE_CATALOG:
         checked = " checked" if global_disabled.get(fid) else ""
+        ico = FEATURE_ICONS.get(fid, "🔹")
         rows.append(
             "<tr>"
-            f"<td class='name'>{html.escape(label)}</td>"
+            f"<td class='name'><span class='fico'>{ico}</span> {html.escape(label)}</td>"
             f"<td><code>{html.escape(fid)}</code></td>"
             f"<td class='num'><label><input type='checkbox' name='kill_{html.escape(fid)}' value='1'{checked}> "
-            "выключить у всех</label></td>"
+            "🛑 выключить у всех</label></td>"
             "</tr>"
         )
 
     options = [
-        f"<option value='{html.escape(fid)}'>{html.escape(label)}</option>"
+        f"<option value='{html.escape(fid)}'>{FEATURE_ICONS.get(fid, '🔹')} {html.escape(label)}</option>"
         for fid, label in FEATURE_CATALOG
     ]
 
     deny_rows = []
     for tg_id, feature, created in denies:
+        ico = FEATURE_ICONS.get(feature, "🔹")
         deny_rows.append(
             "<tr>"
             f"<td class='num'>{tg_id}</td>"
-            f"<td class='name'>{html.escape(label_feature(feature))} "
+            f"<td class='name'><span class='fico'>{ico}</span> {html.escape(label_feature(feature))} "
             f"(<code>{html.escape(feature)}</code>)</td>"
             f"<td class='num'>{html.escape(created or '')}</td>"
             "<td>"
@@ -124,7 +151,7 @@ def render_admin_html(
             "<input type='hidden' name='action' value='deny_remove'>"
             f"<input type='hidden' name='tg_id' value='{tg_id}'>"
             f"<input type='hidden' name='feature' value='{html.escape(feature)}'>"
-            "<button type='submit' class='btn danger'>Снять</button>"
+            "<button type='submit' class='btn danger'>✅ Снять</button>"
             "</form>"
             "</td>"
             "</tr>"
@@ -163,19 +190,24 @@ body {{
     linear-gradient(180deg, var(--bg1), var(--bg0) 40%, #090b0e);
   min-height:100vh;
 }}
+html {{ -webkit-text-size-adjust:100%; }}
 .wrap {{ max-width:960px; margin:0 auto; padding:28px 18px 72px; }}
 .hero {{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:18px; }}
-.brand {{ display:flex; gap:14px; align-items:center; }}
+.brand {{ display:flex; gap:14px; align-items:center; min-width:0; }}
 .logo {{
-  width:52px; height:52px; border-radius:16px;
+  width:52px; height:52px; border-radius:16px; flex:0 0 auto;
   background:linear-gradient(145deg, #f0b45a, #c47a22);
   display:grid; place-items:center; font-weight:800; color:#1a1208; font-size:20px;
 }}
 .brand h1 {{ margin:0; font-size:26px; letter-spacing:-.02em; }}
 .brand p {{ margin:2px 0 0; color:var(--muted); font-size:14px; }}
+.nav {{
+  display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch;
+  max-width:100%;
+}}
 .nav a {{
   color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:999px;
-  border:1px solid var(--line); background:rgba(255,255,255,.02); margin-left:6px;
+  border:1px solid var(--line); background:rgba(255,255,255,.02); white-space:nowrap; flex:0 0 auto;
 }}
 .nav a.on {{ color:#1a1208; background:var(--accent); border-color:var(--accent); font-weight:650; }}
 .card {{
@@ -184,7 +216,8 @@ body {{
 }}
 .card h2 {{ margin:0 0 4px; font-size:17px; }}
 .sub {{ color:var(--muted); font-size:13px; margin:0 0 14px; }}
-table {{ width:100%; border-collapse:collapse; }}
+.table-wrap {{ width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }}
+table {{ width:100%; border-collapse:collapse; min-width:420px; }}
 th {{
   text-align:left; color:var(--muted); font-weight:600; font-size:12px;
   text-transform:uppercase; letter-spacing:.04em;
@@ -193,7 +226,9 @@ th {{
 td {{ padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }}
 tr:last-child td {{ border-bottom:0; }}
 td.num {{ white-space:nowrap; font-variant-numeric:tabular-nums; }}
-code {{ font-size:12px; color:#c9d2e0; }}
+td.name {{ word-break:break-word; }}
+.fico {{ display:inline-block; width:1.4em; text-align:center; }}
+code {{ font-size:12px; color:#c9d2e0; word-break:break-all; }}
 .empty {{ color:var(--muted); padding:10px 0; }}
 .flash {{
   border-radius:14px; padding:12px 14px; margin-bottom:14px; border:1px solid var(--line);
@@ -201,20 +236,29 @@ code {{ font-size:12px; color:#c9d2e0; }}
 .flash.ok {{ background:rgba(62,207,142,.12); border-color:rgba(62,207,142,.35); }}
 .flash.err {{ background:rgba(232,93,93,.12); border-color:rgba(232,93,93,.4); }}
 .row {{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:12px; }}
-label.field {{ display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:12px; }}
+label.field {{ display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:12px; flex:1 1 160px; }}
 input[type=text], input[type=number], select, textarea {{
   background:#10141a; color:var(--text); border:1px solid var(--line);
-  border-radius:10px; padding:9px 11px; font:inherit; min-width:160px;
+  border-radius:10px; padding:9px 11px; font:inherit; width:100%; min-width:0;
 }}
 textarea {{ width:100%; min-height:160px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; }}
 .btn {{
-  appearance:none; border:0; border-radius:10px; padding:9px 14px; font:inherit; font-weight:650;
+  appearance:none; border:0; border-radius:10px; padding:11px 14px; font:inherit; font-weight:650;
   cursor:pointer; background:var(--accent); color:#1a1208;
 }}
 .btn.secondary {{ background:#2a313d; color:var(--text); }}
 .btn.danger {{ background:var(--danger); color:#fff; }}
 form.inline {{ display:inline; margin:0; }}
 .footer {{ margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; }}
+@media (max-width:720px) {{
+  .wrap {{ padding:18px 12px 56px; }}
+  .brand h1 {{ font-size:22px; }}
+  .card {{ padding:14px; }}
+  .row {{ flex-direction:column; align-items:stretch; }}
+  .btn {{ width:100%; }}
+  table {{ min-width:360px; font-size:13px; }}
+  th, td {{ padding:8px 6px; }}
+}}
 </style>
 </head>
 <body>
@@ -224,75 +268,79 @@ form.inline {{ display:inline; margin:0; }}
       <div class="logo">M</div>
       <div>
         <h1>Mgla Hub</h1>
-        <p>Управление доступом и моделями OpenRouter</p>
+        <p>🎛️ Управление доступом и моделями OpenRouter</p>
       </div>
     </div>
     <div class="nav">
-      <a href="/">Статистика</a>
-      <a class="on" href="/admin">Флаги</a>
-      <a href="/admin/updates">Обновления</a>
+      <a href="/">📊 Статистика</a>
+      <a class="on" href="/admin">🚩 Флаги</a>
+      <a href="/admin/updates">📦 Обновления</a>
     </div>
   </div>
   {flash}
 
   <div class="card">
-    <h2>Feature flags — глобально</h2>
+    <h2>🚩 Feature flags — глобально</h2>
     <p class="sub">Kill-switch выключает функцию у всех клиентов после следующего опроса хаба.</p>
     <form method="post" action="/admin">
       <input type="hidden" name="action" value="save_globals">
+      <div class="table-wrap">
       <table>
         <thead><tr><th>Функция</th><th>id</th><th></th></tr></thead>
         <tbody>
           {"".join(rows)}
         </tbody>
       </table>
-      <div class="row"><button class="btn" type="submit">Сохранить kill-switch</button></div>
+      </div>
+      <div class="row"><button class="btn" type="submit">💾 Сохранить kill-switch</button></div>
     </form>
   </div>
 
   <div class="card">
-    <h2>Feature flags — запрет по Telegram ID</h2>
+    <h2>👤 Feature flags — запрет по Telegram ID</h2>
     <p class="sub">После сохранения функция станет недоступна этому пользователю и выключится, если была включена.</p>
     <form method="post" action="/admin">
       <input type="hidden" name="action" value="deny_add">
       <div class="row">
-        <label class="field">Telegram ID
+        <label class="field">🆔 Telegram ID
           <input type="number" name="tg_id" required min="1" step="1" placeholder="123456789">
         </label>
-        <label class="field">Функция
+        <label class="field">🧩 Функция
           <select name="feature">{"".join(options)}</select>
         </label>
-        <button class="btn" type="submit">Запретить</button>
+        <button class="btn" type="submit">🚫 Запретить</button>
       </div>
     </form>
-    <table style="margin-top:16px">
+    <div class="table-wrap" style="margin-top:16px">
+    <table>
       <thead><tr><th>tg_id</th><th>Функция</th><th>Когда</th><th></th></tr></thead>
       <tbody>
         {"".join(deny_rows)}
       </tbody>
     </table>
+    </div>
   </div>
 
   <div class="card">
-    <h2>OpenRouter — модели (fallback по порядку)</h2>
+    <h2>🤖 OpenRouter — модели (fallback по порядку)</h2>
     <p class="sub">Источник правды на хабе. При сохранении список пушится на mglabot
       (<code>{bot_hint}</code>). Ключ API на хабе не хранится.</p>
     <form method="post" action="/admin">
       <input type="hidden" name="action" value="save_models">
-      <label class="field" style="width:100%">Модели (одна на строку)
+      <label class="field" style="width:100%;flex:1 1 100%">📋 Модели (одна на строку)
         <textarea name="models" spellcheck="false">{html.escape(models_to_text(models))}</textarea>
       </label>
       <div class="row">
-        <button class="btn" type="submit">Сохранить и пушить на mglabot</button>
+        <button class="btn" type="submit">💾 Сохранить и пушить на mglabot</button>
       </div>
     </form>
     <form method="post" action="/admin" style="margin-top:10px">
       <input type="hidden" name="action" value="push_models">
-      <button class="btn secondary" type="submit">Повторить push на mglabot</button>
+      <button class="btn secondary" type="submit">🔁 Повторить push на mglabot</button>
     </form>
   </div>
 
-  <p class="footer">Только Basic Auth. Клиентский токен сюда не подходит.</p>
+  <p class="footer">🔐 Только Basic Auth. Клиентский токен сюда не подходит.</p>
 </div>
 </body>
 </html>

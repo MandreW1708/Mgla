@@ -82,14 +82,12 @@ public final class MglaUpdateChecker {
                 if (prefs != null) {
                     prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply();
                 }
-                if (info == null) {
+                if (info == null || !isStillNewerThanInstalled(info)) {
                     clearPending();
                     return;
                 }
                 String dismissed = prefs != null ? prefs.getString(KEY_DISMISSED, "") : "";
-                if (!info.mandatory
-                        && !TextUtils.isEmpty(dismissed)
-                        && dismissed.equals(dismissKey(info))) {
+                if (!TextUtils.isEmpty(dismissed) && dismissed.equals(dismissKey(info))) {
                     return;
                 }
                 persistPending(info);
@@ -105,7 +103,7 @@ public final class MglaUpdateChecker {
     }
 
     public static void dismiss(MglaUpdateInfo info) {
-        if (info == null || info.mandatory) {
+        if (info == null) {
             return;
         }
         SharedPreferences prefs = prefs();
@@ -119,15 +117,68 @@ public final class MglaUpdateChecker {
         return (info.appVersion == null ? "" : info.appVersion) + "|" + info.versionCode;
     }
 
+    /** Same base-code rule as the hub: APP_VERSION_CODE vs APK versionCode/10. */
+    static boolean isStillNewerThanInstalled(MglaUpdateInfo info) {
+        if (info == null) {
+            return false;
+        }
+        int local = currentVersionCode();
+        int hub = info.versionCode;
+        int localBase = local >= 10000 ? local / 10 : local;
+        int hubBase = hub >= 10000 ? hub / 10 : hub;
+        if (hubBase > localBase) {
+            return true;
+        }
+        String localApp = BuildVars.BUILD_VERSION_STRING == null ? "" : BuildVars.BUILD_VERSION_STRING;
+        String hubApp = info.appVersion == null ? "" : info.appVersion;
+        return versionStringGreater(hubApp, localApp);
+    }
+
+    private static boolean versionStringGreater(String a, String b) {
+        if (TextUtils.isEmpty(a)) {
+            return false;
+        }
+        String[] pa = a.replace("v", "").replace("V", "").split("\\.");
+        String[] pb = (b == null ? "0" : b).replace("v", "").replace("V", "").split("\\.");
+        int n = Math.max(pa.length, pb.length);
+        for (int i = 0; i < n; i++) {
+            int na = 0, nb = 0;
+            try {
+                if (i < pa.length) {
+                    na = Integer.parseInt(pa[i].replaceAll("[^0-9].*", ""));
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                if (i < pb.length) {
+                    nb = Integer.parseInt(pb[i].replaceAll("[^0-9].*", ""));
+                }
+            } catch (Exception ignored) {
+            }
+            if (na != nb) {
+                return na > nb;
+            }
+        }
+        return false;
+    }
+
     public static void showPendingIfAny(Activity activity) {
         MglaUpdateInfo pending = loadPending();
-        if (pending != null && activity != null) {
-            showIfPossible(pending);
+        if (pending == null || activity == null) {
+            return;
         }
+        if (!isStillNewerThanInstalled(pending)) {
+            clearPending();
+            return;
+        }
+        showIfPossible(pending);
     }
 
     private static void showIfPossible(MglaUpdateInfo info) {
-        if (info == null || sheetShowing) {
+        if (info == null || sheetShowing || !isStillNewerThanInstalled(info)) {
+            if (info != null && !isStillNewerThanInstalled(info)) {
+                clearPending();
+            }
             return;
         }
         Activity activity = LaunchActivity.instance;

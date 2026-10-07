@@ -25,13 +25,24 @@ SETTING_LABELS = {
     "hide_keyboard_on_scroll": "Скрывать клавиатуру при прокрутке",
     "comma_after_mention": "Запятая после упоминания",
     "ai_enabled": "ИИ включён",
-    "ai_summary": "Краткая свозка",
+    "ai_summary": "Краткая сводка",
     "ai_retell": "Пересказ сообщений",
     "ai_editor": "AI-редактор",
     "ai_chat_dna": "Chat DNA",
     "transcribe_enabled": "Расшифровка голосовых",
+    "ai_transcribe_enabled": "Расшифровка голосовых",
     "text_anim_enabled": "Анимация ввода текста",
     "ws_enabled": "Обход блокировок (WS)",
+    "dpi_enabled": "ByeDPI",
+    "spy_ghost_mode": "Режим призрака",
+    "spy_last_online": "Последний онлайн",
+    "spy_save_deleted_messages": "Сохранение удалённых",
+    "proxy_in_header": "Прокси в шапке",
+    "downloads_in_header": "Загрузки в шапке",
+    "haptic_enabled": "Хаптика",
+    "mgla_popup_notifications_enabled": "Всплывающие уведомления",
+    "audio_autopause": "Автопауза аудио",
+    "edited_icon_enabled": "Иконка «изменено»",
     "camera_api": "Камера (API)",
     "camera_x_60fps": "Камера 60 FPS",
     "accounts": "Число аккаунтов в приложении",
@@ -40,6 +51,34 @@ SETTING_LABELS = {
     "double_tap_out": "Двойной тап (исходящие)",
     "double_tap_in": "Двойной тап (входящие)",
     "ai_provider": "Провайдер ИИ",
+}
+
+SETTING_ICONS = {
+    "ai_enabled": "✨",
+    "ai_summary": "📝",
+    "ai_retell": "🔁",
+    "ai_editor": "✏️",
+    "ai_chat_dna": "🧬",
+    "transcribe_enabled": "🎙️",
+    "ai_transcribe_enabled": "🎙️",
+    "ws_enabled": "🛡️",
+    "dpi_enabled": "🌐",
+    "spy_ghost_mode": "👻",
+    "spy_last_online": "👀",
+    "spy_save_deleted_messages": "🗑️",
+    "chat_time_seconds": "⏱️",
+    "hide_keyboard_on_scroll": "⌨️",
+    "comma_after_mention": "@",
+    "text_anim_enabled": "✨",
+    "proxy_in_header": "🔗",
+    "downloads_in_header": "⬇️",
+    "haptic_enabled": "📳",
+    "mgla_popup_notifications_enabled": "🔔",
+    "audio_autopause": "⏸️",
+    "edited_icon_enabled": "✏️",
+    "sticker_time_hidden": "😶",
+    "camera_api": "📷",
+    "camera_x_60fps": "🎬",
 }
 
 COUNTER_LABELS = {
@@ -194,21 +233,21 @@ class Report:
 
         sections.append({
             "kind": "insights",
-            "title": "Коротко: что происходит",
+            "title": "📌 Коротко: что происходит",
             "lines": self.insight_lines(total, new, dau, wau, mau, ai_users, quota_users, misses_top),
         })
 
         sections.append({
             "kind": "kpis",
-            "title": "Сколько людей",
+            "title": "👥 Сколько людей",
             "kv": [
-                ("Всего установок", total, "Сколько раз поставили Mgla (анонимно)"),
-                (f"Новых за {self.days} дн.", new, "Первый раз прислали статистику"),
-                ("Сегодня", dau, "Хоть раз что-то сделали сегодня"),
-                ("Вчера", dau_y, "Были активны вчера"),
-                ("За 7 дней", wau, "Уникальные установки за неделю"),
-                ("За 30 дней", mau, "Уникальные установки за месяц"),
-                ("Возвращаемость", pct(retained, cohort),
+                ("📦 Всего установок", total, "Сколько раз поставили Mgla (анонимно)"),
+                (f"🆕 Новых за {self.days} дн.", new, "Первый раз прислали статистику"),
+                ("☀️ Сегодня", dau, "Хоть раз что-то сделали сегодня"),
+                ("🌙 Вчера", dau_y, "Были активны вчера"),
+                ("📅 За 7 дней", wau, "Уникальные установки за неделю"),
+                ("🗓️ За 30 дней", mau, "Уникальные установки за месяц"),
+                ("↩️ Возвращаемость", pct(retained, cohort),
                  "Из тех, кто пришёл 8–14 дней назад, сколько ещё заходят"),
             ],
         })
@@ -224,7 +263,7 @@ class Report:
             chart.append((d, active_by_day.get(d, 0), new_by_day.get(d, 0)))
         sections.append({
             "kind": "chart",
-            "title": "Активность по дням",
+            "title": "📈 Активность по дням",
             "subtitle": "Синие столбцы — сколько людей пользовались приложением. Зелёная линия — новые установки.",
             "chart": chart,
         })
@@ -233,7 +272,7 @@ class Report:
             "SELECT SUM(count) FROM counters WHERE day >= ? AND name = 'ai:quota_exhausted'",
             (self.since,))
         sections.append(self.counter_section(
-            "ai:", "Искусственный интеллект",
+            "ai:", "✨ Искусственный интеллект",
             f"ИИ пользуются {ai_users} человек ({pct(ai_users, self.active)} активных). "
             f"В лимит упёрлись {quota_users} человек, всего {quota_events or 0} раз."))
 
@@ -257,7 +296,7 @@ class Report:
                 usage_rows.append((label, u, pct(u, self.active), c))
         sections.append({
             "kind": "table",
-            "title": "Что делают в приложении",
+            "title": "🧭 Что делают в приложении",
             "subtitle": "Самые заметные действия за период (не настройки).",
             "headers": ["Действие", "Сколько человек", "Доля активных", "Сколько раз"],
             "rows": usage_rows[: self.top],
@@ -266,10 +305,10 @@ class Report:
         })
 
         sections.append(self.counter_section(
-            "screen:", "Какие экраны открывают",
+            "screen:", "📱 Какие экраны открывают",
             "Помогает понять, куда люди заходят в настройках Mgla."))
         sections.append(self.counter_section(
-            "set:", "Что меняют в настройках",
+            "set:", "⚙️ Что меняют в настройках",
             "Каждую строку читайте как «столько человек сделали это действие»."))
 
         rows = self.q(
@@ -278,30 +317,42 @@ class Report:
         by_key = {}
         for key, value, n in rows:
             by_key.setdefault(key, {})[value] = n
-        booleans, others = [], []
+        feature_items, others = [], []
         for key, values in by_key.items():
             n = sum(values.values())
             pretty = label_setting(key)
             if set(values) <= {"true", "false"}:
                 on = values.get("true", 0)
-                booleans.append((pretty, on, n, pct(on, n)))
+                off = values.get("false", 0)
+                share = (100.0 * on / n) if n else 0.0
+                feature_items.append({
+                    "key": key,
+                    "name": pretty,
+                    "icon": SETTING_ICONS.get(key, "🔹"),
+                    "on": on,
+                    "off": off,
+                    "total": n,
+                    "pct": f"{share:.0f}%",
+                    "share": share,
+                })
             else:
                 dist = ", ".join(
                     f"{v}: {c}" for v, c in sorted(values.items(), key=lambda x: -x[1])[:6])
                 others.append((pretty, n, dist))
-        booleans.sort(key=lambda r: (-r[1], r[0]))
+        feature_items.sort(key=lambda r: (-r["share"], -r["on"], r["name"]))
         sections.append({
-            "kind": "table",
-            "title": "Какие функции сейчас включены",
-            "subtitle": "По последнему снимку настроек у тех, кто был активен за период.",
-            "headers": ["Функция", "Включено у", "Всего ответов", "Доля"],
-            "rows": booleans,
-            "bar": 1,
-            "bar_max": max([r[2] for r in booleans] or [1]),
+            "kind": "features",
+            "title": "🧩 Какие функции сейчас включены",
+            "subtitle": (
+                "Карточки настроек у активных за период. "
+                "Зелёная полоска — сколько человек держат опцию включённой, "
+                "серая — выключенной. Процент — доля включённых."
+            ),
+            "items": feature_items,
         })
         sections.append({
             "kind": "table",
-            "title": "Другие значения настроек",
+            "title": "🎛️ Другие значения настроек",
             "headers": ["Параметр", "Установок", "Как настроено"],
             "rows": sorted(others),
         })
@@ -311,7 +362,7 @@ class Report:
             "ORDER BY 2 DESC LIMIT ?", (self.since, self.top))
         sections.append({
             "kind": "table",
-            "title": "Ищут в настройках — и не находят",
+            "title": "🔎 Ищут в настройках — и не находят",
             "subtitle": "Это готовый список идей: чего люди ждут, а чего ещё нет.",
             "headers": ["Что искали", "Сколько раз"],
             "rows": miss_rows,
@@ -319,11 +370,11 @@ class Report:
         })
 
         for column, title, hint in (
-            ("ver", "Версии Mgla", "Какая сборка у людей"),
-            ("man", "Производители телефонов", None),
-            ("model", "Модели", None),
-            ("sdk", "Версия Android (SDK)", "Чем выше — тем новее Android"),
-            ("lang", "Язык системы", None),
+            ("ver", "🏷️ Версии Mgla", "Какая сборка у людей"),
+            ("man", "🏭 Производители", None),
+            ("model", "📱 Модели", None),
+            ("sdk", "🤖 Android (SDK)", "Чем выше — тем новее Android"),
+            ("lang", "🌍 Язык системы", None),
         ):
             rows = self.q(
                 f"SELECT COALESCE({column}, '?'), COUNT(*) FROM installs WHERE last_seen >= ? "
@@ -362,6 +413,12 @@ def render_text(sections, days, since):
         elif s.get("kind") == "kpis":
             for k, v, hint in s["kv"]:
                 out.append(f"  {k}: {v}" + (f"  ({hint})" if hint else ""))
+        elif s.get("kind") == "features":
+            for it in s.get("items") or []:
+                out.append(
+                    f"  {it['icon']} {it['name']}: вкл. {it['on']} / выкл. {it['off']} "
+                    f"({it['pct']} из {it['total']})"
+                )
         elif "chart" in s:
             out += [f"  {d}  активны: {a:<6} новых: {n}" for d, a, n in s["chart"]]
         else:
@@ -394,7 +451,7 @@ CSS = """
   --shadow:0 18px 50px rgba(0,0,0,.35);
 }
 * { box-sizing:border-box; }
-html { scroll-behavior:smooth; }
+html { scroll-behavior:smooth; -webkit-text-size-adjust:100%; }
 body {
   margin:0; color:var(--text);
   font:15px/1.5 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
@@ -409,21 +466,22 @@ body {
   display:flex; flex-wrap:wrap; gap:18px; align-items:flex-end;
   justify-content:space-between; margin-bottom:22px;
 }
-.brand {
-  display:flex; gap:14px; align-items:center;
-}
+.brand { display:flex; gap:14px; align-items:center; min-width:0; }
 .logo {
-  width:52px; height:52px; border-radius:16px;
+  width:52px; height:52px; border-radius:16px; flex:0 0 auto;
   background:linear-gradient(145deg, #f0b45a, #c47a22);
   box-shadow:0 10px 30px rgba(232,165,75,.35);
   display:grid; place-items:center; font-weight:800; color:#1a1208; font-size:20px;
 }
 .brand h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
 .brand p { margin:2px 0 0; color:var(--muted); font-size:14px; }
-.nav { display:flex; flex-wrap:wrap; gap:8px; }
+.nav {
+  display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch;
+  max-width:100%; padding-bottom:2px;
+}
 .nav a {
   color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:999px;
-  border:1px solid var(--line); background:rgba(255,255,255,.02);
+  border:1px solid var(--line); background:rgba(255,255,255,.02); white-space:nowrap; flex:0 0 auto;
 }
 .nav a.on { color:#1a1208; background:var(--accent); border-color:var(--accent); font-weight:650; }
 .meta { color:var(--muted); font-size:13px; margin:0 0 18px; }
@@ -452,8 +510,9 @@ body {
 }
 .card h2 { margin:0 0 4px; font-size:17px; }
 .sub { color:var(--muted); font-size:13px; margin:0 0 12px; }
-.grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:0 18px; }
-table { width:100%; border-collapse:collapse; }
+.grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:0 18px; }
+.table-wrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+table { width:100%; border-collapse:collapse; min-width:480px; }
 th {
   text-align:left; color:var(--muted); font-weight:600; font-size:12px;
   text-transform:uppercase; letter-spacing:.04em;
@@ -463,7 +522,7 @@ td { padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:middle
 tr:last-child td { border-bottom:0; }
 td.num { white-space:nowrap; font-variant-numeric:tabular-nums; }
 td.name { word-break:break-word; }
-td.bar { width:40%; }
+td.bar { width:40%; min-width:120px; }
 .bar div { display:flex; align-items:center; gap:10px; }
 .bar b { font-weight:600; min-width:36px; text-align:right; }
 .bar span { flex:1; height:8px; border-radius:999px; background:#232a35; overflow:hidden; }
@@ -471,19 +530,60 @@ td.bar { width:40%; }
   display:block; height:100%; border-radius:999px;
   background:linear-gradient(90deg, var(--accent), #f2c57a);
 }
+.feat-grid {
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px;
+}
+.feat {
+  background:var(--card2); border:1px solid var(--line); border-radius:14px;
+  padding:14px; display:flex; flex-direction:column; gap:10px;
+}
+.feat-top { display:flex; gap:10px; align-items:flex-start; }
+.feat-ico {
+  width:40px; height:40px; border-radius:12px; flex:0 0 auto;
+  display:grid; place-items:center; font-size:18px;
+  background:rgba(255,255,255,.04); border:1px solid var(--line);
+}
+.feat-name { font-weight:650; font-size:14px; line-height:1.3; }
+.feat-meta { color:var(--muted); font-size:12.5px; margin-top:3px; }
+.feat-track { height:9px; border-radius:999px; background:#232a35; overflow:hidden; display:flex; }
+.feat-track .on { background:linear-gradient(90deg,#2f9e6c,var(--accent2)); height:100%; }
+.feat-track .off { background:#3a4454; height:100%; }
+.feat-pills { display:flex; flex-wrap:wrap; gap:6px; }
+.pill {
+  font-size:11.5px; font-weight:650; padding:4px 8px; border-radius:999px;
+  border:1px solid var(--line);
+}
+.pill.yes { color:#9af0c5; background:rgba(62,207,142,.12); border-color:rgba(62,207,142,.35); }
+.pill.no { color:#c5ccd8; background:rgba(255,255,255,.04); }
 .empty { color:var(--muted); padding:10px 0; }
 .legend { color:var(--muted); font-size:12.5px; margin-bottom:8px; }
 .legend i {
   display:inline-block; width:10px; height:10px; border-radius:3px; margin:0 6px 0 12px;
   vertical-align:middle;
 }
+.chart-wrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.chart-wrap svg { min-width:520px; }
 svg text { fill:var(--muted); font-size:10px; }
-.footer {
-  margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center;
-}
-@media (max-width:640px) {
+.footer { margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; padding:0 8px; }
+@media (max-width:720px) {
+  .wrap { padding:18px 12px 56px; }
+  .hero { gap:12px; align-items:flex-start; }
   .brand h1 { font-size:22px; }
-  .kpi .v { font-size:22px; }
+  .brand p { font-size:13px; }
+  .logo { width:44px; height:44px; border-radius:14px; font-size:18px; }
+  .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .kpi { min-height:0; padding:12px; }
+  .kpi .v { font-size:20px; }
+  .card { padding:14px; border-radius:16px; }
+  .card h2 { font-size:16px; }
+  .feat-grid { grid-template-columns:1fr; }
+  .grid2 { grid-template-columns:1fr; }
+  table { min-width:420px; font-size:13px; }
+  th, td { padding:8px 6px; }
+}
+@media (max-width:420px) {
+  .kpis { grid-template-columns:1fr 1fr; }
+  .nav a { padding:7px 10px; font-size:13px; }
 }
 """
 
@@ -524,7 +624,7 @@ def render_table(s):
     if not rows:
         return '<div class="empty">Пока нет данных за этот период</div>'
     bar_max = s.get("bar_max") or (max([r[bar] for r in rows] or [1]) if bar is not None else 1)
-    out = ["<table><thead><tr>"]
+    out = ['<div class="table-wrap"><table><thead><tr>']
     out += [f"<th>{html.escape(str(hd))}</th>" for hd in headers]
     out.append("</tr></thead><tbody>")
     for r in rows:
@@ -541,8 +641,41 @@ def render_table(s):
             else:
                 out.append(f'<td class="num">{text}</td>')
         out.append("</tr>")
-    out.append("</tbody></table>")
+    out.append("</tbody></table></div>")
     return "".join(out)
+
+
+def render_features(s):
+    items = s.get("items") or []
+    if not items:
+        return '<div class="empty">Пока нет снимков настроек за этот период</div>'
+    legend = (
+        '<div class="legend feat-legend">'
+        '<i style="background:linear-gradient(90deg,#2f9e6c,#3ecf8e)"></i>доля «включено»'
+        '<i style="background:#3a4454"></i>доля «выключено»'
+        ' · каждая карточка — одна опция у активных за период'
+        '</div>'
+    )
+    cards = []
+    for it in items:
+        on, off, total = it["on"], it["off"], it["total"] or 1
+        on_w = 100.0 * on / total
+        off_w = 100.0 - on_w
+        tone = "yes" if on_w >= 50 else "no"
+        cards.append(
+            f'<div class="feat">'
+            f'<div class="feat-top"><div class="feat-ico">{html.escape(it["icon"])}</div>'
+            f'<div><div class="feat-name">{html.escape(it["name"])}</div>'
+            f'<div class="feat-meta">Включено у <b>{on}</b> из {total} · {html.escape(it["pct"])}</div></div></div>'
+            f'<div class="feat-track"><div class="on" style="width:{on_w:.1f}%"></div>'
+            f'<div class="off" style="width:{off_w:.1f}%"></div></div>'
+            f'<div class="feat-pills">'
+            f'<span class="pill yes">✅ вкл. {on}</span>'
+            f'<span class="pill no">⛔ выкл. {off}</span>'
+            f'<span class="pill {tone}">{"Чаще включена" if on_w >= 50 else "Чаще выключена"}</span>'
+            f'</div></div>'
+        )
+    return legend + '<div class="feat-grid">' + "".join(cards) + "</div>"
 
 
 def render_html(sections, days, since, links=False):
@@ -550,21 +683,21 @@ def render_html(sections, days, since, links=False):
     nav = ""
     if links:
         period = "".join(
-            f"<a href='?days={d}' class='{'on' if d == days else ''}'>{d} дн.</a>"
+            f"<a href='?days={d}' class='{'on' if d == days else ''}'>📅 {d} дн.</a>"
             for d in (1, 7, 30, 90))
-        nav = f'<div class="nav">{period}<a href="/admin">Управление</a></div>'
+        nav = f'<div class="nav">{period}<a href="/admin">🎛️ Управление</a></div>'
     body = [f"""
 <div class="hero">
   <div class="brand">
     <div class="logo">M</div>
     <div>
       <h1>Mgla Hub</h1>
-      <p>Панель статистики клиента · доступ только у вас</p>
+      <p>📊 Статистика клиента · доступ только у вас</p>
     </div>
   </div>
   {nav}
 </div>
-<div class="meta">Период: последние {days} дн. (с {since}) · обновлено {generated} UTC</div>
+<div class="meta">📅 Период: последние {days} дн. (с {since}) · обновлено {generated} UTC</div>
 """]
 
     devices = []
@@ -588,7 +721,9 @@ def render_html(sections, days, since, links=False):
             devices.append(s)
             continue
         if kind == "chart":
-            inner = render_chart(s["chart"])
+            inner = '<div class="chart-wrap">' + render_chart(s["chart"]) + "</div>"
+        elif kind == "features":
+            inner = render_features(s)
         else:
             inner = render_table(s)
         sub = f'<p class="sub">{html.escape(s["subtitle"])}</p>' if s.get("subtitle") else ""
@@ -596,7 +731,7 @@ def render_html(sections, days, since, links=False):
             f'<div class="card"><h2>{html.escape(s["title"])}</h2>{sub}{inner}</div>')
 
     if devices:
-        body.append('<div class="card"><h2>Версии и устройства</h2><div class="grid2">')
+        body.append('<div class="card"><h2>💻 Версии и устройства</h2><div class="grid2">')
         for s in devices:
             sub = f'<p class="sub">{html.escape(s["subtitle"])}</p>' if s.get("subtitle") else ""
             body.append(
@@ -605,7 +740,7 @@ def render_html(sections, days, since, links=False):
         body.append("</div></div>")
 
     body.append(
-        '<div class="footer">Данные анонимные: без Telegram ID, номеров и текстов чатов. '
+        '<div class="footer">🔒 Данные анонимные: без Telegram ID, номеров и текстов чатов. '
         'IP клиента не сохраняется.</div>')
 
     return (
