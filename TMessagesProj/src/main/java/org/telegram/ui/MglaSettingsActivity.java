@@ -40,7 +40,6 @@ import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.wsbypass.MglaWsBypass;
-
 public class MglaSettingsActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
     private SettingCell dpiBypassCell;
@@ -180,12 +179,31 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
         titleView.setGravity(Gravity.CENTER);
         header.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 4));
 
+        LinearLayout versionRow = new LinearLayout(context);
+        versionRow.setOrientation(LinearLayout.HORIZONTAL);
+        versionRow.setGravity(Gravity.CENTER);
+
         TextView versionView = new TextView(context);
         versionView.setText(BuildVars.MGLA_VERSION_STRING);
         versionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         versionView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        versionView.setGravity(Gravity.CENTER);
-        header.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+        versionView.setGravity(Gravity.CENTER_VERTICAL);
+        versionRow.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        TextView versionBetaBadge = new TextView(context);
+        versionBetaBadge.setText("beta");
+        versionBetaBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+        versionBetaBadge.setTypeface(AndroidUtilities.bold());
+        versionBetaBadge.setTextColor(0xFFFFFFFF);
+        versionBetaBadge.setGravity(Gravity.CENTER);
+        versionBetaBadge.setPadding(dp(5), dp(1), dp(5), dp(2));
+        GradientDrawable versionBadgeBg = new GradientDrawable();
+        versionBadgeBg.setCornerRadius(dp(4));
+        versionBadgeBg.setColor(Theme.getColor(Theme.key_chat_messagePanelSend));
+        versionBetaBadge.setBackground(versionBadgeBg);
+        versionRow.addView(versionBetaBadge, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
+
+        header.addView(versionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
         return header;
     }

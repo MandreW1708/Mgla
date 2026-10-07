@@ -8,6 +8,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MglaDirectHttp;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -15,7 +16,6 @@ import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public class GeminiTranscriber {
@@ -105,8 +105,8 @@ public class GeminiTranscriber {
             + "\"generationConfig\":{\"temperature\":0.1,\"maxOutputTokens\":1024}"
             + "}";
 
-        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        HttpURLConnection conn = MglaDirectHttp.open(
+            "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey);
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setDoOutput(true);

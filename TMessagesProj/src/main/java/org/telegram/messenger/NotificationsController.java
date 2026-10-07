@@ -1831,29 +1831,33 @@ public class NotificationsController extends BaseController implements Notificat
                         final ArrayList<TLRPC.Dialog> dialogs = new ArrayList<>(MessagesController.getInstance(a).allDialogs);
                         for (int i = 0, N = dialogs.size(); i < N; i++) {
                             TLRPC.Dialog dialog = dialogs.get(i);
-                            if (dialog != null && DialogObject.isChatDialog(dialog.id)) {
-                                TLRPC.Chat chat = getMessagesController().getChat(-dialog.id);
+                            if (dialog == null || MglaHiddenChats.isHidden(a, dialog.id)) {
+                                continue;
+                            }
+                            if (DialogObject.isChatDialog(dialog.id)) {
+                                TLRPC.Chat chat = MessagesController.getInstance(a).getChat(-dialog.id);
                                 if (ChatObject.isNotInChat(chat) || ChatObject.isCommunity(chat)) {
                                     continue;
                                 }
                             }
-                            if (dialog != null) {
-                                count += MessagesController.getInstance(a).getDialogUnreadCount(dialog);
-                            }
+                            count += MessagesController.getInstance(a).getDialogUnreadCount(dialog);
                         }
                     } catch (Exception e) {
                         FileLog.e(e);
                     }
                 } else {
-                    count += controller.total_unread_count;
+                    count += getPushDialogsBadgeCount(a, controller, true);
                 }
             } else {
                 if (controller.showBadgeMuted) {
                     try {
                         for (int i = 0, N = MessagesController.getInstance(a).allDialogs.size(); i < N; i++) {
                             TLRPC.Dialog dialog = MessagesController.getInstance(a).allDialogs.get(i);
+                            if (dialog == null || MglaHiddenChats.isHidden(a, dialog.id)) {
+                                continue;
+                            }
                             if (DialogObject.isChatDialog(dialog.id)) {
-                                TLRPC.Chat chat = getMessagesController().getChat(-dialog.id);
+                                TLRPC.Chat chat = MessagesController.getInstance(a).getChat(-dialog.id);
                                 if (ChatObject.isNotInChat(chat) || ChatObject.isCommunity(chat)) {
                                     continue;
                                 }
@@ -1867,8 +1871,32 @@ public class NotificationsController extends BaseController implements Notificat
                         FileLog.e(e, false);
                     }
                 } else {
-                    count += controller.pushDialogs.size();
+                    count += getPushDialogsBadgeCount(a, controller, false);
                 }
+            }
+        }
+        return count;
+    }
+
+    private static int getPushDialogsBadgeCount(int account, NotificationsController controller, boolean countMessages) {
+        int count = 0;
+        for (int i = 0, N = controller.pushDialogs.size(); i < N; i++) {
+            long dialogId = controller.pushDialogs.keyAt(i);
+            if (MglaHiddenChats.isHidden(account, dialogId)) {
+                continue;
+            }
+            if (MessagesController.getInstance(account).isCommunity(dialogId)) {
+                continue;
+            }
+            int dialogCount = controller.pushDialogs.valueAt(i);
+            if (countMessages) {
+                if (MessagesController.getInstance(account).isForum(dialogId)) {
+                    count += dialogCount > 0 ? 1 : 0;
+                } else {
+                    count += dialogCount;
+                }
+            } else if (dialogCount > 0) {
+                count++;
             }
         }
         return count;
@@ -1888,7 +1916,7 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     public String getShortStringForMessage(MessageObject messageObject, String[] userName, boolean[] preview) {
-        if (AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter) {
+        if (AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter || MglaHiddenChats.isContentHidden(currentAccount, messageObject.getDialogId())) {
             return LocaleController.getString(R.string.NotificationHiddenMessage);
         }
         long dialogId = messageObject.messageOwner.dialog_id;
@@ -2574,7 +2602,7 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     private String getStringForMessage(MessageObject messageObject, boolean shortMessage, boolean[] text, boolean[] preview) {
-        if (AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter) {
+        if (AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter || MglaHiddenChats.isContentHidden(currentAccount, messageObject.getDialogId())) {
             return LocaleController.getString(R.string.YouHaveNewMessage);
         }
         if (messageObject.isStoryPush || messageObject.isStoryMentionPush) {
@@ -3348,6 +3376,9 @@ public class NotificationsController extends BaseController implements Notificat
         /*if (BuildVars.LOGS_ENABLED && BuildVars.DEBUG_VERSION) {
             FileLog.d("notify override for " + dialog_id + " = " + notifyOverride);
         }*/
+        if (notifyOverride != 2 && MglaHiddenChats.isNotificationsDisabled(currentAccount, dialog_id)) {
+            notifyOverride = 2;
+        }
         return notifyOverride;
     }
 
@@ -4394,7 +4425,7 @@ public class NotificationsController extends BaseController implements Notificat
             } else {
                 chatName = UserObject.getUserName(user);
             }
-            boolean passcode = AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter;
+            boolean passcode = AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter || MglaHiddenChats.isContentHidden(currentAccount, dialog_id);
             final boolean allowSummary = !"samsung".equalsIgnoreCase(Build.MANUFACTURER);
             if (DialogObject.isEncryptedDialog(dialog_id) || allowSummary && pushDialogs.size() > 1 || passcode) {
                 if (passcode) {
@@ -5244,7 +5275,7 @@ public class NotificationsController extends BaseController implements Notificat
                 photoPath = null;
             }
 
-            if (waitingForPasscode) {
+            if (waitingForPasscode || MglaHiddenChats.isContentHidden(currentAccount, dialogId)) {
                 if (DialogObject.isChatDialog(dialogId)) {
                     name = LocaleController.getString(R.string.NotificationHiddenChatName);
                 } else {
@@ -5464,7 +5495,7 @@ public class NotificationsController extends BaseController implements Notificat
                     Person person = personCache.get(uid + ((long) topicId << 16));
                     CharSequence personName = "";
                     if (senderName[0] == null) {
-                        if (waitingForPasscode) {
+                        if (waitingForPasscode || MglaHiddenChats.isContentHidden(currentAccount, dialogId)) {
                             if (DialogObject.isChatDialog(dialogId)) {
                                 if (isChannel) {
                                     if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O_MR1) {

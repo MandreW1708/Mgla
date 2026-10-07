@@ -35,6 +35,7 @@ import org.telegram.SQLite.SQLitePreparedStatement;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ContactsController;
+import org.telegram.messenger.MglaHiddenChats;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
@@ -283,6 +284,9 @@ public class DialogsSearchAdapter extends RecyclerListView.SelectionAdapter {
     }
 
     private boolean filter(Object obj) {
+        if (!(dialogsActivity != null && dialogsActivity.isMglaHiddenMode()) && MglaHiddenChats.isHidden(currentAccount, MglaHiddenChats.getDialogIdForObject(obj))) {
+            return false;
+        }
         if (dialogsType != DialogsActivity.DIALOGS_TYPE_START_ATTACH_BOT) {
             return true;
         }
@@ -992,6 +996,9 @@ public class DialogsSearchAdapter extends RecyclerListView.SelectionAdapter {
             for (int i = 0; i < result.size(); ++i) {
                 if (!filter(result.get(i))) {
                     result.remove(i);
+                    if (i < names.size()) {
+                        names.remove(i);
+                    }
                     i--;
                 }
             }

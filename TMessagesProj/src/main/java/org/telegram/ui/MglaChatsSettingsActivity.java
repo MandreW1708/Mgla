@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -18,9 +19,11 @@ import android.widget.TextView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaChatsConfig;
+import org.telegram.messenger.MglaHiddenChats;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -36,6 +39,9 @@ public class MglaChatsSettingsActivity extends BaseFragment {
     private SharedPreferences prefs;
     private ImageView previewInIcon;
     private ImageView previewOutIcon;
+    private TextView hiddenOpenValue;
+    private TextView hiddenPasscodeValue;
+    private TextCheckCell hiddenFingerprintCell;
 
     public MglaChatsSettingsActivity() {
         this(null);
@@ -167,12 +173,124 @@ public class MglaChatsSettingsActivity extends BaseFragment {
 
         rootLayout.addView(chatOptionsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
+        LinearLayout hiddenBlock = createBlock(context, "Скрытые чаты");
+
+        TextView[] hiddenOpenRef = new TextView[1];
+        addSelectRow(hiddenBlock, "Открыть скрытые чаты", hiddenCountText(), this::openHiddenChats, hiddenOpenRef);
+        hiddenOpenValue = hiddenOpenRef[0];
+
+        hiddenBlock.addView(MglaUi.createDivider(context));
+
+        TextView[] passcodeRef = new TextView[1];
+        addSelectRow(hiddenBlock, "Код-пароль", hiddenPasscodeText(), this::changeHiddenPasscode, passcodeRef);
+        hiddenPasscodeValue = passcodeRef[0];
+
+        hiddenBlock.addView(MglaUi.createDivider(context));
+
+        hiddenFingerprintCell = new TextCheckCell(context);
+        hiddenFingerprintCell.setBackground(null);
+        hiddenFingerprintCell.setTextAndValueAndCheck("Разблокировка отпечатком", MglaHiddenChats.isFingerprintAvailable() ? "Вместо ввода кода" : "Отпечаток не настроен на устройстве", MglaHiddenChats.isFingerprintEnabled(), true, false);
+        hiddenFingerprintCell.setEnabled(MglaHiddenChats.isFingerprintAvailable(), null);
+        hiddenFingerprintCell.setOnClickListener(v -> {
+            if (!MglaHiddenChats.isFingerprintAvailable()) {
+                return;
+            }
+            boolean newVal = !MglaHiddenChats.isFingerprintEnabled();
+            MglaHiddenChats.setFingerprintEnabled(newVal);
+            hiddenFingerprintCell.setChecked(newVal);
+        });
+        hiddenBlock.addView(hiddenFingerprintCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        hiddenBlock.addView(MglaUi.createDivider(context));
+
+        TextView[] notifyRef = new TextView[1];
+        addSelectRow(hiddenBlock, "Уведомления", notifyModeTitle(MglaHiddenChats.getNotifyMode()), () -> showHiddenNotifyDialog(notifyRef[0]), notifyRef);
+
+        rootLayout.addView(hiddenBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
+        TextView hiddenInfo = new TextView(context);
+        hiddenInfo.setText("Чтобы скрыть чат, удерживайте его в списке чатов и выберите «Скрыть чат» в меню «⋮». Чтобы открыть скрытые чаты, удерживайте кнопку «⋮» в шапке списка чатов.");
+        hiddenInfo.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        hiddenInfo.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText4));
+        rootLayout.addView(hiddenInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 32, 8, 32, 16));
+
         fragmentView = scrollView;
         return fragmentView;
     }
 
     private LinearLayout createBlock(Context context, String title) {
         return MglaUi.createBlock(context, title);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        updateHiddenValues();
+    }
+
+    private void updateHiddenValues() {
+        if (hiddenOpenValue != null) {
+            hiddenOpenValue.setText(hiddenCountText());
+        }
+        if (hiddenPasscodeValue != null) {
+            hiddenPasscodeValue.setText(hiddenPasscodeText());
+        }
+    }
+
+    private String hiddenCountText() {
+        int count = MglaHiddenChats.getHiddenCount(currentAccount);
+        return count == 0 ? "Нет" : String.valueOf(count);
+    }
+
+    private String hiddenPasscodeText() {
+        return MglaHiddenChats.hasPasscode() ? "Изменить" : "Не задан";
+    }
+
+    private static String notifyModeTitle(int mode) {
+        switch (mode) {
+            case MglaHiddenChats.NOTIFY_SHOW:
+                return "Показывать";
+            case MglaHiddenChats.NOTIFY_OFF:
+                return "Отключены";
+            default:
+                return "Без текста";
+        }
+    }
+
+    private void openHiddenChats() {
+        Utilities.Callback<PasscodeActivity> open = fragment -> {
+            Bundle args = new Bundle();
+            args.putBoolean("mgla_hidden", true);
+            fragment.presentFragment(new DialogsActivity(args), true);
+        };
+        presentFragment(PasscodeActivity.createMglaHiddenChats(MglaHiddenChats.hasPasscode() ? PasscodeActivity.TYPE_ENTER_CODE_TO_MANAGE_SETTINGS : PasscodeActivity.TYPE_SETUP_CODE, open));
+    }
+
+    private void changeHiddenPasscode() {
+        Utilities.Callback<PasscodeActivity> done = BaseFragment::finishFragment;
+        if (MglaHiddenChats.hasPasscode()) {
+            presentFragment(PasscodeActivity.createMglaHiddenChats(PasscodeActivity.TYPE_ENTER_CODE_TO_MANAGE_SETTINGS,
+                fragment -> fragment.presentFragment(PasscodeActivity.createMglaHiddenChats(PasscodeActivity.TYPE_SETUP_CODE, done), true)));
+        } else {
+            presentFragment(PasscodeActivity.createMglaHiddenChats(PasscodeActivity.TYPE_SETUP_CODE, done));
+        }
+    }
+
+    private void showHiddenNotifyDialog(TextView valueView) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final int[] modes = {MglaHiddenChats.NOTIFY_SHOW, MglaHiddenChats.NOTIFY_NO_CONTENT, MglaHiddenChats.NOTIFY_OFF};
+        String[] names = {"Показывать как обычно", "Без имени и текста", "Отключить"};
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Уведомления скрытых чатов");
+        dlg.setItems(names, (dialog, which) -> {
+            MglaHiddenChats.setNotifyMode(modes[which]);
+            if (valueView != null) {
+                valueView.setText(notifyModeTitle(modes[which]));
+            }
+        });
+        showDialog(dlg.create());
     }
 
     /**

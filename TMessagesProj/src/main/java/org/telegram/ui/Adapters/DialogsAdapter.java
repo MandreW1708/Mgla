@@ -1627,7 +1627,7 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
 
         dialogsCount = array.size();
         isEmpty = false;
-        if (dialogsCount == 0 && parentFragment.isArchive()) {
+        if (dialogsCount == 0 && parentFragment.isArchive() && !parentFragment.isMglaHiddenMode()) {
             itemInternals.add(new ItemInternal(VIEW_TYPE_ARCHIVE_FULLSCREEN));
             return;
         }

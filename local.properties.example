@@ -12,6 +12,10 @@ OPENROUTER_API_KEY=
 SAFETYNET_API_KEY=
 MAPS_API_KEY=
 
-# WS bypass relay (must match MGLA_WS_TOKEN on the relay server)
-MGLA_WS_RELAY_HOST=your-relay.example.com
+# WS bypass on mglabot (must match MGLA_WS_TOKEN in /opt/mgla-ws-relay/env there)
+MGLA_WS_RELAY_HOST=mglabot.mooo.com
 MGLA_WS_RELAY_TOKEN=
+
+# Stats / hub panel on mglahub (must match MGLA_WS_TOKEN on mglahub)
+MGLA_HUB_HOST=mglahub.mooo.com
+MGLA_HUB_TOKEN=

@@ -116,6 +116,8 @@ import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MglaHeaderConfig;
+import org.telegram.messenger.MglaHiddenChats;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.MediaController;
@@ -721,6 +723,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private final static int add_to_folder = 109;
     private final static int remove_from_folder = 110;
     private final static int community_ungroup = 111;
+    private final static int mgla_hide_chat = 140;
+
+    private boolean mglaHiddenMode;
+    private ActionBarMenuSubItem mglaHideItem;
 
     private final static int ARCHIVE_ITEM_STATE_PINNED = 0;
     private final static int ARCHIVE_ITEM_STATE_SHOWED = 1;
@@ -2869,6 +2875,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             checkCanWrite = arguments.getBoolean("checkCanWrite", true);
             afterSignup = arguments.getBoolean("afterSignup", false);
             folderId = arguments.getInt("folderId", 0);
+            mglaHiddenMode = arguments.getBoolean("mgla_hidden", false);
+            if (mglaHiddenMode) {
+                folderId = 1;
+            }
             communityId = arguments.getLong("community_id", 0);
             if (communityId != 0) {
                 community = getMessagesController().getChat(communityId);
@@ -3498,7 +3508,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         });
         fragmentSearchFieldWatcher.setDoNotCloseAfterFieldEmpty();
 
-        if (initialDialogsType == DIALOGS_TYPE_DEFAULT) {
+        if (initialDialogsType == DIALOGS_TYPE_DEFAULT && !mglaHiddenMode) {
             optionsItem = menu.addItem(4, R.drawable.ic_ab_other);
             optionsItem.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
             optionsItem.setOnClickListener(v -> {
@@ -3506,8 +3516,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 showItemOptions();
             });
             optionsItem.setOnLongClickListener(v -> {
-                getContactsController().loadGlobalPrivacySetting();
-                showItemOptions();
+                try {
+                    v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+                } catch (Exception ignore) {
+                }
+                mglaOpenHiddenChats();
                 return true;
             });
         }
@@ -3560,7 +3573,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (searchString != null || folderId != 0 || communityId != 0) {
                 actionBar.setBackButtonDrawable(backDrawable = new BackDrawable(false));
             }
-            if (folderId != 0) {
+            if (mglaHiddenMode) {
+                actionBar.setTitle("Скрытые чаты");
+            } else if (folderId != 0) {
                 actionBar.setTitle(getString(R.string.ArchivedChats));
             } else if (communityId != 0) {
                 actionBar.setTitle(DialogObject.getName(community));
@@ -4067,6 +4082,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     hideActionMode(false);
                 } else if (id == pin || id == read || id == delete || id == clear || id == mute || id == archive || id == block || id == archive2 || id == pin2) {
                     performSelectedDialogsAction(selectedDialogs, id, true, false);
+                } else if (id == mgla_hide_chat) {
+                    mglaToggleHiddenSelected();
                 }
             }
         });
@@ -6825,6 +6842,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         readItem = otherItem.addSubItem(read, R.drawable.msg_markread, LocaleController.getString(R.string.MarkAsRead));
         clearItem = otherItem.addSubItem(clear, R.drawable.msg_clear, LocaleController.getString(R.string.ClearHistory));
         blockItem = otherItem.addSubItem(block, R.drawable.msg_block, LocaleController.getString(R.string.BlockUser));
+        mglaHideItem = otherItem.addSubItem(mgla_hide_chat, mglaHiddenMode ? R.drawable.msg_message : R.drawable.msg_secret, mglaHiddenMode ? "Показать чат" : "Скрыть чат");
 
         muteItem.setOnLongClickListener(e -> {
             performSelectedDialogsAction(selectedDialogs, mute, true, true);
@@ -7431,7 +7449,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     @Override
     public void onBecomeFullyVisible() {
         super.onBecomeFullyVisible();
-        if (isArchive()) {
+        if (isArchive() && !mglaHiddenMode) {
             SharedPreferences preferences = MessagesController.getGlobalMainSettings();
             boolean showArchiveHint = preferences.getBoolean("archivehint", true);
             final boolean isEmpty = getDialogsArray(currentAccount, initialDialogsType, folderId, false).isEmpty();
@@ -10006,6 +10024,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 blockItem.setVisibility(View.VISIBLE);
             }
         }
+        if (mglaHideItem != null) {
+            mglaHideItem.setVisibility(initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect && communityId == 0 ? View.VISIBLE : View.GONE);
+        }
         if (removeFromFolderItem != null) {
             boolean cantRemoveFromFolder = filterTabsView == null || filterTabsView.getVisibility() != View.VISIBLE || filterTabsView.currentTabIsDefault();
             if (!cantRemoveFromFolder) {
@@ -11250,6 +11271,72 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         if (frozen && frozenDialogsList != null) {
             return frozenDialogsList;
         }
+        if (mglaHiddenMode) {
+            return MglaHiddenChats.buildHiddenList(currentAccount);
+        }
+        return MglaHiddenChats.filterOut(currentAccount, getDialogsArrayInternal(currentAccount, dialogsType, folderId));
+    }
+
+    public boolean isMglaHiddenMode() {
+        return mglaHiddenMode;
+    }
+
+    private void mglaOpenHiddenChats() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        MglaStats.count("hidden_chats:open");
+        final int account = currentAccount;
+        Utilities.Callback<PasscodeActivity> open = fragment -> {
+            Bundle args = new Bundle();
+            args.putBoolean("mgla_hidden", true);
+            fragment.presentFragment(new DialogsActivity(args), true);
+        };
+        if (MglaHiddenChats.hasPasscode()) {
+            presentFragment(PasscodeActivity.createMglaHiddenChats(PasscodeActivity.TYPE_ENTER_CODE_TO_MANAGE_SETTINGS, open));
+        } else if (MglaHiddenChats.hasHidden(account)) {
+            presentFragment(PasscodeActivity.createMglaHiddenChats(PasscodeActivity.TYPE_SETUP_CODE, open));
+        } else {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.info, "Скрытых чатов пока нет", "Удерживайте чат в списке и выберите «Скрыть чат» в меню «ещё»").show();
+        }
+    }
+
+    private void mglaToggleHiddenSelected() {
+        if (selectedDialogs.isEmpty()) {
+            return;
+        }
+        final ArrayList<Long> ids = new ArrayList<>(selectedDialogs);
+        final boolean hide = !mglaHiddenMode;
+        hideActionMode(true);
+        if (hide && !MglaHiddenChats.hasPasscode()) {
+            presentFragment(PasscodeActivity.createMglaHiddenChats(PasscodeActivity.TYPE_SETUP_CODE, fragment -> {
+                MglaHiddenChats.setHidden(currentAccount, ids, true);
+                fragment.finishFragment();
+                AndroidUtilities.runOnUIThread(() -> mglaShowHiddenBulletin(ids.size(), true), 300);
+            }));
+            return;
+        }
+        MglaHiddenChats.setHidden(currentAccount, ids, hide);
+        MglaStats.count(hide ? "hidden_chats:hide" : "hidden_chats:unhide");
+        mglaShowHiddenBulletin(ids.size(), hide);
+    }
+
+    private void mglaShowHiddenBulletin(int count, boolean hidden) {
+        if (!BulletinFactory.canShowBulletin(this)) {
+            return;
+        }
+        String title;
+        if (hidden) {
+            title = count == 1 ? "Чат скрыт" : "Скрыто чатов: " + count;
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.info, title, "Чтобы открыть скрытые чаты, удерживайте кнопку «⋮» вверху").show();
+        } else {
+            title = count == 1 ? "Чат возвращён в общий список" : "Возвращено чатов: " + count;
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.info, title).show();
+        }
+    }
+
+    @NonNull
+    private ArrayList<TLRPC.Dialog> getDialogsArrayInternal(int currentAccount, int dialogsType, int folderId) {
         MessagesController messagesController = AccountInstance.getInstance(currentAccount).getMessagesController();
         if (dialogsType == DIALOGS_TYPE_DEFAULT) {
             return messagesController.getDialogs(folderId);
@@ -13018,7 +13105,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
         boolean onlySelfStories = !isArchive() && getStoriesController().hasOnlySelfStories();
         boolean newVisibility;
-        if (communityId != 0) {
+        if (mglaHiddenMode) {
+            newVisibility = false;
+            onlySelfStories = false;
+        } else if (communityId != 0) {
             newVisibility = false;
         } else if (isArchive()) {
             newVisibility = !getStoriesController().getHiddenList().isEmpty();

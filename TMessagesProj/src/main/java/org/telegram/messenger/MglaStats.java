@@ -311,7 +311,7 @@ public final class MglaStats {
     }
 
     private static boolean post(String json) throws Exception {
-        String host = MglaWsConfig.getRelayHost();
+        String host = MglaWsConfig.getHubHost();
         URL url = new URL("https://" + host + "/mgla-stats/v1/batch");
         HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
         try {
@@ -320,10 +320,10 @@ public final class MglaStats {
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
+            conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getHubToken());
             conn.connect();
-            if ("mglabot.mooo.com".equalsIgnoreCase(host)) {
-                verifyPin(conn.getServerCertificates());
+            if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
+                verifyHubPin(conn.getServerCertificates());
             }
             byte[] body = json.getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
@@ -341,13 +341,13 @@ public final class MglaStats {
         }
     }
 
-    private static void verifyPin(Certificate[] chain) throws Exception {
+    private static void verifyHubPin(Certificate[] chain) throws Exception {
         if (chain == null || chain.length == 0) {
             throw new SecurityException("no certificate");
         }
         byte[] spki = chain[0].getPublicKey().getEncoded();
         String actual = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki));
-        if (!MglaWsConfig.RELAY_SPKI_SHA256_BASE64.equals(actual)) {
+        if (!MglaWsConfig.HUB_SPKI_SHA256_BASE64.equals(actual)) {
             throw new SecurityException("SPKI pin mismatch");
         }
     }

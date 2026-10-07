@@ -13,7 +13,6 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -361,9 +360,9 @@ public class MglaChatDna {
                 + "Ответ строго в формате:\n1. тема\n2. тема\n3. тема\n4. тема";
             String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + escapeJson(prompt) + "\"}]}],"
                 + "\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":128}}";
-            URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
-                + model + ":generateContent?key=" + apiKey);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            HttpURLConnection conn = MglaDirectHttp.open(
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                    + model + ":generateContent?key=" + apiKey);
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);

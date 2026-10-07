@@ -156,6 +156,8 @@ android {
         def mapsKey = getProps("MAPS_API_KEY")
         def mglaWsRelayToken = getProps("MGLA_WS_RELAY_TOKEN")
         def mglaWsRelayHost = getProps("MGLA_WS_RELAY_HOST")
+        def mglaHubToken = getProps("MGLA_HUB_TOKEN")
+        def mglaHubHost = getProps("MGLA_HUB_HOST")
 
         buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
         buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
@@ -163,6 +165,8 @@ android {
         buildConfigField "String", "SAFETYNET_API_KEY", "\"" + ((safetyNetKey != null && !safetyNetKey.isEmpty()) ? safetyNetKey : "") + "\""
         buildConfigField "String", "MGLA_WS_RELAY_TOKEN", "\"" + ((mglaWsRelayToken != null && !mglaWsRelayToken.isEmpty()) ? mglaWsRelayToken : "") + "\""
         buildConfigField "String", "MGLA_WS_RELAY_HOST", "\"" + ((mglaWsRelayHost != null && !mglaWsRelayHost.isEmpty()) ? mglaWsRelayHost : "mglabot.mooo.com") + "\""
+        buildConfigField "String", "MGLA_HUB_TOKEN", "\"" + ((mglaHubToken != null && !mglaHubToken.isEmpty()) ? mglaHubToken : "") + "\""
+        buildConfigField "String", "MGLA_HUB_HOST", "\"" + ((mglaHubHost != null && !mglaHubHost.isEmpty()) ? mglaHubHost : "mglahub.mooo.com") + "\""
 
         manifestPlaceholders = [mapsApiKey: (mapsKey != null && !mapsKey.isEmpty()) ? mapsKey : ""]
 

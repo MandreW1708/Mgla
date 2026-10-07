@@ -43,6 +43,8 @@ import androidx.annotation.IntDef;
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -50,6 +52,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MglaHiddenChats;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
@@ -161,6 +164,69 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
     public PasscodeActivity(@PasscodeActivityType int type) {
         super();
         this.type = type;
+    }
+
+    private static final int ID_MGLA_FINGERPRINT = 2;
+
+    private boolean mglaHidden;
+    private Utilities.Callback<PasscodeActivity> mglaOnSuccess;
+    private boolean mglaFingerprintShown;
+    private boolean mglaDone;
+
+    public static PasscodeActivity createMglaHiddenChats(@PasscodeActivityType int type, Utilities.Callback<PasscodeActivity> onSuccess) {
+        PasscodeActivity fragment = new PasscodeActivity(type);
+        fragment.mglaHidden = true;
+        fragment.mglaOnSuccess = onSuccess;
+        return fragment;
+    }
+
+    private void mglaFinishSuccess() {
+        if (mglaDone) {
+            return;
+        }
+        mglaDone = true;
+        if (mglaOnSuccess != null) {
+            mglaOnSuccess.run(this);
+        } else {
+            finishFragment();
+        }
+    }
+
+    private void mglaShowFingerprint() {
+        if (!mglaHidden || type != TYPE_ENTER_CODE_TO_MANAGE_SETTINGS || !MglaHiddenChats.canUseFingerprint() || LaunchActivity.instance == null || getParentActivity() == null) {
+            return;
+        }
+        try {
+            BiometricPrompt prompt = new BiometricPrompt(LaunchActivity.instance, ContextCompat.getMainExecutor(getParentActivity()), new BiometricPrompt.AuthenticationCallback() {
+                @Override
+                public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                    if (isFinishing() || mglaDone) {
+                        return;
+                    }
+                    MglaHiddenChats.onUnlocked();
+                    if (passwordEditText != null) {
+                        passwordEditText.clearFocus();
+                        AndroidUtilities.hideKeyboard(passwordEditText);
+                    }
+                    if (codeFieldContainer != null) {
+                        for (CodeNumberField f : codeFieldContainer.codeField) {
+                            f.clearFocus();
+                            AndroidUtilities.hideKeyboard(f);
+                        }
+                    }
+                    mglaFinishSuccess();
+                }
+            });
+            BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                    .setTitle("Скрытые чаты")
+                    .setSubtitle("Подтвердите отпечатком пальца")
+                    .setNegativeButtonText(LocaleController.getString(R.string.UsePIN))
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    .build();
+            prompt.authenticate(promptInfo);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 
     @Override
@@ -384,12 +450,17 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                         otherItem = menu.addItem(0, R.drawable.ic_ab_other);
                         switchItem = otherItem.addSubItem(ID_SWITCH_TYPE, R.drawable.msg_permissions, LocaleController.getString(R.string.PasscodeSwitchToPassword));
                     } else switchItem = null;
+                    if (mglaHidden && type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS && MglaHiddenChats.canUseFingerprint()) {
+                        menu.addItem(ID_MGLA_FINGERPRINT, R.drawable.fingerprint).setContentDescription(LocaleController.getString(R.string.UnlockFingerprint));
+                    }
 
                     actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
                         @Override
                         public void onItemClick(int id) {
                             if (id == -1) {
                                 finishFragment();
+                            } else if (id == ID_MGLA_FINGERPRINT) {
+                                mglaShowFingerprint();
                             } else if (id == ID_SWITCH_TYPE) {
                                 currentPasswordType = currentPasswordType == SharedConfig.PASSCODE_TYPE_PIN ? SharedConfig.PASSCODE_TYPE_PASSWORD : SharedConfig.PASSCODE_TYPE_PIN;
                                 AndroidUtilities.runOnUIThread(()->{
@@ -429,7 +500,13 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 titleTextView = new TextView(context);
                 titleTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
                 titleTextView.setTypeface(AndroidUtilities.bold());
-                if (type == TYPE_SETUP_CODE) {
+                if (mglaHidden) {
+                    if (type == TYPE_SETUP_CODE) {
+                        titleTextView.setText(MglaHiddenChats.hasPasscode() ? "Новый код для скрытых чатов" : "Код для скрытых чатов");
+                    } else {
+                        titleTextView.setText("Скрытые чаты");
+                    }
+                } else if (type == TYPE_SETUP_CODE) {
                     if (!SharedConfig.passcodeHash.isEmpty()) {
                         titleTextView.setText(LocaleController.getString(R.string.EnterNewPasscode));
                     } else {
@@ -461,7 +538,25 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 forgotPasswordButton.setPadding(dp(32), 0, dp(32), 0);
                 forgotPasswordButton.setGravity((isPassword() ? Gravity.LEFT : Gravity.CENTER_HORIZONTAL) | Gravity.CENTER_VERTICAL);
 
-                forgotPasswordButton.setOnClickListener(v -> AlertsCreator.createForgotPasscodeDialog(context).show());
+                if (mglaHidden) {
+                    forgotPasswordButton.setOnClickListener(v -> {
+                        AlertDialog alertDialog = new AlertDialog.Builder(context)
+                                .setTitle(LocaleController.getString(R.string.ForgotPasscode))
+                                .setMessage("Код будет сброшен, а все скрытые чаты вернутся в общий список.")
+                                .setNegativeButton(LocaleController.getString(R.string.Cancel), null)
+                                .setPositiveButton("Сбросить", (dialog, which) -> {
+                                    MglaHiddenChats.resetAll();
+                                    finishFragment();
+                                }).create();
+                        showDialog(alertDialog);
+                        TextView button = (TextView) alertDialog.getButton(Dialog.BUTTON_POSITIVE);
+                        if (button != null) {
+                            button.setTextColor(Theme.getColor(Theme.key_text_RedBold));
+                        }
+                    });
+                } else {
+                    forgotPasswordButton.setOnClickListener(v -> AlertsCreator.createForgotPasscodeDialog(context).show());
+                }
                 forgotPasswordButton.setVisibility(type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS ? View.VISIBLE : View.GONE);
                 forgotPasswordButton.setText(LocaleController.getString(R.string.ForgotPasscode));
                 frameLayout.addView(forgotPasswordButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 56, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, 0, 0, 16));
@@ -830,6 +925,10 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
     public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
         if (isOpen && type != TYPE_MANAGE_CODE_SETTINGS) {
             showKeyboard();
+            if (mglaHidden && !mglaFingerprintShown) {
+                mglaFingerprintShown = true;
+                mglaShowFingerprint();
+            }
         }
     }
 
@@ -848,16 +947,16 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
     private void updateFields() {
         String text;
         if (type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS) {
-            text = LocaleController.getString(R.string.EnterYourPasscodeInfo);
+            text = mglaHidden ? "Введите код, чтобы открыть скрытые чаты" : LocaleController.getString(R.string.EnterYourPasscodeInfo);
         } else if (passcodeSetStep == 0) {
-            text = LocaleController.getString(currentPasswordType == SharedConfig.PASSCODE_TYPE_PIN ? R.string.CreatePasscodeInfoPIN : R.string.CreatePasscodeInfoPassword);
+            text = mglaSetupInfo();
         } else text = descriptionTextSwitcher.getCurrentView().getText().toString();
 
         boolean animate = !(descriptionTextSwitcher.getCurrentView().getText().equals(text) || TextUtils.isEmpty(descriptionTextSwitcher.getCurrentView().getText()));
         if (type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS) {
-            descriptionTextSwitcher.setText(LocaleController.getString(R.string.EnterYourPasscodeInfo), animate);
+            descriptionTextSwitcher.setText(text, animate);
         } else if (passcodeSetStep == 0) {
-            descriptionTextSwitcher.setText(LocaleController.getString(currentPasswordType == SharedConfig.PASSCODE_TYPE_PIN ? R.string.CreatePasscodeInfoPIN : R.string.CreatePasscodeInfoPassword), animate);
+            descriptionTextSwitcher.setText(mglaSetupInfo(), animate);
         }
         if (isPinCode()) {
             AndroidUtilities.updateViewVisibilityAnimated(codeFieldContainer, true, 1f, animate);
@@ -899,7 +998,11 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
         }
 
         titleTextView.setText(LocaleController.getString(R.string.ConfirmCreatePasscode));
-        descriptionTextSwitcher.setText(AndroidUtilities.replaceTags(LocaleController.getString(R.string.PasscodeReinstallNotice)));
+        if (mglaHidden) {
+            descriptionTextSwitcher.setText("Если забудете код, его можно сбросить — скрытые чаты тогда вернутся в общий список.");
+        } else {
+            descriptionTextSwitcher.setText(AndroidUtilities.replaceTags(LocaleController.getString(R.string.PasscodeReinstallNotice)));
+        }
         firstPassword = isPinCode() ? codeFieldContainer.getCode() : passwordEditText.getText().toString();
         passwordEditText.setText("");
         passwordEditText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -908,14 +1011,25 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
         passcodeSetStep = 1;
     }
 
+    private String mglaSetupInfo() {
+        if (mglaHidden) {
+            return currentPasswordType == SharedConfig.PASSCODE_TYPE_PIN ? "Придумайте 4-значный код для доступа к скрытым чатам" : "Придумайте пароль для доступа к скрытым чатам";
+        }
+        return LocaleController.getString(currentPasswordType == SharedConfig.PASSCODE_TYPE_PIN ? R.string.CreatePasscodeInfoPIN : R.string.CreatePasscodeInfoPassword);
+    }
+
+    private int enterPasscodeType() {
+        return mglaHidden ? MglaHiddenChats.getPasscodeType() : SharedConfig.passcodeType;
+    }
+
     private boolean isPinCode() {
         return type == TYPE_SETUP_CODE && currentPasswordType == SharedConfig.PASSCODE_TYPE_PIN ||
-                type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS && SharedConfig.passcodeType == SharedConfig.PASSCODE_TYPE_PIN;
+                type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS && enterPasscodeType() == SharedConfig.PASSCODE_TYPE_PIN;
     }
 
     private boolean isPassword() {
         return type == TYPE_SETUP_CODE && currentPasswordType == SharedConfig.PASSCODE_TYPE_PASSWORD ||
-                type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS && SharedConfig.passcodeType == SharedConfig.PASSCODE_TYPE_PASSWORD;
+                type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS && enterPasscodeType() == SharedConfig.PASSCODE_TYPE_PASSWORD;
     }
 
     private void processDone() {
@@ -941,6 +1055,19 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                     codeFieldContainer.postDelayed(hidePasscodesDoNotMatch, 3000);
                     postedHidePasscodesDoNotMatch = true;
                 });
+                return;
+            }
+
+            if (mglaHidden) {
+                MglaHiddenChats.setPasscode(firstPassword, currentPasswordType);
+                passwordEditText.clearFocus();
+                AndroidUtilities.hideKeyboard(passwordEditText);
+                for (CodeNumberField f : codeFieldContainer.codeField) {
+                    f.clearFocus();
+                    AndroidUtilities.hideKeyboard(f);
+                }
+                keyboardView.setEditText(null);
+                animateSuccessAnimation(this::mglaFinishSuccess);
                 return;
             }
 
@@ -983,8 +1110,9 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.didSetPasscode);
             });
         } else if (type == TYPE_ENTER_CODE_TO_MANAGE_SETTINGS) {
-            if (SharedConfig.passcodeRetryInMs > 0) {
-                int value = Math.max(1, (int) Math.ceil(SharedConfig.passcodeRetryInMs / 1000.0));
+            long retryInMs = mglaHidden ? MglaHiddenChats.getRetryInMs() : SharedConfig.passcodeRetryInMs;
+            if (retryInMs > 0) {
+                int value = Math.max(1, (int) Math.ceil(retryInMs / 1000.0));
                 Toast.makeText(getParentActivity(), LocaleController.formatString("TooManyTries", R.string.TooManyTries, LocaleController.formatPluralString("Seconds", value)), Toast.LENGTH_SHORT).show();
 
                 for (CodeNumberField f : codeFieldContainer.codeField) {
@@ -997,8 +1125,10 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 onPasscodeError();
                 return;
             }
-            if (!SharedConfig.checkPasscode(password)) {
-                SharedConfig.increaseBadPasscodeTries();
+            if (mglaHidden ? !MglaHiddenChats.checkPasscode(password) : !SharedConfig.checkPasscode(password)) {
+                if (!mglaHidden) {
+                    SharedConfig.increaseBadPasscodeTries();
+                }
                 passwordEditText.setText("");
                 for (CodeNumberField f : codeFieldContainer.codeField) {
                     f.setText("");
@@ -1009,8 +1139,10 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 onPasscodeError();
                 return;
             }
-            SharedConfig.badPasscodeTries = 0;
-            SharedConfig.saveConfig();
+            if (!mglaHidden) {
+                SharedConfig.badPasscodeTries = 0;
+                SharedConfig.saveConfig();
+            }
 
             passwordEditText.clearFocus();
             AndroidUtilities.hideKeyboard(passwordEditText);
@@ -1020,6 +1152,10 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
             }
             keyboardView.setEditText(null);
 
+            if (mglaHidden) {
+                animateSuccessAnimation(this::mglaFinishSuccess);
+                return;
+            }
             animateSuccessAnimation(() -> {
                 presentFragment(new PasscodeActivity(TYPE_MANAGE_CODE_SETTINGS), true);
                 if (openedSettings != null) {

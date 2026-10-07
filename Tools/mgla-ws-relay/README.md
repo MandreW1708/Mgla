@@ -1,18 +1,17 @@
-# Mgla WS-релей
+# Mgla WS-релей (обход)
 
-Клиент ходит на `wss://<RELAY_HOST>/apiws?dc=N` (прямой `kws*` в блокировках обычно мёртв).
-Мини-приложение бота не трогаем — добавляется только location `/apiws`.
+Клиент ходит на `wss://mglabot.mooo.com/apiws?dc=N`.
+**Статистика и панель** живут отдельно на `mglahub.mooo.com` — сюда их файлы
+(`stats_*.py`, `nginx-mglahub.conf`) **не** кладите.
 
-Токен должен совпадать с клиентом. В клиенте задаётся в корневом `local.properties`
-(файл **не** в git, см. `local.properties.example`):
+Токен обхода должен совпадать с клиентом (`local.properties`):
 
 ```
-MGLA_WS_RELAY_HOST=your-relay.example.com
-MGLA_WS_RELAY_TOKEN=<сгенерируйте длинный случайный секрет>
+MGLA_WS_RELAY_HOST=mglabot.mooo.com
+MGLA_WS_RELAY_TOKEN=<тот же, что MGLA_WS_TOKEN в /opt/mgla-ws-relay/env на mglabot>
 ```
 
-На сервере — тот же токен в `/opt/mgla-ws-relay/env` (`MGLA_WS_TOKEN`).
-Никогда не коммитьте реальный токен в репозиторий.
+Статистика в клиенте: `MGLA_HUB_HOST=mglahub.mooo.com` + `MGLA_HUB_TOKEN`.
 
 ---
 

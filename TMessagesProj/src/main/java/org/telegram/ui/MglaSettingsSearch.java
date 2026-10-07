@@ -190,6 +190,10 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1036, "Нижняя кнопка", hub, chats, chatsIcon, chatsScreen, "Нижняя кнопка", "chats/bottom-button"));
         l.add(new Entry(1037, "Скрывать клавиатуру при прокрутке", hub, chats, chatsIcon, chatsScreen, "Скрывать клавиатуру при прокрутке", "chats/hide-keyboard"));
         l.add(new Entry(1038, "Запятая после упоминания", hub, chats, chatsIcon, chatsScreen, "Запятая после упоминания", "chats/comma-mention"));
+        l.add(new Entry(1039, "Скрытые чаты", hub, chats, chatsIcon, chatsScreen, "Открыть скрытые чаты", "chats/hidden"));
+        l.add(new Entry(1040, "Код-пароль скрытых чатов", hub, chats, chatsIcon, chatsScreen, "Код-пароль", "chats/hidden/passcode"));
+        l.add(new Entry(1041, "Разблокировка скрытых чатов отпечатком", hub, chats, chatsIcon, chatsScreen, "Разблокировка отпечатком", "chats/hidden/fingerprint"));
+        l.add(new Entry(1042, "Уведомления скрытых чатов", hub, chats, chatsIcon, chatsScreen, "Уведомления", "chats/hidden/notifications"));
 
         l.add(new Entry(1050, "Всплывающие уведомления", hub, notif, notifIcon, notifScreen, "Всплывающие уведомления", "notifications/popup"));
         l.add(new Entry(1051, "Время отображения", hub, notif, notifIcon, notifScreen, "Время отображения", "notifications/duration"));

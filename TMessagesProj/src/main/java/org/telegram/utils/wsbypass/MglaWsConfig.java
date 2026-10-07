@@ -8,28 +8,37 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildConfig;
 
 /**
- * Настройки WS-обхода.
+ * Настройки WS-обхода и хаба (статистика).
  * <p>
- * В регионах с блокировкой прямой {@code kws*} обычно тоже недоступен, поэтому
- * рабочий путь — релей ({@link #getRelayHost()}). Хост/токен берутся из
- * {@code BuildConfig} ({@code local.properties}: {@code MGLA_WS_RELAY_HOST},
- * {@code MGLA_WS_RELAY_TOKEN}), с возможностью переопределить в prefs.
+ * Обход: {@link #getRelayHost()} → обычно {@code mglabot.mooo.com} ({@code /apiws}).
+ * Статистика: {@link #getHubHost()} → {@code mglahub.mooo.com} ({@code /mgla-stats/}).
+ * Хосты/токены — из {@code BuildConfig} / {@code local.properties}, prefs могут переопределить.
  */
 public final class MglaWsConfig {
 
     public static final String PREFS = "mgla_config";
 
+    public static final String DEFAULT_RELAY_HOST = "mglabot.mooo.com";
+    public static final String DEFAULT_HUB_HOST = "mglahub.mooo.com";
+
     /**
-     * SPKI SHA-256 (base64) сертификата дефолтного релея — pinning при TLS.
+     * SPKI SHA-256 (base64) сертификата WS-релея (mglabot) — pinning при TLS.
      * При смене ключа на сервере нужно обновить константу.
      */
     public static final String RELAY_SPKI_SHA256_BASE64 = "Ae0rI3yMlnvtv5bwOy5r9fqcniG46yrElv0ox6x5g60=";
+
+    /**
+     * SPKI SHA-256 (base64) сертификата хаба статистики (mglahub).
+     */
+    public static final String HUB_SPKI_SHA256_BASE64 = "whkC3sYvKrHQgAVj2Xx2/QfBEH9DHCEPyyOw5sqI/3E=";
 
     private static final String PREF_ENABLED = "ws_enabled";
     private static final String PREF_PORT = "ws_port";
     private static final String PREF_SECRET = "ws_secret";
     private static final String PREF_RELAY_HOST = "ws_relay_host";
     private static final String PREF_RELAY_TOKEN = "ws_relay_token";
+    private static final String PREF_HUB_HOST = "hub_host";
+    private static final String PREF_HUB_TOKEN = "hub_token";
 
     private static final String PREF_SAVED_EXISTS = "ws_saved_exists";
     private static final String PREF_SAVED_ENABLED = "ws_saved_enabled";
@@ -82,7 +91,7 @@ public final class MglaWsConfig {
             return override.trim();
         }
         String fromBuild = BuildConfig.MGLA_WS_RELAY_HOST;
-        return TextUtils.isEmpty(fromBuild) ? "mglabot.mooo.com" : fromBuild.trim();
+        return TextUtils.isEmpty(fromBuild) ? DEFAULT_RELAY_HOST : fromBuild.trim();
     }
 
     public static void setRelayHost(String host) {
@@ -90,8 +99,7 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Токен релея: prefs override → BuildConfig ({@code MGLA_WS_RELAY_TOKEN} в local.properties).
-     * Без токена WS-обход не стартует uplink (релей обязателен).
+     * Токен WS-релея (mglabot): prefs → {@code MGLA_WS_RELAY_TOKEN} в local.properties.
      */
     public static String getRelayToken() {
         String override = getPrefs().getString(PREF_RELAY_TOKEN, null);
@@ -106,9 +114,43 @@ public final class MglaWsConfig {
         getPrefs().edit().putString(PREF_RELAY_TOKEN, token == null ? "" : token.trim()).apply();
     }
 
-    /** Релей готов к использованию: есть хост и непустой токен. */
+    /** Релей обхода готов: есть хост и непустой токен. */
     public static boolean isRelayConfigured() {
         return !TextUtils.isEmpty(getRelayHost()) && !TextUtils.isEmpty(getRelayToken());
+    }
+
+    /** Хост хаба статистики / панели ({@code mglahub.mooo.com}). */
+    public static String getHubHost() {
+        String override = getPrefs().getString(PREF_HUB_HOST, null);
+        if (!TextUtils.isEmpty(override)) {
+            return override.trim();
+        }
+        String fromBuild = BuildConfig.MGLA_HUB_HOST;
+        return TextUtils.isEmpty(fromBuild) ? DEFAULT_HUB_HOST : fromBuild.trim();
+    }
+
+    public static void setHubHost(String host) {
+        getPrefs().edit().putString(PREF_HUB_HOST, host == null ? "" : host.trim()).apply();
+    }
+
+    /**
+     * Токен хаба (stats/ИИ на mglahub): prefs → {@code MGLA_HUB_TOKEN},
+     * иначе {@link #getRelayToken()} (если токен один на оба сервера).
+     */
+    public static String getHubToken() {
+        String override = getPrefs().getString(PREF_HUB_TOKEN, null);
+        if (!TextUtils.isEmpty(override)) {
+            return override.trim();
+        }
+        String fromBuild = BuildConfig.MGLA_HUB_TOKEN;
+        if (!TextUtils.isEmpty(fromBuild)) {
+            return fromBuild.trim();
+        }
+        return getRelayToken();
+    }
+
+    public static void setHubToken(String token) {
+        getPrefs().edit().putString(PREF_HUB_TOKEN, token == null ? "" : token.trim()).apply();
     }
 
     public static boolean hasSavedUserProxy() {

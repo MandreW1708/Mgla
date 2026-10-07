@@ -408,7 +408,7 @@ public final class WsBypassCore {
         long attemptDeadline = Math.min(deadlineNanos,
             System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(8000L));
         // Pin only the known default host; custom hosts rely on system CAs + hostname verify.
-        String[] pins = "mglabot.mooo.com".equalsIgnoreCase(host)
+        String[] pins = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)
             ? new String[]{MglaWsConfig.RELAY_SPKI_SHA256_BASE64}
             : null;
         RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
