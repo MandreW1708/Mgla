@@ -62,10 +62,16 @@ public final class MglaDpiConfig {
     }
 
     public static boolean isEnabled() {
+        if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("dpi_enabled")) {
+            return false;
+        }
         return getPrefs().getBoolean(PREF_ENABLED, false);
     }
 
     public static void setEnabled(boolean enabled) {
+        if (enabled && !org.telegram.messenger.MglaFeatureFlags.isAllowed("dpi_enabled")) {
+            enabled = false;
+        }
         getPrefs().edit().putBoolean(PREF_ENABLED, enabled).apply();
     }
 

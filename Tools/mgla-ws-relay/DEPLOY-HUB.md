@@ -1,10 +1,13 @@
 # Mgla Hub — установка на mglahub.mooo.com
 #
-# Один сервер для всего:
-#   - панель статистики (Basic Auth)
+# Хаб (этот хост):
+#   - панель статистики + управление (Basic Auth): `/`, `/admin`
 #   - приём аналитики `/mgla-stats/`
-#   - WS-обход `/apiws`
-#   - ИИ-прокси `/mgla-ai/` (ключ OpenRouter только в env)
+#   - feature flags для клиента `/mgla-config/v1/features`
+#   - источник правды для списка OpenRouter-моделей (push на mglabot)
+#
+# Рабочий ИИ и WS-обход — на **mglabot** (`ai_proxy.py`, `relay.py`).
+# Ключ OpenRouter на хабе не нужен.
 
 ## Какие файлы перенести
 
@@ -13,14 +16,15 @@
 ```
 Tools/mgla-ws-relay/stats_server.py
 Tools/mgla-ws-relay/stats_report.py
+Tools/mgla-ws-relay/hub_admin.py
 Tools/mgla-ws-relay/mgla-stats.service
 Tools/mgla-ws-relay/nginx-mglahub.conf
-Tools/mgla-ws-relay/relay.py
-Tools/mgla-ws-relay/mgla-ws-relay.service
-Tools/mgla-ws-relay/requirements.txt
 Tools/mgla-ws-relay/mgla-stats-report.service   # опционально, Telegram
 Tools/mgla-ws-relay/mgla-stats-report.timer     # опционально
 ```
+
+На **mglabot** отдельно: `ai_proxy.py`, `relay.py`, `mgla-ai-proxy.service`,
+`mgla-ws-relay.service`, `nginx-apiws.conf` (см. README.md).
 
 ## DNS
 
@@ -36,15 +40,14 @@ sudo mkdir -p /opt/mgla-ws-relay
 # 2. Секреты — один токен для обхода, stats и ИИ
 sudo tee /opt/mgla-ws-relay/env >/dev/null <<'EOF'
 MGLA_WS_TOKEN=СГЕНЕРИРУЙТЕ_ДЛИННЫЙ_СЕКРЕТ
-MGLA_WS_HOST=127.0.0.1
-MGLA_WS_PORT=8766
 MGLA_STATS_HOST=127.0.0.1
 MGLA_STATS_PORT=8767
 MGLA_STATS_DB=/opt/mgla-ws-relay/stats.db
 MGLA_STATS_RETENTION_DAYS=400
 MGLA_STATS_REPORT_USER=admin
 MGLA_STATS_REPORT_PASSWORD=СГЕНЕРИРУЙТЕ_ПАРОЛЬ_ПАНЕЛИ
-OPENROUTER_API_KEY=sk-or-v1-ВАШ_КЛЮЧ_OPENROUTER
+MGLA_HUB_SYNC_TOKEN=СГЕНЕРИРУЙТЕ_СЕКРЕТ_HUB_BOT
+MGLA_BOT_AI_URL=https://mglabot.mooo.com
 EOF
 sudo chmod 600 /opt/mgla-ws-relay/env
 
@@ -52,29 +55,17 @@ sudo chmod 600 /opt/mgla-ws-relay/env
 openssl rand -hex 24
 # Пароль панели:
 openssl rand -hex 12
+# Sync-токен hub→bot (тот же в env на mglabot):
+openssl rand -hex 24
 
-# 3. Python venv (нужен для relay.py)
-cd /opt/mgla-ws-relay
-sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip
-python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
-
-# 4. Статистика + ИИ-прокси
+# 3. Статистика + панель управления (stdlib Python, venv не обязателен)
 sudo cp /opt/mgla-ws-relay/mgla-stats.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mgla-stats
 sudo journalctl -u mgla-stats -n 20 --no-pager
-# Ожидаемо: listening on 127.0.0.1:8767, openrouter=yes
+# Ожидаемо: listening on 127.0.0.1:8767
 
-# 5. WS-релей обхода
-sudo cp /opt/mgla-ws-relay/mgla-ws-relay.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now mgla-ws-relay
-sudo journalctl -u mgla-ws-relay -n 20 --no-pager
-# Ожидаемо: listening on 127.0.0.1:8766
-
-# 6. Nginx
+# 4. Nginx
 # В /etc/nginx/nginx.conf внутри http { } один раз:
 #   limit_req_zone $binary_remote_addr zone=mgla_stats:10m rate=6r/m;
 #   limit_req_zone $binary_remote_addr zone=mgla_hub:10m rate=20r/m;
@@ -85,7 +76,7 @@ sudo ln -sf /etc/nginx/sites-available/mglahub /etc/nginx/sites-enabled/mglahub
 sudo nginx -t
 sudo systemctl reload nginx
 
-# 7. HTTPS
+# 5. HTTPS
 sudo apt-get install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d mglahub.mooo.com
 sudo nginx -t && sudo systemctl reload nginx
@@ -94,15 +85,15 @@ sudo nginx -t && sudo systemctl reload nginx
 ## Обновление уже установленного хаба
 
 ```bash
-# залить новые stats_server.py + nginx-mglahub.conf
-# в /opt/mgla-ws-relay/env добавить строку:
-#   OPENROUTER_API_KEY=sk-or-v1-...
+# залить: stats_server.py hub_admin.py stats_report.py nginx-mglahub.conf
+# в /opt/mgla-ws-relay/env добавить:
+#   MGLA_HUB_SYNC_TOKEN=...
+#   MGLA_BOT_AI_URL=https://mglabot.mooo.com
+# на mglabot в env — тот же MGLA_HUB_SYNC_TOKEN, затем:
+#   systemctl restart mgla-ai-proxy
 
-# если relay ещё не крутится — шаги 3 и 5 выше
 sudo systemctl restart mgla-stats
-sudo systemctl enable --now mgla-ws-relay   # если ещё не был
 sudo cp /opt/mgla-ws-relay/nginx-mglahub.conf /etc/nginx/sites-available/mglahub
-# не забудьте zone=mgla_ai в nginx.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -112,38 +103,45 @@ sudo nginx -t && sudo systemctl reload nginx
 curl -s https://mglahub.mooo.com/mgla-stats/v1/health
 # {"ok":true}
 
-curl -s -X POST https://mglahub.mooo.com/mgla-ai/v1/chat \
+# Feature flags для клиента:
+curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \
   -H "Content-Type: application/json" \
   -H "X-Mgla-Token: ВАШ_ТОКЕН" \
-  -d '{"message":"скажи ок","lang":"Russian"}'
-# {"content":"..."}
+  -d '{"tg_id":123456789}'
+# {"v":1,"disabled":[...]}
 
-# Панель (спросит логин/пароль):
-# https://mglahub.mooo.com/
-# логин: admin
-# пароль: из MGLA_STATS_REPORT_PASSWORD
+# Панель статистики: https://mglahub.mooo.com/
+# Управление (flags + модели): https://mglahub.mooo.com/admin
+# логин: admin / пароль: MGLA_STATS_REPORT_PASSWORD
 ```
 
-После переключения клиента на хаб старый релей на **mglabot** можно остановить:
-`systemctl stop mgla-ws-relay` (на mglabot).
+Ручной push моделей на mglabot (хаб делает это сам при сохранении в `/admin`):
+
+```bash
+curl -s -X POST https://mglabot.mooo.com/mgla-ai/v1/admin/models \
+  -H "Content-Type: application/json" \
+  -H "X-Mgla-Sync-Token: ВАШ_SYNC_ТОКЕН" \
+  -d '{"models":["nvidia/nemotron-3-super-120b-a12b:free"]}'
+```
 
 ## Клиент (сборка)
 
 В `local.properties` (не коммитить):
 
 ```
-MGLA_WS_RELAY_HOST=mglahub.mooo.com
-MGLA_WS_RELAY_TOKEN=<тот же, что MGLA_WS_TOKEN на сервере>
+MGLA_WS_RELAY_HOST=mglabot.mooo.com
+MGLA_WS_RELAY_TOKEN=<токен mglabot>
+MGLA_HUB_HOST=mglahub.mooo.com
+MGLA_HUB_TOKEN=<токен хаба; может совпадать с релеем>
 ```
 
-`OPENROUTER_API_KEY` в клиент **не** кладите — ключ только в `/opt/mgla-ws-relay/env` на хабе.
+`OPENROUTER_API_KEY` в клиент **не** кладите — ключ только на mglabot.
 
-Пересоберите приложение. Обход: `wss://mglahub.mooo.com/apiws`.  
-Статистика: `https://mglahub.mooo.com/mgla-stats/v1/batch`.  
-ИИ: `https://mglahub.mooo.com/mgla-ai/v1/chat`.
+Пересоберите приложение (нужна одна сборка с poll feature flags).  
+Обход + ИИ: `mglabot`. Статистика + flags: `mglahub`.
 
-Клиент пинит SPKI дефолтного хаба (`MglaWsConfig.RELAY_SPKI_SHA256_BASE64`).
-После смены ключа сертификата обновите константу:
+Клиент пинит SPKI хаба (`MglaWsConfig.HUB_SPKI_SHA256_BASE64`) и релея
+(`RELAY_SPKI_SHA256_BASE64`). После смены ключа сертификата обновите константу:
 
 ```bash
 openssl x509 -in /etc/letsencrypt/live/mglahub.mooo.com/cert.pem -pubkey -noout \
@@ -151,9 +149,6 @@ openssl x509 -in /etc/letsencrypt/live/mglahub.mooo.com/cert.pem -pubkey -noout 
   | openssl dgst -sha256 -binary \
   | openssl base64
 ```
-
-В `nginx-mglahub.conf` для 443 стоит `listen … ssl` **без** `http2` —
-сырой WS Upgrade клиента иначе может не дойти до `relay.py`.
 
 ## Если переносите старую БД
 

@@ -29,6 +29,7 @@ import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
@@ -141,6 +142,10 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 String key = getSwitchKey(position);
                 if (key != null) {
                     boolean enabled = !prefs.getBoolean(key, true);
+                    if (enabled && !org.telegram.messenger.MglaFeatureFlags.isAllowed(key)) {
+                        BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                        return;
+                    }
                     prefs.edit().putBoolean(key, enabled).apply();
                     if ("ai_summary".equals(key)) {
                         MglaMessageMenuController.setEnabled(context, ChatActivity.OPTION_AI_SUMMARY, enabled);
@@ -300,16 +305,20 @@ public class MglaAiSettingsActivity extends BaseFragment {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
                 switch (position) {
                     case ROW_AI_ENABLED:
-                        cell.setTextAndCheck("Включение AI", prefs.getBoolean("ai_enabled", true), false);
+                        cell.setTextAndCheck("Включение AI",
+                            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled") && prefs.getBoolean("ai_enabled", true), false);
                         break;
                     case ROW_AI_SUMMARY:
-                        cell.setTextAndCheck("Краткая Сводка", prefs.getBoolean("ai_summary", true), false);
+                        cell.setTextAndCheck("Краткая Сводка",
+                            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary") && prefs.getBoolean("ai_summary", true), false);
                         break;
                     case ROW_AI_RETELL:
-                        cell.setTextAndCheck("Пересказ сообщений", prefs.getBoolean("ai_retell", true), false);
+                        cell.setTextAndCheck("Пересказ сообщений",
+                            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_retell") && prefs.getBoolean("ai_retell", true), false);
                         break;
                     case ROW_AI_EDITOR:
-                        cell.setTextAndCheck("AI-редактор", prefs.getBoolean("ai_editor", true), false);
+                        cell.setTextAndCheck("AI-редактор",
+                            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor") && prefs.getBoolean("ai_editor", true), false);
                         break;
                 }
             }

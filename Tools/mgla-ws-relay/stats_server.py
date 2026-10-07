@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Mgla Hub backend: analytics + OpenRouter AI proxy.
+"""Mgla Hub backend: analytics + admin control plane + legacy AI proxy.
 
 - POST /mgla-stats/v1/batch — anonymous client analytics (SQLite; no client IPs)
-- POST /mgla-ai/v1/chat — proxies chat to OpenRouter; API key stays server-side
+- POST /mgla-config/v1/features — feature flags for a Telegram user id
+- GET/POST /admin — feature flags + OpenRouter model list (Basic Auth)
+- POST /mgla-ai/v1/* — legacy AI proxy (production clients use mglabot)
 
-Standard library only. Clients authenticate with the same X-Mgla-Token as the WS relay.
+Standard library only. Clients authenticate with X-Mgla-Token (MGLA_WS_TOKEN on hub).
 """
 
 import base64
@@ -21,8 +23,9 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+import hub_admin
 import stats_report
 
 HOST = os.environ.get("MGLA_STATS_HOST", "127.0.0.1")
@@ -33,10 +36,14 @@ RETENTION_DAYS = int(os.environ.get("MGLA_STATS_RETENTION_DAYS", "400"))
 REPORT_USER = os.environ.get("MGLA_STATS_REPORT_USER", "admin")
 REPORT_PASSWORD = os.environ.get("MGLA_STATS_REPORT_PASSWORD", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
+HUB_SYNC_TOKEN = os.environ.get("MGLA_HUB_SYNC_TOKEN", "").strip()
+BOT_AI_URL = os.environ.get("MGLA_BOT_AI_URL", "").strip().rstrip("/")
 
 MAX_BODY = 256 * 1024
 MAX_AI_BODY = 32 * 1024
+MAX_GEMINI_TRANSCRIBE_BODY = 22 * 1024 * 1024
 MAX_AI_MESSAGE = 12_000
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 MAX_DAYS = 14
 MAX_NAMES_PER_DAY = 400
 MAX_COUNT = 100_000
@@ -88,6 +95,22 @@ CREATE TABLE IF NOT EXISTS snapshot (
     value TEXT NOT NULL,
     PRIMARY KEY (iid, key)
 );
+CREATE TABLE IF NOT EXISTS feature_global (
+    feature TEXT PRIMARY KEY,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS feature_deny (
+    tg_id INTEGER NOT NULL,
+    feature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tg_id, feature)
+);
+CREATE INDEX IF NOT EXISTS feature_deny_feature ON feature_deny(feature);
+CREATE TABLE IF NOT EXISTS ai_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -97,8 +120,19 @@ class Store:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
+        self._ensure_default_models()
         self._db.commit()
         self._last_cleanup = 0.0
+
+    def _ensure_default_models(self):
+        row = self._db.execute(
+            "SELECT value FROM ai_config WHERE key = ?", ("openrouter_models",)
+        ).fetchone()
+        if row is None:
+            self._db.execute(
+                "INSERT INTO ai_config(key, value) VALUES(?, ?)",
+                ("openrouter_models", json.dumps(list(hub_admin.DEFAULT_OPENROUTER_MODELS))),
+            )
 
     def ingest(self, batch):
         today = datetime.now(timezone.utc).date()
@@ -146,6 +180,116 @@ class Store:
                 for s in stale:
                     db.execute("DELETE FROM snapshot WHERE iid = ?", (s,))
                     db.execute("DELETE FROM installs WHERE iid = ?", (s,))
+
+    def get_global_disabled(self):
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT feature, disabled FROM feature_global"
+            ).fetchall()
+        return {f: bool(d) for f, d in rows}
+
+    def set_global_flags(self, disabled_map):
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._lock, self._db:
+            for feature, disabled in disabled_map.items():
+                self._db.execute(
+                    """INSERT INTO feature_global(feature, disabled, updated_at) VALUES(?,?,?)
+                       ON CONFLICT(feature) DO UPDATE SET
+                         disabled=excluded.disabled, updated_at=excluded.updated_at""",
+                    (feature, 1 if disabled else 0, now),
+                )
+
+    def list_denies(self):
+        with self._lock:
+            return self._db.execute(
+                "SELECT tg_id, feature, created_at FROM feature_deny ORDER BY created_at DESC, tg_id, feature"
+            ).fetchall()
+
+    def add_deny(self, tg_id, feature):
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._lock, self._db:
+            self._db.execute(
+                """INSERT INTO feature_deny(tg_id, feature, created_at) VALUES(?,?,?)
+                   ON CONFLICT(tg_id, feature) DO NOTHING""",
+                (tg_id, feature, now),
+            )
+
+    def remove_deny(self, tg_id, feature):
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM feature_deny WHERE tg_id = ? AND feature = ?",
+                (tg_id, feature),
+            )
+
+    def disabled_for_user(self, tg_ids):
+        """Union of global kill-switches and personal denies for any of tg_ids."""
+        disabled = set()
+        with self._lock:
+            for feature, flag in self._db.execute(
+                "SELECT feature, disabled FROM feature_global WHERE disabled = 1"
+            ):
+                if feature in hub_admin.FEATURE_IDS:
+                    disabled.add(feature)
+            if tg_ids:
+                placeholders = ",".join("?" * len(tg_ids))
+                rows = self._db.execute(
+                    f"SELECT DISTINCT feature FROM feature_deny WHERE tg_id IN ({placeholders})",
+                    tuple(tg_ids),
+                ).fetchall()
+                for (feature,) in rows:
+                    if feature in hub_admin.FEATURE_IDS:
+                        disabled.add(feature)
+        return sorted(disabled)
+
+    def get_openrouter_models(self):
+        with self._lock:
+            row = self._db.execute(
+                "SELECT value FROM ai_config WHERE key = ?", ("openrouter_models",)
+            ).fetchone()
+        if not row:
+            return list(hub_admin.DEFAULT_OPENROUTER_MODELS)
+        try:
+            return hub_admin.models_from_json(row[0])
+        except (ValueError, json.JSONDecodeError):
+            return list(hub_admin.DEFAULT_OPENROUTER_MODELS)
+
+    def set_openrouter_models(self, models):
+        with self._lock, self._db:
+            self._db.execute(
+                """INSERT INTO ai_config(key, value) VALUES(?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                ("openrouter_models", json.dumps(list(models))),
+            )
+
+
+def push_models_to_bot(models):
+    """Push OpenRouter model list to mglabot. Returns (ok, message)."""
+    if not BOT_AI_URL:
+        return False, "MGLA_BOT_AI_URL не задан"
+    if not HUB_SYNC_TOKEN:
+        return False, "MGLA_HUB_SYNC_TOKEN не задан"
+    url = BOT_AI_URL + "/mgla-ai/v1/admin/models"
+    body = json.dumps({"models": list(models)}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Mgla-Sync-Token": HUB_SYNC_TOKEN,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            if resp.status != 200:
+                return False, f"mglabot HTTP {resp.status}: {raw[:200]}"
+            return True, "модели отправлены на mglabot"
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="replace")[:300]
+        return False, f"mglabot HTTP {e.code}: {err}"
+    except (urllib.error.URLError, TimeoutError) as e:
+        return False, f"mglabot недоступен: {e}"
 
 
 def _short(v, limit=64):
@@ -307,6 +451,45 @@ def call_openrouter(message: str, lang: str) -> str:
     raise RuntimeError("Все модели недоступны (" + "; ".join(failures) + ")")
 
 
+def _extract_gemini_text(payload: dict) -> str:
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("no candidates")
+    content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+    if not isinstance(content, dict):
+        raise ValueError("no content")
+    parts = content.get("parts")
+    if not isinstance(parts, list) or not parts:
+        raise ValueError("no parts")
+    part0 = parts[0] if isinstance(parts[0], dict) else None
+    if not part0:
+        raise ValueError("empty part")
+    text = part0.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("empty text")
+    return text
+
+
+def call_gemini_json(api_key: str, model: str, body: dict) -> str:
+    if not api_key or not model:
+        raise RuntimeError("gemini api_key/model required")
+    safe_model = re.sub(r"[^a-zA-Z0-9._-]", "", model)[:120]
+    url = f"{GEMINI_API_BASE}/{safe_model}:generateContent?key={quote(api_key.strip())}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return _extract_gemini_text(json.loads(raw))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")[:800]
+        raise RuntimeError(f"Gemini HTTP {e.code}: {err_body}") from e
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "mgla-stats"
     sys_version = ""
@@ -331,21 +514,48 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(200, b'{"ok":true}')
         elif path in ("/", "/report", "/mgla-stats/report", "/hub", "/dashboard"):
             self._report(parse_qs(url.query))
+        elif path in ("/admin", "/mgla-admin", "/control"):
+            self._admin_get(parse_qs(url.query))
         else:
             self._reply(404)
 
-    def _report(self, query):
-        # Without a configured password the page is disabled rather than public.
+    def _check_basic_auth(self):
         if not REPORT_PASSWORD:
             self._reply(404)
-            return
+            return False
         expected = base64.b64encode(f"{REPORT_USER}:{REPORT_PASSWORD}".encode()).decode()
         auth = self.headers.get("Authorization", "")
-        if not auth.startswith("Basic ") or not hmac.compare_digest(auth[6:].strip().encode(), expected.encode()):
+        if not auth.startswith("Basic ") or not hmac.compare_digest(
+            auth[6:].strip().encode(), expected.encode()
+        ):
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="Mgla Hub", charset="UTF-8"')
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return False
+        return True
+
+    def _html_reply(self, body: bytes):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Robots-Tag", "noindex, nofollow")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _redirect(self, location: str):
+        body = b""
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _report(self, query):
+        if not self._check_basic_auth():
             return
         try:
             days = min(400, max(1, int(query.get("days", ["30"])[0])))
@@ -361,13 +571,102 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("report failed")
             self._reply(500)
             return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Robots-Tag", "noindex, nofollow")
-        self.end_headers()
-        self.wfile.write(body)
+        self._html_reply(body)
+
+    def _admin_get(self, query):
+        if not self._check_basic_auth():
+            return
+        flash_ok = unquote(query.get("ok", [""])[0] or "")
+        flash_err = unquote(query.get("err", [""])[0] or "")
+        try:
+            body = hub_admin.render_admin_html(
+                global_disabled=self.store.get_global_disabled(),
+                denies=self.store.list_denies(),
+                models=self.store.get_openrouter_models(),
+                flash_ok=flash_ok,
+                flash_err=flash_err,
+                bot_url=BOT_AI_URL,
+            ).encode("utf-8")
+        except Exception:
+            log.exception("admin render failed")
+            self._reply(500)
+            return
+        self._html_reply(body)
+
+    def _read_form_body(self, max_len=64 * 1024):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if length < 0 or length > max_len:
+            self._reply(413)
+            return None
+        raw = self.rfile.read(length) if length else b""
+        try:
+            return parse_qs(raw.decode("utf-8"), keep_blank_values=True)
+        except UnicodeDecodeError:
+            self._reply(400)
+            return None
+
+    def _admin_post(self):
+        if not self._check_basic_auth():
+            return
+        form = self._read_form_body()
+        if form is None:
+            return
+        action = (form.get("action") or [""])[0]
+        try:
+            if action == "save_globals":
+                disabled_map = {
+                    fid: bool((form.get("kill_" + fid) or [""])[0])
+                    for fid, _ in hub_admin.FEATURE_CATALOG
+                }
+                self.store.set_global_flags(disabled_map)
+                self._redirect(hub_admin.flash_redirect(ok="kill-switch сохранён"))
+            elif action == "deny_add":
+                tg_raw = (form.get("tg_id") or [""])[0].strip()
+                feature = (form.get("feature") or [""])[0].strip()
+                tg_id = int(tg_raw)
+                if tg_id <= 0:
+                    raise ValueError("bad tg_id")
+                if feature not in hub_admin.FEATURE_IDS:
+                    raise ValueError("unknown feature")
+                self.store.add_deny(tg_id, feature)
+                self._redirect(hub_admin.flash_redirect(ok=f"запрет для {tg_id} / {feature}"))
+            elif action == "deny_remove":
+                tg_id = int((form.get("tg_id") or ["0"])[0])
+                feature = (form.get("feature") or [""])[0].strip()
+                if feature not in hub_admin.FEATURE_IDS:
+                    raise ValueError("unknown feature")
+                self.store.remove_deny(tg_id, feature)
+                self._redirect(hub_admin.flash_redirect(ok="запрет снят"))
+            elif action == "save_models":
+                models = hub_admin.parse_models_text((form.get("models") or [""])[0])
+                self.store.set_openrouter_models(models)
+                ok, msg = push_models_to_bot(models)
+                if ok:
+                    self._redirect(hub_admin.flash_redirect(ok="модели сохранены; " + msg))
+                else:
+                    self._redirect(
+                        hub_admin.flash_redirect(
+                            ok="модели сохранены на хабе",
+                            err="push: " + msg,
+                        )
+                    )
+            elif action == "push_models":
+                models = self.store.get_openrouter_models()
+                ok, msg = push_models_to_bot(models)
+                if ok:
+                    self._redirect(hub_admin.flash_redirect(ok=msg))
+                else:
+                    self._redirect(hub_admin.flash_redirect(err=msg))
+            else:
+                self._redirect(hub_admin.flash_redirect(err="неизвестное действие"))
+        except (ValueError, TypeError) as e:
+            self._redirect(hub_admin.flash_redirect(err=str(e)))
+        except sqlite3.Error:
+            log.exception("admin post failed")
+            self._redirect(hub_admin.flash_redirect(err="ошибка БД"))
 
     def _check_token(self):
         token = self.headers.get("X-Mgla-Token", "")
@@ -392,12 +691,64 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path.rstrip("/") or "/"
-        if path == "/mgla-stats/v1/batch":
+        if path in ("/admin", "/mgla-admin", "/control"):
+            self._admin_post()
+        elif path == "/mgla-stats/v1/batch":
             self._post_stats()
+        elif path == "/mgla-config/v1/features":
+            self._post_features()
         elif path == "/mgla-ai/v1/chat":
             self._post_ai_chat()
+        elif path == "/mgla-ai/v1/gemini":
+            self._post_ai_gemini()
+        elif path == "/mgla-ai/v1/gemini/transcribe":
+            self._post_ai_gemini_transcribe()
         else:
             self._reply(404)
+
+    def _post_features(self):
+        if not self._check_token():
+            return
+        raw = self._read_json_body(MAX_BODY)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        tg_ids = []
+        single = raw.get("tg_id")
+        multi = raw.get("tg_ids")
+        if isinstance(single, int) and not isinstance(single, bool) and single > 0:
+            tg_ids.append(single)
+        elif isinstance(single, str) and single.isdigit():
+            tg_ids.append(int(single))
+        if isinstance(multi, list):
+            for item in multi:
+                if isinstance(item, int) and not isinstance(item, bool) and item > 0:
+                    tg_ids.append(item)
+                elif isinstance(item, str) and item.isdigit():
+                    tg_ids.append(int(item))
+        # Deduplicate while preserving order.
+        seen = set()
+        uniq = []
+        for tid in tg_ids:
+            if tid not in seen:
+                seen.add(tid)
+                uniq.append(tid)
+        if not uniq:
+            self._reply(400, b'{"error":"tg_id required"}')
+            return
+        if len(uniq) > 8:
+            self._reply(400, b'{"error":"too many tg_ids"}')
+            return
+        try:
+            disabled = self.store.disabled_for_user(uniq)
+        except sqlite3.Error:
+            log.exception("features lookup failed")
+            self._reply(500)
+            return
+        body = json.dumps({"v": 1, "disabled": disabled}, ensure_ascii=False).encode("utf-8")
+        self._reply(200, body)
 
     def _post_stats(self):
         if not self._check_token():
@@ -447,6 +798,93 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = json.dumps({"content": content}, ensure_ascii=False).encode("utf-8")
         self._reply(200, body)
+
+    def _post_ai_gemini(self):
+        if not self._check_token():
+            return
+        raw = self._read_json_body(MAX_AI_BODY)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        api_key = raw.get("api_key")
+        model = raw.get("model") or "gemini-2.0-flash"
+        text = raw.get("text") or raw.get("message")
+        if not isinstance(api_key, str) or not api_key.strip():
+            self._reply(400, b'{"error":"api_key required"}')
+            return
+        if not isinstance(text, str) or not text.strip():
+            self._reply(400, b'{"error":"text required"}')
+            return
+        if len(text) > MAX_AI_MESSAGE:
+            self._reply(413, b'{"error":"text too long"}')
+            return
+        body = {
+            "contents": [{"parts": [{"text": text.strip()}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1024},
+        }
+        try:
+            content = call_gemini_json(api_key.strip(), str(model), body)
+        except RuntimeError as e:
+            log.warning("gemini proxy failed: %s", e)
+            body_err = json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8")
+            self._reply(502, body_err)
+            return
+        body_ok = json.dumps({"content": content}, ensure_ascii=False).encode("utf-8")
+        self._reply(200, body_ok)
+
+    def _post_ai_gemini_transcribe(self):
+        if not self._check_token():
+            return
+        raw = self._read_json_body(MAX_GEMINI_TRANSCRIBE_BODY)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        api_key = raw.get("api_key")
+        model = raw.get("model") or "gemini-2.0-flash"
+        mime_type = raw.get("mime_type")
+        data_b64 = raw.get("data_b64")
+        if not isinstance(api_key, str) or not api_key.strip():
+            self._reply(400, b'{"error":"api_key required"}')
+            return
+        if not isinstance(mime_type, str) or not mime_type.strip():
+            self._reply(400, b'{"error":"mime_type required"}')
+            return
+        if not isinstance(data_b64, str) or len(data_b64) < 16:
+            self._reply(400, b'{"error":"data_b64 required"}')
+            return
+        if len(data_b64) > 20 * 1024 * 1024:
+            self._reply(413, b'{"error":"media too large"}')
+            return
+        is_video = mime_type.strip().startswith("video")
+        prompt = (
+            "Transcribe the following "
+            + ("video" if is_video else "audio")
+            + " accurately. Return ONLY the transcribed text in Russian, no additional commentary."
+        )
+        body = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {"inline_data": {"mime_type": mime_type.strip(), "data": data_b64.strip()}},
+                    ]
+                }
+            ],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024},
+        }
+        try:
+            content = call_gemini_json(api_key.strip(), str(model), body)
+        except RuntimeError as e:
+            log.warning("gemini transcribe failed: %s", e)
+            body_err = json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8")
+            self._reply(502, body_err)
+            return
+        body_ok = json.dumps({"content": content}, ensure_ascii=False).encode("utf-8")
+        self._reply(200, body_ok)
 
 
 def main():

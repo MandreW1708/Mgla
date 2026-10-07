@@ -53,10 +53,16 @@ public final class MglaWsConfig {
     }
 
     public static boolean isEnabled() {
+        if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ws_enabled")) {
+            return false;
+        }
         return getPrefs().getBoolean(PREF_ENABLED, false);
     }
 
     public static void setEnabled(boolean enabled) {
+        if (enabled && !org.telegram.messenger.MglaFeatureFlags.isAllowed("ws_enabled")) {
+            enabled = false;
+        }
         getPrefs().edit().putBoolean(PREF_ENABLED, enabled).apply();
     }
 
@@ -151,6 +157,11 @@ public final class MglaWsConfig {
 
     public static void setHubToken(String token) {
         getPrefs().edit().putString(PREF_HUB_TOKEN, token == null ? "" : token.trim()).apply();
+    }
+
+    /** Хаб (статистика, ИИ-прокси) готов к запросам. */
+    public static boolean isHubConfigured() {
+        return !TextUtils.isEmpty(getHubHost()) && !TextUtils.isEmpty(getHubToken());
     }
 
     public static boolean hasSavedUserProxy() {

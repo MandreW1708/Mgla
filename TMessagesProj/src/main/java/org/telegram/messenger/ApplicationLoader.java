@@ -266,6 +266,11 @@ public class ApplicationLoader extends Application {
         } catch (Throwable e) {
             FileLog.e(e);
         }
+        try {
+            MglaRemoteConfig.init();
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();
             MessagesController.getInstance(a);

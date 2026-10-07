@@ -1,17 +1,24 @@
-# Mgla WS-релей (обход)
+# Mgla WS-релей + ИИ-прокси (mglabot)
 
-Клиент ходит на `wss://mglabot.mooo.com/apiws?dc=N`.
-**Статистика и панель** живут отдельно на `mglahub.mooo.com` — сюда их файлы
-(`stats_*.py`, `nginx-mglahub.conf`) **не** кладите.
+На **mglabot.mooo.com**:
+- `wss://…/apiws` — обход Telegram
+- `https://…/mgla-ai/…` — прокси OpenRouter/Gemini (без VPN у клиента)
+- `POST /mgla-ai/v1/admin/models` — приём списка моделей с mglahub (`X-Mgla-Sync-Token`)
 
-Токен обхода должен совпадать с клиентом (`local.properties`):
+**Статистика / панель / feature flags** — на `mglahub.mooo.com`
+(`stats_server.py`, `hub_admin.py`). Список OpenRouter-моделей правится там и
+пушится на mglabot; ключ `OPENROUTER_API_KEY` остаётся только на mglabot.
+
+Клиент (`local.properties`):
 
 ```
 MGLA_WS_RELAY_HOST=mglabot.mooo.com
-MGLA_WS_RELAY_TOKEN=<тот же, что MGLA_WS_TOKEN в /opt/mgla-ws-relay/env на mglabot>
+MGLA_WS_RELAY_TOKEN=<тот же, что MGLA_WS_TOKEN в /opt/mgla-ws-relay/env>
+MGLA_HUB_HOST=mglahub.mooo.com
+MGLA_HUB_TOKEN=<тот же или отдельный токен хаба>
 ```
 
-Статистика в клиенте: `MGLA_HUB_HOST=mglahub.mooo.com` + `MGLA_HUB_TOKEN`.
+ИИ использует тот же хост/токен, что и обход. OpenRouter-ключ — только в `env` на mglabot.
 
 ---
 
@@ -63,6 +70,10 @@ cat >/opt/mgla-ws-relay/env <<'EOF'
 MGLA_WS_HOST=127.0.0.1
 MGLA_WS_PORT=8766
 MGLA_WS_TOKEN=<ваш-секретный-токен>
+MGLA_AI_HOST=127.0.0.1
+MGLA_AI_PORT=8768
+OPENROUTER_API_KEY=sk-or-v1-ВАШ_КЛЮЧ
+MGLA_HUB_SYNC_TOKEN=<тот же секрет, что на mglahub>
 EOF
 
 cp /opt/mgla-ws-relay/mgla-ws-relay.service /etc/systemd/system/
@@ -138,9 +149,14 @@ nc -vz 149.154.175.50 443
 
 # Анонимная статистика клиента
 
-Клиент раз в 6 часов отправляет `POST https://<RELAY_HOST>/mgla-stats/v1/batch` с тем же
-`X-Mgla-Token`. Приёмник — `stats_server.py` (только стандартная библиотека Python, SQLite),
-слушает `127.0.0.1:8767`.
+Клиент раз в 6 часов отправляет `POST https://mglahub…/mgla-stats/v1/batch` с
+`X-Mgla-Token` хаба. Приёмник — `stats_server.py` (stdlib Python, SQLite),
+слушает `127.0.0.1:8767` на **mglahub**.
+
+Feature flags: клиент периодически делает
+`POST /mgla-config/v1/features` с `tg_id` / `tg_ids` (не в stats batch).
+Управление: `https://mglahub…/admin` (Basic Auth). Модели OpenRouter сохраняются
+на хабе и пушатся на mglabot (`MGLA_BOT_AI_URL` + `MGLA_HUB_SYNC_TOKEN`).
 
 Что приходит: случайный id установки (не связан с аккаунтом), версия Mgla/Telegram, модель
 устройства, версия Android, язык; по дням — счётчики открытых экранов, изменённых настроек Mgla,

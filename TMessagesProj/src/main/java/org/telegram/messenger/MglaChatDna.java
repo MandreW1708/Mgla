@@ -82,6 +82,12 @@ public class MglaChatDna {
         первой; темы — когда провайдер их сгенерирует (локальная модель думает
         заметное время). */
     public static void collect(int accountId, long dialogId, long periodStartSec, long periodEndSec, Callback callback) {
+        if (!MglaFeatureFlags.isAllowed("ai_chat_dna")) {
+            if (callback != null) {
+                AndroidUtilities.runOnUIThread(() -> callback.onResult(new Stats(), new ArrayList<>(), "disabled"));
+            }
+            return;
+        }
         MessagesStorage storage = MessagesStorage.getInstance(accountId);
         storage.getStorageQueue().postRunnable(() -> {
             Stats stats;
@@ -358,29 +364,49 @@ public class MglaChatDna {
             String prompt = "Ты — аналитик переписок. Вот сообщения из чата:\n\n" + sb
                 + "\nВыдели 4 главные темы этого разговора, каждая тема — 1-3 слова. "
                 + "Ответ строго в формате:\n1. тема\n2. тема\n3. тема\n4. тема";
-            String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + escapeJson(prompt) + "\"}]}],"
-                + "\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":128}}";
-            HttpURLConnection conn = MglaDirectHttp.open(
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                    + model + ":generateContent?key=" + apiKey);
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(30000);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(json.getBytes(StandardCharsets.UTF_8));
+            String text;
+            if (MglaHubHttp.isConfigured()) {
+                String hubJson = "{\"api_key\":\"" + escapeJson(apiKey) + "\",\"model\":\"" + escapeJson(model)
+                    + "\",\"text\":\"" + escapeJson(prompt) + "\"}";
+                MglaHubHttp.Response response = MglaHubHttp.post(
+                    "/mgla-ai/v1/gemini",
+                    hubJson.getBytes(StandardCharsets.UTF_8),
+                    30_000,
+                    60_000
+                );
+                if (response.code != 200) {
+                    return null;
+                }
+                text = MglaHubHttp.extractJsonStringField(response.body, "content");
+            } else {
+                String json = "{\"contents\":[{\"parts\":[{\"text\":\"" + escapeJson(prompt) + "\"}]}],"
+                    + "\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":128}}";
+                HttpURLConnection conn = MglaDirectHttp.open(
+                    "https://generativelanguage.googleapis.com/v1beta/models/"
+                        + model + ":generateContent?key=" + apiKey);
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(30000);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(json.getBytes(StandardCharsets.UTF_8));
+                }
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    return null;
+                }
+                StringBuilder body = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) body.append(line);
+                }
+                text = extractText(body.toString());
             }
-            int code = conn.getResponseCode();
-            if (code != 200) {
+            if (TextUtils.isEmpty(text)) {
                 return null;
             }
-            StringBuilder body = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) body.append(line);
-            }
-            return parseTopicLines(extractText(body.toString()));
+            return parseTopicLines(text);
         } catch (Throwable e) {
             FileLog.e(e);
             return null;

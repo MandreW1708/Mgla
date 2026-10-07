@@ -91,8 +91,12 @@ public final class MglaHiddenChats {
         return account >= 0 && account < hidden.length;
     }
 
+    public static boolean isFeatureAllowed() {
+        return MglaFeatureFlags.isAllowed("hidden_chats");
+    }
+
     public static boolean isHidden(int account, long dialogId) {
-        if (dialogId == 0 || !validAccount(account)) {
+        if (!isFeatureAllowed() || dialogId == 0 || !validAccount(account)) {
             return false;
         }
         ensureLoaded();
@@ -102,7 +106,7 @@ public final class MglaHiddenChats {
     }
 
     public static boolean hasHidden(int account) {
-        if (!validAccount(account)) {
+        if (!isFeatureAllowed() || !validAccount(account)) {
             return false;
         }
         ensureLoaded();
@@ -123,6 +127,9 @@ public final class MglaHiddenChats {
 
     public static void setHidden(int account, ArrayList<Long> dialogIds, boolean hide) {
         if (!validAccount(account) || dialogIds == null || dialogIds.isEmpty()) {
+            return;
+        }
+        if (hide && !isFeatureAllowed()) {
             return;
         }
         ensureLoaded();

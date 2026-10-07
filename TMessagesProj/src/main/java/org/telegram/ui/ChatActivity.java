@@ -4526,10 +4526,12 @@ public class ChatActivity extends BaseFragment implements
             if (MglaSpyConfig.isSaveDeletedMessagesEnabled() && chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
                 headerItem.lazilyAddSubItem(mgla_view_deleted, R.drawable.msg_delete, "Удалённые");
             }
-            if (chatMode == MODE_DEFAULT && currentEncryptedChat == null) {
+            if (chatMode == MODE_DEFAULT && currentEncryptedChat == null
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_chat_dna")) {
                 headerItem.lazilyAddSubItem(mgla_chat_dna, R.drawable.msg_topics, "Chat DNA");
             }
-            if (getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", true)) {
+            if (org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_retell")
+                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_retell", true)) {
                 headerItem.lazilyAddSubItem(ai_retell_menu, R.drawable.menu_rewrite, "Пересказ сообщ.");
             }
             if (currentChat != null && !currentChat.creator && !ChatObject.hasAdminRights(currentChat)) {
@@ -10510,7 +10512,8 @@ public class ChatActivity extends BaseFragment implements
         actionMode.setItemVisibility(tag_message, getUserConfig().isPremium() ? View.VISIBLE : View.GONE);
         actionMode.setItemVisibility(share, View.GONE);
         actionMode.setItemVisibility(ai_summary_action,
-            getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)
+            org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
+            && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)
             && selectedMessagesIds[0].size() + selectedMessagesIds[1].size() == 1
             ? View.VISIBLE : View.GONE);
     }
@@ -13735,6 +13738,11 @@ public class ChatActivity extends BaseFragment implements
 
     private void openAttachMenu() {
         if (getParentActivity() == null || chatActivityEnterView != null && !TextUtils.isEmpty(chatActivityEnterView.getSlowModeTimer())) {
+            return;
+        }
+        // Avoid dismiss+re-show races while the sheet is open or mid open/close animation —
+        // rapid attach taps previously left NotificationCenter locked and froze the chat.
+        if (chatAttachAlert != null && (chatAttachAlert.isShowing() || chatAttachAlert.getSheetAnimationType() != 0)) {
             return;
         }
 
@@ -47163,7 +47171,9 @@ public class ChatActivity extends BaseFragment implements
         if (selectedObject != null && !selectedObject.isAnimatedEmoji() && !selectedObject.isDice() && !selectedObject.isSticker() && !selectedObject.isAnimatedSticker() && !selectedObject.isRoundVideo() && !selectedObject.isVoice()) {
             CharSequence caption = getMessageCaption(selectedObject, selectedObjectGroup);
             String aiText = caption != null ? caption.toString() : (selectedObject.messageOwner != null ? selectedObject.messageOwner.message : null);
-            if (!TextUtils.isEmpty(aiText) && getContext() != null && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)) {
+            if (!TextUtils.isEmpty(aiText) && getContext() != null
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
+                    && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_summary", true)) {
                 if (!options.contains(OPTION_AI_SUMMARY)) {
                     items.add("Краткая Сводка");
                     options.add(OPTION_AI_SUMMARY);

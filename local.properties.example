@@ -16,6 +16,6 @@ MAPS_API_KEY=
 MGLA_WS_RELAY_HOST=mglabot.mooo.com
 MGLA_WS_RELAY_TOKEN=
 
-# Stats / hub panel on mglahub (must match MGLA_WS_TOKEN on mglahub)
+# Stats panel on mglahub (optional; AI does NOT use this — AI goes via MGLA_WS_RELAY_HOST)
 MGLA_HUB_HOST=mglahub.mooo.com
 MGLA_HUB_TOKEN=

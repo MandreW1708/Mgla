@@ -90,6 +90,9 @@ public class MglaSpyConfig {
     }
 
     public static boolean isSaveDeletedMessagesEnabled() {
+        if (!MglaFeatureFlags.isAllowed("spy_save_deleted_messages")) {
+            return false;
+        }
         SharedPreferences prefs = prefs();
         return prefs != null && prefs.getBoolean(KEY_SAVE_DELETED, false);
     }
@@ -99,8 +102,9 @@ public class MglaSpyConfig {
         if (prefs == null) {
             return;
         }
-        prefs.edit().putBoolean(KEY_SAVE_DELETED, enabled).apply();
-        if (!enabled) {
+        final boolean value = enabled && MglaFeatureFlags.isAllowed("spy_save_deleted_messages");
+        prefs.edit().putBoolean(KEY_SAVE_DELETED, value).apply();
+        if (!value) {
             MglaDeletedStorage.clearAllAccounts();
             clearDeletedNotifyWatermarks();
         }
@@ -248,6 +252,9 @@ public class MglaSpyConfig {
     }
 
     public static boolean isGhostModeEnabled() {
+        if (!MglaFeatureFlags.isAllowed("spy_ghost_mode")) {
+            return false;
+        }
         SharedPreferences prefs = prefs();
         return prefs != null && prefs.getBoolean(KEY_GHOST_MODE, false);
     }
@@ -257,11 +264,12 @@ public class MglaSpyConfig {
         if (prefs == null) {
             return;
         }
-        prefs.edit().putBoolean(KEY_GHOST_MODE, enabled).apply();
+        final boolean value = enabled && MglaFeatureFlags.isAllowed("spy_ghost_mode");
+        prefs.edit().putBoolean(KEY_GHOST_MODE, value).apply();
         AndroidUtilities.runOnUIThread(() -> {
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 if (UserConfig.getInstance(a).isClientActivated()) {
-                    MessagesController.getInstance(a).onGhostModeChanged(enabled);
+                    MessagesController.getInstance(a).onGhostModeChanged(value);
                 }
             }
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.ghostModeChanged);
@@ -269,6 +277,9 @@ public class MglaSpyConfig {
     }
 
     public static boolean isLastOnlineEnabled() {
+        if (!MglaFeatureFlags.isAllowed("spy_last_online")) {
+            return false;
+        }
         SharedPreferences prefs = prefs();
         return prefs != null && prefs.getBoolean(KEY_LAST_ONLINE, false);
     }
@@ -278,7 +289,8 @@ public class MglaSpyConfig {
         if (prefs == null) {
             return;
         }
-        prefs.edit().putBoolean(KEY_LAST_ONLINE, enabled).apply();
+        final boolean value = enabled && MglaFeatureFlags.isAllowed("spy_last_online");
+        prefs.edit().putBoolean(KEY_LAST_ONLINE, value).apply();
         AndroidUtilities.runOnUIThread(() -> {
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_STATUS);
         });

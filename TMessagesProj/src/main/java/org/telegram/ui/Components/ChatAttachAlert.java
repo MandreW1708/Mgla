@@ -1087,6 +1087,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     private boolean menuShowed;
     public SizeNotifierFrameLayout sizeNotifierFrameLayout;
     private boolean openTransitionFinished;
+    private AnimationNotificationsLocker openAnimationNotificationsLocker;
 
     private Object viewChangeAnimator;
 
@@ -5289,16 +5290,35 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
 
     @Override
     protected void cancelSheetAnimation() {
+        final boolean hadOpenAnimation = currentSheetAnimation != null || appearSpringAnimation != null || openAnimationNotificationsLocker != null;
         if (currentSheetAnimation != null) {
             currentSheetAnimation.cancel();
-            if (appearSpringAnimation != null) {
-                appearSpringAnimation.cancel();
-            }
-            if (buttonsAnimation != null) {
-                buttonsAnimation.cancel();
-            }
             currentSheetAnimation = null;
-            currentSheetAnimationType = 0;
+        }
+        if (appearSpringAnimation != null) {
+            appearSpringAnimation.cancel();
+            appearSpringAnimation = null;
+        }
+        if (buttonsAnimation != null) {
+            buttonsAnimation.cancel();
+            buttonsAnimation = null;
+        }
+        currentSheetAnimationType = 0;
+        // Rapid open/close cancels the open animation before onAnimationEnd runs.
+        // Without unlocking here, NotificationCenter stays "busy" and dismissInternal's
+        // doOnIdle(removeFromRoot) never runs — leaving an invisible dialog that freezes the chat.
+        if (hadOpenAnimation) {
+            finishOpenAnimationNotifications();
+        }
+    }
+
+    private void finishOpenAnimationNotifications() {
+        AnimationNotificationsLocker locker = openAnimationNotificationsLocker;
+        openAnimationNotificationsLocker = null;
+        if (locker != null) {
+            locker.unlock();
+            // Pair with stopAllHeavyOperations(512) posted when the open animation started.
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 512);
         }
     }
 
@@ -5356,12 +5376,16 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         currentSheetAnimation.setDuration(400);
         currentSheetAnimation.setStartDelay(20);
         currentSheetAnimation.setInterpolator(openInterpolator);
-        AnimationNotificationsLocker locker = new AnimationNotificationsLocker();
+        finishOpenAnimationNotifications();
+        openAnimationNotificationsLocker = new AnimationNotificationsLocker();
         BottomSheetDelegateInterface delegate = super.delegate;
         final Runnable onAnimationEnd = () -> {
+            if (openAnimationNotificationsLocker == null) {
+                return;
+            }
             currentSheetAnimation = null;
             appearSpringAnimation = null;
-            locker.unlock();
+            finishOpenAnimationNotifications();
             currentSheetAnimationType = 0;
             if (delegate != null) {
                 delegate.onOpenAnimationEnd();
@@ -5375,9 +5399,11 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 params.flags &= ~WindowManager.LayoutParams.FLAG_FULLSCREEN;
                 getWindow().setAttributes(params);
             }
-            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 512);
         };
         appearSpringAnimation.addEndListener((animation, cancelled, value, velocity) -> {
+            if (cancelled) {
+                return;
+            }
             if (currentSheetAnimation != null && !currentSheetAnimation.isRunning()) {
                 onAnimationEnd.run();
             }
@@ -5400,7 +5426,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 }
             }
         });
-        locker.lock();
+        openAnimationNotificationsLocker.lock();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, 512);
         currentSheetAnimation.start();
 

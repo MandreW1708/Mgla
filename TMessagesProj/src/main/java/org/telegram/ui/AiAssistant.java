@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaFeatureFlags;
+import org.telegram.messenger.MglaHubHttp;
 import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
@@ -76,7 +78,7 @@ public class AiAssistant {
             String apiKey = prefs().getString("ai_transcribe_api_key", "");
             return !TextUtils.isEmpty(apiKey);
         }
-        return !TextUtils.isEmpty(API_KEY);
+        return MglaHubHttp.isConfigured() || !TextUtils.isEmpty(API_KEY);
     }
 
     private static SharedPreferences prefs() {
@@ -146,6 +148,12 @@ public class AiAssistant {
      * @param callback    вызывается с ответом (на UI-потоке) или ошибкой
      */
     public void sendMessage(String userMessage, AiCallback callback) {
+        if (!MglaFeatureFlags.isAllowed("ai_enabled")) {
+            if (callback != null) {
+                AndroidUtilities.runOnUIThread(() -> callback.onError("ИИ недоступен"));
+            }
+            return;
+        }
         if (!isConfigured()) {
             if (callback != null) {
                 String errorMsg = "gemini".equals(getProvider()) ? "API ключ Gemini не задан в разделе ИИ-расшифровка" : "API ключ не задан";
@@ -200,7 +208,7 @@ public class AiAssistant {
         }).start();
     }
 
-    private String getSystemPrompt() {
+    private static String getClientLangName() {
         String langName = "Russian";
         try {
             LocaleController.LocaleInfo info = LocaleController.getInstance().getCurrentLocaleInfo();
@@ -212,10 +220,25 @@ public class AiAssistant {
         } catch (Exception e) {
             FileLog.e(e);
         }
-        return "Ты — инструмент обработки текста. Каждый запрос НЕЗАВИСИМЫЙ. НЕТ истории. НЕТ памяти. НЕ здоровайся. НЕ прощайся. НЕ комментируй. НЕ упоминай предыдущие запросы. ТОЛЬКО результат. ВАЖНО: Всегда отвечай на языке, который установлен в настройках клиента по умолчанию (" + langName + "), если в самом запросе явно не требуется перевод на другой язык.";
+        return langName;
+    }
+
+    private String getSystemPrompt() {
+        return "Ты — инструмент обработки текста. Каждый запрос НЕЗАВИСИМЫЙ. НЕТ истории. НЕТ памяти. НЕ здоровайся. НЕ прощайся. НЕ комментируй. НЕ упоминай предыдущие запросы. ТОЛЬКО результат. ВАЖНО: Всегда отвечай на языке, который установлен в настройках клиента по умолчанию (" + getClientLangName() + "), если в самом запросе явно не требуется перевод на другой язык.";
+    }
+
+    private static String hubError(MglaHubHttp.Response response) {
+        String err = MglaHubHttp.extractJsonStringField(response.body, "error");
+        if (!TextUtils.isEmpty(err)) {
+            return err;
+        }
+        return "Хаб ИИ: HTTP " + response.code;
     }
 
     private String callOpenRouter(String userMessage) throws Exception {
+        if (MglaHubHttp.isConfigured()) {
+            return callHubOpenRouter(userMessage);
+        }
         long seed = System.nanoTime() ^ (long)(Math.random() * Long.MAX_VALUE);
         String systemPrompt = getSystemPrompt();
         String userContent = escapeJson(userMessage);
@@ -294,6 +317,24 @@ public class AiAssistant {
             : new Exception("Все модели недоступны");
     }
 
+    private String callHubOpenRouter(String userMessage) throws Exception {
+        String json = "{\"message\":\"" + escapeJson(userMessage) + "\",\"lang\":\"" + escapeJson(getClientLangName()) + "\"}";
+        MglaHubHttp.Response response = MglaHubHttp.post(
+            "/mgla-ai/v1/chat",
+            json.getBytes(StandardCharsets.UTF_8),
+            30_000,
+            90_000
+        );
+        if (response.code == 200) {
+            String content = MglaHubHttp.extractJsonStringField(response.body, "content");
+            if (!TextUtils.isEmpty(content)) {
+                return content;
+            }
+            throw new Exception("пустой ответ хаба");
+        }
+        throw new Exception(hubError(response));
+    }
+
     private String parseResponse(String json) {
         try {
             // Простой парсинг JSON без библиотек
@@ -348,6 +389,10 @@ public class AiAssistant {
         String systemPrompt = getSystemPrompt();
         String fullPrompt = systemPrompt + "\n\n" + userMessage;
 
+        if (MglaHubHttp.isConfigured()) {
+            return callHubGemini(apiKey, model, fullPrompt);
+        }
+
         String jsonBody = "{"
             + "\"contents\":[{"
             +   "\"parts\":[{\"text\":\"" + escapeJson(fullPrompt) + "\"}]"
@@ -388,6 +433,25 @@ public class AiAssistant {
             }
             throw new Exception("Gemini ошибка " + code + " (" + model + "): " + err.toString());
         }
+    }
+
+    private String callHubGemini(String apiKey, String model, String text) throws Exception {
+        String json = "{\"api_key\":\"" + escapeJson(apiKey) + "\",\"model\":\"" + escapeJson(model)
+            + "\",\"text\":\"" + escapeJson(text) + "\"}";
+        MglaHubHttp.Response response = MglaHubHttp.post(
+            "/mgla-ai/v1/gemini",
+            json.getBytes(StandardCharsets.UTF_8),
+            30_000,
+            90_000
+        );
+        if (response.code == 200) {
+            String content = MglaHubHttp.extractJsonStringField(response.body, "content");
+            if (!TextUtils.isEmpty(content)) {
+                return content;
+            }
+            throw new Exception("пустой ответ хаба");
+        }
+        throw new Exception(hubError(response));
     }
 
     private String parseGeminiResponse(String json) {

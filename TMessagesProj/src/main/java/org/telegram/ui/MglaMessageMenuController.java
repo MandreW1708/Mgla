@@ -53,8 +53,11 @@ public class MglaMessageMenuController {
 
     public static boolean isEnabled(Context context, int option) {
         if (context == null) return true;
-        if (option == ChatActivity.OPTION_AI_SUMMARY && !getPrefs(context).getBoolean("ai_summary", true)) {
-            return false;
+        if (option == ChatActivity.OPTION_AI_SUMMARY) {
+            if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_summary")
+                    || !getPrefs(context).getBoolean("ai_summary", true)) {
+                return false;
+            }
         }
         return getPrefs(context).getBoolean(ENABLED_PREFIX + option, true);
     }

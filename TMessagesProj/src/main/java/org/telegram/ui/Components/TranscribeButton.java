@@ -531,7 +531,8 @@ public class TranscribeButton {
     private static boolean isMglaTranscribeEnabled() {
         return org.telegram.messenger.ApplicationLoader.applicationContext
             .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE)
-            .getBoolean("ai_transcribe_enabled", false);
+            .getBoolean("ai_transcribe_enabled", false)
+            && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_transcribe_enabled");
     }
 
     private void addCorner(
@@ -707,7 +708,8 @@ public class TranscribeButton {
         // Mgla: use Gemini for transcription if enabled
         android.content.SharedPreferences prefs = org.telegram.messenger.ApplicationLoader.applicationContext
             .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE);
-        if (prefs.getBoolean("ai_transcribe_enabled", false)) {
+        if (prefs.getBoolean("ai_transcribe_enabled", false)
+                && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_transcribe_enabled")) {
             long dialogId = messageObject.getDialogId();
             int messageId = messageObject.messageOwner.id;
             if (open) {

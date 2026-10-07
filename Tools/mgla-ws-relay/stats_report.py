@@ -549,9 +549,10 @@ def render_html(sections, days, since, links=False):
     generated = datetime.now().strftime("%d.%m.%Y %H:%M")
     nav = ""
     if links:
-        nav = '<div class="nav">' + "".join(
+        period = "".join(
             f"<a href='?days={d}' class='{'on' if d == days else ''}'>{d} дн.</a>"
-            for d in (1, 7, 30, 90)) + "</div>"
+            for d in (1, 7, 30, 90))
+        nav = f'<div class="nav">{period}<a href="/admin">Управление</a></div>'
     body = [f"""
 <div class="hero">
   <div class="brand">

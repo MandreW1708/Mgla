@@ -1,0 +1,16 @@
+[Unit]
+Description=Mgla AI proxy (OpenRouter + Gemini via mglabot)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/mgla-ws-relay
+EnvironmentFile=/opt/mgla-ws-relay/env
+ExecStart=/opt/mgla-ws-relay/venv/bin/python /opt/mgla-ws-relay/ai_proxy.py
+Restart=always
+RestartSec=2
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

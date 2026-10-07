@@ -9,6 +9,7 @@ import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MglaDirectHttp;
+import org.telegram.messenger.MglaHubHttp;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -95,6 +96,10 @@ public class GeminiTranscriber {
         }
 
         boolean isVideo = mimeType.startsWith("video");
+        if (MglaHubHttp.isConfigured()) {
+            return callGeminiViaHub(apiKey, model, mimeType, base64Audio);
+        }
+
         String jsonBody = "{"
             + "\"contents\":[{"
             +   "\"parts\":["
@@ -134,6 +139,33 @@ public class GeminiTranscriber {
             }
             throw new Exception("Gemini HTTP " + code + ": " + err.toString());
         }
+    }
+
+    private static String callGeminiViaHub(String apiKey, String model, String mimeType, String base64Audio) throws Exception {
+        String json = "{\"api_key\":\"" + escapeJson(apiKey) + "\",\"model\":\"" + escapeJson(model)
+            + "\",\"mime_type\":\"" + escapeJson(mimeType) + "\",\"data_b64\":\"" + base64Audio + "\"}";
+        MglaHubHttp.Response response = MglaHubHttp.post(
+            "/mgla-ai/v1/gemini/transcribe",
+            json.getBytes(StandardCharsets.UTF_8),
+            30_000,
+            180_000
+        );
+        if (response.code == 200) {
+            String content = MglaHubHttp.extractJsonStringField(response.body, "content");
+            if (!TextUtils.isEmpty(content)) {
+                return content;
+            }
+            throw new Exception("пустой ответ хаба");
+        }
+        String err = MglaHubHttp.extractJsonStringField(response.body, "error");
+        throw new Exception(!TextUtils.isEmpty(err) ? err : ("Хаб Gemini: HTTP " + response.code));
+    }
+
+    private static String escapeJson(String s) {
+        return s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r");
     }
 
     private static String parseGeminiResponse(String json) {

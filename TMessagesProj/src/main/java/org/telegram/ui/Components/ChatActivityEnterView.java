@@ -2769,7 +2769,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         setEmojiButtonImage(false, false);
 
         // AI Editor robot button (to the right of emoji)
-        boolean aiEditorEnabled = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_editor", false);
+        boolean aiEditorEnabled = org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor")
+            && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_editor", false);
         if (aiEditorEnabled) {
             aiEditorButton = new ImageView(context);
             aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
