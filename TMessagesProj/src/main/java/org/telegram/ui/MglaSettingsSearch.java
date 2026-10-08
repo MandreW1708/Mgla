@@ -143,7 +143,7 @@ public final class MglaSettingsSearch {
         final String cleanHeader = "Настройки чистой шапки";
         final String sideMenu = "Боковое меню";
         final String camera = "Камера";
-        final String connection = "Подключение";
+        final String connection = "Подключение без VPN";
         final String ai = "Искусственный интеллект";
         final String transcribe = "ИИ-расшифровка";
 

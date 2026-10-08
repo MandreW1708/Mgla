@@ -75,8 +75,8 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
         if (dpiBypassCell != null) {
             dpiBypassCell.set(
                 IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
-                R.drawable.mgla_dpi_shield, "Подключение", null,
-                bypassStatusLabel(), false, false
+                R.drawable.mgla_dpi_shield, "Подключение без VPN", null,
+                bypassStatusLabel(), false, true
             );
         }
     }
@@ -132,11 +132,11 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
         mainBlock.addView(MglaUi.createDivider(context));
         dpiBypassCell = addMenuItem(mainBlock, () -> presentFragment(new MglaDpiBypassActivity()),
-            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.mgla_dpi_shield, "Подключение",
-            bypassStatusLabel());
+            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.mgla_dpi_shield, "Подключение без VPN",
+            bypassStatusLabel(), true);
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
-            IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект", null, true);
+            IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект");
         rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
         LinearLayout extraBlock = createBlock(context, "Дополнительно");

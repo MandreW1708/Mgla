@@ -110,7 +110,7 @@ public class MglaDpiBypassActivity extends BaseFragment implements NotificationC
     public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle("Подключение");
+        actionBar.setTitle("Подключение без VPN");
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
