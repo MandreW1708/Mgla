@@ -11,7 +11,8 @@ import org.telegram.messenger.BuildConfig;
  * Настройки WS-обхода и хаба (статистика).
  * <p>
  * Обход: {@link #getRelayHost()} → обычно {@code mglabot.mooo.com} ({@code /apiws}).
- * Статистика: {@link #getHubHost()} → {@code mglahub.mooo.com} ({@code /mgla-stats/}).
+ * Статистика: напрямую {@link #getHubHost()} → {@code mglahub.mooo.com} ({@code /mgla-stats/}),
+ * либо через релей {@code /mgla-ai/v1/stats-batch}, если обход включён.
  * Хосты/токены — из {@code BuildConfig} / {@code local.properties}, prefs могут переопределить.
  */
 public final class MglaWsConfig {

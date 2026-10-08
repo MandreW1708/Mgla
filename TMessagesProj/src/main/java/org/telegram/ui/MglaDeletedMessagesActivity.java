@@ -20,6 +20,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ChatThemeController;
 import org.telegram.messenger.DialogObject;
+import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
@@ -464,10 +465,82 @@ public class MglaDeletedMessagesActivity extends BaseFragment {
             MediaController.getInstance().playMessage(message);
             return;
         }
+        // Keep the disappearing-media look: open via SecretMediaViewer (not PhotoViewer),
+        // otherwise the bubble rebinds as a normal video after close.
+        if (message.needDrawBluredPreview()) {
+            SecretMediaViewer.getInstance().setParentActivity(getParentActivity());
+            SecretMediaViewer.getInstance().openMedia(message, new PhotoViewer.EmptyPhotoViewerProvider() {
+                @Override
+                public PhotoViewer.PlaceProviderObject getPlaceForPhoto(MessageObject messageObject, TLRPC.FileLocation fileLocation, int index, boolean needPreview, boolean closing) {
+                    return findPlaceForPhoto(messageObject);
+                }
+            }, null, () -> refreshMessageCell(message));
+            return;
+        }
         if (message.isVideo() || message.type == MessageObject.TYPE_PHOTO || message.isGif()) {
             PhotoViewer.getInstance().setParentActivity(this);
-            PhotoViewer.getInstance().openPhoto(message, null, 0, 0, 0, new PhotoViewer.EmptyPhotoViewerProvider());
+            PhotoViewer.getInstance().openPhoto(message, null, 0, 0, 0, new PhotoViewer.EmptyPhotoViewerProvider() {
+                @Override
+                public PhotoViewer.PlaceProviderObject getPlaceForPhoto(MessageObject messageObject, TLRPC.FileLocation fileLocation, int index, boolean needPreview, boolean closing) {
+                    return findPlaceForPhoto(messageObject);
+                }
+
+                @Override
+                public void willHidePhotoViewer() {
+                    refreshMessageCell(message);
+                }
+            });
         }
+    }
+
+    private void refreshMessageCell(MessageObject message) {
+        if (message == null || adapter == null || listView == null) {
+            return;
+        }
+        // Force a full rebind so blur / once-timer visuals come back after the viewer.
+        message.forceExpired = false;
+        message.mglaDeleted = true;
+        if (message.messageOwner != null) {
+            message.messageOwner.mglaDeleted = true;
+        }
+        message.setType();
+        int index = messages.indexOf(message);
+        if (index >= 0) {
+            adapter.notifyItemChanged(index);
+        }
+    }
+
+    private PhotoViewer.PlaceProviderObject findPlaceForPhoto(MessageObject messageObject) {
+        if (messageObject == null || listView == null) {
+            return null;
+        }
+        int count = listView.getChildCount();
+        for (int a = 0; a < count; a++) {
+            View view = listView.getChildAt(a);
+            if (!(view instanceof ChatMessageCell)) {
+                continue;
+            }
+            ChatMessageCell cell = (ChatMessageCell) view;
+            MessageObject message = cell.getMessageObject();
+            if (message == null || message.getId() != messageObject.getId()) {
+                continue;
+            }
+            ImageReceiver imageReceiver = cell.getPhotoImage();
+            if (imageReceiver == null) {
+                return null;
+            }
+            int[] coords = new int[2];
+            view.getLocationInWindow(coords);
+            PhotoViewer.PlaceProviderObject object = new PhotoViewer.PlaceProviderObject();
+            object.viewX = coords[0];
+            object.viewY = coords[1] + view.getPaddingTop();
+            object.parentView = listView;
+            object.imageReceiver = imageReceiver;
+            object.thumb = imageReceiver.getBitmapSafe();
+            object.radius = imageReceiver.getRoundRadius(true);
+            return object;
+        }
+        return null;
     }
 
     private boolean isOpenableMedia(MessageObject message) {

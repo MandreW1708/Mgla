@@ -1873,6 +1873,9 @@ public class MessageObject {
         localUserName = userName;
         messageText = formattedMessage;
         messageOwner = message;
+        if (messageOwner != null) {
+            messageOwner.noforwards = false;
+        }
         localChannel = isChannel;
         localSupergroup = supergroup;
         localEdit = edit;
@@ -1928,6 +1931,10 @@ public class MessageObject {
 
         currentAccount = accountNum;
         messageOwner = message;
+        if (messageOwner != null) {
+            // Ignore author protect-content: allow save / screenshot / copy locally.
+            messageOwner.noforwards = false;
+        }
         mglaDeleted = message.mglaDeleted;
         replyMessageObject = replyToMessage;
         eventId = eid;
@@ -6652,8 +6659,23 @@ public class MessageObject {
             } else if (hasExtendedMediaPreview()) {
                 type = TYPE_EXTENDED_MEDIA_PREVIEW;
             } else if (getMedia(messageOwner).ttl_seconds != 0 && (getMedia(messageOwner).photo instanceof TLRPC.TL_photoEmpty || getDocument() instanceof TLRPC.TL_documentEmpty || getMedia(messageOwner) instanceof TLRPC.TL_messageMediaDocument && getDocument() == null || forceExpired)) {
-                contentType = 1;
-                type = TYPE_DATE;
+                if (mglaDeleted) {
+                    // Keep a regular media bubble for archived once-media (never "Video has expired").
+                    contentType = 0;
+                    forceExpired = false;
+                    if (getMedia(messageOwner).voice) {
+                        type = TYPE_VOICE;
+                    } else if (getMedia(messageOwner).round) {
+                        type = TYPE_ROUND_VIDEO;
+                    } else if (getMedia(messageOwner) instanceof TLRPC.TL_messageMediaPhoto) {
+                        type = TYPE_PHOTO;
+                    } else {
+                        type = TYPE_VIDEO;
+                    }
+                } else {
+                    contentType = 1;
+                    type = TYPE_DATE;
+                }
             } else if (getMedia(messageOwner) instanceof TLRPC.TL_messageMediaGiveaway) {
                 type = TYPE_GIVEAWAY;
             } else if (getMedia(messageOwner) instanceof TLRPC.TL_messageMediaGiveawayResults) {
@@ -10202,7 +10224,8 @@ public class MessageObject {
         if (!isSecretMedia()) {
             return null;
         }
-        if (messageOwner.ttl == 0x7FFFFFFF) {
+        if (messageOwner.ttl == 0x7FFFFFFF
+                || getMedia(messageOwner) != null && getMedia(messageOwner).ttl_seconds == 0x7FFFFFFF) {
             if (secretOnceSpan == null) {
                 secretOnceSpan = new SpannableString("v");
                 ColoredImageSpan span = new ColoredImageSpan(R.drawable.mini_viewonce);

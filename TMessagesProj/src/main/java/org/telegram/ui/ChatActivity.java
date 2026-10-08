@@ -15761,7 +15761,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private Runnable sendSecretMessageRead(MessageObject messageObject, boolean readNow) {
-        if (messageObject == null || messageObject.isOut() || !messageObject.isSecretMedia() || messageObject.messageOwner.destroyTime != 0 || messageObject.messageOwner.ttl <= 0) {
+        if (messageObject == null || messageObject.mglaDeleted || messageObject.isOut() || !messageObject.isSecretMedia() || messageObject.messageOwner.destroyTime != 0 || messageObject.messageOwner.ttl <= 0) {
             return null;
         }
         if (readNow) {
@@ -15790,15 +15790,38 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private Runnable sendSecretMediaDelete(MessageObject messageObject) {
-        if (messageObject == null || messageObject.isOut() || !messageObject.isSecretMedia() || messageObject.messageOwner.ttl != 0x7FFFFFFF) {
+        if (messageObject == null || messageObject.isOut() || !messageObject.isSecretMedia()
+                || !MglaDeletedStorage.isViewOnceMedia(messageObject.messageOwner)) {
             return null;
         }
+        // Already archived — do not schedule another empty/delete pass.
+        if (messageObject.mglaDeleted) {
+            return null;
+        }
+        // Normalize so stock timers / SecretMediaViewer ignoreDelete stay in sync.
+        if (messageObject.messageOwner.ttl != 0x7FFFFFFF) {
+            messageObject.messageOwner.ttl = 0x7FFFFFFF;
+        }
         final long taskId = getMessagesController().createDeleteShowOnceTask(dialog_id, messageObject.getId());
-        messageObject.forceExpired = true;
-        if (messageObject.isOutOwner() || !messageObject.isRoundOnce() && !messageObject.isVoiceOnce()) {
+        if (keepMglaDeletedVisible(0, messageObject)) {
+            final int oldContentType = messageObject.contentType;
+            messageObject.forceExpired = false;
+            messageObject.mglaDeleted = true;
+            messageObject.deleted = false;
+            if (messageObject.messageOwner != null) {
+                messageObject.messageOwner.mglaDeleted = true;
+            }
+            messageObject.setType();
             ArrayList<MessageObject> msgs = new ArrayList<>();
             msgs.add(messageObject);
-            updateMessages(msgs, true);
+            updateMessages(msgs, oldContentType != messageObject.contentType);
+        } else {
+            messageObject.forceExpired = true;
+            if (messageObject.isOutOwner() || !messageObject.isRoundOnce() && !messageObject.isVoiceOnce()) {
+                ArrayList<MessageObject> msgs = new ArrayList<>();
+                msgs.add(messageObject);
+                updateMessages(msgs, true);
+            }
         }
         return () -> getMessagesController().doDeleteShowOnceTask(taskId, dialog_id, messageObject.getId());
     }
@@ -23490,52 +23513,109 @@ public class ChatActivity extends BaseFragment implements
             TLRPC.Message message = (TLRPC.Message) args[0];
             MessageObject existMessageObject = messagesDict[0].get(message.id);
             if (existMessageObject != null) {
-                existMessageObject.messageOwner.media = message.media;
-                existMessageObject.messageOwner.attachPath = message.attachPath;
-                existMessageObject.generateThumbs(false);
-                if (existMessageObject.getGroupId() != 0 && (existMessageObject.photoThumbs == null || existMessageObject.photoThumbs.isEmpty())) {
-                    MessageObject.GroupedMessages groupedMessages = groupedMessagesMap.get(existMessageObject.getGroupId());
-                    if (groupedMessages != null) {
-                        int idx = groupedMessages.messages.indexOf(existMessageObject);
-                        if (idx >= 0) {
-                            int updateCount = groupedMessages.messages.size();
-                            MessageObject messageObject = null;
-                            if (idx > 0 && idx < groupedMessages.messages.size() - 1) {
-                                MessageObject.GroupedMessages slicedGroup = new MessageObject.GroupedMessages();
-                                slicedGroup.reversed = reversed;
-                                slicedGroup.groupId = Utilities.random.nextLong();
-                                slicedGroup.messages.addAll(groupedMessages.messages.subList(idx + 1, groupedMessages.messages.size()));
-                                for (int b = 0; b < slicedGroup.messages.size(); b++) {
-                                    slicedGroup.messages.get(b).localGroupId = slicedGroup.groupId;
-                                    groupedMessages.messages.remove(idx + 1);
+                final boolean emptiedDisappearing = MglaDeletedStorage.isEmptiedDisappearingMedia(message);
+                final boolean archivedFull = message.mglaDeleted
+                    && !emptiedDisappearing
+                    && MglaDeletedStorage.isDisappearingMedia(message);
+                final boolean canKeepDisappearing = chatMode == MODE_DEFAULT
+                    && currentEncryptedChat == null
+                    && MglaSpyConfig.isSaveDeletedMessagesEnabled()
+                    && (MglaDeletedStorage.shouldSave(currentAccount, dialog_id, archivedFull ? message : existMessageObject.messageOwner)
+                        || emptiedDisappearing && MglaDeletedStorage.shouldSave(currentAccount, dialog_id, message)
+                        || existMessageObject.mglaDeleted);
+
+                if (canKeepDisappearing && (archivedFull || emptiedDisappearing || existMessageObject.mglaDeleted || existMessageObject.forceExpired && existMessageObject.isSecretMedia())) {
+                    if (archivedFull) {
+                        applyMglaRestoredDisappearingMedia(existMessageObject, message);
+                    } else if (MglaDeletedStorage.isDisappearingMedia(existMessageObject.messageOwner)) {
+                        // Still have full media in memory — just mark and redraw as saved.
+                        applyMglaRestoredDisappearingMedia(existMessageObject, existMessageObject.messageOwner);
+                    } else {
+                        // Emptied stub (photo empty / video document null): pull archive so the
+                        // video/round/photo bubble stays instead of "Video has expired".
+                        final int mid = message.id;
+                        // Mark immediately so a racing setType cannot flip to TYPE_DATE.
+                        existMessageObject.mglaDeleted = true;
+                        existMessageObject.forceExpired = false;
+                        if (existMessageObject.messageOwner != null) {
+                            existMessageObject.messageOwner.mglaDeleted = true;
+                        }
+                        getMessagesStorage().getStorageQueue().postRunnable(() -> {
+                            TLRPC.Message archived = MglaDeletedStorage.loadMessage(
+                                getMessagesStorage().getDatabase(), currentAccount, dialog_id, mid
+                            );
+                            AndroidUtilities.runOnUIThread(() -> {
+                                MessageObject obj = messagesDict[0].get(mid);
+                                if (obj == null) {
+                                    return;
                                 }
-                                groupedMessagesMap.put(slicedGroup.groupId, slicedGroup);
-                                messageObject = slicedGroup.messages.get(slicedGroup.messages.size() - 1);
-                                slicedGroup.calculate();
-                            }
-                            groupedMessages.messages.remove(idx);
-                            if (groupedMessages.messages.isEmpty()) {
-                                groupedMessagesMap.remove(groupedMessages.groupId);
-                            } else {
-                                if (messageObject == null) {
-                                    messageObject = groupedMessages.messages.get(groupedMessages.messages.size() - 1);
+                                if (archived != null && MglaDeletedStorage.isDisappearingMedia(archived)) {
+                                    applyMglaRestoredDisappearingMedia(obj, archived);
+                                } else {
+                                    // Archive miss — fall back to stock expired stub.
+                                    obj.mglaDeleted = false;
+                                    if (obj.messageOwner != null) {
+                                        obj.messageOwner.mglaDeleted = false;
+                                    }
+                                    obj.messageOwner.media = message.media;
+                                    obj.messageOwner.attachPath = message.attachPath;
+                                    obj.generateThumbs(false);
+                                    obj.setType();
+                                    if (chatAdapter != null) {
+                                        chatAdapter.updateRowWithMessageObject(obj, false, true);
+                                    }
                                 }
-                                groupedMessages.calculate();
-                                int index = messages.indexOf(messageObject);
-                                if (chatAdapter != null && !chatAdapter.isFiltered && index >= 0) {
-                                    chatAdapter.notifyItemRangeChanged(index + chatAdapter.messagesStartRow, updateCount);
+                            });
+                        });
+                    }
+                } else {
+                    existMessageObject.messageOwner.media = message.media;
+                    existMessageObject.messageOwner.attachPath = message.attachPath;
+                    existMessageObject.generateThumbs(false);
+                    if (existMessageObject.getGroupId() != 0 && (existMessageObject.photoThumbs == null || existMessageObject.photoThumbs.isEmpty())) {
+                        MessageObject.GroupedMessages groupedMessages = groupedMessagesMap.get(existMessageObject.getGroupId());
+                        if (groupedMessages != null) {
+                            int idx = groupedMessages.messages.indexOf(existMessageObject);
+                            if (idx >= 0) {
+                                int updateCount = groupedMessages.messages.size();
+                                MessageObject messageObject = null;
+                                if (idx > 0 && idx < groupedMessages.messages.size() - 1) {
+                                    MessageObject.GroupedMessages slicedGroup = new MessageObject.GroupedMessages();
+                                    slicedGroup.reversed = reversed;
+                                    slicedGroup.groupId = Utilities.random.nextLong();
+                                    slicedGroup.messages.addAll(groupedMessages.messages.subList(idx + 1, groupedMessages.messages.size()));
+                                    for (int b = 0; b < slicedGroup.messages.size(); b++) {
+                                        slicedGroup.messages.get(b).localGroupId = slicedGroup.groupId;
+                                        groupedMessages.messages.remove(idx + 1);
+                                    }
+                                    groupedMessagesMap.put(slicedGroup.groupId, slicedGroup);
+                                    messageObject = slicedGroup.messages.get(slicedGroup.messages.size() - 1);
+                                    slicedGroup.calculate();
+                                }
+                                groupedMessages.messages.remove(idx);
+                                if (groupedMessages.messages.isEmpty()) {
+                                    groupedMessagesMap.remove(groupedMessages.groupId);
+                                } else {
+                                    if (messageObject == null) {
+                                        messageObject = groupedMessages.messages.get(groupedMessages.messages.size() - 1);
+                                    }
+                                    groupedMessages.calculate();
+                                    int index = messages.indexOf(messageObject);
+                                    if (chatAdapter != null && !chatAdapter.isFiltered && index >= 0) {
+                                        chatAdapter.notifyItemRangeChanged(index + chatAdapter.messagesStartRow, updateCount);
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                if (message.media.ttl_seconds != 0 && (message.media.photo instanceof TLRPC.TL_photoEmpty || message.media.document instanceof TLRPC.TL_documentEmpty)) {
-                    existMessageObject.setType();
-                    if (chatAdapter != null) {
-                        chatAdapter.updateRowWithMessageObject(existMessageObject, false, false);
+                    if (MglaDeletedStorage.isEmptiedDisappearingMedia(message)) {
+                        existMessageObject.setType();
+                        if (chatAdapter != null) {
+                            chatAdapter.updateRowWithMessageObject(existMessageObject, false, true);
+                        }
+                    } else {
+                        updateVisibleRows();
                     }
-                } else {
-                    updateVisibleRows();
                 }
             }
         } else if (id == NotificationCenter.voiceTranscriptionUpdate) {
@@ -26603,6 +26683,29 @@ public class ChatActivity extends BaseFragment implements
             && !obj.isDateObject
             && obj.getId() > 0
             && MglaDeletedStorage.shouldSave(currentAccount, dialog_id, obj.messageOwner);
+    }
+
+    /** Restore a once/ttl media bubble from an archived (or still-full) TL message. */
+    private void applyMglaRestoredDisappearingMedia(MessageObject obj, TLRPC.Message source) {
+        if (obj == null || source == null || source.media == null) {
+            return;
+        }
+        final int oldContentType = obj.contentType;
+        obj.messageOwner.media = source.media;
+        obj.messageOwner.attachPath = source.attachPath;
+        obj.messageOwner.ttl = source.ttl != 0 ? source.ttl : source.media.ttl_seconds;
+        obj.mglaDeleted = true;
+        obj.deleted = false;
+        obj.deletedByThanos = false;
+        obj.forceExpired = false;
+        obj.messageOwner.mglaDeleted = true;
+        obj.generateThumbs(false);
+        obj.checkMediaExistance();
+        obj.setType();
+        // Always replace when contentType flips (action "expired" cell ↔ media bubble).
+        if (chatAdapter != null) {
+            chatAdapter.updateRowWithMessageObject(obj, false, oldContentType != obj.contentType || oldContentType == 1);
+        }
     }
 
     private void openMglaDeletedMessages() {
@@ -42325,8 +42428,8 @@ public class ChatActivity extends BaseFragment implements
                 emojiAnimationsOverlay.onTapItem(cell, ChatActivity.this, true);
                 chatListView.cancelClickRunnables(false);
             } else if (message.needDrawBluredPreview()) {
-                Runnable openAction = sendSecretMessageRead(message, false);
-                Runnable closeAction = sendSecretMediaDelete(message);
+                Runnable openAction = message.mglaDeleted ? null : sendSecretMessageRead(message, false);
+                Runnable closeAction = message.mglaDeleted ? null : sendSecretMediaDelete(message);
                 cell.invalidate();
                 SecretMediaViewer.getInstance().setParentActivity(getParentActivity());
                 SecretMediaViewer.getInstance().openMedia(message, photoViewerProvider, openAction, closeAction);

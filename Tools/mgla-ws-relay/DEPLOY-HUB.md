@@ -110,6 +110,8 @@ curl -s https://mglahub.mooo.com/mgla-stats/v1/health
 #   https://mglahub.mooo.com/admin/updates
 # Клиент: POST /mgla-updates/v1/check , GET /mgla-updates/v1/apk
 # Через релей: POST /mgla-ai/v1/update-check , GET /mgla-ai/v1/update-apk
+# Статистика напрямую: POST /mgla-stats/v1/batch
+# Через релей: POST /mgla-ai/v1/stats-batch
 
 # Feature flags напрямую на хаб:
 curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \

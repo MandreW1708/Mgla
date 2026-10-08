@@ -70,16 +70,18 @@ public class MglaDeletedStorage {
         if (message == null) {
             return MglaSpyConfig.MSG_TYPE_TEXT;
         }
-        if (MessageObject.isVoiceMessage(message)) {
+        // Prefer explicit once/ttl flags: emptied stubs keep voice/round but lose document attrs.
+        if ((message.media != null && message.media.voice) || MessageObject.isVoiceMessage(message)) {
             return MglaSpyConfig.MSG_TYPE_VOICE;
         }
-        if (MessageObject.isRoundVideoMessage(message)) {
+        if ((message.media != null && message.media.round) || MessageObject.isRoundVideoMessage(message)) {
             return MglaSpyConfig.MSG_TYPE_ROUND;
         }
-        if (MessageObject.isVideoMessage(message)) {
+        if (MessageObject.isVideoMessage(message)
+                || (message.media instanceof TLRPC.TL_messageMediaDocument && message.media.ttl_seconds != 0)) {
             return MglaSpyConfig.MSG_TYPE_VIDEO;
         }
-        if (MessageObject.isPhoto(message)) {
+        if (MessageObject.isPhoto(message) || message.media instanceof TLRPC.TL_messageMediaPhoto) {
             return MglaSpyConfig.MSG_TYPE_PHOTO;
         }
         return MglaSpyConfig.MSG_TYPE_TEXT;
@@ -109,6 +111,118 @@ public class MglaDeletedStorage {
             return false;
         }
         return MglaSpyConfig.isSaveDeletedMsgTypeEnabled(dialogId, resolveMessageType(message));
+    }
+
+    /**
+     * Once / TTL media that Telegram already wiped from the regular messages table.
+     * <p>
+     * Photos deserialize a missing FLAG_0 as {@link TLRPC.TL_photoEmpty}; documents leave
+     * {@code document == null} after the same empty+{@ round-trip. Treat both as emptied
+     * so archived once-videos/rounds can be swapped back into the chat bubble.
+     */
+    public static boolean isEmptiedDisappearingMedia(TLRPC.Message message) {
+        if (message == null || message.media == null || message.media.ttl_seconds == 0) {
+            return false;
+        }
+        if (message.media instanceof TLRPC.TL_messageMediaPhoto) {
+            return message.media.photo == null || message.media.photo instanceof TLRPC.TL_photoEmpty;
+        }
+        if (message.media instanceof TLRPC.TL_messageMediaDocument) {
+            return message.media.document == null || message.media.document instanceof TLRPC.TL_documentEmpty;
+        }
+        return message.media.photo instanceof TLRPC.TL_photoEmpty
+            || message.media.document instanceof TLRPC.TL_documentEmpty;
+    }
+
+    /** View-once / self-destruct media that still has real content. */
+    public static boolean isDisappearingMedia(TLRPC.Message message) {
+        if (message == null || message.media == null || message.media.ttl_seconds == 0) {
+            return false;
+        }
+        if (isEmptiedDisappearingMedia(message)) {
+            return false;
+        }
+        return message.media.photo != null || message.media.document != null;
+    }
+
+    /** View-once media (ttl == 0x7FFFFFFF on message and/or media). */
+    public static boolean isViewOnceMedia(TLRPC.Message message) {
+        if (message == null) {
+            return false;
+        }
+        if (message.ttl == 0x7FFFFFFF) {
+            return true;
+        }
+        return message.media != null && message.media.ttl_seconds == 0x7FFFFFFF;
+    }
+
+    /** Deep-copy a message (used to keep a full UI copy while emptying the DB row). */
+    public static TLRPC.Message cloneMessage(TLRPC.Message message, long clientUserId) {
+        if (message == null) {
+            return null;
+        }
+        NativeByteBuffer data = null;
+        try {
+            data = new NativeByteBuffer(message.getObjectSize());
+            message.serializeToStream(data);
+            data.position(0);
+            TLRPC.Message copy = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+            if (copy != null) {
+                copy.readAttachPath(data, clientUserId);
+                if (copy.dialog_id == 0) {
+                    copy.dialog_id = message.dialog_id;
+                }
+                copy.id = message.id;
+                copy.date = message.date;
+                copy.mglaDeleted = true;
+            }
+            return copy;
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        } finally {
+            if (data != null) {
+                data.reuse();
+            }
+        }
+    }
+
+    /** Load one archived message by id (for restoring a chat bubble after once-media expiry). */
+    public static TLRPC.Message loadMessage(SQLiteDatabase database, int currentAccount, long dialogId, int messageId) {
+        if (database == null || dialogId == 0 || messageId <= 0) {
+            return null;
+        }
+        SQLiteCursor cursor = null;
+        try {
+            cursor = database.queryFinalized(
+                "SELECT data FROM " + TABLE + " WHERE uid = ? AND mid = ? LIMIT 1",
+                dialogId, messageId
+            );
+            if (!cursor.next()) {
+                return null;
+            }
+            NativeByteBuffer data = cursor.byteBufferValue(0);
+            if (data == null) {
+                return null;
+            }
+            TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+            if (message != null) {
+                message.readAttachPath(data, UserConfig.getInstance(currentAccount).getClientUserId());
+                if (message.dialog_id == 0) {
+                    message.dialog_id = dialogId;
+                }
+                message.mglaDeleted = true;
+            }
+            data.reuse();
+            return message;
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
     }
 
     // endregion

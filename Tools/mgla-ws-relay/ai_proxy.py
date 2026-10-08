@@ -8,6 +8,7 @@ Runs next to relay.py. Clients call:
   POST /mgla-ai/v1/features          — feature flags (proxies to mglahub)
   POST /mgla-ai/v1/update-check      — in-app update check (proxies to mglahub)
   GET  /mgla-ai/v1/update-apk        — APK download (proxies to mglahub)
+  POST /mgla-ai/v1/stats-batch       — anonymous stats batch (proxies to mglahub)
 
 Admin (hub → bot sync, not for clients):
   POST /mgla-ai/v1/admin/models      — replace OpenRouter fallback list
@@ -55,6 +56,10 @@ HUB_UPDATE_APK_URL = os.environ.get(
     "MGLA_HUB_UPDATE_APK_URL",
     "https://mglahub.mooo.com/mgla-updates/v1/apk",
 ).strip()
+HUB_STATS_BATCH_URL = os.environ.get(
+    "MGLA_HUB_STATS_BATCH_URL",
+    "https://mglahub.mooo.com/mgla-stats/v1/batch",
+).strip()
 MODELS_PATH = Path(
     os.environ.get("MGLA_OPENROUTER_MODELS_FILE", "/opt/mgla-ws-relay/openrouter_models.json")
 )
@@ -63,6 +68,7 @@ MAX_AI_BODY = 32 * 1024
 MAX_ADMIN_BODY = 16 * 1024
 MAX_FEATURES_BODY = 8 * 1024
 MAX_UPDATE_CHECK_BODY = 8 * 1024
+MAX_STATS_BATCH_BODY = 256 * 1024
 MAX_GEMINI_TRANSCRIBE_BODY = 22 * 1024 * 1024
 MAX_AI_MESSAGE = 12_000
 MAX_MODELS = 40
@@ -299,6 +305,26 @@ def proxy_hub_update_check(body_bytes: bytes) -> tuple[int, bytes]:
         return int(e.code), e.read()
 
 
+def proxy_hub_stats_batch(body_bytes: bytes) -> tuple[int, bytes]:
+    url = HUB_STATS_BATCH_URL
+    if not url:
+        raise RuntimeError("hub stats batch URL not configured")
+    req = urllib.request.Request(
+        url,
+        data=body_bytes,
+        method="POST",
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "X-Mgla-Token": _hub_client_token(),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return int(resp.status), resp.read()
+    except urllib.error.HTTPError as e:
+        return int(e.code), e.read()
+
+
 def proxy_hub_update_apk_open():
     url = HUB_UPDATE_APK_URL
     if not url:
@@ -400,6 +426,7 @@ class Handler(BaseHTTPRequestHandler):
                     "models": len(models),
                     "features_proxy": bool(HUB_FEATURES_URL and HUB_FEATURES_TOKEN),
                     "update_proxy": bool(HUB_UPDATE_CHECK_URL and HUB_FEATURES_TOKEN),
+                    "stats_proxy": bool(HUB_STATS_BATCH_URL and HUB_FEATURES_TOKEN),
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
@@ -417,6 +444,8 @@ class Handler(BaseHTTPRequestHandler):
             self._post_features_proxy()
         elif path == "/mgla-ai/v1/update-check":
             self._post_update_check()
+        elif path == "/mgla-ai/v1/stats-batch":
+            self._post_stats_batch()
         elif path == "/mgla-ai/v1/chat":
             self._post_chat()
         elif path == "/mgla-ai/v1/gemini":
@@ -440,6 +469,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             log.warning("update check proxy failed: %s", e)
+            self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        self._reply(code, body)
+
+    def _post_stats_batch(self):
+        if not self._check_token():
+            return
+        raw = self._read_raw_body(MAX_STATS_BATCH_BODY)
+        if raw is None:
+            return
+        try:
+            code, body = proxy_hub_stats_batch(raw)
+        except RuntimeError as e:
+            self._reply(503, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            log.warning("stats batch proxy failed: %s", e)
             self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
         self._reply(code, body)

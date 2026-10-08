@@ -17,7 +17,8 @@ import javax.net.ssl.HttpsURLConnection;
  * HTTPS к ИИ-прокси на том же хосте, что и WS-обход ({@code mglabot.mooo.com}).
  * OpenRouter/Gemini с телефона не вызываются напрямую — только через этот прокси.
  * <p>
- * Статистика ({@link MglaStats}) по-прежнему может ходить на mglahub отдельно.
+ * Статистика ({@link MglaStats}) при включённом обходе тоже идёт через этот хост
+ * ({@code /mgla-ai/v1/stats-batch} → mglahub), иначе напрямую на хаб.
  */
 public final class MglaHubHttp {
 

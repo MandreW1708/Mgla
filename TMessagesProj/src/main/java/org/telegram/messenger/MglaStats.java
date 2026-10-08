@@ -12,7 +12,6 @@ import org.telegram.utils.wsbypass.MglaWsConfig;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -29,7 +28,9 @@ import java.util.regex.Pattern;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Anonymous product analytics sent to the Mgla relay host ({@code /mgla-stats/v1/batch}).
+ * Anonymous product analytics for mglahub ({@code /mgla-stats/v1/batch}).
+ * When WS bypass is on (and not VPN-paused), posts via mglabot
+ * {@code /mgla-ai/v1/stats-batch}; otherwise directly to the hub.
  * <p>
  * Collected: daily usage counters (screens opened, Mgla settings toggled, AI features used,
  * settings-search misses), a snapshot of Mgla settings, app version and device model.
@@ -197,7 +198,11 @@ public final class MglaStats {
     }
 
     public static void maybeUpload(boolean force) {
-        if (!isEnabled() || !MglaWsConfig.isRelayConfigured()) {
+        if (!isEnabled()) {
+            return;
+        }
+        boolean viaRelay = MglaRemoteConfig.shouldFetchViaRelay();
+        if (!viaRelay && !MglaWsConfig.isHubConfigured()) {
             return;
         }
         long last = prefs().getLong(KEY_LAST_UPLOAD, 0);
@@ -311,22 +316,41 @@ public final class MglaStats {
     }
 
     private static boolean post(String json) throws Exception {
-        String host = MglaWsConfig.getHubHost();
-        URL url = new URL("https://" + host + "/mgla-stats/v1/batch");
-        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+        boolean viaRelay = MglaRemoteConfig.shouldFetchViaRelay();
+        final String host;
+        final String path;
+        final String token;
+        final String expectedPin;
+        final boolean pinDefaultHost;
+        if (viaRelay) {
+            host = MglaWsConfig.getRelayHost();
+            path = "/mgla-ai/v1/stats-batch";
+            token = MglaWsConfig.getRelayToken();
+            expectedPin = MglaWsConfig.RELAY_SPKI_SHA256_BASE64;
+            pinDefaultHost = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host);
+        } else {
+            host = MglaWsConfig.getHubHost();
+            path = "/mgla-stats/v1/batch";
+            token = MglaWsConfig.getHubToken();
+            expectedPin = MglaWsConfig.HUB_SPKI_SHA256_BASE64;
+            pinDefaultHost = MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host);
+        }
+
+        String url = "https://" + host + path;
+        HttpsURLConnection conn = MglaDirectHttp.openHttps(url);
         try {
             conn.setConnectTimeout(15_000);
             conn.setReadTimeout(15_000);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getHubToken());
-            conn.connect();
-            if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
-                verifyHubPin(conn.getServerCertificates());
-            }
+            conn.setRequestProperty("X-Mgla-Token", token);
             byte[] body = json.getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
+                // getOutputStream completes the TLS handshake.
+                if (pinDefaultHost) {
+                    verifySpkiPin(conn.getServerCertificates(), expectedPin);
+                }
                 os.write(body);
             }
             int code = conn.getResponseCode();
@@ -335,19 +359,22 @@ public final class MglaStats {
                     drain(is);
                 }
             }
+            if (BuildVars.LOGS_ENABLED && (code < 200 || code >= 300)) {
+                FileLog.e("MglaStats HTTP " + code + " via=" + (viaRelay ? "relay" : "hub"));
+            }
             return code >= 200 && code < 300;
         } finally {
             conn.disconnect();
         }
     }
 
-    private static void verifyHubPin(Certificate[] chain) throws Exception {
+    private static void verifySpkiPin(Certificate[] chain, String expectedPin) throws Exception {
         if (chain == null || chain.length == 0) {
             throw new SecurityException("no certificate");
         }
         byte[] spki = chain[0].getPublicKey().getEncoded();
         String actual = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki));
-        if (!MglaWsConfig.HUB_SPKI_SHA256_BASE64.equals(actual)) {
+        if (!expectedPin.equals(actual)) {
             throw new SecurityException("SPKI pin mismatch");
         }
     }

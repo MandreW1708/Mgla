@@ -2353,7 +2353,40 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
         }
         if (glassDrawableMenu != null && menuWidth > 0 && !glassOnlyBack && !doNotDrawGlassMenu) {
-            glassDrawableMenu.setBounds(getWidth() - Math.max(s, menuWidth) - p * 2, t, getWidth(), b);
+            // Align menu glass to the real on-screen menu items (menu has translationX in
+            // glass mode). For the standard-header avatar slot the glass must sit exactly
+            // under the avatar at the same size — otherwise it peeks out from the side.
+            int menuGlassLeft = getWidth() - Math.max(s, menuWidth) - p * 2;
+            int menuGlassRight = getWidth();
+            if (menu != null) {
+                float itemsLeft = Float.POSITIVE_INFINITY;
+                float itemsRight = Float.NEGATIVE_INFINITY;
+                boolean foundItem = false;
+                for (int a = 0, N = menu.getChildCount(); a < N; a++) {
+                    final View child = menu.getChildAt(a);
+                    if (!(child instanceof ActionBarMenuItem) || child.getVisibility() != View.VISIBLE) {
+                        continue;
+                    }
+                    final float childLeft = menu.getX() + child.getX();
+                    final float childRight = childLeft + child.getWidth();
+                    itemsLeft = Math.min(itemsLeft, childLeft);
+                    itemsRight = Math.max(itemsRight, childRight);
+                    foundItem = true;
+                }
+                if (foundItem) {
+                    final float itemsWidth = itemsRight - itemsLeft;
+                    if (itemsWidth <= s + dp(2)) {
+                        // Single avatar-sized item: center a matching circle under it.
+                        final float centerX = (itemsLeft + itemsRight) / 2f;
+                        menuGlassLeft = Math.round(centerX - s / 2f - p);
+                        menuGlassRight = Math.round(centerX + s / 2f + p);
+                    } else {
+                        menuGlassLeft = Math.round(itemsLeft - p);
+                        menuGlassRight = Math.round(itemsRight + p);
+                    }
+                }
+            }
+            glassDrawableMenu.setBounds(menuGlassLeft, t, menuGlassRight, b);
             glassDrawableMenu.setAlpha(hasForcedMenuWidth ? 255 : (int) (255 * animatorHasMenuItems.getFloatValue()));
             if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
                 glassDrawableMenu.draw(canvas);

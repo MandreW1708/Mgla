@@ -55,7 +55,6 @@ import org.telegram.ui.AspectRatioFrameLayout;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BotWebViewVibrationEffect;
-import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
@@ -2870,37 +2869,25 @@ public class StoryViewer implements NotificationCenter.NotificationCenterDelegat
     }
 
     public void allowScreenshots(boolean allowScreenshots) {
-        if (BuildVars.DEBUG_PRIVATE_VERSION) {
-            return;
-        }
-        allowScreenshots = !isShowing || allowScreenshots;
+        // Always allow screenshots in stories regardless of author restriction.
+        allowScreenshots = true;
         if (this.allowScreenshots != allowScreenshots) {
             this.allowScreenshots = allowScreenshots;
 
             if (surfaceView != null) {
-                surfaceView.setSecure(!allowScreenshots);
+                surfaceView.setSecure(false);
             }
             if (liveView != null) {
-                liveView.setSecure(!allowScreenshots);
+                liveView.setSecure(false);
             }
             if (ATTACH_TO_FRAGMENT) {
                 if (fragment.getParentActivity() != null) {
-                    if (allowScreenshots) {
-                        fragment.getParentActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
-                        AndroidUtilities.logFlagSecure();
-                    } else {
-                        fragment.getParentActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-                        AndroidUtilities.logFlagSecure();
-                    }
+                    fragment.getParentActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                    AndroidUtilities.logFlagSecure();
                 }
             } else {
-                if (allowScreenshots) {
-                    windowLayoutParams.flags &= ~WindowManager.LayoutParams.FLAG_SECURE;
-                    AndroidUtilities.logFlagSecure();
-                } else {
-                    windowLayoutParams.flags |= WindowManager.LayoutParams.FLAG_SECURE;
-                    AndroidUtilities.logFlagSecure();
-                }
+                windowLayoutParams.flags &= ~WindowManager.LayoutParams.FLAG_SECURE;
+                AndroidUtilities.logFlagSecure();
                 try {
                     windowManager.updateViewLayout(windowView, windowLayoutParams);
                 } catch (Exception e) {

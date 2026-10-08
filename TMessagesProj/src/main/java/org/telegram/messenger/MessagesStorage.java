@@ -4752,25 +4752,17 @@ public class MessagesStorage extends BaseController {
                 ArrayList<String> namesToDelete = new ArrayList<>();
                 ArrayList<Pair<Long, Integer>> idsToDelete = new ArrayList<>();
                 ArrayList<TLRPC.Message> messages = new ArrayList<>();
+                ArrayList<TLRPC.Message> uiMessages = new ArrayList<>();
                 ArrayList<TLRPC.Message> changedSavedMessages = null;
+                final long clientUserId = getUserConfig().clientUserId;
                 cursor = database.queryFinalized(String.format(Locale.US, "SELECT data, mid, date, uid, custom_params FROM messages_v2 WHERE mid IN (%s) AND uid = %d", TextUtils.join(",", mids), dialogId));
                 while (cursor.next()) {
                     NativeByteBuffer data = cursor.byteBufferValue(0);
                     if (data != null) {
                         TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
-                        message.readAttachPath(data, getUserConfig().clientUserId);
+                        message.readAttachPath(data, clientUserId);
                         data.reuse();
                         if (message.media != null) {
-                            if (!addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, true)) {
-                                continue;
-                            } else {
-                                if (message.media.document != null) {
-                                    message.media.document = new TLRPC.TL_documentEmpty();
-                                } else if (message.media.photo != null) {
-                                    message.media.photo = new TLRPC.TL_photoEmpty();
-                                }
-                            }
-                            message.media.flags = message.media.flags & ~1;
                             message.id = cursor.intValue(1);
                             message.date = cursor.intValue(2);
                             message.dialog_id = cursor.longValue(3);
@@ -4779,7 +4771,39 @@ public class MessagesStorage extends BaseController {
                                 MessageCustomParamsHelper.readLocalParams(message, customParams);
                                 customParams.reuse();
                             }
+
+                            // Archive disappearing/once media before Telegram empties it, and keep
+                            // the local files so the copy stays openable in «Удалённые».
+                            final boolean archive = MglaDeletedStorage.shouldSave(currentAccount, dialogId, message)
+                                && MglaDeletedStorage.isDisappearingMedia(message);
+                            TLRPC.Message uiCopy = null;
+                            if (archive) {
+                                MglaDeletedStorage.save(
+                                    database, currentAccount, dialogId,
+                                    MessageObject.getTopicId(currentAccount, message, getForumTypeFlags(dialogId)),
+                                    message
+                                );
+                                // Keep a full clone for the UI so the bubble stays a secret-media
+                                // preview instead of becoming an expired stub.
+                                uiCopy = MglaDeletedStorage.cloneMessage(message, clientUserId);
+                            } else if (!addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, true)) {
+                                continue;
+                            }
+
+                            if (message.media.document != null) {
+                                message.media.document = new TLRPC.TL_documentEmpty();
+                                // Keep FLAG_0 so TL_documentEmpty survives serialize→DB→deserialize.
+                                // Clearing it leaves document==null on reload (photos auto-create
+                                // TL_photoEmpty; documents do not) and breaks once-video restore.
+                                message.media.flags |= 1;
+                            } else if (message.media.photo != null) {
+                                message.media.photo = new TLRPC.TL_photoEmpty();
+                                message.media.flags |= 1;
+                            } else {
+                                message.media.flags = message.media.flags & ~1;
+                            }
                             messages.add(message);
+                            uiMessages.add(uiCopy != null ? uiCopy : message);
                         }
                     }
                 }
@@ -4872,9 +4896,10 @@ public class MessagesStorage extends BaseController {
                         state.dispose();
                         state = null;
                     }
+                    final ArrayList<TLRPC.Message> uiNotify = uiMessages;
                     AndroidUtilities.runOnUIThread(() -> {
-                        for (int a = 0; a < messages.size(); a++) {
-                            getNotificationCenter().postNotificationName(NotificationCenter.updateMessageMedia, messages.get(a));
+                        for (int a = 0; a < uiNotify.size(); a++) {
+                            getNotificationCenter().postNotificationName(NotificationCenter.updateMessageMedia, uiNotify.get(a));
                         }
                     });
                 }
@@ -9817,7 +9842,21 @@ public class MessagesStorage extends BaseController {
                     );
                     for (int a = 0, N = archived.size(); a < N; a++) {
                         TLRPC.Message archivedMessage = archived.get(a);
-                        if (archivedMessage == null || loadedIds.contains(archivedMessage.id)) {
+                        if (archivedMessage == null) {
+                            continue;
+                        }
+                        if (loadedIds.contains(archivedMessage.id)) {
+                            // Once-media stays in messages_v2 as an emptied stub; swap it for the
+                            // archived full copy so it reappears like other saved deletions.
+                            for (int i = 0, M = res.messages.size(); i < M; i++) {
+                                TLRPC.Message existing = res.messages.get(i);
+                                if (existing != null && existing.id == archivedMessage.id
+                                        && MglaDeletedStorage.isEmptiedDisappearingMedia(existing)) {
+                                    addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
+                                    res.messages.set(i, archivedMessage);
+                                    break;
+                                }
+                            }
                             continue;
                         }
                         addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);

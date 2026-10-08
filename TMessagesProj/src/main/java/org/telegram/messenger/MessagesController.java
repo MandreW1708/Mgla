@@ -6435,13 +6435,30 @@ public class MessagesController extends BaseController implements NotificationCe
             }
         } else if (id == NotificationCenter.updateMessageMedia) {
             TLRPC.Message message = (TLRPC.Message) args[0];
-            if (message.peer_id.channel_id == 0) {
+            if (message.peer_id != null && message.peer_id.channel_id == 0) {
                 MessageObject existMessageObject = dialogMessagesByIds.get(message.id);
                 if (existMessageObject != null) {
-                    existMessageObject.messageOwner.media = MessageObject.getMedia(message);
-                    if (MessageObject.getMedia(message).ttl_seconds != 0 && (MessageObject.getMedia(message).photo instanceof TLRPC.TL_photoEmpty || MessageObject.getMedia(message).document instanceof TLRPC.TL_documentEmpty)) {
+                    // Prefer archived full once-media over an emptied stub so dialog previews
+                    // (and any shared MessageObject) keep a real video/photo bubble.
+                    if (message.mglaDeleted && MglaDeletedStorage.isDisappearingMedia(message)) {
+                        existMessageObject.messageOwner.media = MessageObject.getMedia(message);
+                        existMessageObject.mglaDeleted = true;
+                        existMessageObject.forceExpired = false;
+                        if (existMessageObject.messageOwner != null) {
+                            existMessageObject.messageOwner.mglaDeleted = true;
+                        }
                         existMessageObject.setType();
                         getNotificationCenter().postNotificationName(NotificationCenter.notificationsSettingsUpdated);
+                    } else if (MglaDeletedStorage.isEmptiedDisappearingMedia(message)
+                            && (existMessageObject.mglaDeleted
+                                || MglaDeletedStorage.shouldSave(currentAccount, existMessageObject.getDialogId(), existMessageObject.messageOwner))) {
+                        // Leave full media alone; ChatActivity restores from the archive.
+                    } else {
+                        existMessageObject.messageOwner.media = MessageObject.getMedia(message);
+                        if (MglaDeletedStorage.isEmptiedDisappearingMedia(message)) {
+                            existMessageObject.setType();
+                            getNotificationCenter().postNotificationName(NotificationCenter.notificationsSettingsUpdated);
+                        }
                     }
                 }
             }
@@ -6699,16 +6716,8 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public boolean isChatNoForwards(TLRPC.Chat chat) {
-        if (chat == null) {
-            return false;
-        }
-        if (chat.migrated_to != null) {
-            TLRPC.Chat migratedTo = getChat(chat.migrated_to.channel_id);
-            if (migratedTo != null) {
-                return migratedTo.noforwards;
-            }
-        }
-        return chat.noforwards;
+        // Always allow saving / screenshots regardless of author/channel protect content.
+        return false;
     }
 
     public boolean isChatNoForwards(long chatId) {
@@ -6724,11 +6733,8 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public boolean isUserNoForwards(TLRPC.UserFull userFull) {
-        if (userFull == null) {
-            return false;
-        }
-
-        return userFull.noforwards_peer_enabled || userFull.noforwards_my_enabled;
+        // Always allow saving / screenshots regardless of author protect content.
+        return false;
     }
 
     public TLRPC.User getUser(Long id) {
@@ -8311,7 +8317,17 @@ public class MessagesController extends BaseController implements NotificationCe
                         if (checkViewer && viewerObject != null && viewerObject.currentAccount == currentAccount && viewerObject.getDialogId() == dialogId && mids.contains(viewerObject.getId())) {
                             final int id = viewerObject.getId();
                             mids.remove((Integer) id);
-                            viewerObject.forceExpired = true;
+                            if (MglaDeletedStorage.shouldSave(currentAccount, dialogId, viewerObject.messageOwner)) {
+                                viewerObject.forceExpired = false;
+                                viewerObject.mglaDeleted = true;
+                                viewerObject.deleted = false;
+                                if (viewerObject.messageOwner != null) {
+                                    viewerObject.messageOwner.mglaDeleted = true;
+                                }
+                                viewerObject.setType();
+                            } else {
+                                viewerObject.forceExpired = true;
+                            }
                             final long taskId = createDeleteShowOnceTask(dialogId, id);
                             SecretMediaViewer.getInstance().setOnClose(() -> doDeleteShowOnceTask(taskId, dialogId, id));
                             getNotificationCenter().postNotificationName(NotificationCenter.updateMessageMedia, viewerObject.messageOwner);
