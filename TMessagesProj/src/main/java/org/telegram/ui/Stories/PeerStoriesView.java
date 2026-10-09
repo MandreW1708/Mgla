@@ -3588,7 +3588,11 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
             chatActivityEnterView.setAllowStickersAndGifs(true, true, true);
         }
         chatActivityEnterView.updateColors();
-        chatActivityEnterView.isStories = true;
+        chatActivityEnterView.setIsStories(true);
+        // Separate attach/send glass appears on expand; collapsed stays one unified pill.
+        chatActivityEnterView.setupStaticAttachButton(blurredBackgroundDrawableFactory, blurredBackgroundColorProvider);
+        chatActivityEnterView.setupStaticSendButton(blurredBackgroundDrawableFactory, blurredBackgroundColorProvider);
+        chatActivityEnterView.updateStoriesKeyboardProgress(0f);
         addView(chatActivityEnterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 7, 0, 7, 0));
         if (sendAsPeersObj != null) {
             chatActivityEnterView.updateSendAsButton(false);
@@ -7448,6 +7452,9 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
             progressToDismiss = progressToDismissLocal;
             progressToKeyboard = progressToKeyboardLocal;
             progressToReply = storyViewer.swipeToReplyProgress;
+            if (chatActivityEnterView != null) {
+                chatActivityEnterView.updateStoriesKeyboardProgress(progressToKeyboardLocal);
+            }
         } else {
             return;
         }
@@ -7635,10 +7642,13 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
                 canvas.drawRect(0, 0, getMeasuredWidth(), getMeasuredHeight(), sharedResources.dimPaint);
             }
 
+            // Expanded: middle bubble only, clear of the separate attach/send discs.
+            final float attachInset = chatActivityEnterView.getStoriesExpandedAttachInset();
+            final float sendInset = chatActivityEnterView.getStoriesExpandedSendInset();
             sharedResources.rect1.set(
-                chatActivityEnterView.getX(),
+                chatActivityEnterView.getX() + attachInset,
                 chatActivityEnterView.getY() + chatActivityEnterView.getAnimatedTop() + dp(1.33f),
-                chatActivityEnterView.getX() + chatActivityEnterView.getMeasuredWidth(),
+                chatActivityEnterView.getX() + chatActivityEnterView.getMeasuredWidth() - sendInset,
                 chatActivityEnterView.getY() + chatActivityEnterView.getMeasuredHeight()
             );
             float leftOffset = 0;
@@ -7661,19 +7671,16 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
                     rightOffset += dp(46);
                 }
             }
+            // Collapsed: one unified pill covering attach + AI + hint (no separate buttons).
             sharedResources.rect2.set(
-                dp(10) + leftOffset,
+                chatActivityEnterView.getX() + leftOffset,
                 (chatActivityEnterView.getY() + chatActivityEnterView.getMeasuredHeight() - dp(5) - dp(38)),
                 getMeasuredWidth() - dp(10) - rightOffset,
                 (chatActivityEnterView.getY() + chatActivityEnterView.getMeasuredHeight() - dp(5))
             );
             chatActivityEnterView.setTranslationX(leftOffset * (1f - progressToKeyboard));
-            float editFieldTy = 0;
-            if (chatActivityEnterView.getMeasuredHeight() > dp(50)) {
-                editFieldTy += (1f - progressToKeyboard) * (chatActivityEnterView.getMeasuredHeight() - dp(50));
-            }
-            editFieldTy += -dp(2) * (1f - progressToKeyboard);
-            chatActivityEnterView.getEditField().setTranslationY(editFieldTy);
+            // Keep text on the optical vertical center of the input row.
+            chatActivityEnterView.getEditField().setTranslationY(chatActivityEnterView.getStoriesTextOpticalOffsetY());
             float radius = dp(50) / 2f;
             AndroidUtilities.lerp(sharedResources.rect2, sharedResources.rect1, progressToKeyboard, sharedResources.finalRect);
             if (inputFieldBackground != null) {

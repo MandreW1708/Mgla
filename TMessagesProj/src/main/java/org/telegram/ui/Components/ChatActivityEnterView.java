@@ -4806,6 +4806,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     public boolean shouldDrawBackground = true;
     public boolean shouldDrawRecordedAudioPanelInParent;
     public boolean isStories;
+    private float storiesKeyboardProgress;
 
     Paint backgroundPaint = new Paint();
     private float composeShadowAlpha = 1f;
@@ -8911,7 +8912,11 @@ public class ChatActivityEnterView extends FrameLayout implements
         slowModeButton.setVisibility(visible ? VISIBLE : GONE);
         int padding = visible ? dp(slowModeButton.isPremiumMode ? 26 : 16) : 0;
         if (messageEditText != null && messageEditText.getPaddingRight() != padding) {
-            messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), padding, dp(INPUT_TEXT_PADDING_BOTTOM));
+            if (isStories) {
+                messageEditText.setPadding(0, 0, padding, 0);
+            } else {
+                messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), padding, dp(INPUT_TEXT_PADDING_BOTTOM));
+            }
         }
         updateStaticSendLayout();
     }
@@ -14951,6 +14956,10 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     public void setHorizontalPadding(float leftPadding, float rightPadding, float progress, boolean allowShare) {
+        // Incoming rightPadding is negative: -(10dp + share/like reserve). Enter view has 7dp
+        // side margin while the pill uses 10dp from the screen edge — account for both so the
+        // hint centers in the visible pill, not the full enter-view width.
+        final float storiesPillRightInset = isStories ? Math.max(0f, -rightPadding - dp(7)) : 0f;
         leftPadding *= (1f - progress);
         rightPadding *= (1f - progress);
         float s = 0.5f + 0.5f * progress;
@@ -14958,7 +14967,12 @@ public class ChatActivityEnterView extends FrameLayout implements
         emojiButtonPaddingAlpha = progress;
         updateEmojiButtonParams();
         emojiButton.setTranslationX(-leftPadding);
-        messageTextPaddingTranslationX = -leftPadding - (messageEditText == null ? 0 : dp(40) + (senderSelectView != null && senderSelectView.getVisibility() == View.VISIBLE ? dp(18) : 0)) * (1f - progress);
+        // Stories collapsed pill is text-only and centered — don't reserve space for hidden icons.
+        if (isStories) {
+            messageTextPaddingTranslationX = 0;
+        } else {
+            messageTextPaddingTranslationX = -leftPadding - (messageEditText == null ? 0 : dp(40) + (senderSelectView != null && senderSelectView.getVisibility() == View.VISIBLE ? dp(18) : 0)) * (1f - progress);
+        }
         if (recordDeleteImageView != null) {
             recordDeleteImageView.setTranslationX(-leftPadding);
         }
@@ -14987,6 +15001,27 @@ public class ChatActivityEnterView extends FrameLayout implements
         attachLayoutPaddingAlpha = progress;
         updateAttachLayoutParams();
         updateMessageTextParams();
+        if (isStories && messageEditText != null && progress < 0.5f) {
+            // Match the edit field to the visible pill, then center the hint in it.
+            final int sidePad = dp(16);
+            final int pillH = dp(DEFAULT_HEIGHT);
+            FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) messageEditText.getLayoutParams();
+            final int left = sidePad;
+            final int right = sidePad + Math.round(storiesPillRightInset);
+            if (textLp.leftMargin != left || textLp.rightMargin != right || textLp.height != pillH || textLp.gravity != (Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL)) {
+                textLp.leftMargin = left;
+                textLp.rightMargin = right;
+                textLp.height = pillH;
+                textLp.gravity = Gravity.BOTTOM;
+                // Bottom-align into the 38dp pill strip; hint is centered inside this box.
+                textLp.bottomMargin = dp(5);
+                messageEditText.setLayoutParams(textLp);
+            }
+            messageEditText.setIncludeFontPadding(false);
+            messageEditText.setGravity(Gravity.CENTER);
+            messageEditText.setPadding(0, 0, 0, 0);
+            messageEditText.setHintDrawableGravity(Gravity.CENTER);
+        }
         float newPadding = leftPadding * (1f - progress);
 
         if (horizontalPadding != newPadding) {
@@ -15049,7 +15084,12 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     private int getStaticAttachContentLeftOffset() {
-        return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_ATTACH_GAP) - dp(INPUT_BUBBLE_CONTENT_SIDE_TUCK));
+        final int expanded = Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_ATTACH_GAP) - dp(INPUT_BUBBLE_CONTENT_SIDE_TUCK));
+        // Stories collapsed: text-only pill — no reserved attach slot on the left.
+        if (isStories) {
+            return Math.round(lerp(0, expanded, storiesKeyboardProgress));
+        }
+        return expanded;
     }
 
     private int getInputInnerButtonLeftMargin() {
@@ -15106,9 +15146,10 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
         }
 
-        if (aiEditorButton != null) {
+        if (aiEditorButton != null && !isStories) {
             FrameLayout.LayoutParams aiLp = (FrameLayout.LayoutParams) aiEditorButton.getLayoutParams();
-            final int aiLeft = getInputInnerButtonLeftMargin() + dp(26);
+            // Sit just after the emoji button (same size), not overlapping it / the hint.
+            final int aiLeft = getInputInnerButtonLeftMargin() + dp(DEFAULT_HEIGHT);
             if (aiLp.leftMargin != aiLeft) {
                 aiLp.leftMargin = aiLeft;
                 aiEditorButton.setLayoutParams(aiLp);
@@ -15116,6 +15157,135 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
 
         onChangedIslandTotalHeight(getIslandTotalHeight(false));
+        if (isStories) {
+            updateStoriesKeyboardProgress(storiesKeyboardProgress);
+        }
+    }
+
+    /**
+     * Stories uses the same static attach/send slots as chats when the keyboard is open.
+     * Collapsed (keyboard closed) hides the emoji and parks the AI button in its place
+     * so the compact pill reads: [attach][AI][hint].
+     */
+    public void setIsStories(boolean stories) {
+        if (isStories == stories) {
+            return;
+        }
+        isStories = stories;
+        if (stories) {
+            // Ensure attach lives on textFieldContainer (chat static slot), not inside the bubble.
+            if (attachButton != null && textFieldContainer != null && attachButton.getParent() != textFieldContainer) {
+                if (attachButton.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) attachButton.getParent()).removeView(attachButton);
+                }
+                textFieldContainer.addView(attachButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT));
+            }
+            updateStaticAttachLayout();
+            updateStaticAttachButton();
+            updateStaticSendLayout();
+            updateStoriesKeyboardProgress(0f);
+        }
+    }
+
+    /**
+     * @param progress 0 = collapsed stories reply field (one unified pill),
+     *                 1 = keyboard / expanded (separate attach + send buttons).
+     */
+    public void updateStoriesKeyboardProgress(float progress) {
+        if (!isStories || messageEditTextContainer == null) {
+            return;
+        }
+        progress = Math.max(0f, Math.min(1f, progress));
+        storiesKeyboardProgress = progress;
+        final boolean collapsed = progress < 0.5f;
+        // PeerStoriesView clips the enter view to the unified pill while progress < 0.5 —
+        // only then reveal separate discs so they don't flash inside the clip.
+        final float separateButtons = Math.max(0f, Math.min(1f, (progress - 0.5f) / 0.5f));
+
+        // Collapsed: text-only "Ответить…" pill. Expanded: attach/send discs fade in.
+        // sendButtonContainer alpha is already driven by setHorizontalPadding(progress).
+        updateStaticAttachButton();
+        if (staticSendGlassButton != null) {
+            final float scale = 0.6f + 0.4f * separateButtons;
+            staticSendGlassButton.setScaleX(scale);
+            staticSendGlassButton.setScaleY(scale);
+            staticSendGlassButton.setAlpha(separateButtons);
+        }
+
+        if (emojiButton != null) {
+            updateEmojiButtonParams();
+            emojiButton.setEnabled(!collapsed);
+            emojiButton.setClickable(!collapsed);
+        }
+
+        if (aiEditorButton != null) {
+            FrameLayout.LayoutParams aiLp = (FrameLayout.LayoutParams) aiEditorButton.getLayoutParams();
+            // Expanded only: AI sits after emoji, same as chats.
+            final int aiLeft = getInputInnerButtonLeftMargin() + dp(DEFAULT_HEIGHT);
+            if (aiLp.leftMargin != aiLeft) {
+                aiLp.leftMargin = aiLeft;
+                aiEditorButton.setLayoutParams(aiLp);
+            }
+            aiEditorButton.setAlpha(separateButtons);
+            aiEditorButton.setEnabled(separateButtons > 0.5f);
+            aiEditorButton.setClickable(separateButtons > 0.5f);
+            if (separateButtons > 0f) {
+                aiEditorButton.bringToFront();
+            }
+        }
+
+        if (messageEditText != null && !collapsed) {
+            FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) messageEditText.getLayoutParams();
+            final int textLeft = getInputInnerButtonLeftMargin() + dp(2) + dp(DEFAULT_HEIGHT) // emoji
+                + (aiEditorButton != null ? dp(DEFAULT_HEIGHT) : 0);
+            final int textRight = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(isChat ? 50 : 2);
+            // Match the 38dp button row so single-line text sits on the same optical center.
+            final int lineH = dp(DEFAULT_HEIGHT);
+            if (textLp.leftMargin != textLeft || textLp.rightMargin != textRight || textLp.height != LayoutHelper.WRAP_CONTENT || textLp.gravity != Gravity.BOTTOM || textLp.bottomMargin != 0) {
+                textLp.leftMargin = textLeft;
+                textLp.rightMargin = textRight;
+                textLp.height = LayoutHelper.WRAP_CONTENT;
+                textLp.bottomMargin = 0;
+                textLp.gravity = Gravity.BOTTOM;
+                messageEditText.setLayoutParams(textLp);
+            }
+            if (messageEditText.getMinimumHeight() != lineH) {
+                messageEditText.setMinimumHeight(lineH);
+            }
+            messageEditText.setIncludeFontPadding(false);
+            messageEditText.setGravity(Gravity.CENTER_VERTICAL);
+            messageEditText.setPadding(0, 0, 0, 0);
+            messageEditText.setHintDrawableGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        }
+
+        // Reclaim left/right button slots while collapsed so the hint fills the pill.
+        if (useStaticAttachButton() || useStaticSendButton()) {
+            FrameLayout.LayoutParams containerLp = (FrameLayout.LayoutParams) messageEditTextContainer.getLayoutParams();
+            final int leftOffset = useStaticAttachButton() ? getStaticAttachContentLeftOffset() : containerLp.leftMargin;
+            final int rightOffset = useStaticSendButton() ? getStaticSendContentRightOffset() : containerLp.rightMargin;
+            if (containerLp.leftMargin != leftOffset || containerLp.rightMargin != rightOffset) {
+                containerLp.leftMargin = leftOffset;
+                containerLp.rightMargin = rightOffset;
+                messageEditTextContainer.setLayoutParams(containerLp);
+            }
+            if (useStaticAttachButton()) {
+                updateTopViewLeftOffset(leftOffset);
+            }
+        }
+    }
+
+    /** Expanded stories middle-bubble inset: full button size + gap, no tuck under the buttons. */
+    public float getStoriesExpandedAttachInset() {
+        return dp(DEFAULT_HEIGHT) + dp(STATIC_ATTACH_GAP) + dp(6);
+    }
+
+    public float getStoriesExpandedSendInset() {
+        return dp(DEFAULT_HEIGHT) + dp(STATIC_SEND_GAP) + dp(6);
+    }
+
+    /** Slight downward nudge so glyphs sit on the optical center of the 38dp input row. */
+    public float getStoriesTextOpticalOffsetY() {
+        return isStories ? dp(1) : 0;
     }
 
     private boolean useStaticSendButton() {
@@ -15136,7 +15306,12 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     private int getStaticSendContentRightOffset() {
-        return Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_SEND_GAP) - dp(INPUT_BUBBLE_CONTENT_SIDE_TUCK));
+        final int expanded = Math.max(0, dp(DEFAULT_HEIGHT) + dp(STATIC_SEND_GAP) - dp(INPUT_BUBBLE_CONTENT_SIDE_TUCK));
+        // Stories collapsed: one unified pill — no reserved send slot on the right.
+        if (isStories) {
+            return Math.round(lerp(0, expanded, storiesKeyboardProgress));
+        }
+        return expanded;
     }
 
     private int getStaticSendContainerWidth() {
@@ -15246,10 +15421,17 @@ public class ChatActivityEnterView extends FrameLayout implements
             attachButtonAnimator = null;
         }
         attachButton.setVisibility(View.VISIBLE);
-        attachButtonAlpha = 1.0f;
-        attachButton.setAlpha(1.0f);
+        // Stories collapsed pill is text-only — hide attach until the field expands.
+        final float storiesAttach = isStories ? Math.max(0f, Math.min(1f, (storiesKeyboardProgress - 0.5f) / 0.5f)) : 1f;
+        attachButtonAlpha = storiesAttach;
+        attachButton.setAlpha(storiesAttach);
         attachButton.setScaleX(1.0f);
         attachButton.setScaleY(1.0f);
+        attachButton.setEnabled(storiesAttach > 0.5f);
+        attachButton.setClickable(storiesAttach > 0.5f);
+        if (attachButton instanceof ChatActivityBlurredRoundButton) {
+            ((ChatActivityBlurredRoundButton) attachButton).setGlassAlpha(storiesAttach);
+        }
         updateAttachButtonTranslationX();
     }
 
@@ -15271,7 +15453,13 @@ public class ChatActivityEnterView extends FrameLayout implements
     private void updateEmojiButtonParams() {
         emojiButton.setScaleX(emojiButtonPaddingScale * emojiButtonScale);
         emojiButton.setScaleY(emojiButtonPaddingScale * emojiButtonScale);
-        emojiButton.setAlpha(emojiButtonPaddingAlpha * emojiButtonAlpha);
+        float alpha = emojiButtonPaddingAlpha * emojiButtonAlpha;
+        // Collapsed stories reply field shows attach + AI only — hide emoji so it doesn't
+        // sit under the paperclip / eat space before the hint.
+        if (isStories && storiesKeyboardProgress < 0.5f) {
+            alpha = 0f;
+        }
+        emojiButton.setAlpha(alpha);
     }
 
     public void setOverrideHint(CharSequence overrideHint) {

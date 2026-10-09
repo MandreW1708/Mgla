@@ -114,10 +114,23 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
         backgroundDrawable.setBounds(0, 0, width, height);
     }
 
+    private float glassAlpha = 1f;
+
+    /** 0..1 opacity of the glass disc only (icon stays fully visible). */
+    public void setGlassAlpha(float alpha) {
+        alpha = Math.max(0f, Math.min(1f, alpha));
+        if (this.glassAlpha != alpha) {
+            this.glassAlpha = alpha;
+            invalidate();
+        }
+    }
+
     @Override
     public void draw(@NonNull Canvas canvas) {
-        if (backgroundDrawable != null) {
+        if (backgroundDrawable != null && glassAlpha > 0f) {
+            final int save = canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), (int) (glassAlpha * 0xFF), Canvas.ALL_SAVE_FLAG);
             backgroundDrawable.draw(canvas);
+            canvas.restoreToCount(save);
         }
         super.draw(canvas);
     }

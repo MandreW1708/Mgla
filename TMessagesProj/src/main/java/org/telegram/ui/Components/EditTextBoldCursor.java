@@ -244,6 +244,13 @@ public class EditTextBoldCursor extends EditTextEffects {
         hintAnimatedDrawable2.setTextSize(getPaint().getTextSize());
     }
 
+    public void setHintDrawableGravity(int gravity) {
+        if (hintAnimatedDrawable != null) {
+            hintAnimatedDrawable.setGravity(gravity);
+            invalidate();
+        }
+    }
+
     @Override
     public void addTextChangedListener(TextWatcher watcher) {
         registeredTextWatchers.add(watcher);
