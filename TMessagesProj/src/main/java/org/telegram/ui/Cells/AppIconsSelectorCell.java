@@ -3,6 +3,7 @@ package org.telegram.ui.Cells;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -28,11 +29,13 @@ import androidx.recyclerview.widget.LinearSmoothScroller;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.Bulletin;
@@ -47,9 +50,59 @@ import org.telegram.ui.PremiumPreviewFragment;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class AppIconsSelectorCell extends RecyclerListView implements NotificationCenter.NotificationCenterDelegate {
     public final static float ICONS_ROUND_RADIUS = 18;
+
+    /** Small previews rendered off the UI thread so opening Chat Settings doesn't hitch. */
+    private static final ConcurrentHashMap<Integer, Bitmap> previewCache = new ConcurrentHashMap<>();
+    private static boolean prewarmStarted;
+    /** Bump when icon inset/art changes so stale previews are not reused. */
+    private static final int PREVIEW_CACHE_GENERATION = 4;
+    private static int previewCacheGeneration = -1;
+
+    /**
+     * Decode/render icon previews on a background queue as soon as Chat Settings opens,
+     * so scrolling to the app-icon block doesn't stall the UI thread.
+     */
+    public static void prewarmAllIcons() {
+        if (ApplicationLoader.applicationContext == null) {
+            return;
+        }
+        if (previewCacheGeneration != PREVIEW_CACHE_GENERATION) {
+            previewCache.clear();
+            previewCacheGeneration = PREVIEW_CACHE_GENERATION;
+            prewarmStarted = false;
+        }
+        if (prewarmStarted) {
+            return;
+        }
+        prewarmStarted = true;
+        final Context appCtx = ApplicationLoader.applicationContext;
+        final LauncherIconController.LauncherIcon[] icons = LauncherIconController.LauncherIcon.values();
+        Utilities.globalQueue.postRunnable(() -> {
+            final int size = AndroidUtilities.dp(72);
+            for (LauncherIconController.LauncherIcon icon : icons) {
+                if (previewCache.containsKey(icon.background)) {
+                    continue;
+                }
+                try {
+                    Drawable d = ContextCompat.getDrawable(appCtx, icon.background);
+                    if (d == null) {
+                        continue;
+                    }
+                    d = d.mutate();
+                    Bitmap preview = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+                    Canvas canvas = new Canvas(preview);
+                    d.setBounds(0, 0, size, size);
+                    d.draw(canvas);
+                    previewCache.put(icon.background, preview);
+                } catch (Throwable ignore) {
+                }
+            }
+        });
+    }
 
     private List<LauncherIconController.LauncherIcon> availableIcons = new ArrayList<>();
     private LinearLayoutManager linearLayoutManager;
@@ -57,6 +110,7 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
 
     public AppIconsSelectorCell(Context context, BaseFragment fragment, int currentAccount) {
         super(context);
+        prewarmAllIcons();
         this.currentAccount = currentAccount;
         setPadding(AndroidUtilities.dp(14), AndroidUtilities.dp(12), AndroidUtilities.dp(14), AndroidUtilities.dp(12));
 
@@ -258,9 +312,9 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
             }
         }
 
-        private void bind(LauncherIconController.LauncherIcon icon) {
-            iconView.setImageResource(icon.background);
+        private int bindToken;
 
+        private void bind(LauncherIconController.LauncherIcon icon) {
             MarginLayoutParams params = (MarginLayoutParams) titleView.getLayoutParams();
             if (icon.premium && !UserConfig.hasPremiumOnAccounts()) {
                 SpannableString str = new SpannableString("d " + LocaleController.getString(icon.title));
@@ -276,6 +330,46 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
                 titleView.setText(LocaleController.getString(icon.title));
             }
             setSelected(LauncherIconController.isEnabled(icon), false);
+
+            final int token = ++bindToken;
+            final int resId = icon.background;
+            Bitmap cached = previewCache.get(resId);
+            if (cached != null && !cached.isRecycled()) {
+                iconView.setImageBitmap(cached);
+            } else {
+                iconView.setImageDrawable(null);
+                final Context appCtx = ApplicationLoader.applicationContext;
+                Utilities.globalQueue.postRunnable(() -> {
+                    Bitmap preview = previewCache.get(resId);
+                    if (preview == null || preview.isRecycled()) {
+                        try {
+                            Drawable d = ContextCompat.getDrawable(appCtx, resId);
+                            if (d != null) {
+                                d = d.mutate();
+                                int size = AndroidUtilities.dp(72);
+                                preview = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+                                Canvas canvas = new Canvas(preview);
+                                d.setBounds(0, 0, size, size);
+                                d.draw(canvas);
+                                previewCache.put(resId, preview);
+                            }
+                        } catch (Throwable ignore) {
+                            preview = null;
+                        }
+                    }
+                    final Bitmap bmp = preview;
+                    AndroidUtilities.runOnUIThread(() -> {
+                        if (token != bindToken) {
+                            return;
+                        }
+                        if (bmp != null && !bmp.isRecycled()) {
+                            iconView.setImageBitmap(bmp);
+                        } else {
+                            iconView.setImageResource(resId);
+                        }
+                    });
+                });
+            }
         }
     }
 

@@ -51,7 +51,11 @@ public class LauncherIconController {
         RACE("RaceIcon", R.drawable.race_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconRace),
         SUMMER("SummerIcon", R.drawable.summer_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconSummer),
         WINTER("WinterIcon", R.drawable.winter_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconWinter),
-        GIRLS("GirlsIcon", R.drawable.girls_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGirls);
+        GIRLS("GirlsIcon", R.drawable.girls_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGirls),
+        RED("RedIcon", R.drawable.red_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconRed),
+        BLACK("BlackIcon", R.drawable.black_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconBlack),
+        REALISTIC("RealisticIcon", R.drawable.realistic_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconRealistic),
+        PAPER("PaperIcon", R.drawable.paper_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconPaper);
 
         public final String key;
         public final int background;

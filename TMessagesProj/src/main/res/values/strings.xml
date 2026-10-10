@@ -5782,6 +5782,10 @@
     <string name="AppIconSummer">Лето</string>
     <string name="AppIconWinter">Зима</string>
     <string name="AppIconGirls">Женский</string>
+    <string name="AppIconRed">Бордовый</string>
+    <string name="AppIconBlack">Черный</string>
+    <string name="AppIconRealistic">Реалистичный</string>
+    <string name="AppIconPaper">Рисунок</string>
     <string name="AppIconPerlamutr">Перламутровый</string>
     <string name="AppIconUfc">UFC</string>
     <string name="AppIconChangedTo">App icon has been changed to %1$s</string>

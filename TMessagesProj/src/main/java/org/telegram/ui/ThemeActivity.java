@@ -956,6 +956,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             menuItem = menu.addItem(day_night_switch, sunDrawable);
         } else if (currentType == THEME_TYPE_BASIC) {
             actionBar.setTitle(getString("ChatSettings", R.string.ChatSettings));
+            // Warm app-icon previews off-UI so scrolling to that block stays smooth.
+            AppIconsSelectorCell.prewarmAllIcons();
             ActionBarMenu menu = actionBar.createMenu();
             menuItem = menu.addItem(0, R.drawable.ic_ab_other);
             menuItem.setContentDescription(getString("AccDescrMoreOptions", R.string.AccDescrMoreOptions));
