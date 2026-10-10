@@ -7,6 +7,7 @@ import static org.telegram.messenger.LocaleController.getString;
 import static org.telegram.ui.ActionBar.Theme.RIPPLE_MASK_CIRCLE_20DP;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
@@ -25,12 +26,18 @@ import android.widget.ImageView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaFeatureFlags;
+import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.ui.ActionBar.AlertDialog;
+import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.AiAssistant;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.Stories.DarkThemeResourceProvider;
 import org.telegram.ui.Stories.recorder.CaptionContainerView;
 import org.telegram.ui.Stories.recorder.HintView2;
@@ -62,9 +69,17 @@ public class CaptionPhotoViewer extends CaptionContainerView {
 
     private BlurredBackgroundDrawable backgroundForCaptionButton;
 
+    /** Mgla AI rewrite button (same prefs / prompts as chat {@code ChatActivityEnterView}). */
+    private ImageView aiEditorButton;
+
     @Override
     protected int getEditTextStyle() {
         return EditTextEmoji.STYLE_PHOTOVIEWER;
+    }
+
+    @Override
+    protected boolean useChatLikeExpandedCaption() {
+        return true;
     }
 
     public CaptionPhotoViewer(
@@ -78,6 +93,35 @@ public class CaptionPhotoViewer extends CaptionContainerView {
     ) {
         super(context, rootView, sizeNotifierFrameLayout, containerView, resourcesProvider, blurManager);
         this.applyCaption = applyCaption;
+        // Match chat input row / apply disc height (38dp): tighter text padding + centered 38dp controls.
+        if (editText != null) {
+            editText.setTranslationY(0);
+            editText.getEditText().setPadding(0, dp(6), 0, dp(6));
+            editText.getEditText().setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+            // Hint ("Add caption…") — true vertical center in the 38dp row (stock path nudges it up).
+            editText.getEditText().hintLayoutCenterVertically = true;
+            View emojiButton = editText.getEmojiButton();
+            if (emojiButton != null) {
+                emojiButton.setTranslationY(0);
+                FrameLayout.LayoutParams emojiLp = (FrameLayout.LayoutParams) emojiButton.getLayoutParams();
+                if (emojiLp != null) {
+                    emojiLp.width = dp(38);
+                    emojiLp.height = dp(38);
+                    // BOTTOM in a 38dp row == vertical center; stays on the last line when multiline.
+                    emojiLp.gravity = Gravity.BOTTOM | Gravity.LEFT;
+                    emojiButton.setLayoutParams(emojiLp);
+                }
+            }
+            FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) editText.getEditText().getLayoutParams();
+            if (textLp != null) {
+                if (textLp.leftMargin == dp(40)) {
+                    textLp.leftMargin = dp(38);
+                }
+                textLp.gravity = Gravity.CENTER_VERTICAL | Gravity.LEFT;
+                editText.getEditText().setLayoutParams(textLp);
+            }
+        }
+        setupAiEditorButton(context);
 
         moveButtonText.setTextSize(dp(14));
         moveButtonText.setOverrideFullWidth(AndroidUtilities.displaySize.x);
@@ -417,7 +461,7 @@ public class CaptionPhotoViewer extends CaptionContainerView {
 
     @Override
     protected boolean clipChild(View child) {
-        return child != hint;
+        return child != hint && child != applyButton && child != applyGlassButton;
     }
 
     private Utilities.Callback<Integer> onTTLChange;
@@ -455,6 +499,93 @@ public class CaptionPhotoViewer extends CaptionContainerView {
     protected void onUpdateShowKeyboard(float keyboardT) {
         timerButton.setAlpha(1f - keyboardT);
         addPhotoButton.setAlpha(1f - keyboardT);
+        if (aiEditorButton != null) {
+            aiEditorButton.setAlpha(keyboardT);
+            aiEditorButton.setVisibility(keyboardT > 0.01f ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void setupAiEditorButton(Context context) {
+        SharedPreferences mglaPrefs = context.getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+        boolean aiEditorEnabled = MglaFeatureFlags.isAllowed("ai_enabled")
+            && MglaFeatureFlags.isAllowed("ai_editor")
+            && mglaPrefs.getBoolean("ai_enabled", true)
+            && mglaPrefs.getBoolean("ai_editor", false);
+        if (!aiEditorEnabled || editText == null) {
+            return;
+        }
+
+        aiEditorButton = new ImageView(context);
+        aiEditorButton.setScaleType(ImageView.ScaleType.CENTER);
+        aiEditorButton.setImageResource(R.drawable.menu_rewrite);
+        aiEditorButton.setColorFilter(new PorterDuffColorFilter(0xBBFFFFFF, PorterDuff.Mode.SRC_IN));
+        aiEditorButton.setBackground(Theme.createSelectorDrawable(0x40FFFFFF, Theme.RIPPLE_MASK_CIRCLE_20DP, dp(16)));
+        aiEditorButton.setContentDescription("AI-редактор");
+        aiEditorButton.setClickable(true);
+        aiEditorButton.setFocusable(true);
+        aiEditorButton.setAlpha(0f);
+        aiEditorButton.setVisibility(View.GONE);
+        aiEditorButton.setOnClickListener(v -> {
+            if (editText == null) {
+                return;
+            }
+            String text = editText.getText() != null ? editText.getText().toString() : "";
+            if (TextUtils.isEmpty(text.trim())) {
+                return;
+            }
+
+            AlertDialog.Builder menu = new AlertDialog.Builder(context, new DarkThemeResourceProvider());
+            menu.setTitle("AI-редактор");
+            menu.setItems(new CharSequence[]{"Исправить ошибки", "Укоротить", "Переделать в спокойное"}, new int[]{R.drawable.menu_proofread, R.drawable.msg_forward, R.drawable.menu_rewrite}, (dialog, which) -> {
+                String prompt;
+                switch (which) {
+                    case 0: prompt = "Ниже текст с возможными ошибками. Твоя задача — ТОЛЬКО исправить орфографию и грамматику. НЕ отвечай на текст, НЕ комментируй его, НЕ продолжай диалог. Верни ИСКЛЮЧИТЕЛЬНО исправленный текст, без пояснений:\n\n---\n"; break;
+                    case 1: prompt = "Ниже текст, который нужно сократить. Твоя задача — ТОЛЬКО сократить, сохранив смысл. НЕ отвечай на текст, НЕ комментируй его, НЕ продолжай диалог. Верни ИСКЛЮЧИТЕЛЬНО сокращённый текст, без пояснений:\n\n---\n"; break;
+                    case 2: prompt = "Ниже текст, который нужно переписать в спокойном дружелюбном тоне. Твоя задача — ТОЛЬКО переписать, убрав агрессию и негатив. НЕ отвечай на текст, НЕ комментируй его, НЕ продолжай диалог. Верни ИСКЛЮЧИТЕЛЬНО переписанный текст, без пояснений:\n\n---\n"; break;
+                    default: return;
+                }
+                MglaStats.count("ai:editor:" + which);
+                aiEditorButton.setEnabled(false);
+                aiEditorButton.setAlpha(0.5f);
+
+                AiAssistant.getInstance().sendMessage(prompt + text,
+                    new AiAssistant.AiCallback() {
+                        @Override
+                        public void onResponse(String edited) {
+                            if (editText != null) {
+                                editText.setText(edited.trim());
+                                editText.setSelection(edited.trim().length(), edited.trim().length());
+                            }
+                            aiEditorButton.setEnabled(true);
+                            aiEditorButton.setAlpha(keyboardT);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            aiEditorButton.setEnabled(true);
+                            aiEditorButton.setAlpha(keyboardT);
+                            if (error != null) {
+                                BaseFragment fragment = LaunchActivity.getLastFragment();
+                                if (fragment != null) {
+                                    BulletinFactory.of(fragment).createErrorBulletin(error).show();
+                                }
+                            }
+                        }
+                    }
+                );
+            });
+            menu.show();
+        });
+
+        // Tucked against the 38dp emoji button — same vertical alignment as emoji in the 38dp row.
+        editText.addView(aiEditorButton, LayoutHelper.createFrame(38, 38, Gravity.BOTTOM | Gravity.LEFT, 28, 0, 0, 0));
+
+        // Make room for the AI button in the text field (emoji is 38dp).
+        FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) editText.getEditText().getLayoutParams();
+        if (textLp != null) {
+            textLp.leftMargin = dp(28 + 38);
+            editText.getEditText().setLayoutParams(textLp);
+        }
     }
 
     @Override

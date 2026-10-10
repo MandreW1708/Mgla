@@ -108,6 +108,8 @@ public class EditTextBoldCursor extends EditTextEffects {
     private StaticLayout hintLayout;
     public float hintLayoutX, hintLayoutY;
     public boolean hintLayoutYFix;
+    /** When set with {@link #hintLayoutYFix}, centers the hint in the padded content box without the stock −1/−7dp nudges. */
+    public boolean hintLayoutCenterVertically;
     public boolean lineYFix;
     public Utilities.Callback2<Canvas, Runnable> drawHint;
     private AnimatedTextView.AnimatedTextDrawable hintAnimatedDrawable;
@@ -618,7 +620,12 @@ public class EditTextBoldCursor extends EditTextEffects {
                 setHintText(hint, false, hintLayout.getPaint());
             }
             if (hintLayoutYFix) {
-                lineY = getExtendedPaddingTop() + getPaddingTop() + (getMeasuredHeight() - getPaddingTop() - getPaddingBottom() - hintLayout.getHeight()) / 2.0f + hintLayout.getHeight() - dp(1);
+                if (hintLayoutCenterVertically) {
+                    // Geometric center of the padded content box (no stock −1/−7dp nudges).
+                    lineY = getPaddingTop() + (getMeasuredHeight() - getPaddingTop() - getPaddingBottom() + hintLayout.getHeight()) / 2.0f;
+                } else {
+                    lineY = getExtendedPaddingTop() + getPaddingTop() + (getMeasuredHeight() - getPaddingTop() - getPaddingBottom() - hintLayout.getHeight()) / 2.0f + hintLayout.getHeight() - dp(1);
+                }
             } else {
                 lineY = (getMeasuredHeight() - hintLayout.getHeight()) / 2.0f + hintLayout.getHeight() + dp(6);
             }
@@ -832,11 +839,12 @@ public class EditTextBoldCursor extends EditTextEffects {
             if (lineLeft != 0) {
                 left -= lineLeft;
             }
+            final float hintTopExtra = hintLayoutCenterVertically ? 0 : AndroidUtilities.dp2(7);
             if (supportRtlHint && LocaleController.isRTL) {
                 float offset = getMeasuredWidth() - hintWidth;
-                canvas.translate(hintLayoutX = left + getScrollX() + offset, hintLayoutY = lineY - hintLayout.getHeight() - dp(7));
+                canvas.translate(hintLayoutX = left + getScrollX() + offset, hintLayoutY = lineY - hintLayout.getHeight() - hintTopExtra);
             } else {
-                canvas.translate(hintLayoutX = left + getScrollX()+ hintLayoutOffset, hintLayoutY = lineY - hintLayout.getHeight() - AndroidUtilities.dp2(7));
+                canvas.translate(hintLayoutX = left + getScrollX()+ hintLayoutOffset, hintLayoutY = lineY - hintLayout.getHeight() - hintTopExtra);
             }
             if (transformHintToHeader) {
                 float scale = 1.0f - 0.3f * headerAnimationProgress;

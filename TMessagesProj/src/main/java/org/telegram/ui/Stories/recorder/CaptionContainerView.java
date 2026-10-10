@@ -82,8 +82,10 @@ import org.telegram.ui.Components.Text;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.StrokeDrawable;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProviderAccent;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProviderThemed;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.ui.Components.chat.buttons.ChatActivityBlurredRoundButton;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.Stories.DarkThemeResourceProvider;
 
@@ -99,6 +101,9 @@ public class CaptionContainerView extends FrameLayout {
     private Drawable applyButtonCheck;
     private CombinedDrawable applyButtonDrawable;
     public ImageView applyButton;
+    /** Glass disc behind {@link #applyButton} when {@link #useChatLikeExpandedCaption()} is active. */
+    @Nullable protected ChatActivityBlurredRoundButton applyGlassButton;
+    private boolean chatLikeApplyGlassConfigured;
     public FrameLayout limitTextContainer;
     public AnimatedTextView limitTextView;
     private int codePointCount;
@@ -134,6 +139,21 @@ public class CaptionContainerView extends FrameLayout {
 
     protected int getEditTextStyle() {
         return EditTextEmoji.STYLE_STORY;
+    }
+
+    /**
+     * When true, the keyboard-open caption bar mirrors chat input: shortened glass bubble
+     * with a separate glass apply disc outside it. Only {@link CaptionPhotoViewer} opts in —
+     * CaptionStory / stories reply / chat enter view stay untouched.
+     */
+    protected boolean useChatLikeExpandedCaption() {
+        return false;
+    }
+
+    /** Right inset (dp→px) reserved for the external apply disc while keyboard is open. */
+    protected float getChatLikeApplySlotWidth() {
+        // Match ChatActivityEnterView: DEFAULT_HEIGHT(38) + gap(0) - side tuck(4) ≈ 34, plus outer pad.
+        return dp(38 + 6);
     }
 
     boolean waitingForScrollYChange;
@@ -542,6 +562,83 @@ public class CaptionContainerView extends FrameLayout {
 
     public void setBlurredBackgroundDrawableForMentions(BlurredBackgroundDrawableViewFactory factoryForMentions) {
         this.factoryForMentions = factoryForMentions;
+        setupChatLikeApplyGlass(factoryForMentions);
+    }
+
+    /**
+     * Restyles the apply/done control as a chat-style accent glass disc sitting outside the
+     * shortened caption bubble. No-op unless {@link #useChatLikeExpandedCaption()} is true.
+     */
+    protected void setupChatLikeApplyGlass(BlurredBackgroundDrawableViewFactory factory) {
+        if (!useChatLikeExpandedCaption() || factory == null || chatLikeApplyGlassConfigured || applyButton == null) {
+            return;
+        }
+        chatLikeApplyGlassConfigured = true;
+
+        final BlurredBackgroundColorProviderAccent accent = new BlurredBackgroundColorProviderAccent(resourcesProvider);
+        applyGlassButton = ChatActivityBlurredRoundButton.create(getContext(), factory, accent, resourcesProvider);
+        applyGlassButton.updateVisualSize(38, false);
+        applyGlassButton.setClickable(false);
+        applyGlassButton.setFocusable(false);
+        applyGlassButton.setAlpha(0f);
+        applyGlassButton.setVisibility(View.GONE);
+
+        applyButtonCheck.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider), PorterDuff.Mode.SRC_IN));
+        applyButton.setImageDrawable(applyButtonCheck);
+        applyButton.setScaleType(ImageView.ScaleType.CENTER);
+
+        final int gravity = Gravity.RIGHT | (isAtTop() ? Gravity.TOP : Gravity.BOTTOM);
+        final int index = indexOfChild(applyButton);
+        addView(applyGlassButton, Math.max(0, index), LayoutHelper.createFrame(38, 38, gravity, 0, 8, 7, 8));
+
+        FrameLayout.LayoutParams applyLp = (FrameLayout.LayoutParams) applyButton.getLayoutParams();
+        applyLp.width = dp(38);
+        applyLp.height = dp(38);
+        applyLp.rightMargin = dp(7);
+        applyLp.leftMargin = 0;
+        applyLp.topMargin = dp(8);
+        applyLp.bottomMargin = dp(8);
+        applyButton.setLayoutParams(applyLp);
+    }
+
+    private void setApplyButtonKeyboardProgress(float progress) {
+        final float alpha = (float) Math.pow(progress, 16);
+        applyButton.setAlpha(alpha);
+        if (applyGlassButton != null) {
+            applyGlassButton.setAlpha(alpha);
+        }
+    }
+
+    private void setApplyButtonKeyboardVisible(boolean show, boolean immediateGone) {
+        if (show) {
+            applyButton.setVisibility(View.VISIBLE);
+            if (applyGlassButton != null) {
+                applyGlassButton.setVisibility(View.VISIBLE);
+            }
+        } else if (immediateGone) {
+            applyButton.setVisibility(View.GONE);
+            if (applyGlassButton != null) {
+                applyGlassButton.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    /** Extra right margin on the EditTextEmoji so text doesn't run under the external apply disc. */
+    private void updateChatLikeEditTextMargins(float keyboardT) {
+        if (!useChatLikeExpandedCaption() || editText == null) {
+            return;
+        }
+        final FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) editText.getLayoutParams();
+        if (lp == null) {
+            return;
+        }
+        final int collapsedRight = dp(12 + additionalRightMargin());
+        final int expandedRight = dp(12) + Math.round(getChatLikeApplySlotWidth());
+        final int right = Math.round(lerp(collapsedRight, expandedRight, keyboardT));
+        if (lp.rightMargin != right) {
+            lp.rightMargin = right;
+            editText.setLayoutParams(lp);
+        }
     }
 
 
@@ -717,7 +814,7 @@ public class CaptionContainerView extends FrameLayout {
                 if (mentionContainer != null) {
                     mentionContainer.setVisibility(View.VISIBLE);
                 }
-                applyButton.setVisibility(View.VISIBLE);
+                setApplyButtonKeyboardVisible(true, false);
             } else {
                 editText.getEditText().scrollBy(0, -editText.getEditText().getScrollY());
             }
@@ -730,7 +827,8 @@ public class CaptionContainerView extends FrameLayout {
                 limitTextContainer.setTranslationX(lerp(-dp(8), dp(2), keyboardT));
                 limitTextContainer.setTranslationY(lerp(-dp(8), 0, keyboardT));
                 editText.getEmojiButton().setAlpha(keyboardT);
-                applyButton.setAlpha((float) Math.pow(keyboardT, 16));
+                setApplyButtonKeyboardProgress(keyboardT);
+                updateChatLikeEditTextMargins(keyboardT);
                 onUpdateShowKeyboard(keyboardT);
                 if (mentionContainer != null) {
                     mentionContainer.setAlpha((float) Math.pow(keyboardT, 4));
@@ -745,7 +843,7 @@ public class CaptionContainerView extends FrameLayout {
                 @Override
                 public void onAnimationEnd(Animator animation) {
                     if (!show) {
-                        applyButton.setVisibility(View.GONE);
+                        setApplyButtonKeyboardVisible(false, true);
                         if (mentionContainer != null) {
                             mentionContainer.setVisibility(View.GONE);
                         }
@@ -772,8 +870,9 @@ public class CaptionContainerView extends FrameLayout {
             limitTextContainer.setTranslationX(lerp(-dp(8), dp(2), keyboardT));
             limitTextContainer.setTranslationY(lerp(-dp(8), 0, keyboardT));
             editText.getEmojiButton().setAlpha(keyboardT);
-            applyButton.setVisibility(show ? View.VISIBLE : View.GONE);
-            applyButton.setAlpha(show ? 1f : 0f);
+            setApplyButtonKeyboardVisible(show, true);
+            setApplyButtonKeyboardProgress(keyboardT);
+            updateChatLikeEditTextMargins(keyboardT);
             onUpdateShowKeyboard(keyboardT);
             editText.getEditText().setAllowDrawCursor(show);
             afterUpdateShownKeyboard(show);
@@ -998,7 +1097,8 @@ public class CaptionContainerView extends FrameLayout {
         if (collapsed) {
             height = dp(44);
         } else if (keyboardShown) {
-            height = Math.max(dp(44), height);
+            // Chat-like caption matches the 38dp apply/check disc; stock stays 44.
+            height = Math.max(dp(useChatLikeExpandedCaption() ? 38 : 44), height);
         } else {
             height = Math.min(dp(82), height);
         }
@@ -1020,14 +1120,18 @@ public class CaptionContainerView extends FrameLayout {
         final int padV = dp(8);
         if (isAtTop()) {
             if (!collapsed) {
-                final float heightTranslation = lerp(dpf2(-1), dpf2(1), keyboardT);
+                // Chat-like caption keeps text optically centered in the 38dp row (no ±1dp nudge).
+                final float heightTranslation = useChatLikeExpandedCaption()
+                    ? (height - heightAnimated)
+                    : lerp(dpf2(-1), dpf2(1), keyboardT);
                 editText.getEditText().setTranslationY(lastHeightTranslation = heightTranslation);
             }
 
+            final float applySlotTop = useChatLikeExpandedCaption() ? lerp(0f, getChatLikeApplySlotWidth(), keyboardT) : 0f;
             bounds.set(
                 padH,
                 padV,
-                getWidth() - padH,
+                getWidth() - padH - applySlotTop,
                 padV + heightAnimated
             );
             clickBounds.set(
@@ -1037,14 +1141,15 @@ public class CaptionContainerView extends FrameLayout {
                 padV + heightAnimated + dp(24)
             );
         } else {
-            final float heightTranslation = lerp(dpf2(1), dpf2(-1), keyboardT) + height - heightAnimated;
+            final float heightTranslation = (useChatLikeExpandedCaption() ? 0f : lerp(dpf2(1), dpf2(-1), keyboardT)) + height - heightAnimated;
             if (Math.abs(lastHeightTranslation - heightTranslation) >= 1 && !collapsed) {
                 editText.getEditText().setTranslationY(lastHeightTranslation = heightTranslation);
             }
+            final float applySlot = useChatLikeExpandedCaption() ? lerp(0f, getChatLikeApplySlotWidth(), keyboardT) : 0f;
             bounds.set(
                 padH,
                 getHeight() - padV - heightAnimated,
-                getWidth() - padH,
+                getWidth() - padH - applySlot,
                 getHeight() - padV
             );
             clickBounds.set(
@@ -1057,7 +1162,10 @@ public class CaptionContainerView extends FrameLayout {
 
         canvas.save();
         final float s = bounce.getScale(.018f);
-        canvas.scale(s, s, bounds.centerX(), bounds.centerY());
+        // Keep scale pivot on the full-width optical center so the external apply disc
+        // (chat-like caption) doesn't drift when the bubble shortens.
+        final float scaleCx = useChatLikeExpandedCaption() ? getWidth() / 2f : bounds.centerX();
+        canvas.scale(s, s, scaleCx, bounds.centerY());
 
         final float r = lerp(dp(21), 0, keyboardT * (1.0f - forceRound()));
         if (factoryForMentions != null) {
@@ -1065,7 +1173,7 @@ public class CaptionContainerView extends FrameLayout {
                 backgroundForCaptionField = factoryForMentions.create(this)
                     .setColorProvider(BlurredBackgroundProviderImpl.photoViewer(resourcesProvider))
                     .setPadding(dp(5))
-                    .setRadius(dp(22));
+                    .setRadius(dp(useChatLikeExpandedCaption() ? 19 : 22));
             }
 
             bounds.round(AndroidUtilities.rectTmp2);
@@ -1286,21 +1394,28 @@ public class CaptionContainerView extends FrameLayout {
             final boolean result = super.drawChild(canvas, child, drawingTime);
             canvas.restore();
 
-            canvas.save();
-            matrix.reset();
-            matrix.postTranslate(0, bounds.top - 1);
-            fadeGradient.setLocalMatrix(matrix);
-            canvas.drawRect(bounds.left, bounds.top, bounds.right, bounds.top + dp(10), fadePaint);
+            // Chat-like 38dp row: edge fades eat the hint/glyph bottoms — only fade when multiline.
+            final boolean fadeEdges = !useChatLikeExpandedCaption() || bounds.height() > dp(50);
+            if (fadeEdges) {
+                canvas.save();
+                matrix.reset();
+                matrix.postTranslate(0, bounds.top - 1);
+                fadeGradient.setLocalMatrix(matrix);
+                canvas.drawRect(bounds.left, bounds.top, bounds.right, bounds.top + dp(10), fadePaint);
 
-            matrix.reset();
-            matrix.postRotate(180);
-            matrix.postTranslate(0, bounds.bottom);
-            fadeGradient.setLocalMatrix(matrix);
-            canvas.drawRect(bounds.left, bounds.bottom - dp(10), bounds.right, bounds.bottom, fadePaint);
-            canvas.restore();
+                matrix.reset();
+                matrix.postRotate(180);
+                matrix.postTranslate(0, bounds.bottom);
+                fadeGradient.setLocalMatrix(matrix);
+                canvas.drawRect(bounds.left, bounds.bottom - dp(10), bounds.right, bounds.bottom, fadePaint);
+                canvas.restore();
+            }
             canvas.restore();
 
             return result;
+        } else if (child == applyButton || child == applyGlassButton) {
+            // External apply disc sits outside the shortened chat-like bubble — never clip it.
+            return super.drawChild(canvas, child, drawingTime);
         } else if (clipChild(child)) {
             canvas.save();
             canvas.clipRect(bounds);
@@ -1385,8 +1500,13 @@ public class CaptionContainerView extends FrameLayout {
 
     public void updateColors(Theme.ResourcesProvider resourcesProvider) {
         this.resourcesProvider = resourcesProvider;
-        applyButtonCheck.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_dialogFloatingIcon), PorterDuff.Mode.SRC_IN));
-        applyButtonDrawable.setBackgroundDrawable(Theme.createCircleDrawable(AndroidUtilities.dp(16), Theme.getColor(Theme.key_chat_editMediaButton, resourcesProvider)));
+        if (applyGlassButton != null) {
+            applyButtonCheck.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider), PorterDuff.Mode.SRC_IN));
+            applyGlassButton.updateColors();
+        } else {
+            applyButtonCheck.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_dialogFloatingIcon), PorterDuff.Mode.SRC_IN));
+            applyButtonDrawable.setBackgroundDrawable(Theme.createCircleDrawable(AndroidUtilities.dp(16), Theme.getColor(Theme.key_chat_editMediaButton, resourcesProvider)));
+        }
     }
 
     @Override
