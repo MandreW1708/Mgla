@@ -50,19 +50,27 @@ public class WhisperTranscriber {
         }
         final String language = MglaWhisperModelsManager.getLanguage();
         final String modelPath = model.getAbsolutePath();
+        // Warm model in parallel with Opus decode — first call used to serialize both.
+        preload(modelPath);
         new Thread(() -> {
             try {
+                long t0 = System.currentTimeMillis();
                 float[] pcm = decodeToPcm16kMono(audioFile);
                 if (pcm == null || pcm.length == 0) {
                     throw new Exception("Не удалось декодировать аудио");
                 }
+                long tDecode = System.currentTimeMillis();
                 String text;
                 synchronized (lock) {
                     long handle = ensureModelLocked(modelPath);
                     if (handle == 0) {
                         throw new Exception("Не удалось загрузить модель Whisper");
                     }
+                    long tModel = System.currentTimeMillis();
                     text = MglaWhisperNative.transcribe(handle, pcm, language, 0);
+                    FileLog.d("WhisperTranscribe decode=" + (tDecode - t0) + "ms modelReady="
+                        + (tModel - tDecode) + "ms infer=" + (System.currentTimeMillis() - tModel)
+                        + "ms samples=" + pcm.length);
                 }
                 if (text == null) {
                     throw new Exception("Ошибка распознавания Whisper");
@@ -78,6 +86,30 @@ public class WhisperTranscriber {
                 notifyError(callback, e.getMessage() != null ? e.getMessage() : "Ошибка расшифровки");
             }
         }, "MglaWhisperTranscribe").start();
+    }
+
+    /** Preload selected model into RAM so the first tap isn't cold. */
+    public static void preloadSelected() {
+        Context ctx = ApplicationLoader.applicationContext;
+        if (ctx == null || !MglaWhisperNative.isAvailable()) {
+            return;
+        }
+        File model = MglaWhisperModelsManager.getLoadedModel(ctx);
+        if (model == null) {
+            return;
+        }
+        preload(model.getAbsolutePath());
+    }
+
+    private static void preload(String modelPath) {
+        if (modelPath == null) {
+            return;
+        }
+        new Thread(() -> {
+            synchronized (lock) {
+                ensureModelLocked(modelPath);
+            }
+        }, "MglaWhisperPreload").start();
     }
 
     private static long ensureModelLocked(String modelPath) {

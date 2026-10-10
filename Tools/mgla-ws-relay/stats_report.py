@@ -35,7 +35,7 @@ SETTING_LABELS = {
     "mgla_popup_notifications_enabled": "Всплывающие уведомления",
     "edited_icon_enabled": "Значок вместо «изменено»",
     "text_anim_enabled": "Анимация текста",
-    "ws_enabled": "Обход через WebSocket",
+    "ws_enabled": "Авто-обход",
     "dpi_enabled": "Обход через ByeDPI",
     "ai_enabled": "Включение AI",
     "ai_summary": "Краткая Сводка",

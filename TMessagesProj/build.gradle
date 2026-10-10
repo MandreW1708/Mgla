@@ -158,6 +158,8 @@ android {
         def mglaWsRelayHost = getProps("MGLA_WS_RELAY_HOST")
         def mglaHubToken = getProps("MGLA_HUB_TOKEN")
         def mglaHubHost = getProps("MGLA_HUB_HOST")
+        def mglaWebProxyHost = getProps("MGLA_WEB_PROXY_HOST")
+        def mglaWebProxySecret = getProps("MGLA_WEB_PROXY_SECRET")
 
         buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
         buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
@@ -167,6 +169,8 @@ android {
         buildConfigField "String", "MGLA_WS_RELAY_HOST", "\"" + ((mglaWsRelayHost != null && !mglaWsRelayHost.isEmpty()) ? mglaWsRelayHost : "mglabot.mooo.com") + "\""
         buildConfigField "String", "MGLA_HUB_TOKEN", "\"" + ((mglaHubToken != null && !mglaHubToken.isEmpty()) ? mglaHubToken : "") + "\""
         buildConfigField "String", "MGLA_HUB_HOST", "\"" + ((mglaHubHost != null && !mglaHubHost.isEmpty()) ? mglaHubHost : "mglahub.mooo.com") + "\""
+        buildConfigField "String", "MGLA_WEB_PROXY_HOST", "\"" + ((mglaWebProxyHost != null && !mglaWebProxyHost.isEmpty()) ? mglaWebProxyHost : "mglabot.mooo.com/tgweb") + "\""
+        buildConfigField "String", "MGLA_WEB_PROXY_SECRET", "\"" + ((mglaWebProxySecret != null && !mglaWebProxySecret.isEmpty()) ? mglaWebProxySecret : "") + "\""
 
         manifestPlaceholders = [mapsApiKey: (mapsKey != null && !mapsKey.isEmpty()) ? mapsKey : ""]
 

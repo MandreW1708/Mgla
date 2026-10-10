@@ -85,7 +85,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
     private static String bypassStatusLabel() {
         if (MglaWsBypass.getInstance().isEnabled()) {
-            return "WS";
+            return "Авто";
         }
         if (MglaDpiBypass.getInstance().isEnabled()) {
             return "ByeDPI";

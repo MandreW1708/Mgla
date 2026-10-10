@@ -98,6 +98,7 @@ public class MglaWhisperModelsActivity extends MglaBaseSettingsActivity {
                     confirmDelete(context, info.id);
                 } else {
                     MglaWhisperModelsManager.selectModel(info.id);
+                    WhisperTranscriber.preloadSelected();
                     adapter.notifyDataSetChanged();
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.contact_check, "Модель выбрана").show();
                 }
@@ -143,6 +144,7 @@ public class MglaWhisperModelsActivity extends MglaBaseSettingsActivity {
             @Override
             public void onDone(File file) {
                 downloadPercent.remove(info.id);
+                WhisperTranscriber.preloadSelected();
                 adapter.notifyDataSetChanged();
                 BulletinFactory.of(MglaWhisperModelsActivity.this)
                     .createSimpleBulletin(R.raw.contact_check, "Модель скачана").show();

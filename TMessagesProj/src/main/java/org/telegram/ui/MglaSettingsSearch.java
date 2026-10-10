@@ -219,7 +219,7 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1080, "API", hub, camera, cameraIcon, cameraScreen, "API", "camera/api"));
         l.add(new Entry(1081, "60 FPS", hub, camera, cameraIcon, cameraScreen, "60 FPS", "camera/60fps"));
 
-        l.add(new Entry(1090, "Обход через WebSocket", hub, connection, connectionIcon, connectionScreen, "Обход через WebSocket", "connection/websocket"));
+        l.add(new Entry(1090, "Авто-обход", hub, connection, connectionIcon, connectionScreen, "Авто-обход", "connection/websocket"));
         l.add(new Entry(1091, "Обход через ByeDPI", hub, connection, connectionIcon, connectionScreen, "Обход через ByeDPI", "connection/byedpi"));
         l.add(new Entry(1092, "Выбрать стратегию", hub, connection, connectionIcon, connectionScreen, "Выбрать стратегию", "connection/strategy"));
         l.add(new Entry(1093, "SNI фейк-пакетов", hub, connection, connectionIcon, connectionScreen, "SNI фейк-пакетов", "connection/sni"));

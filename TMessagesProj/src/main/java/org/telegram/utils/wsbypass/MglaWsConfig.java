@@ -126,6 +126,22 @@ public final class MglaWsConfig {
         return !TextUtils.isEmpty(getRelayHost()) && !TextUtils.isEmpty(getRelayToken());
     }
 
+    /** Адрес запасного WEB proxy в форме {@code host/path} (без https://). */
+    public static String getWebProxyHost() {
+        String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
+        return fromBuild == null ? "" : fromBuild.trim();
+    }
+
+    /** Секрет WEB proxy: 32 hex (как в profiles.json tproxy-server). */
+    public static String getWebProxySecret() {
+        String fromBuild = BuildConfig.MGLA_WEB_PROXY_SECRET;
+        return fromBuild == null ? "" : fromBuild.trim().toLowerCase(java.util.Locale.US);
+    }
+
+    public static boolean isWebProxyConfigured() {
+        return !TextUtils.isEmpty(getWebProxyHost()) && !TextUtils.isEmpty(getWebProxySecret());
+    }
+
     /** Хост хаба статистики / панели ({@code mglahub.mooo.com}). */
     public static String getHubHost() {
         // BuildConfig (local.properties) wins over stale prefs overrides.

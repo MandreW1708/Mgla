@@ -45,7 +45,8 @@ target_compile_options(mglawhisper PRIVATE -O3 -fvisibility=hidden -fvisibility-
 
 if (${ANDROID_ABI} STREQUAL "arm64-v8a")
     target_compile_definitions(mglawhisper PRIVATE GGML_USE_CPU_AARCH64)
-    target_compile_options(mglawhisper PRIVATE -march=armv8.2-a+fp16)
+    # fp16 + dotprod: large win on quantized (Q5) kernels on modern ARM phones
+    target_compile_options(mglawhisper PRIVATE -march=armv8.2-a+fp16+dotprod)
 elseif (${ANDROID_ABI} STREQUAL "armeabi-v7a")
     target_compile_definitions(mglawhisper PRIVATE GGML_USE_CPU_AARCH64)
     target_compile_options(mglawhisper PRIVATE -mfpu=neon-vfpv4)

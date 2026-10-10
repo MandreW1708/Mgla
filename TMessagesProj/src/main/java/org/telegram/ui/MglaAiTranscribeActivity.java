@@ -164,6 +164,9 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyDataSetChanged();
         }
+        if (isWhisper()) {
+            WhisperTranscriber.preloadSelected();
+        }
     }
 
     private void selectProvider(String provider) {
@@ -175,6 +178,9 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
             return;
         }
         MglaWhisperModelsManager.setProvider(provider);
+        if (MglaWhisperModelsManager.PROVIDER_WHISPER.equals(provider)) {
+            WhisperTranscriber.preloadSelected();
+        }
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyDataSetChanged();
         }

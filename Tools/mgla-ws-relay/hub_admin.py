@@ -20,7 +20,7 @@ FEATURE_CATALOG: Sequence[Tuple[str, str]] = (
     ("ai_editor", "AI-редактор"),
     ("ai_transcribe_enabled", "Включить расшифровку"),
     ("ai_chat_dna", "Главные темы Chat DNA"),
-    ("ws_enabled", "Обход через WebSocket"),
+    ("ws_enabled", "Авто-обход"),
     ("dpi_enabled", "Обход через ByeDPI"),
     ("spy_ghost_mode", "Режим призрака"),
     ("spy_last_online", "Последний онлайн"),

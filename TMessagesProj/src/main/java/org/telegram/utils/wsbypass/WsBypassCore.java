@@ -58,7 +58,10 @@ public final class WsBypassCore {
         }
     }
 
-    private static final long WS_ROUTE_DEADLINE_MS = 12_000L;
+    private static final long WS_ROUTE_DEADLINE_MS = 18_000L;
+    private static final long RELAY_ATTEMPT_MS = 12_000L;
+    private static final long FAIL_BACKOFF_MS = 3_000L;
+    private static final int FAILS_BEFORE_BACKOFF = 2;
     private static final int MAX_DIRECT_ATTEMPTS = 6;
     private static final int SOCK_RCVBUF = 256 * 1024;
     private static final int SOCK_SNDBUF = 512 * 1024;
@@ -103,7 +106,11 @@ public final class WsBypassCore {
 
     private final Object failLock = new Object();
     private final Map<Long, Long> failUntilMs = new HashMap<>();
+    private final Map<Long, Integer> failStreak = new HashMap<>();
     private final Map<Long, String> preferredDomain = new HashMap<>();
+
+    private volatile long lastUpstreamOkAtMs;
+    private volatile long lastUpstreamFailAtMs;
 
     private WsBypassCore() {
     }
@@ -128,6 +135,16 @@ public final class WsBypassCore {
 
     public long getLastBridgeOkAtMs() {
         return lastBridgeOkAtMs;
+    }
+
+    /** Wall-clock time of the last successful upstream WebSocket connect (0 = none yet). */
+    public long getLastUpstreamOkAtMs() {
+        return lastUpstreamOkAtMs;
+    }
+
+    /** Wall-clock time of the last failed upstream connect (0 = none yet). */
+    public long getLastUpstreamFailAtMs() {
+        return lastUpstreamFailAtMs;
     }
 
     /** @return пустая строка при успехе, иначе текст ошибки */
@@ -172,6 +189,12 @@ public final class WsBypassCore {
                     new ThreadPoolExecutor.AbortPolicy()
                 );
 
+                lastUpstreamOkAtMs = 0L;
+                lastUpstreamFailAtMs = 0L;
+                synchronized (failLock) {
+                    failUntilMs.clear();
+                    failStreak.clear();
+                }
                 running = true;
                 final long generation = nextBridgeGeneration();
                 Thread accept = new Thread(() -> acceptLoop(generation), "mgla-ws-accept");
@@ -326,20 +349,23 @@ public final class WsBypassCore {
             }
 
             long dcKey = poolKey(dc, isMedia);
-            if (isInFailBackoff(dcKey)) {
-                dbg("dc " + dc + " in backoff");
-                return;
+            // In backoff we still make one quick attempt instead of dropping the client socket.
+            boolean inBackoff = isInFailBackoff(dcKey);
+            if (inBackoff) {
+                dbg("dc " + dc + " in backoff, single attempt");
             }
 
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WS_ROUTE_DEADLINE_MS);
             RawWebSocket ws;
             try {
-                ws = connectUpstream(dc, isMedia, deadline, generation);
+                ws = connectUpstream(dc, isMedia, deadline, generation, !inBackoff);
             } catch (Throwable e) {
                 dbg("upstream connect failed: " + e.getMessage());
                 failRecord(dcKey);
+                lastUpstreamFailAtMs = System.currentTimeMillis();
                 return;
             }
+            lastUpstreamOkAtMs = System.currentTimeMillis();
             if (!trackIfGenerationCurrent(ws, generation)) {
                 try {
                     ws.close();
@@ -370,7 +396,8 @@ public final class WsBypassCore {
      * Основной путь — релей (нужен, когда DC/kws заблокированы).
      * Прямой kws оставляем запасным: имеет смысл только там, где Telegram Web уже открыт.
      */
-    private RawWebSocket connectUpstream(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
+    private RawWebSocket connectUpstream(int dc, boolean isMedia, long deadlineNanos, long generation,
+                                         boolean allowRetry) throws IOException {
         if (!MglaWsConfig.isRelayConfigured()) {
             throw new IOException("релей не сконфигурирован");
         }
@@ -380,6 +407,15 @@ public final class WsBypassCore {
         } catch (IOException e) {
             relayError = e;
             dbg("relay failed: " + e.getMessage());
+        }
+        if (!allowRetry || !isBridgeGenerationCurrent(generation) || System.nanoTime() >= deadlineNanos) {
+            throw relayError;
+        }
+        try {
+            return connectRelay(dc, isMedia, deadlineNanos, generation);
+        } catch (IOException e) {
+            relayError = e;
+            dbg("relay retry failed: " + e.getMessage());
         }
         if (!isBridgeGenerationCurrent(generation) || System.nanoTime() >= deadlineNanos) {
             throw relayError;
@@ -406,7 +442,7 @@ public final class WsBypassCore {
         headers.put("X-Mgla-Token", token);
         dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : ""));
         long attemptDeadline = Math.min(deadlineNanos,
-            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(8000L));
+            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RELAY_ATTEMPT_MS));
         // Pin only the known default host; custom hosts rely on system CAs + hostname verify.
         String[] pins = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)
             ? new String[]{MglaWsConfig.RELAY_SPKI_SHA256_BASE64}
@@ -415,6 +451,32 @@ public final class WsBypassCore {
             () -> isBridgeGenerationCurrent(generation), pins);
         dbg("101 OK via relay " + host);
         return ws;
+    }
+
+    /** Blocking check that the relay accepts a WebSocket upgrade; does not touch running bridges. */
+    public boolean probeRelay(long timeoutMs) {
+        RawWebSocket ws = null;
+        try {
+            ws = connectRelay(2, false,
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs), currentBridgeGeneration());
+            return true;
+        } catch (Throwable e) {
+            dbg("relay probe failed: " + e.getMessage());
+            return false;
+        } finally {
+            if (ws != null) {
+                try {
+                    ws.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    private long currentBridgeGeneration() {
+        synchronized (bridgeStateLock) {
+            return bridgeGeneration;
+        }
     }
 
     private RawWebSocket connectKws(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
@@ -615,13 +677,19 @@ public final class WsBypassCore {
 
     private void failRecord(long dcKey) {
         synchronized (failLock) {
-            failUntilMs.put(dcKey, SystemClock.elapsedRealtime() + 15_000L);
+            Integer prev = failStreak.get(dcKey);
+            int streak = (prev == null ? 0 : prev) + 1;
+            failStreak.put(dcKey, streak);
+            if (streak >= FAILS_BEFORE_BACKOFF) {
+                failUntilMs.put(dcKey, SystemClock.elapsedRealtime() + FAIL_BACKOFF_MS);
+            }
         }
     }
 
     private void failClear(long dcKey) {
         synchronized (failLock) {
             failUntilMs.remove(dcKey);
+            failStreak.remove(dcKey);
         }
     }
 

@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 import android.os.SystemClock;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.DispatchQueue;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
@@ -14,14 +15,27 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.utils.bypass.MglaBypassVpnGuard;
 import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.proxy.ProxySettings;
+import org.telegram.utils.proxy.WebProxyTransport;
 
 /**
- * Менеджер WS-обхода: поднимает {@link WsBypassCore} и направляет Telegram
- * через локальный MTProto-прокси (не SOCKS5) на WebSocket-релей.
+ * Менеджер «Авто-обхода»: основной маршрут — {@link WsBypassCore} (локальный MTProto-прокси
+ * на WebSocket-релей), запасной — Telegram WEB proxy ({@link WebProxyTransport}) на
+ * {@link MglaWsConfig#getWebProxyHost()}. Переключение автоматическое по состоянию соединения.
  * <p>
- * Взаимоисключает с ByeDPI-обходом: при включении WS выключает ByeDPI и наоборот.
+ * Взаимоисключает с ByeDPI-обходом: при включении выключает ByeDPI и наоборот.
  */
 public final class MglaWsBypass {
+
+    public enum Route { WS, WEB }
+
+    private static final long MONITOR_INTERVAL_MS = 5_000L;
+    /** Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB. */
+    private static final long WS_STALL_MS = 45_000L;
+    /** Сколько WEB может висеть в Connecting, прежде чем вернуться на WS. */
+    private static final long WEB_STALL_MS = 60_000L;
+    /** Как часто из WEB пробовать вернуться на WS. */
+    private static final long WEB_RETRY_WS_MS = 8 * 60_000L;
+    private static final long WS_PROBE_TIMEOUT_MS = 10_000L;
 
     private static final MglaWsBypass instance = new MglaWsBypass();
 
@@ -39,6 +53,14 @@ public final class MglaWsBypass {
 
     private SharedConfig.ProxyInfo bypassProxyInfo;
     private SharedConfig.ProxyInfo savedCurrentProxyRef;
+
+    private volatile Route route = Route.WS;
+    private volatile long routeSinceElapsed;
+    private volatile long lastConnectedElapsed;
+    private volatile long lastWsProbeElapsed;
+    private DispatchQueue monitorQueue;
+    private boolean monitorScheduled;
+    private final Runnable monitorRunnable = this::monitorTick;
 
     private MglaWsBypass() {
     }
@@ -63,10 +85,12 @@ public final class MglaWsBypass {
             FileLog.e("MglaWsBypass: start on launch failed: " + err);
             return;
         }
+        resetRoute();
         writeBypassToMainConfig();
         addBypassProxyToList();
         proxyApplied = true;
         sessionStartElapsed = SystemClock.elapsedRealtime();
+        scheduleMonitor();
     }
 
     public synchronized boolean setEnabled(boolean enable) {
@@ -98,12 +122,14 @@ public final class MglaWsBypass {
                 notifyChanged();
                 return false;
             }
+            resetRoute();
             writeBypassToMainConfig();
             addBypassProxyToList();
-            ConnectionsManager.setProxySettings(true, buildLocalSettings());
+            ConnectionsManager.setProxySettings(true, buildActiveSettings());
             proxyApplied = true;
             sessionStartElapsed = SystemClock.elapsedRealtime();
             lastError = null;
+            scheduleMonitor();
         } else {
             MglaBypassVpnGuard.noteUserDisabled(MglaBypassVpnGuard.MODE_WS);
             if (proxyApplied) {
@@ -112,6 +138,7 @@ public final class MglaWsBypass {
                 restoreUserProxy();
                 proxyApplied = false;
             }
+            resetRoute();
             sessionStartElapsed = 0;
             WsBypassCore.getInstance().stop();
             MglaWsConfig.setEnabled(false);
@@ -131,6 +158,7 @@ public final class MglaWsBypass {
             restoreUserProxy();
             proxyApplied = false;
         }
+        resetRoute();
         sessionStartElapsed = 0;
         WsBypassCore.getInstance().stop();
         notifyChanged();
@@ -162,12 +190,14 @@ public final class MglaWsBypass {
             notifyChanged();
             return;
         }
+        resetRoute();
         writeBypassToMainConfig();
         addBypassProxyToList();
-        ConnectionsManager.setProxySettings(true, buildLocalSettings());
+        ConnectionsManager.setProxySettings(true, buildActiveSettings());
         proxyApplied = true;
         sessionStartElapsed = SystemClock.elapsedRealtime();
         lastError = null;
+        scheduleMonitor();
         notifyChanged();
     }
 
@@ -197,11 +227,123 @@ public final class MglaWsBypass {
         }
         FileLog.e("MglaWsBypass: engine stopped, restarting");
         String err = startEngine();
-        if (err == null) {
+        if (err == null && route == Route.WS) {
             writeBypassToMainConfig();
-            ConnectionsManager.setProxySettings(true, buildLocalSettings());
+            replaceBypassProxyInList();
+            ConnectionsManager.setProxySettings(true, buildActiveSettings());
         }
+        scheduleMonitor();
         notifyChanged();
+    }
+
+    public Route getRoute() {
+        return route;
+    }
+
+    /** WEB proxy можно использовать как запасной маршрут на этом устройстве. */
+    public boolean isWebFallbackAvailable() {
+        return MglaWsConfig.isWebProxyConfigured() && WebProxyTransport.isSupported();
+    }
+
+    private void resetRoute() {
+        long now = SystemClock.elapsedRealtime();
+        route = Route.WS;
+        routeSinceElapsed = now;
+        lastConnectedElapsed = now;
+        lastWsProbeElapsed = now;
+    }
+
+    private synchronized void switchRoute(Route target, String reason) {
+        if (!proxyApplied || route == target || !MglaWsConfig.isEnabled()) {
+            return;
+        }
+        FileLog.d("MglaWsBypass: route " + route + " -> " + target + " (" + reason + ")");
+        long now = SystemClock.elapsedRealtime();
+        route = target;
+        routeSinceElapsed = now;
+        lastConnectedElapsed = now;
+        lastWsProbeElapsed = now;
+        if (target == Route.WS && !isServerRunning()) {
+            String err = startEngine();
+            if (err != null) {
+                FileLog.e("MglaWsBypass: engine restart for WS failed: " + err);
+            }
+        }
+        writeBypassToMainConfig();
+        replaceBypassProxyInList();
+        ConnectionsManager.setProxySettings(true, buildActiveSettings());
+        notifyChanged();
+    }
+
+    private synchronized void scheduleMonitor() {
+        if (monitorScheduled) {
+            return;
+        }
+        if (monitorQueue == null) {
+            monitorQueue = new DispatchQueue("mglaAutoBypass");
+        }
+        monitorScheduled = true;
+        monitorQueue.postRunnable(monitorRunnable, MONITOR_INTERVAL_MS);
+    }
+
+    private void monitorTick() {
+        synchronized (this) {
+            monitorScheduled = false;
+            if (!proxyApplied || !MglaWsConfig.isEnabled()) {
+                return;
+            }
+        }
+        try {
+            checkRoute();
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        if (proxyApplied) {
+            scheduleMonitor();
+        }
+    }
+
+    private void checkRoute() {
+        long now = SystemClock.elapsedRealtime();
+        int state;
+        try {
+            state = ConnectionsManager.getInstance(UserConfig.selectedAccount).getConnectionState();
+        } catch (Throwable e) {
+            return;
+        }
+        if (state == ConnectionsManager.ConnectionStateConnected
+            || state == ConnectionsManager.ConnectionStateUpdating) {
+            lastConnectedElapsed = now;
+            if (route == Route.WS) {
+                return;
+            }
+        }
+        boolean connecting = state == ConnectionsManager.ConnectionStateConnecting
+            || state == ConnectionsManager.ConnectionStateConnectingToProxy;
+        long stalledFor = now - Math.max(lastConnectedElapsed, routeSinceElapsed);
+
+        if (route == Route.WS) {
+            if (!connecting || stalledFor < WS_STALL_MS || !isWebFallbackAvailable()) {
+                return;
+            }
+            long lastOk = WsBypassCore.getInstance().getLastUpstreamOkAtMs();
+            if (lastOk > 0 && System.currentTimeMillis() - lastOk < WS_STALL_MS) {
+                return;
+            }
+            switchRoute(Route.WEB, "ws stalled " + (stalledFor / 1000) + "s");
+            return;
+        }
+
+        if (connecting && stalledFor >= WEB_STALL_MS) {
+            switchRoute(Route.WS, "web stalled " + (stalledFor / 1000) + "s");
+            return;
+        }
+        if (now - routeSinceElapsed >= WEB_RETRY_WS_MS && now - lastWsProbeElapsed >= WEB_RETRY_WS_MS) {
+            lastWsProbeElapsed = now;
+            if (WsBypassCore.getInstance().probeRelay(WS_PROBE_TIMEOUT_MS)) {
+                switchRoute(Route.WS, "ws relay reachable again");
+            }
+        }
     }
 
     public boolean isEnabled() {
@@ -241,10 +383,24 @@ public final class MglaWsBypass {
         if (!MglaWsConfig.isRelayConfigured()) {
             return "Нет токена релея";
         }
+        if (route == Route.WEB) {
+            int state = getConnectionStateSafe();
+            return state == ConnectionsManager.ConnectionStateConnected
+                || state == ConnectionsManager.ConnectionStateUpdating
+                ? "Работает (WEB)" : "Ожидание соединения (WEB)…";
+        }
         if (core.hasActiveBridge() && core.getLastBridgeOkAtMs() > 0) {
-            return "Работает";
+            return "Работает (WS)";
         }
         return "Ожидание соединения…";
+    }
+
+    private static int getConnectionStateSafe() {
+        try {
+            return ConnectionsManager.getInstance(UserConfig.selectedAccount).getConnectionState();
+        } catch (Throwable e) {
+            return -1;
+        }
     }
 
     public String getTelegramConnectionStateText() {
@@ -285,6 +441,24 @@ public final class MglaWsBypass {
             .build();
     }
 
+    private ProxySettings buildWebSettings() {
+        return ProxySettings.builder()
+            .setType(ProxySettings.Type.WEB)
+            .setAddress(MglaWsConfig.getWebProxyHost())
+            .setSecret(MglaWsConfig.getWebProxySecret())
+            .build();
+    }
+
+    private ProxySettings buildActiveSettings() {
+        if (route == Route.WEB) {
+            ProxySettings web = buildWebSettings();
+            if (web.isValid()) {
+                return web;
+            }
+        }
+        return buildLocalSettings();
+    }
+
     private void writeBypassToMainConfig() {
         SharedPreferences main = MessagesController.getGlobalMainSettings();
         if (!MglaWsConfig.hasSavedUserProxy()) {
@@ -299,7 +473,7 @@ public final class MglaWsBypass {
             );
         }
         SharedPreferences.Editor editor = main.edit();
-        buildLocalSettings().toSharedPreferences(editor);
+        buildActiveSettings().toSharedPreferences(editor);
         editor.putBoolean("proxy_enabled", true);
         editor.apply();
     }
@@ -353,8 +527,35 @@ public final class MglaWsBypass {
             SharedConfig.loadProxyList();
             if (bypassProxyInfo == null) {
                 savedCurrentProxyRef = SharedConfig.currentProxy;
-                bypassProxyInfo = SharedConfig.addProxy(new SharedConfig.ProxyInfo(buildLocalSettings()));
+                bypassProxyInfo = SharedConfig.addProxy(new SharedConfig.ProxyInfo(buildActiveSettings()));
             }
+            SharedConfig.currentProxy = bypassProxyInfo;
+            SharedConfig.saveProxyList();
+            AndroidUtilities.runOnUIThread(() ->
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged));
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+    }
+
+    private void replaceBypassProxyInList() {
+        try {
+            SharedConfig.ProxyInfo old = bypassProxyInfo;
+            if (old == null) {
+                addBypassProxyToList();
+                return;
+            }
+            ProxySettings next = buildActiveSettings();
+            if (next.equals(old.settings)) {
+                return;
+            }
+            SharedConfig.loadProxyList();
+            // deleteProxy() on the current entry would wipe proxy_* prefs and disable the proxy.
+            if (SharedConfig.currentProxy == old) {
+                SharedConfig.currentProxy = null;
+            }
+            SharedConfig.deleteProxy(old);
+            bypassProxyInfo = SharedConfig.addProxy(new SharedConfig.ProxyInfo(next));
             SharedConfig.currentProxy = bypassProxyInfo;
             SharedConfig.saveProxyList();
             AndroidUtilities.runOnUIThread(() ->

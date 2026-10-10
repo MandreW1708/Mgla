@@ -127,7 +127,53 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 1. Пропишите `MGLA_WS_RELAY_HOST` / `MGLA_WS_RELAY_TOKEN` в `local.properties`.
 2. Соберите APK.
 3. **Настройки Mgla → Подключение**.
-4. Включите **«Обход через WebSocket»**.
+4. Включите **«Авто-обход»**.
+
+---
+
+## Запасной маршрут: Telegram WEB proxy (`/tgweb`)
+
+«Авто-обход» сначала идёт через WS-релей (`/apiws`). Если Telegram висит в «Подключение…»
+≥45 с и релей не отвечает, клиент сам переключается на WEB proxy
+(`ProxySettings.Type.WEB` → `WebProxyTransport` → системный WebView) и раз в ~8 минут
+проверяет, не ожил ли релей.
+
+Сервер (тот же `mglabot.mooo.com`, отдельный домен не нужен):
+
+```text
+nginx :443 location ^~ /tgweb/ → 127.0.0.1:8090 tproxy-server → 127.0.0.1:2398 official MTProxy
+```
+
+Установка / переустановка (root, идемпотентно):
+
+```bash
+bash /opt/mgla-ws-relay/deploy-web-proxy.sh
+```
+
+Скрипт качает [tproxy-server](https://github.com/telegramdesktop/tproxy-server),
+собирает официальный MTProxy, ставит Go при необходимости, создаёт
+`/etc/tproxy-server/{config,profiles}.json` (base_path `tgweb`, carrier `websocket`,
+decoy = бот на `127.0.0.1:8080`), юниты `mgla-mtproxy`, `mgla-tproxy`,
+`mgla-refresh-mtproxy-config.timer` и вставляет `location ^~ /tgweb/` в
+`/etc/nginx/sites-enabled/mglabot` (бэкап в `/root/mglabot.nginx.bak.*`).
+Порты 2398/8888/8090/8091 наружу закрыты UFW.
+
+Секрет — `MGLA_WEB_PROXY_SECRET` в `/opt/mgla-ws-relay/env` (32 hex). Тот же секрет
+в клиенте:
+
+```properties
+MGLA_WEB_PROXY_HOST=mglabot.mooo.com/tgweb
+MGLA_WEB_PROXY_SECRET=<32 hex>
+```
+
+Проверка:
+
+```bash
+systemctl status mgla-mtproxy mgla-tproxy --no-pager
+curl -fsS http://127.0.0.1:8091/healthz; curl -fsS http://127.0.0.1:8091/readyz
+journalctl -u mgla-mtproxy --since -5min | grep -c 'Disconnected from RPC Middle-End'   # должно быть 0
+curl -s -o /dev/null -w '%{http_code}\n' 'https://mglabot.mooo.com/tgweb/?bridge=wrong'  # как у сайта
+```
 
 ---
 

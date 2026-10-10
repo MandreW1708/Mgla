@@ -25,10 +25,27 @@ static int max_threads(void) {
     if (n <= 0) {
         n = 2;
     }
-    if (n > 4) {
-        n = 4;
+    // Whisper scales well on big.LITTLE phones; keep a bit of headroom for UI.
+    if (n > 6) {
+        n = 6;
     }
     return n;
+}
+
+// Encoder context frames: 1500 ≈ 30s. Scale down for short voice notes.
+static int audio_ctx_for_samples(int n_samples) {
+    if (n_samples <= 0) {
+        return 0;
+    }
+    // 50 frames/sec of encoder context; +64 pad so we don't clip the end.
+    int ctx = (int) ((n_samples / (float) WHISPER_SAMPLE_RATE) * 50.0f) + 64;
+    if (ctx < 128) {
+        ctx = 128;
+    }
+    if (ctx > 1500) {
+        ctx = 1500;
+    }
+    return ctx;
 }
 
 JNIEXPORT jlong JNICALL
@@ -43,6 +60,8 @@ Java_org_telegram_messenger_MglaWhisperNative_nativeInit(JNIEnv *env, jclass cla
     }
     LOGI("init model %s", path);
     struct whisper_context_params cparams = whisper_context_default_params();
+    cparams.use_gpu = false; // CPU-only build
+    cparams.flash_attn = false;
     struct whisper_context *ctx = whisper_init_from_file_with_params(path, cparams);
     (*env)->ReleaseStringUTFChars(env, modelPath, path);
     if (ctx == NULL) {
@@ -98,17 +117,25 @@ Java_org_telegram_messenger_MglaWhisperNative_nativeTranscribe(
     params.n_threads = n_threads;
     params.offset_ms = 0;
     params.no_context = true;
-    params.single_segment = false;
+    // Voice notes are short: skip timestamp decoding and multi-pass temperature fallbacks.
+    params.no_timestamps = true;
+    params.single_segment = true;
+    params.temperature = 0.0f;
+    params.temperature_inc = 0.0f;
+    params.greedy.best_of = 1;
+    params.max_tokens = 224;
+    params.audio_ctx = audio_ctx_for_samples((int) n);
     if (lang != NULL && lang[0] != '\0' && strcmp(lang, "auto") != 0) {
         params.language = lang;
         params.detect_language = false;
     } else {
-        params.language = "auto";
-        params.detect_language = true;
+        // Auto language detection is expensive — default to Russian for this client.
+        params.language = "ru";
+        params.detect_language = false;
     }
 
-    LOGI("whisper_full samples=%d threads=%d lang=%s", (int) n, n_threads,
-         params.language != NULL ? params.language : "?");
+    LOGI("whisper_full samples=%d threads=%d lang=%s audio_ctx=%d", (int) n, n_threads,
+         params.language != NULL ? params.language : "?", params.audio_ctx);
     int rc = whisper_full(ctx, params, samples, n);
     (*env)->ReleaseFloatArrayElements(env, audio, samples, JNI_ABORT);
     if (lang != NULL) {

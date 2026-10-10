@@ -36,7 +36,7 @@ import org.telegram.utils.wsbypass.WsBypassCore;
 /**
  * Mgla -> Настройки Mgla -> Обход блокировок.
  * <p>
- * Два взаимоисключающих режима: WebSocket-релей и ByeDPI.
+ * Два взаимоисключающих режима: авто-обход (WebSocket-релей + WEB proxy) и ByeDPI.
  * При системном VPN обход автоматически приостанавливается.
  */
 public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
@@ -128,12 +128,12 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         rootLayout.setOrientation(LinearLayout.VERTICAL);
         scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-        // ---- WebSocket relay (needed when DC/kws are blocked)
-        LinearLayout wsBlock = MglaUi.createBlock(context, "WebSocket-релей");
+        // ---- Auto bypass: WebSocket relay (primary) + WEB proxy (fallback)
+        LinearLayout wsBlock = MglaUi.createBlock(context, "Авто-обход");
 
         wsMasterCell = new TextCheckCell(context);
         wsMasterCell.setBackground(null);
-        wsMasterCell.setTextAndCheck("Обход через WebSocket", MglaWsBypass.getInstance().isEnabled(), false);
+        wsMasterCell.setTextAndCheck("Авто-обход", MglaWsBypass.getInstance().isEnabled(), false);
         wsMasterCell.setOnClickListener(v -> {
             boolean newVal = !wsMasterCell.isChecked();
             if (newVal && !MglaFeatureFlags.isAllowed("ws_enabled")) {
@@ -143,7 +143,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             }
             MglaWsBypass mgr = MglaWsBypass.getInstance();
             if (!mgr.setEnabled(newVal) && newVal) {
-                showError("Не удалось включить WS-обход", mgr.getLastError());
+                showError("Не удалось включить авто-обход", mgr.getLastError());
             }
             refreshDynamic();
         });
@@ -154,12 +154,12 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         wsBlock.addView(MglaUi.createDivider(context));
         wsTelegramCell = createStatCell(context, wsBlock, "Соединение Telegram");
         wsBlock.addView(MglaUi.createDivider(context));
-        wsProxyCell = createStatCell(context, wsBlock, "Локальный MTProto");
+        wsProxyCell = createStatCell(context, wsBlock, "Маршрут");
         wsBlock.addView(MglaUi.createDivider(context));
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
         TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Когда режут IP/домены Telegram, прямой kws* тоже обычно недоступен — поэтому трафик идёт через релей. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
+        wsInfo.setText("Основной маршрут — WebSocket-релей. Если он не подключается, обход сам переходит на резервный WEB proxy и периодически пробует вернуться на основной. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
         rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
@@ -350,8 +350,16 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             wsTelegramCell.setValue(ws.getTelegramConnectionStateText(), false);
         }
         if (wsProxyCell != null) {
-            wsProxyCell.setValue(ws.isServerRunning() && ws.getPort() > 0
-                ? WsBypassCore.LOCAL_PROXY_HOST + ":" + ws.getPort() + " · MTProto" : "—", false);
+            String routeText;
+            if (!ws.isEnabled() || !ws.isProxyApplied()) {
+                routeText = "—";
+            } else if (ws.getRoute() == MglaWsBypass.Route.WEB) {
+                routeText = "WEB proxy (резерв)";
+            } else {
+                routeText = ws.isServerRunning() && ws.getPort() > 0
+                    ? "WS · " + WsBypassCore.LOCAL_PROXY_HOST + ":" + ws.getPort() : "WS";
+            }
+            wsProxyCell.setValue(routeText, false);
         }
         if (wsUptimeCell != null) {
             wsUptimeCell.setValue(formatUptime(ws.getUptimeSeconds()), false);
