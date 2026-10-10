@@ -57,7 +57,7 @@ import java.util.regex.Pattern;
  * выбранная модель, подпись про 8 ГБ, пилюля поиска и секции с одинаковыми
  * тенями 12dp между ними. Тап по скачанной — выбрать, тап по выбранной — удалить.
  */
-public class MglaLocalModelsActivity extends BaseFragment {
+public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
 
     private static final int ROW_SELECTED = 0;
     private static final int ROW_NOTE = 1;

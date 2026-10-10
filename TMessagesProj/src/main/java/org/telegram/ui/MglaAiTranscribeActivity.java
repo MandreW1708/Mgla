@@ -32,7 +32,7 @@ import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
-public class MglaAiTranscribeActivity extends BaseFragment {
+public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
 
     private static final int ROW_ENABLED = 0;
     private static final int ROW_API_KEY = 1;

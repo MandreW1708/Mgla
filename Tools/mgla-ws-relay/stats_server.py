@@ -567,10 +567,14 @@ class Handler(BaseHTTPRequestHandler):
     def _report(self, query):
         if not self._check_basic_auth():
             return
-        try:
-            days = min(400, max(1, int(query.get("days", ["30"])[0])))
-        except ValueError:
-            days = 30
+        raw_days = (query.get("days", ["30"])[0] or "30").strip().lower()
+        if raw_days in ("all", "0", "alltime", "всего", "всё", "vse"):
+            days = 0
+        else:
+            try:
+                days = min(400, max(1, int(raw_days)))
+            except ValueError:
+                days = 30
         try:
             db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
             try:

@@ -23,7 +23,7 @@ import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
 
-public class MglaMessageMenuSettingsActivity extends BaseFragment {
+public class MglaMessageMenuSettingsActivity extends MglaBaseSettingsActivity {
 
     private RecyclerListView listView;
     private ListAdapter adapter;

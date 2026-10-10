@@ -50,9 +50,9 @@ public final class MglaUi {
     public static LinearLayout createBlock(Context context, String title) {
         LinearLayout block = new LinearLayout(context);
         block.setOrientation(LinearLayout.VERTICAL);
+        // Rounded GradientDrawable is enough — clipToOutline forces expensive per-frame
+        // re-clipping during predictive-back / slide transforms of ScrollView settings.
         block.setBackground(createBlockBackground());
-        block.setClipToOutline(true);
-        block.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
 
         if (title != null) {
             HeaderCell header = new HeaderCell(context, 22);

@@ -21,7 +21,7 @@ import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class MglaNotificationsSettingsActivity extends BaseFragment {
+public class MglaNotificationsSettingsActivity extends MglaBaseSettingsActivity {
 
     private SharedPreferences prefs;
 

@@ -38,7 +38,7 @@ import java.util.Map;
  * Аналог «Подбора стратегий» ByeByeDPI: проверяет каждую стратегию на серверах Telegram
  * (MTProto) и сайтах Telegram, показывает результаты и позволяет применить лучшую.
  */
-public class MglaDpiTestActivity extends BaseFragment {
+public class MglaDpiTestActivity extends MglaBaseSettingsActivity {
 
     private static final int MENU_COPY = 1;
     private static final int MENU_SETTINGS = 2;

@@ -27,7 +27,7 @@ import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class MglaMainSettingsActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
+public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private SharedPreferences prefs;
     private TextCheckCell ghostModeCell;

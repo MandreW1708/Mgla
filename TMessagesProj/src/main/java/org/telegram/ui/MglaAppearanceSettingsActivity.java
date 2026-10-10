@@ -21,7 +21,7 @@ import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class MglaAppearanceSettingsActivity extends BaseFragment {
+public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
     private TextSettingsCell textAnimationCell;
 

@@ -6,7 +6,6 @@ import android.os.Build;
 import android.text.TextUtils;
 
 import org.json.JSONObject;
-import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.utils.wsbypass.MglaWsConfig;
 
 import java.io.ByteArrayOutputStream;
@@ -103,11 +102,8 @@ public final class MglaStats {
                 return;
             }
             Object value = sp.getAll().get(key);
+            // Only boolean toggles: matches on-screen switches, not opaque numeric codes.
             if (value instanceof Boolean) {
-                count("set:" + key + "=" + value);
-            } else if (value instanceof Integer || value instanceof Float) {
-                count("set:" + key + "=" + value);
-            } else if ("ai_provider".equals(key) && value instanceof String) {
                 count("set:" + key + "=" + value);
             }
         };
@@ -141,19 +137,6 @@ public final class MglaStats {
             day.put(clean, (old == null ? 0 : old) + delta);
         }
         scheduleSave();
-    }
-
-    public static void screen(BaseFragment fragment) {
-        if (fragment == null) {
-            return;
-        }
-        Class<?> cls = fragment.getClass();
-        String name = cls.getSimpleName();
-        while (TextUtils.isEmpty(name) && cls.getSuperclass() != null) {
-            cls = cls.getSuperclass();
-            name = cls.getSimpleName();
-        }
-        count("screen:" + name);
     }
 
     /**
@@ -297,21 +280,11 @@ public final class MglaStats {
             if (key == null || isSensitiveKey(key)) {
                 continue;
             }
-            if (value instanceof Boolean || value instanceof Integer || value instanceof Float) {
-                out.put(key, value);
-            } else if ("ai_provider".equals(key) && value instanceof String) {
+            // Only on/off switches — no numeric/string codes (those were an opaque "other values" block).
+            if (value instanceof Boolean) {
                 out.put(key, value);
             }
         }
-        out.put("camera_api", SharedConfig.cameraApi);
-        out.put("camera_x_60fps", SharedConfig.cameraX60Fps);
-        int accounts = 0;
-        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-            if (UserConfig.getInstance(a).isClientActivated()) {
-                accounts++;
-            }
-        }
-        out.put("accounts", accounts);
         return out;
     }
 

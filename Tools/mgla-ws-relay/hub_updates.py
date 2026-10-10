@@ -369,86 +369,89 @@ def render_updates_html(meta: Dict[str, Any], flash_ok: str = "", flash_err: str
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <title>Mgla Hub — обновления</title>
 <style>
 :root {{
-  --bg0:#0b0d10; --bg1:#12161c; --card:#171c24; --line:#2a313d;
-  --text:#eef1f6; --muted:#9aa3b2; --accent:#e8a54b; --accent2:#3ecf8e;
-  --danger:#e85d5d; --radius:18px;
+  --bg0:#050304; --bg1:#100a0c; --card:#1a1014; --line:#3d2a32;
+  --text:#f3e9ec; --muted:#b09aa2; --accent:#8b1e3f; --accent-hi:#c23b5f;
+  --accent2:#9a6b78; --danger:#b33a4a; --radius:16px;
 }}
 * {{ box-sizing:border-box; }}
+html {{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }}
 body {{
-  margin:0; color:var(--text);
-  font:15px/1.5 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
+  margin:0; color:var(--text); max-width:100vw; overflow-x:hidden;
+  font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(232,165,75,.16), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(91,141,239,.12), transparent 50%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 40%, #090b0e);
+    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
+    radial-gradient(700px 420px at 100% 0%, rgba(90,58,68,.22), transparent 50%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
   min-height:100vh;
 }}
-html {{ -webkit-text-size-adjust:100%; }}
-.wrap {{ max-width:820px; margin:0 auto; padding:28px 18px 72px; }}
+.wrap {{ width:100%; max-width:820px; margin:0 auto; padding:24px 16px 64px; }}
 .hero {{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:18px; }}
-.brand {{ display:flex; gap:14px; align-items:center; min-width:0; }}
+.brand {{ display:flex; gap:12px; align-items:center; min-width:0; }}
 .logo {{
-  width:52px; height:52px; border-radius:16px; flex:0 0 auto;
-  background:linear-gradient(145deg, #f0b45a, #c47a22);
-  display:grid; place-items:center; font-weight:800; color:#1a1208; font-size:20px;
+  width:48px; height:48px; border-radius:14px; flex:0 0 auto;
+  background:linear-gradient(145deg, #c23b5f, #6e152f);
+  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
 }}
-.brand h1 {{ margin:0; font-size:26px; letter-spacing:-.02em; }}
-.brand p {{ margin:2px 0 0; color:var(--muted); font-size:14px; }}
+.brand h1 {{ margin:0; font-size:24px; letter-spacing:-.02em; }}
+.brand p {{ margin:2px 0 0; color:var(--muted); font-size:13px; }}
 .nav {{
-  display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%;
+  display:flex; flex-wrap:nowrap; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%;
+  scrollbar-width:none;
 }}
+.nav::-webkit-scrollbar {{ display:none; }}
 .nav a {{
-  color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:999px;
-  border:1px solid var(--line); background:rgba(255,255,255,.02); white-space:nowrap; flex:0 0 auto;
+  color:var(--muted); text-decoration:none; padding:8px 11px; border-radius:999px;
+  border:1px solid var(--line); background:rgba(255,255,255,.03); white-space:nowrap; flex:0 0 auto;
+  font-size:13px;
 }}
-.nav a.on {{ color:#1a1208; background:var(--accent); border-color:var(--accent); font-weight:650; }}
+.nav a.on {{ color:#fff; background:var(--accent); border-color:var(--accent-hi); font-weight:650; }}
 .card {{
   background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
-  padding:18px; margin-top:16px;
+  padding:16px; margin-top:14px; overflow:hidden;
 }}
-.card h2 {{ margin:0 0 4px; font-size:17px; }}
+.card h2 {{ margin:0 0 4px; font-size:16px; }}
 .sub {{ color:var(--muted); font-size:13px; margin:0 0 14px; }}
 .flash {{
   border-radius:14px; padding:12px 14px; margin-bottom:14px; border:1px solid var(--line);
 }}
-.flash.ok {{ background:rgba(62,207,142,.12); border-color:rgba(62,207,142,.35); }}
-.flash.err {{ background:rgba(232,93,93,.12); border-color:rgba(232,93,93,.4); }}
+.flash.ok {{ background:rgba(139,30,63,.18); border-color:rgba(194,59,95,.4); }}
+.flash.err {{ background:rgba(179,58,74,.16); border-color:rgba(179,58,74,.45); }}
 .grid {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }}
 label.field {{ display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:12px; }}
 input[type=text], input[type=number], textarea {{
-  background:#10141a; color:var(--text); border:1px solid var(--line);
+  background:#120c0e; color:var(--text); border:1px solid var(--line);
   border-radius:10px; padding:9px 11px; font:inherit; width:100%;
 }}
 textarea {{ min-height:180px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; resize:vertical; }}
 .checks {{ display:flex; flex-wrap:wrap; gap:16px; margin:12px 0 4px; color:var(--muted); font-size:14px; }}
 .btn {{
   appearance:none; border:0; border-radius:10px; padding:11px 16px; font:inherit; font-weight:650;
-  cursor:pointer; background:var(--accent); color:#1a1208;
+  cursor:pointer; background:var(--accent); color:#fff;
 }}
 .drop {{
   margin-top:8px; border:1.5px dashed var(--line); border-radius:14px; padding:28px 18px;
-  text-align:center; color:var(--muted); background:rgba(255,255,255,.02); transition:.15s;
+  text-align:center; color:var(--muted); background:rgba(255,255,255,.03); transition:.15s;
 }}
-.drop.over {{ border-color:var(--accent); background:rgba(232,165,75,.08); color:var(--text); }}
+.drop.over {{ border-color:var(--accent-hi); background:rgba(139,30,63,.12); color:var(--text); }}
 .drop strong {{ color:var(--text); }}
 .fileinfo {{ margin-top:10px; font-size:13px; color:var(--muted); }}
 .pill {{
   display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:650;
-  background:rgba(62,207,142,.15); color:var(--accent2); border:1px solid rgba(62,207,142,.35);
+  background:rgba(139,30,63,.2); color:#e8c4cf; border:1px solid rgba(194,59,95,.4);
 }}
-.pill.draft {{ background:rgba(154,163,178,.12); color:var(--muted); border-color:var(--line); }}
+.pill.draft {{ background:rgba(176,154,162,.12); color:var(--muted); border-color:var(--line); }}
 .footer {{ margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; }}
-code {{ font-size:12px; color:#c9d2e0; word-break:break-all; }}
+code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
 @media (max-width:720px) {{
-  .wrap {{ padding:18px 12px 56px; }}
-  .brand h1 {{ font-size:22px; }}
+  .wrap {{ padding:14px 10px 48px; }}
+  .brand h1 {{ font-size:20px; }}
   .grid {{ grid-template-columns:1fr; }}
-  .card {{ padding:14px; }}
+  .card {{ padding:12px; }}
   .btn {{ width:100%; }}
   .drop {{ padding:22px 14px; }}
 }}
@@ -522,14 +525,14 @@ code {{ font-size:12px; color:#c9d2e0; word-break:break-all; }}
 <style>
 .bar {{ display:none; height:8px; margin:14px auto 0; max-width:320px; background:#10141a; border:1px solid var(--line); border-radius:999px; overflow:hidden; }}
 .bar.on {{ display:block; }}
-.bar i {{ display:block; height:100%; width:0; background:linear-gradient(90deg,#f0b45a,#c47a22); transition:width .1s linear; }}
-.fileinfo.ok {{ color:var(--accent2); }}
+.bar i {{ display:block; height:100%; width:0; background:linear-gradient(90deg,#c23b5f,#6e152f); transition:width .1s linear; }}
+.fileinfo.ok {{ color:#e8c4cf; }}
 .fileinfo.err {{ color:var(--danger); }}
-.fileinfo.busy {{ color:var(--accent); }}
+.fileinfo.busy {{ color:var(--accent-hi); }}
 .upload-ok {{
   display:none; margin-top:12px; padding:10px 12px; border-radius:12px;
-  background:rgba(62,207,142,.14); border:1px solid rgba(62,207,142,.4);
-  color:var(--accent2); font-weight:700; font-size:14px;
+  background:rgba(139,30,63,.18); border:1px solid rgba(194,59,95,.4);
+  color:#e8c4cf; font-weight:700; font-size:14px;
 }}
 .upload-ok[hidden] {{ display:none !important; }}
 .upload-ok.show {{ display:block; }}

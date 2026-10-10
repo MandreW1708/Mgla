@@ -3,10 +3,12 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
@@ -40,7 +42,7 @@ import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.wsbypass.MglaWsBypass;
-public class MglaSettingsActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
+public class MglaSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private SettingCell dpiBypassCell;
 
@@ -166,7 +168,9 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
 
         ImageView iconView = new ImageView(context);
         iconView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        iconView.setImageResource(R.mipmap.ic_launcher);
+        // Never bind R.mipmap.ic_launcher directly — adaptive icons are huge to rasterize.
+        // Returning to this hub from subsections was stalling ~1s on every back animation.
+        iconView.setImageDrawable(new BitmapDrawable(context.getResources(), getHubIconBitmap(context)));
         iconContainer.addView(iconView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         header.addView(iconContainer, LayoutHelper.createLinear(80, 80, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
@@ -187,6 +191,27 @@ public class MglaSettingsActivity extends BaseFragment implements NotificationCe
         header.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
         return header;
+    }
+
+    private static Bitmap hubIconBitmap;
+
+    private static Bitmap getHubIconBitmap(Context context) {
+        if (hubIconBitmap != null && !hubIconBitmap.isRecycled()) {
+            return hubIconBitmap;
+        }
+        final int size = dp(80);
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        try {
+            Drawable src = context.getPackageManager().getApplicationIcon(context.getApplicationInfo());
+            src.setBounds(0, 0, size, size);
+            src.draw(canvas);
+        } catch (Exception e) {
+            Drawable fallback = context.getResources().getDrawable(R.drawable.msg_fave).mutate();
+            fallback.setBounds(dp(20), dp(20), size - dp(20), size - dp(20));
+            fallback.draw(canvas);
+        }
+        return hubIconBitmap = bitmap;
     }
 
     private LinearLayout createBlock(Context context, String title) {

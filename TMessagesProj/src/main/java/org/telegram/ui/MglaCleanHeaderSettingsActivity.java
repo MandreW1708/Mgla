@@ -15,7 +15,7 @@ import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class MglaCleanHeaderSettingsActivity extends BaseFragment {
+public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
 
     public MglaCleanHeaderSettingsActivity() {
         super();

@@ -21,84 +21,150 @@ public class MglaGlassConfig {
     public static final String PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK = "clean_header_hide_pinned_block";
     public static final String PREF_CLEAN_HEADER_HIDE_TRANSLATION_PANEL = "clean_header_hide_translation_panel";
 
+    // In-memory cache — prefs are hit from Switch/ActionBar draw paths every frame.
+    private static boolean cacheLoaded;
+    private static int glassDarkeningLevel = 100;
+    private static boolean md3PredictiveBack;
+    private static boolean md3Switches;
+    private static boolean editedIcon;
+    private static boolean cleanHeader;
+    private static boolean cleanHeaderHideBackBtn = true;
+    private static boolean cleanHeaderHideTitleBlock = true;
+    private static boolean cleanHeaderHidePinnedBlock = true;
+    private static boolean cleanHeaderHideTranslationPanel = true;
+
+    private static void ensureCache() {
+        if (cacheLoaded) {
+            return;
+        }
+        SharedPreferences p = getPrefs();
+        glassDarkeningLevel = p.getInt(PREF_GLASS_DARKENING_LEVEL, 100);
+        md3PredictiveBack = p.getBoolean(PREF_MD3_PREDICTIVE_BACK, false);
+        md3Switches = p.getBoolean(PREF_MD3_SWITCHES, false);
+        editedIcon = p.getBoolean(PREF_EDITED_ICON, false);
+        cleanHeader = p.getBoolean(PREF_CLEAN_HEADER, false);
+        cleanHeaderHideBackBtn = p.getBoolean(PREF_CLEAN_HEADER_HIDE_BACK_BTN, true);
+        cleanHeaderHideTitleBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK, true);
+        cleanHeaderHidePinnedBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK, true);
+        cleanHeaderHideTranslationPanel = p.getBoolean(PREF_CLEAN_HEADER_HIDE_TRANSLATION_PANEL, true);
+        cacheLoaded = true;
+    }
+
     public static int getGlassDarkeningLevel() {
-        return getPrefs().getInt(PREF_GLASS_DARKENING_LEVEL, 100);
+        ensureCache();
+        return glassDarkeningLevel;
     }
 
     public static void setGlassDarkeningLevel(int level) {
-        if (getGlassDarkeningLevel() == level) {
+        ensureCache();
+        if (glassDarkeningLevel == level) {
             return;
         }
+        glassDarkeningLevel = level;
         getPrefs().edit().putInt(PREF_GLASS_DARKENING_LEVEL, level).apply();
         notifyGlassAppearanceChanged();
     }
 
     public static boolean isCleanHeaderEnabled() {
-        return getPrefs().getBoolean(PREF_CLEAN_HEADER, false);
+        ensureCache();
+        return cleanHeader;
     }
 
     public static void setCleanHeaderEnabled(boolean enabled) {
-        if (isCleanHeaderEnabled() == enabled) {
+        ensureCache();
+        if (cleanHeader == enabled) {
             return;
         }
+        cleanHeader = enabled;
         getPrefs().edit().putBoolean(PREF_CLEAN_HEADER, enabled).apply();
         notifyGlassAppearanceChanged();
     }
 
     public static boolean isCleanHeaderHideBackBtnEnabled() {
-        return getPrefs().getBoolean(PREF_CLEAN_HEADER_HIDE_BACK_BTN, true);
+        ensureCache();
+        return cleanHeaderHideBackBtn;
     }
 
     public static void setCleanHeaderHideBackBtnEnabled(boolean enabled) {
-        if (isCleanHeaderHideBackBtnEnabled() == enabled) return;
+        ensureCache();
+        if (cleanHeaderHideBackBtn == enabled) {
+            return;
+        }
+        cleanHeaderHideBackBtn = enabled;
         getPrefs().edit().putBoolean(PREF_CLEAN_HEADER_HIDE_BACK_BTN, enabled).apply();
         notifyGlassAppearanceChanged();
     }
 
     public static boolean isCleanHeaderHideTitleBlockEnabled() {
-        return getPrefs().getBoolean(PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK, true);
+        ensureCache();
+        return cleanHeaderHideTitleBlock;
     }
 
     public static void setCleanHeaderHideTitleBlockEnabled(boolean enabled) {
-        if (isCleanHeaderHideTitleBlockEnabled() == enabled) return;
+        ensureCache();
+        if (cleanHeaderHideTitleBlock == enabled) {
+            return;
+        }
+        cleanHeaderHideTitleBlock = enabled;
         getPrefs().edit().putBoolean(PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK, enabled).apply();
         notifyGlassAppearanceChanged();
     }
 
     public static boolean isCleanHeaderHidePinnedBlockEnabled() {
-        return getPrefs().getBoolean(PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK, true);
+        ensureCache();
+        return cleanHeaderHidePinnedBlock;
     }
 
     public static void setCleanHeaderHidePinnedBlockEnabled(boolean enabled) {
-        if (isCleanHeaderHidePinnedBlockEnabled() == enabled) return;
+        ensureCache();
+        if (cleanHeaderHidePinnedBlock == enabled) {
+            return;
+        }
+        cleanHeaderHidePinnedBlock = enabled;
         getPrefs().edit().putBoolean(PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK, enabled).apply();
         notifyGlassAppearanceChanged();
     }
 
     public static boolean isCleanHeaderHideTranslationPanelEnabled() {
-        return getPrefs().getBoolean(PREF_CLEAN_HEADER_HIDE_TRANSLATION_PANEL, true);
+        ensureCache();
+        return cleanHeaderHideTranslationPanel;
     }
 
     public static void setCleanHeaderHideTranslationPanelEnabled(boolean enabled) {
-        if (isCleanHeaderHideTranslationPanelEnabled() == enabled) return;
+        ensureCache();
+        if (cleanHeaderHideTranslationPanel == enabled) {
+            return;
+        }
+        cleanHeaderHideTranslationPanel = enabled;
         getPrefs().edit().putBoolean(PREF_CLEAN_HEADER_HIDE_TRANSLATION_PANEL, enabled).apply();
         notifyGlassAppearanceChanged();
     }
 
     public static boolean isMd3PredictiveBackEnabled() {
-        return getPrefs().getBoolean(PREF_MD3_PREDICTIVE_BACK, false);
+        ensureCache();
+        return md3PredictiveBack;
     }
 
     public static void setMd3PredictiveBackEnabled(boolean enabled) {
+        ensureCache();
+        if (md3PredictiveBack == enabled) {
+            return;
+        }
+        md3PredictiveBack = enabled;
         getPrefs().edit().putBoolean(PREF_MD3_PREDICTIVE_BACK, enabled).apply();
     }
 
     public static boolean isMd3SwitchesEnabled() {
-        return getPrefs().getBoolean(PREF_MD3_SWITCHES, false);
+        ensureCache();
+        return md3Switches;
     }
 
     public static void setMd3SwitchesEnabled(boolean enabled) {
-        if (isMd3SwitchesEnabled() == enabled) return;
+        ensureCache();
+        if (md3Switches == enabled) {
+            return;
+        }
+        md3Switches = enabled;
         getPrefs().edit().putBoolean(PREF_MD3_SWITCHES, enabled).apply();
         notifyGlassAppearanceChanged();
     }
@@ -107,14 +173,19 @@ public class MglaGlassConfig {
         if (!org.telegram.messenger.MglaFeatureFlags.isAllowed(PREF_EDITED_ICON)) {
             return false;
         }
-        return getPrefs().getBoolean(PREF_EDITED_ICON, false);
+        ensureCache();
+        return editedIcon;
     }
 
     public static void setEditedIconEnabled(boolean enabled) {
         if (enabled && !org.telegram.messenger.MglaFeatureFlags.isAllowed(PREF_EDITED_ICON)) {
             enabled = false;
         }
-        if (getPrefs().getBoolean(PREF_EDITED_ICON, false) == enabled) return;
+        ensureCache();
+        if (editedIcon == enabled) {
+            return;
+        }
+        editedIcon = enabled;
         getPrefs().edit().putBoolean(PREF_EDITED_ICON, enabled).apply();
         notifyGlassAppearanceChanged();
     }

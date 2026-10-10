@@ -14,28 +14,28 @@ from urllib.parse import quote
 
 # (feature_id, Russian label). feature_id matches mgla_config keys where possible.
 FEATURE_CATALOG: Sequence[Tuple[str, str]] = (
-    ("ai_enabled", "ИИ (мастер)"),
-    ("ai_summary", "Краткая сводка"),
+    ("ai_enabled", "Включение AI"),
+    ("ai_summary", "Краткая Сводка"),
     ("ai_retell", "Пересказ сообщений"),
     ("ai_editor", "AI-редактор"),
-    ("ai_transcribe_enabled", "Расшифровка голосовых"),
-    ("ai_chat_dna", "Chat DNA"),
+    ("ai_transcribe_enabled", "Включить расшифровку"),
+    ("ai_chat_dna", "Главные темы Chat DNA"),
     ("ws_enabled", "Обход через WebSocket"),
-    ("dpi_enabled", "ByeDPI"),
+    ("dpi_enabled", "Обход через ByeDPI"),
     ("spy_ghost_mode", "Режим призрака"),
     ("spy_last_online", "Последний онлайн"),
-    ("spy_save_deleted_messages", "Сохранение удалённых"),
+    ("spy_save_deleted_messages", "Сохранение удаленных"),
     ("hidden_chats", "Скрытые чаты"),
-    ("chat_time_seconds", "Время сообщений с секундами"),
+    ("chat_time_seconds", "Время с секундами"),
     ("hide_keyboard_on_scroll", "Скрывать клавиатуру при прокрутке"),
     ("comma_after_mention", "Запятая после упоминания"),
-    ("text_anim_enabled", "Анимация ввода текста"),
+    ("text_anim_enabled", "Анимация текста"),
     ("proxy_in_header", "Прокси в шапке"),
     ("downloads_in_header", "Загрузки в шапке"),
-    ("haptic_enabled", "Хаптика"),
+    ("haptic_enabled", "Виброотклик"),
     ("mgla_popup_notifications_enabled", "Всплывающие уведомления"),
-    ("audio_autopause", "Автопауза аудио"),
-    ("edited_icon_enabled", "Иконка «изменено»"),
+    ("audio_autopause", "Автопауза"),
+    ("edited_icon_enabled", "Значок вместо «изменено»"),
 )
 
 FEATURE_ICONS = {
@@ -171,93 +171,95 @@ def render_admin_html(
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <title>Mgla Hub — управление</title>
 <style>
 :root {{
-  --bg0:#0b0d10; --bg1:#12161c; --card:#171c24; --line:#2a313d;
-  --text:#eef1f6; --muted:#9aa3b2; --accent:#e8a54b; --accent2:#3ecf8e;
-  --danger:#e85d5d; --radius:18px;
+  --bg0:#050304; --bg1:#100a0c; --card:#1a1014; --line:#3d2a32;
+  --text:#f3e9ec; --muted:#b09aa2; --accent:#8b1e3f; --accent-hi:#c23b5f;
+  --accent2:#9a6b78; --danger:#b33a4a; --radius:16px;
 }}
 * {{ box-sizing:border-box; }}
+html {{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }}
 body {{
-  margin:0; color:var(--text);
-  font:15px/1.5 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
+  margin:0; color:var(--text); max-width:100vw; overflow-x:hidden;
+  font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(232,165,75,.16), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(91,141,239,.12), transparent 50%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 40%, #090b0e);
+    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
+    radial-gradient(700px 420px at 100% 0%, rgba(90,58,68,.22), transparent 50%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
   min-height:100vh;
 }}
-html {{ -webkit-text-size-adjust:100%; }}
-.wrap {{ max-width:960px; margin:0 auto; padding:28px 18px 72px; }}
+.wrap {{ width:100%; max-width:960px; margin:0 auto; padding:24px 16px 64px; }}
 .hero {{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:18px; }}
-.brand {{ display:flex; gap:14px; align-items:center; min-width:0; }}
+.brand {{ display:flex; gap:12px; align-items:center; min-width:0; }}
 .logo {{
-  width:52px; height:52px; border-radius:16px; flex:0 0 auto;
-  background:linear-gradient(145deg, #f0b45a, #c47a22);
-  display:grid; place-items:center; font-weight:800; color:#1a1208; font-size:20px;
+  width:48px; height:48px; border-radius:14px; flex:0 0 auto;
+  background:linear-gradient(145deg, #c23b5f, #6e152f);
+  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
 }}
-.brand h1 {{ margin:0; font-size:26px; letter-spacing:-.02em; }}
-.brand p {{ margin:2px 0 0; color:var(--muted); font-size:14px; }}
+.brand h1 {{ margin:0; font-size:24px; letter-spacing:-.02em; }}
+.brand p {{ margin:2px 0 0; color:var(--muted); font-size:13px; }}
 .nav {{
-  display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch;
-  max-width:100%;
+  display:flex; flex-wrap:nowrap; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch;
+  max-width:100%; scrollbar-width:none;
 }}
+.nav::-webkit-scrollbar {{ display:none; }}
 .nav a {{
-  color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:999px;
-  border:1px solid var(--line); background:rgba(255,255,255,.02); white-space:nowrap; flex:0 0 auto;
+  color:var(--muted); text-decoration:none; padding:8px 11px; border-radius:999px;
+  border:1px solid var(--line); background:rgba(255,255,255,.03); white-space:nowrap; flex:0 0 auto;
+  font-size:13px;
 }}
-.nav a.on {{ color:#1a1208; background:var(--accent); border-color:var(--accent); font-weight:650; }}
+.nav a.on {{ color:#fff; background:var(--accent); border-color:var(--accent-hi); font-weight:650; }}
 .card {{
   background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
-  padding:18px; margin-top:16px;
+  padding:16px; margin-top:14px; overflow:hidden;
 }}
-.card h2 {{ margin:0 0 4px; font-size:17px; }}
+.card h2 {{ margin:0 0 4px; font-size:16px; }}
 .sub {{ color:var(--muted); font-size:13px; margin:0 0 14px; }}
 .table-wrap {{ width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }}
-table {{ width:100%; border-collapse:collapse; min-width:420px; }}
+table {{ width:100%; border-collapse:collapse; min-width:0; }}
 th {{
-  text-align:left; color:var(--muted); font-weight:600; font-size:12px;
+  text-align:left; color:var(--muted); font-weight:600; font-size:11px;
   text-transform:uppercase; letter-spacing:.04em;
-  border-bottom:1px solid var(--line); padding:8px;
+  border-bottom:1px solid var(--line); padding:8px 6px;
 }}
-td {{ padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }}
+td {{ padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:middle; font-size:13px; }}
 tr:last-child td {{ border-bottom:0; }}
 td.num {{ white-space:nowrap; font-variant-numeric:tabular-nums; }}
-td.name {{ word-break:break-word; }}
+td.name {{ word-break:break-word; overflow-wrap:anywhere; }}
 .fico {{ display:inline-block; width:1.4em; text-align:center; }}
-code {{ font-size:12px; color:#c9d2e0; word-break:break-all; }}
+code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
 .empty {{ color:var(--muted); padding:10px 0; }}
 .flash {{
   border-radius:14px; padding:12px 14px; margin-bottom:14px; border:1px solid var(--line);
 }}
-.flash.ok {{ background:rgba(62,207,142,.12); border-color:rgba(62,207,142,.35); }}
-.flash.err {{ background:rgba(232,93,93,.12); border-color:rgba(232,93,93,.4); }}
+.flash.ok {{ background:rgba(139,30,63,.18); border-color:rgba(194,59,95,.4); }}
+.flash.err {{ background:rgba(179,58,74,.16); border-color:rgba(179,58,74,.45); }}
 .row {{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:12px; }}
 label.field {{ display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:12px; flex:1 1 160px; }}
 input[type=text], input[type=number], select, textarea {{
-  background:#10141a; color:var(--text); border:1px solid var(--line);
+  background:#120c0e; color:var(--text); border:1px solid var(--line);
   border-radius:10px; padding:9px 11px; font:inherit; width:100%; min-width:0;
 }}
 textarea {{ width:100%; min-height:160px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; }}
 .btn {{
   appearance:none; border:0; border-radius:10px; padding:11px 14px; font:inherit; font-weight:650;
-  cursor:pointer; background:var(--accent); color:#1a1208;
+  cursor:pointer; background:var(--accent); color:#fff;
 }}
-.btn.secondary {{ background:#2a313d; color:var(--text); }}
+.btn.secondary {{ background:#2a1c22; color:var(--text); }}
 .btn.danger {{ background:var(--danger); color:#fff; }}
 form.inline {{ display:inline; margin:0; }}
 .footer {{ margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; }}
 @media (max-width:720px) {{
-  .wrap {{ padding:18px 12px 56px; }}
-  .brand h1 {{ font-size:22px; }}
-  .card {{ padding:14px; }}
+  .wrap {{ padding:14px 10px 48px; }}
+  .brand h1 {{ font-size:20px; }}
+  .card {{ padding:12px; }}
   .row {{ flex-direction:column; align-items:stretch; }}
   .btn {{ width:100%; }}
-  table {{ min-width:360px; font-size:13px; }}
-  th, td {{ padding:8px 6px; }}
+  table {{ font-size:12px; }}
+  th, td {{ padding:7px 5px; }}
 }}
 </style>
 </head>

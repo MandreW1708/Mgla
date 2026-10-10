@@ -33,7 +33,7 @@ import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
-public class MglaAiSettingsActivity extends BaseFragment {
+public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
 
     private static final int ROW_AI_ENABLED = 0;
     private static final int ROW_SHADOW_1 = 1;

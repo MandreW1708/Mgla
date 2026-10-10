@@ -58,7 +58,7 @@ import java.util.Calendar;
  * including the user's own messages. Rendered with the regular chat cells so media behaves as
  * it does in the chat itself.
  */
-public class MglaDeletedMessagesActivity extends BaseFragment {
+public class MglaDeletedMessagesActivity extends MglaBaseSettingsActivity {
 
     private static final int PAGE_SIZE = 50;
     private static final int menu_clear = 1;

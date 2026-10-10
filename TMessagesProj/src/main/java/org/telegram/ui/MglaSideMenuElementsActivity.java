@@ -30,7 +30,7 @@ import org.telegram.ui.Components.RecyclerListView;
 import java.util.ArrayList;
 import java.util.Collections;
 
-public class MglaSideMenuElementsActivity extends BaseFragment {
+public class MglaSideMenuElementsActivity extends MglaBaseSettingsActivity {
 
     private RecyclerListView visibleList;
     private RecyclerListView hiddenList;

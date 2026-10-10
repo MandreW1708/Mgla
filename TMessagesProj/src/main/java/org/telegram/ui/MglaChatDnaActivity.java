@@ -32,7 +32,7 @@ import java.util.Locale;
 /**
  * Mgla: Chat DNA — живой визуальный профиль разговора за выбранный период.
  */
-public class MglaChatDnaActivity extends BaseFragment {
+public class MglaChatDnaActivity extends MglaBaseSettingsActivity {
 
     private static final int DAY_SEC = 86400;
     private static final int TOPIC_COUNT = 3;

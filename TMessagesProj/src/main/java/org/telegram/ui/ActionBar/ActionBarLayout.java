@@ -64,7 +64,6 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
@@ -1437,8 +1436,17 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         animationInProgress = false;
         containerView.setTranslationX(0);
         containerViewBack.setTranslationX(0);
-        containerView.setLayerType(LAYER_TYPE_NONE, null);
+        clearSlideHardwareLayers();
         setInnerTranslationX(0);
+    }
+
+    private void clearSlideHardwareLayers() {
+        if (containerView != null) {
+            containerView.setLayerType(LAYER_TYPE_NONE, null);
+        }
+        if (containerViewBack != null) {
+            containerViewBack.setLayerType(LAYER_TYPE_NONE, null);
+        }
     }
 
     private void prepareForMoving() {
@@ -1503,9 +1511,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     if (!currentFragment.isSwipeBackEnabled(ev)) {
                         maybeStartTracking = false;
                         startedTracking = false;
-                        if (containerView != null) {
-                            containerView.setLayerType(LAYER_TYPE_NONE, null);
-                        }
+                        clearSlideHardwareLayers();
                         return false;
                     }
                     startedTrackingPointerId = ev.getPointerId(0);
@@ -1578,9 +1584,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         maybeStartTracking = false;
                         startedTracking = false;
                         layoutToIgnore = null;
-                        if (containerView != null) {
-                            containerView.setLayerType(LAYER_TYPE_NONE, null);
-                        }
+                        clearSlideHardwareLayers();
                     }
                     if (velocityTracker != null) {
                         velocityTracker.recycle();
@@ -1590,9 +1594,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     maybeStartTracking = false;
                     startedTracking = false;
                     layoutToIgnore = null;
-                    if (containerView != null) {
-                        containerView.setLayerType(LAYER_TYPE_NONE, null);
-                    }
+                    clearSlideHardwareLayers();
                     if (velocityTracker != null) {
                         velocityTracker.recycle();
                         velocityTracker = null;
@@ -2151,7 +2153,6 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         if (fragment == null || checkTransitionAnimation() || delegate != null && check && !delegate.needPresentFragment(this, params) || !fragment.onFragmentCreate()) {
             return false;
         }
-        MglaStats.screen(fragment);
         final EdgeToEdgeSupportMode edgeToEdgeSupportMode = fragment.getEdgeToEdgeSupportMode();
         final boolean isSupportEdgeToEdge = edgeToEdgeSupportMode != EdgeToEdgeSupportMode.NONE;
         final boolean drawNavigationBar = fragment.drawEdgeNavigationBar();

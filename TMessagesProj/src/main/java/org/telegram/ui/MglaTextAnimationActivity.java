@@ -37,7 +37,7 @@ import org.telegram.ui.Components.MglaTypingAnimator;
 import java.util.ArrayList;
 import java.util.Random;
 
-public class MglaTextAnimationActivity extends BaseFragment {
+public class MglaTextAnimationActivity extends MglaBaseSettingsActivity {
 
     private static final String[] DEMO_PHRASES = {
         "Привет! Как дела? 👋",

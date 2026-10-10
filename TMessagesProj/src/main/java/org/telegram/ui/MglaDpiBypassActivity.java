@@ -39,7 +39,7 @@ import org.telegram.utils.wsbypass.WsBypassCore;
  * Два взаимоисключающих режима: WebSocket-релей и ByeDPI.
  * При системном VPN обход автоматически приостанавливается.
  */
-public class MglaDpiBypassActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
+public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private TextCheckCell wsMasterCell;
     private TextView wsStatusValue;

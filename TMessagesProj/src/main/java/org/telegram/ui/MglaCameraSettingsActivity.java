@@ -30,7 +30,7 @@ import org.telegram.ui.Components.LayoutHelper;
  * для CameraX — дополнительные опции (60 fps).
  * Порядок api: 0 — Camera1, 1 — Camera2, 2 — CameraX (SharedConfig.cameraApi).
  */
-public class MglaCameraSettingsActivity extends BaseFragment {
+public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
 
     private static final int API_1 = 0;
     private static final int API_2 = 1;

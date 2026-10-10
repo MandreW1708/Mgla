@@ -36,7 +36,7 @@ import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.SeekBarView;
 
-public class MglaChatsSettingsActivity extends BaseFragment {
+public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
 
     private SharedPreferences prefs;
     private ImageView previewInIcon;
