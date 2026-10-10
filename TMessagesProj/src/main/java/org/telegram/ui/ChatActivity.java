@@ -32989,10 +32989,33 @@ public class ChatActivity extends BaseFragment implements
         for (int a = 0; a < actionModeViews.size(); a++) {
             View view = actionModeViews.get(a);
             AndroidUtilities.clearDrawableAnimation(view);
-            animators.add(ObjectAnimator.ofFloat(view, View.SCALE_Y, 0.1f, 1.0f));
+            view.setPivotX(view.getMeasuredWidth() > 0 ? view.getMeasuredWidth() / 2f : dp(24));
+            view.setPivotY(view.getMeasuredHeight() > 0 ? view.getMeasuredHeight() / 2f : dp(24));
+            view.setAlpha(0f);
+            view.setScaleX(0.6f);
+            view.setScaleY(0.6f);
+            final int delay = a * 18;
+            ObjectAnimator sx = ObjectAnimator.ofFloat(view, View.SCALE_X, 0.6f, 1.0f);
+            ObjectAnimator sy = ObjectAnimator.ofFloat(view, View.SCALE_Y, 0.6f, 1.0f);
+            ObjectAnimator aAlpha = ObjectAnimator.ofFloat(view, View.ALPHA, 0f, 1.0f);
+            sx.setStartDelay(delay);
+            sy.setStartDelay(delay);
+            aAlpha.setStartDelay(delay);
+            animators.add(sx);
+            animators.add(sy);
+            animators.add(aAlpha);
+        }
+        if (selectedMessagesCountTextView != null) {
+            selectedMessagesCountTextView.setAlpha(0f);
+            selectedMessagesCountTextView.setScaleX(0.92f);
+            selectedMessagesCountTextView.setScaleY(0.92f);
+            animators.add(ObjectAnimator.ofFloat(selectedMessagesCountTextView, View.ALPHA, 0f, 1f));
+            animators.add(ObjectAnimator.ofFloat(selectedMessagesCountTextView, View.SCALE_X, 0.92f, 1f));
+            animators.add(ObjectAnimator.ofFloat(selectedMessagesCountTextView, View.SCALE_Y, 0.92f, 1f));
         }
         animatorSet.playTogether(animators);
-        animatorSet.setDuration(250);
+        animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        animatorSet.setDuration(300);
         animatorSet.start();
 
         addToSelectedMessages(message, listView);
@@ -47645,7 +47668,12 @@ public class ChatActivity extends BaseFragment implements
             final float factor1 = 1f - actionBar.getActionModeFactor();
             final float factor2 = 1f - animatorSearchFieldVisibility.getFloatValue();
             final float factor = factor1 * factor2;
-            final float scale = lerp(0.95f, 1f, factor);
+            // Fade + scale from center (not a sideways slide — ActionBar freezes translationX).
+            final float scale = lerp(0.78f, 1f, factor);
+            if (avatarContainer.getMeasuredWidth() > 0) {
+                avatarContainer.setPivotX(avatarContainer.getMeasuredWidth() / 2f);
+                avatarContainer.setPivotY(avatarContainer.getMeasuredHeight() / 2f);
+            }
             avatarContainer.setScaleX(scale);
             avatarContainer.setScaleY(scale);
             avatarContainer.setAlpha(factor);

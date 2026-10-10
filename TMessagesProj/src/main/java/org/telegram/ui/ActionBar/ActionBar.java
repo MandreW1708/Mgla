@@ -203,6 +203,8 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     private boolean glassModeIsForum;
 
     private ChatAvatarContainer chatAvatarContainer;
+    private float frozenAvatarTranslationX;
+    private boolean hasFrozenAvatarTranslationX;
 
     public void setGlassOnlyBack() {
         glassOnlyBack = true;
@@ -301,15 +303,19 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         backButtonImageView.setContentDescription(LocaleController.getString(R.string.AccDescrGoBack));
     }
 
+    private int backUnreadCountRequested;
+
     public void setBackUnreadCount(int count) {
-        if (!glassMode || backButtonImageView == null || backButtonImageView.getVisibility() == GONE) {
+        backUnreadCountRequested = Math.max(0, count);
+        // Action-mode back is a close (X) control — never show the unread badge on it.
+        if (!glassMode || backButtonImageView == null || backButtonImageView.getVisibility() == GONE || actionModeVisible) {
             if (backUnreadBadge != null) {
                 backUnreadBadge.setCount(0);
             }
             return;
         }
         ensureBackUnreadBadge();
-        backUnreadBadge.setCount(count);
+        backUnreadBadge.setCount(backUnreadCountRequested);
         backUnreadBadge.bringToFront();
     }
 
@@ -896,6 +902,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             return;
         }
         actionModeVisible = true;
+        setBackUnreadCount(backUnreadCountRequested); // hide unread badge while X is shown
         checkMenuItemsWidth();
         if (animated) {
             ArrayList<Animator> animators = new ArrayList<>();
@@ -920,7 +927,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             if (actionModeExtraView != null) {
                 animators.add(ObjectAnimator.ofFloat(actionModeExtraView, View.TRANSLATION_Y, 0));
             }
-            if (actionModeColor == 0) {
+            if (actionModeColor == 0 || glassMode) {
                 if (!isSearchFieldVisible) {
                     if (titleTextView[0] != null) {
                         animators.add(ObjectAnimator.ofFloat(titleTextView[0], View.ALPHA, 0));
@@ -930,7 +937,13 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
                     }
                 }
                 if (menu != null) {
-                    animators.add(ObjectAnimator.ofFloat(menu, View.ALPHA, 0));
+                    menu.setPivotX(Math.max(1, menu.getMeasuredWidth()) / 2f);
+                    menu.setPivotY(Math.max(1, menu.getMeasuredHeight()) / 2f);
+                    animators.add(ObjectAnimator.ofFloat(menu, View.ALPHA, 1f, 0f));
+                    if (glassMode) {
+                        animators.add(ObjectAnimator.ofFloat(menu, View.SCALE_X, 1f, 0.72f));
+                        animators.add(ObjectAnimator.ofFloat(menu, View.SCALE_Y, 1f, 0.72f));
+                    }
                 }
             }
             final int color = actionModeColor == 0 ? actionBarColor : actionModeColor;
@@ -955,7 +968,8 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
                 });
                 actionModeAnimation.playTogether(alphaUpdate);
             }
-            actionModeAnimation.setDuration(200);
+            actionModeAnimation.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            actionModeAnimation.setDuration(glassMode ? 300 : 200);
             actionModeAnimation.addListener(new AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationStart(Animator animation) {
@@ -1067,6 +1081,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
         actionMode.hideAllPopupMenus();
         actionModeVisible = false;
+        setBackUnreadCount(backUnreadCountRequested); // restore unread badge on the back button
         checkMenuItemsWidth();
         ArrayList<Animator> animators = new ArrayList<>();
         animators.add(ObjectAnimator.ofFloat(actionMode, View.ALPHA, 0.0f));
@@ -1097,7 +1112,13 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
         }
         if (menu != null) {
+            menu.setPivotX(Math.max(1, menu.getMeasuredWidth()) / 2f);
+            menu.setPivotY(Math.max(1, menu.getMeasuredHeight()) / 2f);
             animators.add(ObjectAnimator.ofFloat(menu, View.ALPHA, 1));
+            if (glassMode) {
+                animators.add(ObjectAnimator.ofFloat(menu, View.SCALE_X, 1f));
+                animators.add(ObjectAnimator.ofFloat(menu, View.SCALE_Y, 1f));
+            }
         }
         if (actionBarColor == 0 || glassMode) {
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.needCheckSystemBarColors);
@@ -1120,7 +1141,8 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             });
             actionModeAnimation.playTogether(alphaUpdate);
         }
-        actionModeAnimation.setDuration(200);
+        actionModeAnimation.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        actionModeAnimation.setDuration(glassMode ? 300 : 200);
         actionModeAnimation.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
@@ -1129,6 +1151,10 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
                     actionMode.setVisibility(INVISIBLE);
                     if (actionModeExtraView != null) {
                         actionModeExtraView.setVisibility(INVISIBLE);
+                    }
+                    if (menu != null) {
+                        menu.setScaleX(1f);
+                        menu.setScaleY(1f);
                     }
                 }
             }
@@ -1928,22 +1954,27 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     public boolean dispatchTouchEvent(MotionEvent ev) {
         if (chatAvatarContainer != null && glassMode) {
             if (ev.getAction() == MotionEvent.ACTION_DOWN) {
-                final int x = (int) ev.getX();
-                final int y = (int) ev.getY();
-                View child = findChildUnder(this, x, y, chatAvatarContainer);
-                if (child == null) {
-                    child = findChildUnder(this, x, y, null);
-                }
+                // Action mode puts copy/forward/etc. between the back and delete glass discs
+                // (no glass under those icons). Those buttons must still receive hits — do not
+                // apply the "only glass is touchable" filter while action mode is open.
+                if (!actionModeVisible) {
+                    final int x = (int) ev.getX();
+                    final int y = (int) ev.getY();
+                    View child = findChildUnder(this, x, y, chatAvatarContainer);
+                    if (child == null) {
+                        child = findChildUnder(this, x, y, null);
+                    }
 
-                boolean contains = false;
-                contains |= glassDrawable != null && glassDrawable.getBounds().contains(x, y);
-                if (child != null && child != chatAvatarContainer) {
-                    contains |= glassDrawableBack != null && glassDrawableBack.getBounds().contains(x, y);
-                    contains |= glassDrawableMenu != null && glassDrawableMenu.getBounds().contains(x, y);
-                }
+                    boolean contains = false;
+                    contains |= glassDrawable != null && glassDrawable.getBounds().contains(x, y);
+                    if (child != null && child != chatAvatarContainer) {
+                        contains |= glassDrawableBack != null && glassDrawableBack.getBounds().contains(x, y);
+                        contains |= glassDrawableMenu != null && glassDrawableMenu.getBounds().contains(x, y);
+                    }
 
-                if (!contains) {
-                    return false;
+                    if (!contains) {
+                        return false;
+                    }
                 }
             }
         }
@@ -2287,6 +2318,33 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
 
     public boolean doNotDrawGlassMenu;
 
+    /** Fills outLeftRight with [left, right] of visible ActionBarMenuItem children in parent coords. */
+    private static boolean computeActionBarMenuItemBounds(ActionBarMenu source, float[] outLeftRight) {
+        if (source == null || outLeftRight == null || outLeftRight.length < 2) {
+            return false;
+        }
+        float itemsLeft = Float.POSITIVE_INFINITY;
+        float itemsRight = Float.NEGATIVE_INFINITY;
+        boolean foundItem = false;
+        for (int a = 0, N = source.getChildCount(); a < N; a++) {
+            final View child = source.getChildAt(a);
+            if (!(child instanceof ActionBarMenuItem) || child.getVisibility() != View.VISIBLE) {
+                continue;
+            }
+            final float childLeft = source.getX() + child.getX();
+            final float childRight = childLeft + child.getWidth();
+            itemsLeft = Math.min(itemsLeft, childLeft);
+            itemsRight = Math.max(itemsRight, childRight);
+            foundItem = true;
+        }
+        if (!foundItem) {
+            return false;
+        }
+        outLeftRight[0] = itemsLeft;
+        outLeftRight[1] = itemsRight;
+        return true;
+    }
+
     @Override
     protected void dispatchDraw(Canvas canvas) {
         final int p = dp(6);
@@ -2333,8 +2391,19 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
                     - ((MarginLayoutParams)(chatAvatarContainer.getLayoutParams())).leftMargin
                     - chatAvatarContainer.getLeftPadding()
                     + p + dp(3);
-                chatAvatarContainer.setTranslationX(translationX);
-                chatAvatarContainer.setPivotX((chatAvatarContainer.getMeasuredWidth()) / 2f - translationX );
+                // Freeze X while action mode morphs the title glass — otherwise the avatar/title
+                // slides sideways as the pill expands (looks like it vanishes from the sides).
+                if (actionModeFactor <= 0.001f) {
+                    frozenAvatarTranslationX = translationX;
+                    hasFrozenAvatarTranslationX = true;
+                    chatAvatarContainer.setTranslationX(translationX);
+                } else if (hasFrozenAvatarTranslationX) {
+                    chatAvatarContainer.setTranslationX(frozenAvatarTranslationX);
+                } else {
+                    chatAvatarContainer.setTranslationX(translationX);
+                }
+                chatAvatarContainer.setPivotX(chatAvatarContainer.getMeasuredWidth() / 2f);
+                chatAvatarContainer.setPivotY(chatAvatarContainer.getMeasuredHeight() / 2f);
             } else {
                 left = leftDefault;
                 right = rightDefault;
@@ -2348,42 +2417,58 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
         if (glassDrawableBack != null && hasBackButton) {
             glassDrawableBack.setBounds(0, t, s + p * 2, b);
-            if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || !org.telegram.ui.MglaGlassConfig.isCleanHeaderHideBackBtnEnabled()) {
+            final boolean cleanHeader = org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled();
+            if (cleanHeader) {
+                // Clean header: no back glass while action mode shows the close (X) control.
+                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHideBackBtnEnabled() && actionModeFactor < 1f) {
+                    final int backAlpha = Math.round(255 * (1f - actionModeFactor));
+                    if (backAlpha > 0) {
+                        glassDrawableBack.setAlpha(backAlpha);
+                        glassDrawableBack.draw(canvas);
+                        glassDrawableBack.setAlpha(255);
+                    }
+                }
+            } else {
                 glassDrawableBack.draw(canvas);
             }
         }
         if (glassDrawableMenu != null && menuWidth > 0 && !glassOnlyBack && !doNotDrawGlassMenu) {
-            // Align menu glass to the real on-screen menu items (menu has translationX in
-            // glass mode). For the standard-header avatar slot the glass must sit exactly
-            // under the avatar at the same size — otherwise it peeks out from the side.
+            // Align menu glass to on-screen items. During action mode, morph from the avatar
+            // disc to the full action-button strip (copy/forward/delete/…).
             int menuGlassLeft = getWidth() - Math.max(s, menuWidth) - p * 2;
             int menuGlassRight = getWidth();
-            if (menu != null) {
-                float itemsLeft = Float.POSITIVE_INFINITY;
-                float itemsRight = Float.NEGATIVE_INFINITY;
-                boolean foundItem = false;
-                for (int a = 0, N = menu.getChildCount(); a < N; a++) {
-                    final View child = menu.getChildAt(a);
-                    if (!(child instanceof ActionBarMenuItem) || child.getVisibility() != View.VISIBLE) {
-                        continue;
-                    }
-                    final float childLeft = menu.getX() + child.getX();
-                    final float childRight = childLeft + child.getWidth();
-                    itemsLeft = Math.min(itemsLeft, childLeft);
-                    itemsRight = Math.max(itemsRight, childRight);
-                    foundItem = true;
-                }
-                if (foundItem) {
-                    final float itemsWidth = itemsRight - itemsLeft;
-                    if (itemsWidth <= s + dp(2)) {
-                        // Single avatar-sized item: center a matching circle under it.
-                        final float centerX = (itemsLeft + itemsRight) / 2f;
-                        menuGlassLeft = Math.round(centerX - s / 2f - p);
-                        menuGlassRight = Math.round(centerX + s / 2f + p);
-                    } else {
-                        menuGlassLeft = Math.round(itemsLeft - p);
-                        menuGlassRight = Math.round(itemsRight + p);
-                    }
+            final float[] menuItemBounds = new float[2];
+            final float[] actionItemBounds = new float[2];
+            final boolean hasMenuItems = computeActionBarMenuItemBounds(menu, menuItemBounds);
+            final boolean hasActionItems = actionMode != null
+                && actionMode.getVisibility() != GONE
+                && computeActionBarMenuItemBounds(actionMode, actionItemBounds);
+            float itemsLeft = 0;
+            float itemsRight = 0;
+            boolean foundItem = false;
+            if (hasMenuItems && hasActionItems && actionModeFactor > 0f) {
+                itemsLeft = lerp(menuItemBounds[0], actionItemBounds[0], actionModeFactor);
+                itemsRight = lerp(menuItemBounds[1], actionItemBounds[1], actionModeFactor);
+                foundItem = true;
+            } else if (hasActionItems && (actionModeVisible || actionModeFactor > 0.5f)) {
+                itemsLeft = actionItemBounds[0];
+                itemsRight = actionItemBounds[1];
+                foundItem = true;
+            } else if (hasMenuItems) {
+                itemsLeft = menuItemBounds[0];
+                itemsRight = menuItemBounds[1];
+                foundItem = true;
+            }
+            if (foundItem) {
+                final float itemsWidth = itemsRight - itemsLeft;
+                if (itemsWidth <= s + dp(2)) {
+                    // Single avatar-sized item: center a matching circle under it.
+                    final float centerX = (itemsLeft + itemsRight) / 2f;
+                    menuGlassLeft = Math.round(centerX - s / 2f - p);
+                    menuGlassRight = Math.round(centerX + s / 2f + p);
+                } else {
+                    menuGlassLeft = Math.round(itemsLeft - p);
+                    menuGlassRight = Math.round(itemsRight + p);
                 }
             }
             glassDrawableMenu.setBounds(menuGlassLeft, t, menuGlassRight, b);
