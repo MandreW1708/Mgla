@@ -302,3 +302,6 @@ target_link_options(mgladpi PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE
 
 include(AndroidNdkModules)
 android_ndk_import_module_cpufeatures()
+
+# Local Whisper (CPU) for Mgla AI transcription — separate .so
+include(${CMAKE_CURRENT_SOURCE_DIR}/mgla_whisper.cmake)

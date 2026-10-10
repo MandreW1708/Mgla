@@ -232,6 +232,10 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1104, "Лимит запросов к AI", hub, ai, aiIcon, aiScreen, "Лимит запросов к AI", "ai/limit"));
         l.add(new Entry(1105, transcribe, hub, ai, aiIcon, aiScreen, transcribe, "ai/transcribe"));
         l.add(new Entry(1106, "Включить расшифровку", hub, transcribe, aiIcon, transcribeScreen, "Включить расшифровку", "ai/transcribe/enable"));
+        l.add(new Entry(1109, "Gemini (облако)", hub, transcribe, aiIcon, transcribeScreen, "Gemini", "ai/transcribe/gemini"));
+        l.add(new Entry(1110, "Локальный Whisper", hub, transcribe, aiIcon, transcribeScreen, "Локальный Whisper", "ai/transcribe/whisper"));
+        l.add(new Entry(1111, "Модели Whisper", hub, transcribe, aiIcon, MglaWhisperModelsActivity::new, null, "ai/transcribe/whisper/models"));
+        l.add(new Entry(1112, "Язык Whisper", hub, transcribe, aiIcon, transcribeScreen, "Язык", "ai/transcribe/whisper/language"));
         l.add(new Entry(1107, "Главные темы Chat DNA", hub, ai, aiIcon, aiScreen, "Главные темы Chat DNA", "ai/chat-dna"));
         l.add(new Entry(1108, "Локальные модели", hub, ai, aiIcon, aiScreen, "Локальные модели", "ai/models"));
 

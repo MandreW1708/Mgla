@@ -20,11 +20,14 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaFeatureFlags;
+import org.telegram.messenger.MglaWhisperModelsManager;
+import org.telegram.messenger.MglaWhisperNative;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
-import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.RadioCell;
+import org.telegram.ui.Cells.ShadowSectionCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
@@ -35,15 +38,31 @@ import org.telegram.ui.Components.RecyclerListView;
 public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
 
     private static final int ROW_ENABLED = 0;
-    private static final int ROW_API_KEY = 1;
-    private static final int ROW_MODEL = 2;
-    private static final int ROW_FALLBACK = 3;
-    private static final int ROW_INFO = 4;
-    private static final int ROW_COUNT = 5;
+    private static final int ROW_SHADOW_0 = 1;
+
+    private static final int ROW_GEMINI = 2;
+    private static final int ROW_API_KEY = 3;
+    private static final int ROW_GEMINI_MODEL = 4;
+    private static final int ROW_SHADOW_1 = 5;
+
+    private static final int ROW_WHISPER = 6;
+    private static final int ROW_WHISPER_MODEL = 7;
+    private static final int ROW_WHISPER_LANG = 8;
+    private static final int ROW_WHISPER_STATUS = 9;
+    private static final int ROW_SHADOW_2 = 10;
+
+    private static final int ROW_FALLBACK = 11;
+    private static final int ROW_INFO = 12;
+    private static final int ROW_COUNT = 13;
 
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_TEXT = 1;
     private static final int VIEW_TYPE_INFO = 2;
+    private static final int VIEW_TYPE_RADIO = 3;
+    private static final int VIEW_TYPE_SHADOW = 4;
+
+    private static final float ALPHA_ACTIVE = 1f;
+    private static final float ALPHA_DIMMED = 0.38f;
 
     private SharedPreferences prefs;
     private RecyclerListView listView;
@@ -93,7 +112,9 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
                 for (int i = 0; i < parent.getChildCount(); i++) {
                     View child = parent.getChildAt(i);
                     int position = parent.getChildAdapterPosition(child);
-                    if (position != ROW_ENABLED && position != ROW_API_KEY && position != ROW_MODEL) {
+                    if (position != ROW_GEMINI && position != ROW_API_KEY
+                            && position != ROW_WHISPER && position != ROW_WHISPER_MODEL
+                            && position != ROW_WHISPER_LANG) {
                         continue;
                     }
                     float bottom = child.getBottom() + child.getTranslationY();
@@ -104,10 +125,30 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         listView.setOnItemClickListener((view, position) -> {
             if (position == ROW_ENABLED) {
                 toggleSwitch(view, "ai_transcribe_enabled", false);
+            } else if (position == ROW_GEMINI) {
+                selectProvider(MglaWhisperModelsManager.PROVIDER_GEMINI);
+            } else if (position == ROW_WHISPER) {
+                selectProvider(MglaWhisperModelsManager.PROVIDER_WHISPER);
             } else if (position == ROW_API_KEY) {
-                showTextInputDialog("API ключ Gemini", "ai_transcribe_api_key", "sk-...", true);
-            } else if (position == ROW_MODEL) {
-                showTextInputDialog("Модель", "ai_transcribe_model", "gemini-2.0-flash", false);
+                if (isWhisper()) {
+                    return;
+                }
+                showTextInputDialog("API ключ Gemini", "ai_transcribe_api_key", "AIza...", true);
+            } else if (position == ROW_GEMINI_MODEL) {
+                if (isWhisper()) {
+                    return;
+                }
+                showTextInputDialog("Модель Gemini", "ai_transcribe_model", "gemini-2.0-flash", false);
+            } else if (position == ROW_WHISPER_MODEL) {
+                if (!isWhisper()) {
+                    return;
+                }
+                presentFragment(new MglaWhisperModelsActivity());
+            } else if (position == ROW_WHISPER_LANG) {
+                if (!isWhisper()) {
+                    return;
+                }
+                showLanguageDialog();
             } else if (position == ROW_FALLBACK) {
                 toggleSwitch(view, "ai_transcribe_fallback_telegram", true);
             }
@@ -115,6 +156,28 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
 
         ((FrameLayout) fragmentView).addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         return fragmentView;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (listView != null && listView.getAdapter() != null) {
+            listView.getAdapter().notifyDataSetChanged();
+        }
+    }
+
+    private void selectProvider(String provider) {
+        if (MglaWhisperModelsManager.PROVIDER_WHISPER.equals(provider) && !MglaWhisperNative.isAvailable()) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Библиотека Whisper не собрана для этой сборки").show();
+            return;
+        }
+        if (provider.equals(MglaWhisperModelsManager.getProvider())) {
+            return;
+        }
+        MglaWhisperModelsManager.setProvider(provider);
+        if (listView != null && listView.getAdapter() != null) {
+            listView.getAdapter().notifyDataSetChanged();
+        }
     }
 
     private void toggleSwitch(View view, String key, boolean defaultValue) {
@@ -134,6 +197,23 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
             }
             ((TextCheckCell) view).setChecked(shown);
         }
+    }
+
+    private void showLanguageDialog() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final String[] names = {"Автоопределение", "Русский", "English", "Українська", "Беларуская", "Қазақша"};
+        final String[] values = {"auto", "ru", "en", "uk", "be", "kk"};
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Язык Whisper");
+        dlg.setItems(names, (dialog, which) -> {
+            MglaWhisperModelsManager.setLanguage(values[which]);
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyDataSetChanged();
+            }
+        });
+        showDialog(dlg.create());
     }
 
     private void showTextInputDialog(String title, String key, String hint, boolean multiline) {
@@ -185,6 +265,30 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         return value;
     }
 
+    private boolean isWhisper() {
+        return MglaWhisperModelsManager.PROVIDER_WHISPER.equals(MglaWhisperModelsManager.getProvider());
+    }
+
+    private boolean isGeminiBlock(int position) {
+        return position == ROW_GEMINI || position == ROW_API_KEY || position == ROW_GEMINI_MODEL;
+    }
+
+    private boolean isWhisperBlock(int position) {
+        return position == ROW_WHISPER || position == ROW_WHISPER_MODEL
+            || position == ROW_WHISPER_LANG || position == ROW_WHISPER_STATUS;
+    }
+
+    private void applyBlockAlpha(View view, int position) {
+        boolean whisper = isWhisper();
+        if (isGeminiBlock(position)) {
+            view.setAlpha(whisper ? ALPHA_DIMMED : ALPHA_ACTIVE);
+        } else if (isWhisperBlock(position)) {
+            view.setAlpha(whisper ? ALPHA_ACTIVE : ALPHA_DIMMED);
+        } else {
+            view.setAlpha(ALPHA_ACTIVE);
+        }
+    }
+
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
         private final Context context;
 
@@ -195,7 +299,14 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == ROW_ENABLED || position == ROW_API_KEY || position == ROW_MODEL || position == ROW_FALLBACK;
+            if (position == ROW_ENABLED || position == ROW_FALLBACK
+                    || position == ROW_GEMINI || position == ROW_WHISPER) {
+                return true;
+            }
+            if (isWhisper()) {
+                return position == ROW_WHISPER_MODEL || position == ROW_WHISPER_LANG;
+            }
+            return position == ROW_API_KEY || position == ROW_GEMINI_MODEL;
         }
 
         @Override
@@ -205,7 +316,13 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
 
         @Override
         public int getItemViewType(int position) {
-            if (position == ROW_API_KEY || position == ROW_MODEL) {
+            if (position == ROW_SHADOW_0 || position == ROW_SHADOW_1 || position == ROW_SHADOW_2) {
+                return VIEW_TYPE_SHADOW;
+            } else if (position == ROW_GEMINI || position == ROW_WHISPER) {
+                return VIEW_TYPE_RADIO;
+            } else if (position == ROW_API_KEY || position == ROW_GEMINI_MODEL
+                    || position == ROW_WHISPER_MODEL || position == ROW_WHISPER_LANG
+                    || position == ROW_WHISPER_STATUS) {
                 return VIEW_TYPE_TEXT;
             } else if (position == ROW_INFO) {
                 return VIEW_TYPE_INFO;
@@ -217,8 +334,13 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View view;
-            if (viewType == VIEW_TYPE_TEXT) {
+            if (viewType == VIEW_TYPE_SHADOW) {
+                view = new ShadowSectionCell(context);
+            } else if (viewType == VIEW_TYPE_TEXT) {
                 view = new TextSettingsCell(context);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            } else if (viewType == VIEW_TYPE_RADIO) {
+                view = new RadioCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else if (viewType == VIEW_TYPE_INFO) {
                 view = new TextInfoPrivacyCell(context);
@@ -231,25 +353,50 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            boolean whisper = isWhisper();
             if (position == ROW_ENABLED) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
                 cell.setTextAndCheck("Включить расшифровку",
                     MglaFeatureFlags.isAllowed("ai_transcribe_enabled") && prefs.getBoolean("ai_transcribe_enabled", false), false);
+            } else if (position == ROW_GEMINI) {
+                RadioCell cell = (RadioCell) holder.itemView;
+                cell.setText("Gemini (облако)", !whisper, true);
             } else if (position == ROW_API_KEY) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("API ключ Gemini", getValuePreview("ai_transcribe_api_key", "Не задан"), false);
+                cell.setTextAndValue("API ключ", getValuePreview("ai_transcribe_api_key", "Не задан"), true);
                 cell.setCanDisable(false);
-            } else if (position == ROW_MODEL) {
+            } else if (position == ROW_GEMINI_MODEL) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                 cell.setTextAndValue("Модель", getValuePreview("ai_transcribe_model", "gemini-2.0-flash"), false);
+                cell.setCanDisable(false);
+            } else if (position == ROW_WHISPER) {
+                RadioCell cell = (RadioCell) holder.itemView;
+                cell.setText("Локальный Whisper", whisper, true);
+            } else if (position == ROW_WHISPER_MODEL) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Модель", MglaWhisperModelsManager.getSelectedModelTitle(), true);
+                cell.setCanDisable(false);
+            } else if (position == ROW_WHISPER_LANG) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Язык", MglaWhisperModelsManager.getLanguageTitle(), true);
+                cell.setCanDisable(false);
+            } else if (position == ROW_WHISPER_STATUS) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                String status = MglaWhisperNative.isAvailable() ? "Готов" : "Библиотека недоступна";
+                cell.setTextAndValue("Движок", status, false);
                 cell.setCanDisable(false);
             } else if (position == ROW_FALLBACK) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
                 cell.setTextAndCheck("Fallback на Telegram", prefs.getBoolean("ai_transcribe_fallback_telegram", true), false);
             } else if (position == ROW_INFO) {
                 TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
-                cell.setText("При включении голосовые и видеосообщения будут расшифровываться через Gemini в отдельном окне. Если fallback включён, при ошибке Gemini будет использована обычная расшифровка Telegram.");
+                if (whisper) {
+                    cell.setText("Голосовые и видеосообщения расшифровываются на устройстве через Whisper. Нужна скачанная модель — данные никуда не отправляются. Если fallback включён, при ошибке используется расшифровка Telegram.");
+                } else {
+                    cell.setText("Голосовые и видеосообщения расшифровываются через Gemini в отдельном окне. Если fallback включён, при ошибке используется обычная расшифровка Telegram.");
+                }
             }
+            applyBlockAlpha(holder.itemView, position);
         }
     }
 }

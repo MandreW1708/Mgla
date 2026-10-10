@@ -707,7 +707,7 @@ public class TranscribeButton {
         }
         int account = messageObject.currentAccount;
 
-        // Mgla: use Gemini for transcription if enabled
+        // Mgla: Gemini / локальный Whisper, если ИИ-расшифровка включена
         android.content.SharedPreferences prefs = org.telegram.messenger.ApplicationLoader.applicationContext
             .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE);
         if (org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
@@ -716,10 +716,14 @@ public class TranscribeButton {
                 && prefs.getBoolean("ai_transcribe_enabled", false)) {
             long dialogId = messageObject.getDialogId();
             int messageId = messageObject.messageOwner.id;
+            final boolean useWhisper = org.telegram.messenger.MglaWhisperModelsManager.PROVIDER_WHISPER
+                .equals(org.telegram.messenger.MglaWhisperModelsManager.getProvider());
+            final String providerMarker = useWhisper ? "•Whisper" : "•Gemini";
+            final String providerLabel = useWhisper ? "Whisper" : "Gemini";
             if (open) {
                 if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
-                    if (isGeminiTranscription(messageObject.messageOwner.voiceTranscription)) {
-                        showGeminiTranscriptionSheet(context, messageObject, messageObject.messageOwner.voiceTranscription);
+                    if (isMglaAiTranscription(messageObject.messageOwner.voiceTranscription)) {
+                        showMglaTranscriptionSheet(context, messageObject, messageObject.messageOwner.voiceTranscription);
                     } else {
                         transcribePressedTelegram(messageObject, true, delegate);
                     }
@@ -728,14 +732,14 @@ public class TranscribeButton {
                         transcribeOperationsByDialogPosition = new HashMap<>();
                     }
                     transcribeOperationsByDialogPosition.put((Integer) reqInfoHash(messageObject), messageObject);
-                    GeminiTranscriber.transcribe(messageObject, account, new GeminiTranscriber.Callback() {
+                    GeminiTranscriber.Callback aiCallback = new GeminiTranscriber.Callback() {
                         @Override
                         public void onSuccess(String text) {
                             if (transcribeOperationsByDialogPosition != null) {
                                 transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
                             }
                             String finalText = text == null ? "" : text.trim();
-                            messageObject.messageOwner.voiceTranscription = finalText + "\n\n•Gemini";
+                            messageObject.messageOwner.voiceTranscription = finalText + "\n\n" + providerMarker;
                             messageObject.messageOwner.voiceTranscriptionId = -1;
                             messageObject.messageOwner.voiceTranscriptionOpen = false;
                             messageObject.messageOwner.voiceTranscriptionFinal = true;
@@ -743,7 +747,7 @@ public class TranscribeButton {
                             NotificationCenter.getInstance(account).postNotificationName(
                                 NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null,
                                 (Boolean) false, (Boolean) true);
-                            showGeminiTranscriptionSheet(context, messageObject, finalText);
+                            showMglaTranscriptionSheet(context, messageObject, finalText);
                         }
 
                         @Override
@@ -754,14 +758,19 @@ public class TranscribeButton {
                             NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject);
                             if (prefs.getBoolean("ai_transcribe_fallback_telegram", true)) {
                                 if (context != null) {
-                                    Toast.makeText(context, "Gemini недоступен, пробуем Telegram", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(context, providerLabel + " недоступен, пробуем Telegram", Toast.LENGTH_SHORT).show();
                                 }
                                 transcribePressedTelegram(messageObject, true, delegate);
                             } else {
-                                showGeminiTranscriptionSheet(context, messageObject, "Ошибка Gemini: " + (error != null ? error : "неизвестно"));
+                                showMglaTranscriptionSheet(context, messageObject, "Ошибка " + providerLabel + ": " + (error != null ? error : "неизвестно"));
                             }
                         }
-                    });
+                    };
+                    if (useWhisper) {
+                        org.telegram.ui.WhisperTranscriber.transcribe(messageObject, account, aiCallback);
+                    } else {
+                        GeminiTranscriber.transcribe(messageObject, account, aiCallback);
+                    }
                 }
             } else {
                 if (transcribeOperationsByDialogPosition != null) {
@@ -886,13 +895,22 @@ public class TranscribeButton {
         }
     }
 
-    private static void showGeminiTranscriptionSheet(Context context, MessageObject messageObject, String text) {
+    private static void showMglaTranscriptionSheet(Context context, MessageObject messageObject, String text) {
         if (context == null || !AndroidUtilities.isSafeToShow(context)) {
             return;
         }
-        String cleanText = cleanGeminiTranscription(text);
+        String cleanText = cleanMglaAiTranscription(text);
+        boolean whisper;
+        if (text != null && text.trim().endsWith("•Whisper")) {
+            whisper = true;
+        } else if (text != null && text.trim().endsWith("•Gemini")) {
+            whisper = false;
+        } else {
+            whisper = org.telegram.messenger.MglaWhisperModelsManager.PROVIDER_WHISPER
+                .equals(org.telegram.messenger.MglaWhisperModelsManager.getProvider());
+        }
         if (TextUtils.isEmpty(cleanText)) {
-            cleanText = "Gemini не вернул текст расшифровки.";
+            cleanText = (whisper ? "Whisper" : "Gemini") + " не вернул текст расшифровки.";
         }
         final String transcriptionText = cleanText;
         final String[] summaryText = new String[1];
@@ -914,7 +932,7 @@ public class TranscribeButton {
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView titleView = new TextView(context);
-        titleView.setText("Gemini AI");
+        titleView.setText(whisper ? "Whisper" : "Gemini AI");
         titleView.setTextSize(20);
         titleView.setTypeface(AndroidUtilities.bold());
         titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
@@ -949,7 +967,7 @@ public class TranscribeButton {
         card.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 38));
 
         TextView subtitleView = new TextView(context);
-        subtitleView.setText("Распознавание голоса");
+        subtitleView.setText(whisper ? "Локально на устройстве" : "Распознавание голоса");
         subtitleView.setTextSize(12);
         subtitleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         subtitleView.setPadding(dp(7), dp(2), dp(7), dp(3));
@@ -960,12 +978,12 @@ public class TranscribeButton {
         card.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 10));
 
         int maxSheetHeight = AndroidUtilities.displaySize.y / 2 + dp(56);
-        int maxTextHeight = Math.max(dp(120), maxSheetHeight - dp(86));
+        int maxTextHeight = Math.max(dp(120), maxSheetHeight - dp(whisper ? 56 : 86));
         FrameLayout textContainer = new FrameLayout(context);
         MaxHeightScrollView scrollView = new MaxHeightScrollView(context, maxTextHeight);
         scrollView.setFillViewport(false);
         scrollView.setClipToPadding(false);
-        scrollView.setPadding(0, 0, 0, dp(64));
+        scrollView.setPadding(0, 0, 0, whisper ? dp(8) : dp(64));
         scrollView.setVerticalScrollBarEnabled(cleanText.length() > 280);
         TextView textView = new TextView(context);
         textView.setText(cleanText);
@@ -976,125 +994,128 @@ public class TranscribeButton {
         scrollView.addView(textView, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
         textContainer.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-        TextView summaryButton = new TextView(context);
-        summaryButton.setText("Кратко");
-        summaryButton.setGravity(Gravity.CENTER);
-        summaryButton.setTextSize(15);
-        summaryButton.setTypeface(AndroidUtilities.bold());
-        summaryButton.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
-        summaryButton.setPadding(dp(26), 0, dp(26), 0);
-        summaryButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), Theme.getColor(Theme.key_featuredStickers_addButton), Theme.getColor(Theme.key_featuredStickers_addButtonPressed)));
-        summaryButton.setOnClickListener(v -> {
-            if (showingSummary[0]) {
-                textView.setText(transcriptionText);
-                summaryButton.setText("Кратко");
-                showingSummary[0] = false;
-                scrollView.scrollTo(0, 0);
-                return;
-            }
-            if (!TextUtils.isEmpty(summaryText[0])) {
-                textView.setText(summaryText[0]);
-                summaryButton.setText("Полный текст");
-                showingSummary[0] = true;
-                scrollView.scrollTo(0, 0);
-                return;
-            }
-            summaryButton.setEnabled(false);
-            summaryButton.setAlpha(0.65f);
-            summaryButton.setText("...");
-            MglaStats.count("ai:voice_summary");
-            String prompt = "Сделай краткую сводку этой голосовой расшифровки в 1-2 предложениях. Верни только сводку, без комментариев:\n\n" + transcriptionText;
-            AiAssistant.getInstance().sendMessage(prompt, new AiAssistant.AiCallback() {
-                @Override
-                public void onResponse(String text) {
-                    String summary = text == null ? "" : text.trim();
-                    summaryText[0] = TextUtils.isEmpty(summary) ? "Не удалось получить сводку." : summary;
+        if (!whisper) {
+            TextView summaryButton = new TextView(context);
+            summaryButton.setText("Кратко");
+            summaryButton.setGravity(Gravity.CENTER);
+            summaryButton.setTextSize(15);
+            summaryButton.setTypeface(AndroidUtilities.bold());
+            summaryButton.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
+            summaryButton.setPadding(dp(26), 0, dp(26), 0);
+            summaryButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), Theme.getColor(Theme.key_featuredStickers_addButton), Theme.getColor(Theme.key_featuredStickers_addButtonPressed)));
+            summaryButton.setOnClickListener(v -> {
+                if (showingSummary[0]) {
+                    textView.setText(transcriptionText);
+                    summaryButton.setText("Кратко");
+                    showingSummary[0] = false;
+                    scrollView.scrollTo(0, 0);
+                    return;
+                }
+                if (!TextUtils.isEmpty(summaryText[0])) {
                     textView.setText(summaryText[0]);
                     summaryButton.setText("Полный текст");
-                    summaryButton.setAlpha(1.0f);
-                    summaryButton.setEnabled(true);
                     showingSummary[0] = true;
                     scrollView.scrollTo(0, 0);
+                    return;
                 }
-
-                @Override
-                public void onError(String error) {
-                    textView.setText("Ошибка сводки: " + (error != null ? error : "неизвестно"));
-                    summaryButton.setText("Кратко");
-                    summaryButton.setAlpha(1.0f);
-                    summaryButton.setEnabled(true);
-                    scrollView.scrollTo(0, 0);
-                }
-            });
-        });
-        FrameLayout.LayoutParams summaryButtonLayoutParams = LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 48, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        summaryButtonLayoutParams.bottomMargin = dp(4);
-        textContainer.addView(summaryButton, summaryButtonLayoutParams);
-        card.addView(textContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        LinearLayout actionsRow = new LinearLayout(context);
-        actionsRow.setOrientation(LinearLayout.HORIZONTAL);
-        actionsRow.setGravity(Gravity.CENTER);
-        TextView copyButton = createGeminiActionButton(context, "Копировать");
-        copyButton.setOnClickListener(v -> {
-            ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-            if (clipboard != null) {
-                clipboard.setPrimaryClip(ClipData.newPlainText("Gemini transcription", textView.getText()));
-                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show();
-            }
-        });
-        actionsRow.addView(copyButton, LayoutHelper.createLinear(0, 38, 1.0f, 0, 0, 5, 0));
-
-        TextView saveButton = createGeminiActionButton(context, "Сохранить");
-        saveButton.setOnClickListener(v -> saveGeminiText(context, textView.getText().toString()));
-        actionsRow.addView(saveButton, LayoutHelper.createLinear(0, 38, 1.0f, 0, 0, 5, 0));
-
-        TextView sendButton = createGeminiActionButton(context, "Отправить");
-        sendButton.setOnClickListener(v -> {
-            if (messageObject != null) {
-                SendMessagesHelper.prepareSendingText(
-                    AccountInstance.getInstance(messageObject.currentAccount),
-                    textView.getText().toString(),
-                    messageObject.getDialogId(),
-                    true,
-                    0,
-                    0,
-                    0
-                );
-                Toast.makeText(context, "Отправлено", Toast.LENGTH_SHORT).show();
-            }
-        });
-        actionsRow.addView(sendButton, LayoutHelper.createLinear(0, 38, 1.0f, 0, 0, 5, 0));
-
-        TextView translateButton = createGeminiActionButton(context, "Перевести");
-        translateButton.setOnClickListener(v -> {
-            translateButton.setEnabled(false);
-            translateButton.setAlpha(0.65f);
-            MglaStats.count("ai:translate");
-            AiAssistant.getInstance().sendMessage(
-                "Переведи этот текст на русский. Если текст уже на русском, переведи его на английский. Верни только перевод:\n\n" + textView.getText(),
-                new AiAssistant.AiCallback() {
+                summaryButton.setEnabled(false);
+                summaryButton.setAlpha(0.65f);
+                summaryButton.setText("...");
+                MglaStats.count("ai:voice_summary");
+                String prompt = "Сделай краткую сводку этой голосовой расшифровки в 1-2 предложениях. Верни только сводку, без комментариев:\n\n" + transcriptionText;
+                AiAssistant.getInstance().sendMessage(prompt, new AiAssistant.AiCallback() {
                     @Override
                     public void onResponse(String text) {
-                        textView.setText(text == null ? "" : text.trim());
-                        translateButton.setAlpha(1.0f);
-                        translateButton.setEnabled(true);
-                        showingSummary[0] = false;
-                        summaryButton.setText("Кратко");
+                        String summary = text == null ? "" : text.trim();
+                        summaryText[0] = TextUtils.isEmpty(summary) ? "Не удалось получить сводку." : summary;
+                        textView.setText(summaryText[0]);
+                        summaryButton.setText("Полный текст");
+                        summaryButton.setAlpha(1.0f);
+                        summaryButton.setEnabled(true);
+                        showingSummary[0] = true;
                         scrollView.scrollTo(0, 0);
                     }
 
                     @Override
                     public void onError(String error) {
-                        Toast.makeText(context, error != null ? error : "Ошибка перевода", Toast.LENGTH_SHORT).show();
-                        translateButton.setAlpha(1.0f);
-                        translateButton.setEnabled(true);
+                        textView.setText("Ошибка сводки: " + (error != null ? error : "неизвестно"));
+                        summaryButton.setText("Кратко");
+                        summaryButton.setAlpha(1.0f);
+                        summaryButton.setEnabled(true);
+                        scrollView.scrollTo(0, 0);
                     }
+                });
+            });
+            FrameLayout.LayoutParams summaryButtonLayoutParams = LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 48, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            summaryButtonLayoutParams.bottomMargin = dp(4);
+            textContainer.addView(summaryButton, summaryButtonLayoutParams);
+        }
+        card.addView(textContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        if (!whisper) {
+            LinearLayout actionsRow = new LinearLayout(context);
+            actionsRow.setOrientation(LinearLayout.HORIZONTAL);
+            actionsRow.setGravity(Gravity.CENTER);
+            TextView copyButton = createGeminiActionButton(context, "Копировать");
+            copyButton.setOnClickListener(v -> {
+                ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Gemini transcription", textView.getText()));
+                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show();
                 }
-            );
-        });
-        actionsRow.addView(translateButton, LayoutHelper.createLinear(0, 38, 1.0f));
-        card.addView(actionsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 0));
+            });
+            actionsRow.addView(copyButton, LayoutHelper.createLinear(0, 38, 1.0f, 0, 0, 5, 0));
+
+            TextView saveButton = createGeminiActionButton(context, "Сохранить");
+            saveButton.setOnClickListener(v -> saveGeminiText(context, textView.getText().toString()));
+            actionsRow.addView(saveButton, LayoutHelper.createLinear(0, 38, 1.0f, 0, 0, 5, 0));
+
+            TextView sendButton = createGeminiActionButton(context, "Отправить");
+            sendButton.setOnClickListener(v -> {
+                if (messageObject != null) {
+                    SendMessagesHelper.prepareSendingText(
+                        AccountInstance.getInstance(messageObject.currentAccount),
+                        textView.getText().toString(),
+                        messageObject.getDialogId(),
+                        true,
+                        0,
+                        0,
+                        0
+                    );
+                    Toast.makeText(context, "Отправлено", Toast.LENGTH_SHORT).show();
+                }
+            });
+            actionsRow.addView(sendButton, LayoutHelper.createLinear(0, 38, 1.0f, 0, 0, 5, 0));
+
+            TextView translateButton = createGeminiActionButton(context, "Перевести");
+            translateButton.setOnClickListener(v -> {
+                translateButton.setEnabled(false);
+                translateButton.setAlpha(0.65f);
+                MglaStats.count("ai:translate");
+                AiAssistant.getInstance().sendMessage(
+                    "Переведи этот текст на русский. Если текст уже на русском, переведи его на английский. Верни только перевод:\n\n" + textView.getText(),
+                    new AiAssistant.AiCallback() {
+                        @Override
+                        public void onResponse(String text) {
+                            textView.setText(text == null ? "" : text.trim());
+                            translateButton.setAlpha(1.0f);
+                            translateButton.setEnabled(true);
+                            showingSummary[0] = false;
+                            scrollView.scrollTo(0, 0);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            Toast.makeText(context, error != null ? error : "Ошибка перевода", Toast.LENGTH_SHORT).show();
+                            translateButton.setAlpha(1.0f);
+                            translateButton.setEnabled(true);
+                        }
+                    }
+                );
+            });
+            actionsRow.addView(translateButton, LayoutHelper.createLinear(0, 38, 1.0f));
+            card.addView(actionsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 0));
+        }
 
         sheetRef[0] = new BottomSheet.Builder(context)
             .setCustomView(card)
@@ -1153,17 +1174,23 @@ public class TranscribeButton {
         }
     }
 
-    private static boolean isGeminiTranscription(String text) {
-        return text != null && text.trim().endsWith("•Gemini");
+    private static boolean isMglaAiTranscription(String text) {
+        if (text == null) {
+            return false;
+        }
+        String t = text.trim();
+        return t.endsWith("•Gemini") || t.endsWith("•Whisper");
     }
 
-    private static String cleanGeminiTranscription(String text) {
+    private static String cleanMglaAiTranscription(String text) {
         if (text == null) {
             return "";
         }
         String cleanText = text.trim();
         if (cleanText.endsWith("•Gemini")) {
             cleanText = cleanText.substring(0, cleanText.length() - "•Gemini".length()).trim();
+        } else if (cleanText.endsWith("•Whisper")) {
+            cleanText = cleanText.substring(0, cleanText.length() - "•Whisper".length()).trim();
         }
         return cleanText;
     }
