@@ -688,6 +688,8 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private final RectF predictiveBackShadowRect = new RectF();
     private final Paint predictiveBackShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix predictiveBackMatrix = new Matrix();
+    /** Soft push settle — lighter overshoot than EASE_OUT_BACK. */
+    private static final CubicBezierInterpolator PUSH_SPRING = new CubicBezierInterpolator(0.28, 1.12, 0.45, 1);
 
     public ActionBarLayout(Context context, boolean main) {
         super(context);
@@ -1146,7 +1148,8 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, targetRadius), radiusProgress);
                     radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, targetRadius), radiusProgress);
                     radii[6] = radii[7] = lerp(sysBL, Math.max(sysBL, targetRadius), radiusProgress);
-                    if (!pageStyle) {
+                    // MD3 keeps the floating-card shadow; pages/push stay flat.
+                    if (!pageStyle && !pushStyle) {
                         drawSpatialFrontShadow(canvas, AndroidUtilities.rectTmp, Math.max(radii[0], radii[2]), Math.min(1.2f, getSpatialBackProgress()));
                     }
                     clipPath.rewind();
@@ -1237,6 +1240,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     clipPath.rewind();
                     clipPath.addRoundRect(AndroidUtilities.rectTmp, radii, Path.Direction.CW);
                     canvas.clipPath(clipPath);
+                    if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
+                        // Paint the card body with the stage colour so scaled edges don't show a seam.
+                        canvas.drawColor(getPredictiveStageColor());
+                    }
                     clipRight = width + getPaddingLeft();
                 } else {
                     final WindowInsets insets = getRootWindowInsets();
@@ -1295,8 +1302,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         opacity = lerp(0.35f, 0.0f, p);
                         maxAlpha = 28;
                     } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
-                        opacity = lerp(0.85f, 0.15f, p);
-                        maxAlpha = 70;
+                        // No scrim — keeps previous screen the same colour as the stage.
+                        opacity = 0f;
+                        maxAlpha = 0;
                     } else {
                         // Subtle M3 scrim — adds depth without darkening the previous screen much
                         opacity = lerp(1.0f, 0.0f, p);
@@ -1452,7 +1460,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         containerViewBack.setVisibility(View.INVISIBLE);
         startedTracking = false;
         animationInProgress = false;
+        predictiveBackStyle = MglaGlassConfig.PREDICTIVE_BACK_DEFAULT;
+        spatialAnimProgress = -1f;
         containerView.setTranslationX(0);
+        containerView.setAlpha(1.0f);
         containerViewBack.setTranslationX(0);
         clearSlideHardwareLayers();
         setInnerTranslationX(0);
@@ -1473,6 +1484,12 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         layoutToIgnore = containerViewBack;
         containerViewBack.setVisibility(View.VISIBLE);
         beginTrackingSent = false;
+        // Client edge-swipe uses the same spatial style as system predictive back.
+        predictiveBackStyle = MglaGlassConfig.getPredictiveBackStyle();
+        predictiveBackLeft = true;
+        predictiveBackY = startedTrackingY;
+        predictiveBackProgress = 0f;
+        spatialAnimProgress = -1f;
 
         BaseFragment lastFragment = fragmentsStack.get(fragmentsStack.size() - 2);
         View fragmentView = lastFragment.fragmentView;
@@ -1563,9 +1580,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                             currentFragment.onBeginSlide();
                             beginTrackingSent = true;
                         }
-                        if (newBackTransitions()) {
-                            containerView.setTranslationX(dx / (float) getWidth() * (5 * dp(56)));
-                            setInnerTranslationX(dx / (float) getWidth() * (5 * dp(56)));
+                        if (isSpatialPredictiveBack()) {
+                            // Match system predictive-back: canvas-driven layers, view stays put.
+                            containerView.setTranslationX(0);
+                            setInnerTranslationX(dx);
                         } else {
                             containerView.setTranslationX(dx);
                             setInnerTranslationX(dx);
@@ -1593,10 +1611,15 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         }
                     }
                     if (startedTracking) {
-                        float x = containerView.getX();
+                        float x = isSpatialPredictiveBack() ? innerTranslationX : containerView.getX();
                         float velX = velocityTracker.getXVelocity();
                         float velY = velocityTracker.getYVelocity();
-                        final boolean backAnimation = (newBackTransitions() ? x < dp(56) / 2 || velX < -1000 : x < containerView.getMeasuredWidth() / 3.0f) && (velX < 3500 || Math.abs(velX) < Math.abs(velY));
+                        final boolean backAnimation;
+                        if (predictiveBackInProgress) {
+                            backAnimation = (x < predictivePeekPx() / 2f || velX < -1000) && (velX < 3500 || Math.abs(velX) < Math.abs(velY));
+                        } else {
+                            backAnimation = x < containerView.getMeasuredWidth() / 3.0f && (velX < 3500 || Math.abs(velX) < Math.abs(velY));
+                        }
                         animateBackEndAnimation(backAnimation);
                     } else {
                         maybeStartTracking = false;
@@ -1674,19 +1697,51 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private int getPredictiveStageColor() {
         if (fragmentsStack.size() >= 2) {
             final BaseFragment prev = fragmentsStack.get(fragmentsStack.size() - 2);
-            final View fv = prev != null ? prev.getFragmentView() : null;
-            if (fv != null) {
-                final Drawable bg = fv.getBackground();
-                if (bg instanceof ColorDrawable) {
-                    return ((ColorDrawable) bg).getColor();
-                }
+            final int fromTree = findLargestSolidBackgroundColor(prev != null ? prev.getFragmentView() : null);
+            if (fromTree != 0) {
+                return fromTree;
             }
         }
         final Drawable selfBg = getBackground();
         if (selfBg instanceof ColorDrawable) {
-            return ((ColorDrawable) selfBg).getColor();
+            final int c = ((ColorDrawable) selfBg).getColor();
+            if (Color.alpha(c) == 255) {
+                return c;
+            }
         }
         return Theme.getColor(Theme.key_windowBackgroundWhite);
+    }
+
+    /** Largest opaque ColorDrawable in the view tree — matches list/gray hosts to the stage. */
+    private int findLargestSolidBackgroundColor(View root) {
+        if (root == null) {
+            return 0;
+        }
+        int bestColor = 0;
+        int bestArea = 0;
+        final java.util.ArrayDeque<View> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            final View v = queue.removeFirst();
+            final Drawable bg = v.getBackground();
+            if (bg instanceof ColorDrawable) {
+                final int c = ((ColorDrawable) bg).getColor();
+                if (Color.alpha(c) == 255) {
+                    final int area = Math.max(1, v.getWidth()) * Math.max(1, v.getHeight());
+                    if (area >= bestArea) {
+                        bestArea = area;
+                        bestColor = c;
+                    }
+                }
+            }
+            if (v instanceof ViewGroup) {
+                final ViewGroup g = (ViewGroup) v;
+                for (int i = 0, n = g.getChildCount(); i < n; i++) {
+                    queue.add(g.getChildAt(i));
+                }
+            }
+        }
+        return bestColor;
     }
 
     /** Previous layer transform for spatial predictive-back styles. */
@@ -1709,13 +1764,14 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
             // Both shrink while dragging; previous stays on the trailing flank of the active card,
             // then expands into place on commit while the active is pushed away.
-            final float scaleF = lerp(1.0f, 0.86f, p) * lerp(1f, 0.72f, Math.min(1f, commit));
-            final float scaleBDrag = lerp(0.92f, 0.86f, p);
-            final float scaleB = lerp(scaleBDrag, 1.0f, commitEase);
-            final float txF = (innerTranslationX + w * 0.28f * commit) * dir;
+            final float spring = PUSH_SPRING.getInterpolation(Math.min(1f, commit));
+            final float scaleF = lerp(1.0f, 0.88f, p) * lerp(1f, 0.78f, Math.min(1f, commit));
+            final float scaleBDrag = lerp(0.94f, 0.88f, p);
+            final float scaleB = lerp(scaleBDrag, 1.0f, spring);
+            final float txF = (innerTranslationX + w * 0.22f * commit) * dir;
             final float edgeGap = (scaleF + scaleB) * w * 0.5f;
             final float stickTx = txF - edgeGap * dir;
-            final float txB = lerp(stickTx, 0f, commitEase);
+            final float txB = lerp(stickTx, 0f, spring);
             predictiveBackMatrix.postScale(scaleB, scaleB, cx, cy);
             predictiveBackMatrix.postTranslate(txB, 0);
         }
@@ -1740,11 +1796,11 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             // Pure page slide — no window/card scale, just content leaving sideways.
             predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
         } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
-            final float scale = lerp(1.0f, 0.86f, p) * lerp(1f, 0.72f, Math.min(1f, commit));
-            final float tx = (innerTranslationX + w * 0.28f * commit) * dir;
+            final float scale = lerp(1.0f, 0.88f, p) * lerp(1f, 0.78f, Math.min(1f, commit));
+            final float tx = (innerTranslationX + w * 0.22f * commit) * dir;
             predictiveBackMatrix.postScale(scale, scale, cx, cy);
             predictiveBackMatrix.postTranslate(tx, 0);
-            containerView.setAlpha(lerp(1f, 0.0f, Math.min(1f, commit)));
+            containerView.setAlpha(lerp(1f, 0.0f, CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(Math.min(1f, commit))));
         } else {
             // M3: flat card that subtly zooms out — no 3D rotation
             final float scale = lerp(1.0f, 0.93f, p) * lerp(1f, 0.96f, commit);
@@ -1846,7 +1902,11 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     }
 
     private boolean newBackTransitions() {
-        return predictiveBackInProgress && predictiveBackHasProgress;
+        if (predictiveBackInProgress && predictiveBackHasProgress) {
+            return true;
+        }
+        // In-app swipe-back (chat → dialogs) with a selected spatial predictive style.
+        return isSpatialPredictiveBack() && (startedTracking || spatialAnimProgress >= 0f);
     }
 
     private boolean backAnimatorIsBack;
@@ -1870,7 +1930,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             int duration = Math.max((int) (150.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? (enhanced ? 180 : 260) : 50);
             if (enhanced) {
                 // Fly away smoothly completely off-screen
-                duration = pushStyle ? 340 : (pageStyle ? 280 : 300);
+                duration = pushStyle ? 380 : (pageStyle ? 280 : 300);
             }
             if (!overrideTransition) {
                 if (enhanced) {
@@ -1887,14 +1947,14 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     );
                 }
                 if (newBackTransitions()) {
-                    animatorSet.setInterpolator(pushStyle ? CubicBezierInterpolator.EASE_OUT_QUINT : CubicBezierInterpolator.EASE_BOTH);
+                    animatorSet.setInterpolator(pushStyle ? PUSH_SPRING : CubicBezierInterpolator.EASE_BOTH);
                 }
             }
         } else {
             distToMove = x;
             int duration = Math.max((int) ((enhanced ? 180.0f : 240.0f) / containerView.getMeasuredWidth() * Math.max(distToMove, 1)), newBackTransitions() ? (enhanced ? 180 : 240) : 100);
             if (enhanced) {
-                duration = Math.max(140, (int) ((pushStyle ? 240 : 200) * Math.max(0.15f, spatialFrom)));
+                duration = Math.max(160, (int) ((pushStyle ? 320 : 200) * Math.max(0.15f, spatialFrom)));
             }
             if (!overrideTransition) {
                 if (enhanced) {
@@ -1911,7 +1971,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     );
                 }
                 if (newBackTransitions()) {
-                    animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+                    // Cancel: soft settle without overshoot past zero.
+                    animatorSet.setInterpolator(pushStyle
+                            ? CubicBezierInterpolator.EmphasizedDecelerate
+                            : CubicBezierInterpolator.EASE_OUT_QUINT);
                 }
             }
         }
