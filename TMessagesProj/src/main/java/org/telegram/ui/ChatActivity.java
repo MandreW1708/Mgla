@@ -27707,6 +27707,9 @@ public class ChatActivity extends BaseFragment implements
         startMs = System.currentTimeMillis();
         int[] alowedNotifications = null;
         if (isOpen) {
+            if (!backward && avatarContainer != null) {
+                MglaAvatarHero.playIfNeeded(this, avatarContainer, getDialogId());
+            }
             if (!fragmentOpened) {
                 fragmentOpened = true;
                 updateMessagesVisiblePart(false);

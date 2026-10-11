@@ -509,6 +509,12 @@ public class NotificationsController extends BaseController implements Notificat
             openedDialogId = dialog_id;
             openedTopicId = topicId;
         });
+        // Зашли в чат не из шторки — снимаем его уведомления сразу, не дожидаясь
+        // markDialogAsRead (тот раньше ходил через storage queue и давал окно, в котором
+        // FCM-сводка успевала «осиротеть» относительно внутреннего состояния).
+        if (dialog_id != 0) {
+            removeNotificationsForDialog(dialog_id);
+        }
     }
 
     public void setOpenedInBubble(long dialogId, boolean opened) {
@@ -1567,6 +1573,10 @@ public class NotificationsController extends BaseController implements Notificat
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.notificationsCountUpdated, currentAccount);
                     getNotificationCenter().postNotificationName(NotificationCenter.dialogsUnreadCounterChanged, pushDialogsCount);
                 });
+            } else if (pushMessages.isEmpty() && storyPushMessages.isEmpty()) {
+                // счётчик не изменился (уже был 0), но системная сводка могла остаться
+                // после рассинхрона с FCM/пересборкой — принудительно снимаем
+                showOrUpdateNotification(false);
             }
             notifyCheck = false;
             if (showBadgeNumber) {
@@ -1798,11 +1808,14 @@ public class NotificationsController extends BaseController implements Notificat
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.notificationsCountUpdated, currentAccount);
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogsUnreadCounterChanged, pushDialogsCount);
             });
-            // уведомления не переживают перезагрузку устройства — восстанавливаем их только в этом случае,
-            // иначе на каждой фоновой пересборке (старт процесса/синки диалогов) шторка мигнет сводкой по старым чатам
-            if (SystemClock.elapsedRealtime() / 1000 < 60) {
-                showOrUpdateNotification(true);
-            }
+            // Как в upstream: всегда синхронизируем шторку с пересобранным состоянием.
+            // notifyAboutLast=true только сразу после boot (чтобы восстановить уведомления
+            // после перезагрузки). На остальных пересборках — тихий апдейт; мигание
+            // одинакового содержимого режет computeNotificationSignature ниже.
+            // Раньше здесь был `if (uptime < 60) show…`, из‑за чего после FCM +
+            // processLoadedUnreadMessages шторка могла остаться «осиротевшей»:
+            // внутреннее состояние уже пустое, а cancel по notificationId не вызывался.
+            showOrUpdateNotification(SystemClock.elapsedRealtime() / 1000 < 60);
 
             if (showBadgeNumber) {
                 setBadge(getTotalAllUnreadCount());
@@ -3412,6 +3425,9 @@ public class NotificationsController extends BaseController implements Notificat
                 notificationManager.cancel(wearNotificationsIds.valueAt(a));
             }
             wearNotificationsIds.clear();
+            // иначе следующий тихий showOrUpdate с пустым/тем же содержимым может
+            // посчитать, что шторка уже актуальна, и не перевыложить cancel
+            setLastNotificationSignature("");
             AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.pushMessagesUpdated));
         } catch (Exception e) {
             FileLog.e(e);
@@ -3472,6 +3488,19 @@ public class NotificationsController extends BaseController implements Notificat
             sb.append(entry).append(';');
         }
         return sb.toString();
+    }
+
+    private static boolean isUsableNotificationAccountName(String name) {
+        if (TextUtils.isEmpty(name)) {
+            return false;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (Character.isLetterOrDigit(c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public ArrayList<MessageObject> getPushMessagesSnapshot() {
@@ -4448,10 +4477,16 @@ public class NotificationsController extends BaseController implements Notificat
             String detailText;
             if (allowSummary) {
                 if (UserConfig.getActivatedAccountsCount() > 1) {
+                    // на MIUI/POCO короткое/пунктуационное имя аккаунта всплывает в шапке
+                    // сводки как отдельный «'» — такие имена в detailText не тащим
+                    String accountName = UserObject.getFirstName(getUserConfig().getCurrentUser());
+                    if (!isUsableNotificationAccountName(accountName)) {
+                        accountName = "";
+                    }
                     if (pushDialogs.size() == 1) {
-                        detailText = UserObject.getFirstName(getUserConfig().getCurrentUser());
+                        detailText = accountName;
                     } else {
-                        detailText = UserObject.getFirstName(getUserConfig().getCurrentUser()) + "・";
+                        detailText = TextUtils.isEmpty(accountName) ? "" : accountName + "・";
                     }
                 } else {
                     detailText = "";
@@ -4760,7 +4795,10 @@ public class NotificationsController extends BaseController implements Notificat
                 }
             }
             intent.putExtra("currentAccount", currentAccount);
-            PendingIntent contentIntent = PendingIntent.getActivity(ApplicationLoader.applicationContext, 0, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT);
+            // UPDATE_CURRENT вместо ONE_SHOT: на MIUI/POCO сводка могла остаться в шторке
+            // после прочтения, а одноразовый PendingIntent к тому моменту уже был «сгоревшим» —
+            // тап тогда открывал ничего. Intent.action и так уникален (Math.random).
+            PendingIntent contentIntent = PendingIntent.getActivity(ApplicationLoader.applicationContext, 0, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             mBuilder.setContentTitle(name)
                     .setSmallIcon(R.drawable.notific_icon)
@@ -5714,7 +5752,7 @@ public class NotificationsController extends BaseController implements Notificat
                 intent.putExtra("topicId", topicId);
             }
             intent.putExtra("currentAccount", currentAccount);
-            PendingIntent contentIntent = PendingIntent.getActivity(ApplicationLoader.applicationContext, 0, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT);
+            PendingIntent contentIntent = PendingIntent.getActivity(ApplicationLoader.applicationContext, internalId, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             NotificationCompat.WearableExtender wearableExtender = new NotificationCompat.WearableExtender();
             if (wearReplyAction != null) {

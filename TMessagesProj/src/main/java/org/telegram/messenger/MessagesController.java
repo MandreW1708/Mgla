@@ -14226,6 +14226,14 @@ public class MessagesController extends BaseController implements NotificationCe
                         if (BuildVars.LOGS_ENABLED) {
                             FileLog.d("processDialogsUpdate dialog not null");
                         }
+                        // из кэша не возвращаем устаревший бейдж, если локально уже
+                        // прочитали до top_message (типичный гонщик при ответе в чате)
+                        if (fromCache && value.unread_count > 0 && value.top_message > 0) {
+                            Integer inboxMax = dialogs_read_inbox_max.get(key);
+                            if (inboxMax != null && inboxMax >= value.top_message) {
+                                value.unread_count = 0;
+                            }
+                        }
                         currentDialog.unread_count = value.unread_count;
                         if (currentDialog.unread_mentions_count != value.unread_mentions_count) {
                             currentDialog.unread_mentions_count = value.unread_mentions_count;
@@ -14822,6 +14830,10 @@ public class MessagesController extends BaseController implements NotificationCe
                 dialogs_read_inbox_max.put(dialogId, Math.max(value, maxPositiveId));
 
                 getMessagesStorage().processPendingRead(dialogId, maxPositiveId, maxNegativeId, scheduledCount);
+                // Важно: UI-сброс unread_count только ПОСЛЕ processPendingRead на той же
+                // storage queue. Иначе ответ/апдейт диалога успевает подтянуть из БД
+                // старый unread_count=1 и бейдж в списке чатов залипает, хотя read receipt
+                // на сервер уже ушёл.
                 getMessagesStorage().getStorageQueue().postRunnable(() -> AndroidUtilities.runOnUIThread(() -> {
                     TLRPC.Dialog dialog = dialogs_dict.get(dialogId);
                     if (dialog != null) {

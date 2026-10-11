@@ -29,6 +29,10 @@ public class MglaGlassConfig {
     public static final String PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK = "clean_header_hide_title_block";
     public static final String PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK = "clean_header_hide_pinned_block";
     public static final String PREF_CLEAN_HEADER_HIDE_TRANSLATION_PANEL = "clean_header_hide_translation_panel";
+    public static final String PREF_DIALOGS_AVATAR_HERO = "dialogs_avatar_hero";
+    public static final String PREF_DIALOGS_SEARCH_EXPAND = "dialogs_search_expand";
+    public static final String PREF_DIALOGS_FAB_MORPH = "dialogs_fab_morph";
+    public static final String PREF_REVERSE_CHAT_OPEN = "reverse_chat_open";
 
     // In-memory cache — prefs are hit from Switch/ActionBar draw paths every frame.
     private static boolean cacheLoaded;
@@ -42,6 +46,10 @@ public class MglaGlassConfig {
     private static boolean cleanHeaderHideTitleBlock = true;
     private static boolean cleanHeaderHidePinnedBlock = true;
     private static boolean cleanHeaderHideTranslationPanel = true;
+    private static boolean dialogsAvatarHero = true;
+    private static boolean dialogsSearchExpand = true;
+    private static boolean dialogsFabMorph = true;
+    private static boolean reverseChatOpen = true;
 
     private static void ensureCache() {
         if (cacheLoaded) {
@@ -63,6 +71,10 @@ public class MglaGlassConfig {
         cleanHeaderHideTitleBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK, true);
         cleanHeaderHidePinnedBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK, true);
         cleanHeaderHideTranslationPanel = p.getBoolean(PREF_CLEAN_HEADER_HIDE_TRANSLATION_PANEL, true);
+        dialogsAvatarHero = p.getBoolean(PREF_DIALOGS_AVATAR_HERO, true);
+        dialogsSearchExpand = p.getBoolean(PREF_DIALOGS_SEARCH_EXPAND, true);
+        dialogsFabMorph = p.getBoolean(PREF_DIALOGS_FAB_MORPH, true);
+        reverseChatOpen = p.getBoolean(PREF_REVERSE_CHAT_OPEN, true);
         cacheLoaded = true;
     }
 
@@ -242,6 +254,63 @@ public class MglaGlassConfig {
         editedIcon = enabled;
         getPrefs().edit().putBoolean(PREF_EDITED_ICON, enabled).apply();
         notifyGlassAppearanceChanged();
+    }
+
+    public static boolean isDialogsAvatarHeroEnabled() {
+        ensureCache();
+        return dialogsAvatarHero;
+    }
+
+    public static void setDialogsAvatarHeroEnabled(boolean enabled) {
+        ensureCache();
+        if (dialogsAvatarHero == enabled) {
+            return;
+        }
+        dialogsAvatarHero = enabled;
+        getPrefs().edit().putBoolean(PREF_DIALOGS_AVATAR_HERO, enabled).apply();
+    }
+
+    public static boolean isDialogsSearchExpandEnabled() {
+        ensureCache();
+        return dialogsSearchExpand;
+    }
+
+    public static void setDialogsSearchExpandEnabled(boolean enabled) {
+        ensureCache();
+        if (dialogsSearchExpand == enabled) {
+            return;
+        }
+        dialogsSearchExpand = enabled;
+        getPrefs().edit().putBoolean(PREF_DIALOGS_SEARCH_EXPAND, enabled).apply();
+    }
+
+    public static boolean isDialogsFabMorphEnabled() {
+        ensureCache();
+        return dialogsFabMorph;
+    }
+
+    public static void setDialogsFabMorphEnabled(boolean enabled) {
+        ensureCache();
+        if (dialogsFabMorph == enabled) {
+            return;
+        }
+        dialogsFabMorph = enabled;
+        getPrefs().edit().putBoolean(PREF_DIALOGS_FAB_MORPH, enabled).apply();
+        notifyGlassAppearanceChanged();
+    }
+
+    public static boolean isReverseChatOpenEnabled() {
+        ensureCache();
+        return reverseChatOpen;
+    }
+
+    public static void setReverseChatOpenEnabled(boolean enabled) {
+        ensureCache();
+        if (reverseChatOpen == enabled) {
+            return;
+        }
+        reverseChatOpen = enabled;
+        getPrefs().edit().putBoolean(PREF_REVERSE_CHAT_OPEN, enabled).apply();
     }
 
     public static void notifyGlassAppearanceChanged() {

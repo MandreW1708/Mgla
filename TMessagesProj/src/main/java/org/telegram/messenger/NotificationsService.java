@@ -78,7 +78,7 @@ public class NotificationsService extends Service {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext, NotificationsController.MGLA_BACKGROUND_CHANNEL);
         builder.setWhen(System.currentTimeMillis());
-        builder.setSmallIcon(R.drawable.mgla_notification_blank);
+        builder.setSmallIcon(R.drawable.mgla_notification_service);
         builder.setContentTitle("Mgla");
         builder.setOngoing(true);
         builder.setPriority(NotificationCompat.PRIORITY_MIN);

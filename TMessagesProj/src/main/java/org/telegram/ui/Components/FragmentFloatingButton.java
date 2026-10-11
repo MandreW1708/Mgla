@@ -8,16 +8,21 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.PorterDuff;
+import android.text.TextUtils;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RawRes;
 
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.utils.ViewOutlineProviderImpl;
 import org.telegram.ui.ActionBar.Theme;
@@ -34,6 +39,7 @@ import me.vkryl.android.animator.FactorAnimator;
 public class FragmentFloatingButton extends FrameLayout implements FactorAnimator.Target {
     private final int ANIMATOR_ID_BUTTON_VISIBLE = 0;
     private final int ANIMATOR_ID_PROGRESS_VISIBLE = 1;
+    private final int ANIMATOR_ID_EXTENDED = 2;
 
     private final BoolAnimator animatorButtonVisible = new BoolAnimator(ANIMATOR_ID_BUTTON_VISIBLE, this,
         CubicBezierInterpolator.EASE_OUT_QUINT, 380, true);
@@ -41,12 +47,17 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
     private final BoolAnimator animatorProgressVisible = new BoolAnimator(ANIMATOR_ID_PROGRESS_VISIBLE, this,
         CubicBezierInterpolator.EASE_OUT_QUINT, 380);
 
+    private final BoolAnimator animatorExtended = new BoolAnimator(ANIMATOR_ID_EXTENDED, this,
+        CubicBezierInterpolator.EASE_OUT_QUINT, 320, false);
 
     public final RLottieImageView imageView;
     public final RadialProgressView progressView;
+    private TextView labelView;
     private final Theme.ResourcesProvider resourcesProvider;
     private ArrayList<View> additionalContentViews;
     private final boolean isSubButton;
+    private boolean morphEnabled;
+    private CharSequence labelText;
 
     public FragmentFloatingButton(@NonNull Context context, Theme.ResourcesProvider resourcesProvider) {
         this(context, resourcesProvider, false);
@@ -60,17 +71,18 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
 
         imageView = new RLottieImageView(context);
         imageView.setScaleType(ImageView.ScaleType.CENTER);
-        addView(imageView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        addView(imageView, LayoutHelper.createFrame(SIZE, SIZE, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         progressView = new RadialProgressView(context);
         progressView.setSize(dp(18));
         progressView.setStrokeWidth(2);
-        addView(progressView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        addView(progressView, LayoutHelper.createFrame(SIZE, SIZE, Gravity.LEFT | Gravity.CENTER_VERTICAL));
         setAnimatedVisibility(progressView, 0);
 
         ScaleStateListAnimator.apply(this);
         if (!isSubButton) {
-            setOutlineProvider(ViewOutlineProviderImpl.BOUNDS_OVAL);
+            setOutlineProvider(ViewOutlineProviderImpl.BOUNDS_ROUND_RECT);
+            setClipToOutline(true);
             setTranslationZ(dpf2(0.5f));
         }
 
@@ -118,6 +130,77 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
         return animatorProgressVisible.getValue();
     }
 
+    public void setMorphEnabled(boolean enabled) {
+        morphEnabled = enabled && !isSubButton;
+        if (!morphEnabled) {
+            setExtended(false, false);
+        }
+        applyExtendedLayout(animatorExtended.getFloatValue());
+        updateColors();
+    }
+
+    public void setLabelText(CharSequence text) {
+        labelText = text;
+        ensureLabelView();
+        if (labelView != null) {
+            labelView.setText(text);
+        }
+        applyExtendedLayout(animatorExtended.getFloatValue());
+    }
+
+    public void setExtended(boolean extended, boolean animated) {
+        if (isSubButton || !morphEnabled) {
+            extended = false;
+        }
+        animatorExtended.setValue(extended, animated && morphEnabled);
+        if (!animated) {
+            applyExtendedLayout(extended ? 1f : 0f);
+        }
+    }
+
+    public boolean isExtended() {
+        return animatorExtended.getValue();
+    }
+
+    private void ensureLabelView() {
+        if (isSubButton || labelView != null) {
+            return;
+        }
+        labelView = new TextView(getContext());
+        labelView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        labelView.setTypeface(AndroidUtilities.bold());
+        labelView.setSingleLine(true);
+        labelView.setEllipsize(TextUtils.TruncateAt.END);
+        labelView.setGravity(Gravity.CENTER_VERTICAL);
+        labelView.setPadding(0, 0, dp(16), 0);
+        labelView.setAlpha(0f);
+        labelView.setVisibility(GONE);
+        if (!TextUtils.isEmpty(labelText)) {
+            labelView.setText(labelText);
+        }
+        addView(labelView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 52, 0, 0, 0));
+        addAdditionalView(labelView);
+    }
+
+    private void applyExtendedLayout(float factor) {
+        int collapsed = dp(SIZE);
+        int expanded = dp(SIZE + 72);
+        int width = Math.round(lerp(collapsed, expanded, factor));
+        ViewGroup.LayoutParams lp = getLayoutParams();
+        if (lp != null && lp.width != width) {
+            lp.width = width;
+            lp.height = collapsed;
+            setLayoutParams(lp);
+        }
+        if (labelView != null) {
+            labelView.setAlpha(factor);
+            labelView.setTranslationX(dp(8) * (1f - factor));
+            labelView.setVisibility(factor > 0.02f ? VISIBLE : GONE);
+        }
+        invalidateOutline();
+        invalidate();
+    }
+
     @Override
     public void onFactorChanged(int id, float factor, float fraction, FactorAnimator callee) {
         if (id == ANIMATOR_ID_BUTTON_VISIBLE) {
@@ -132,6 +215,9 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
                     setAnimatedVisibility(v, 1f - factor);
                 }
             }
+        } else if (id == ANIMATOR_ID_EXTENDED) {
+            applyExtendedLayout(factor);
+            updateColors();
         }
     }
 
@@ -163,10 +249,20 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
         } else {
             imageView.setColorFilter(Theme.getColor(Theme.key_chats_actionIcon, resourcesProvider), PorterDuff.Mode.SRC_IN);
             progressView.setProgressColor(Theme.getColor(Theme.key_chats_actionIcon, resourcesProvider));
-            setBackground(Theme.createSimpleSelectorCircleDrawable(dp(48),
-                Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider),
-                Theme.getColor(Theme.key_featuredStickers_addButtonPressed, resourcesProvider)
-            ));
+            final int bg = Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider);
+            final int bgPressed = Theme.getColor(Theme.key_featuredStickers_addButtonPressed, resourcesProvider);
+            if (morphEnabled && animatorExtended.getFloatValue() > 0.01f) {
+                float r = Math.min(getMeasuredWidth(), getMeasuredHeight()) / 2f;
+                if (r <= 0) {
+                    r = dp(SIZE / 2f);
+                }
+                setBackground(Theme.createSimpleSelectorRoundRectDrawable((int) r, bg, bgPressed));
+            } else {
+                setBackground(Theme.createSimpleSelectorCircleDrawable(dp(SIZE), bg, bgPressed));
+            }
+            if (labelView != null) {
+                labelView.setTextColor(Theme.getColor(Theme.key_chats_actionIcon, resourcesProvider));
+            }
         }
     }
 

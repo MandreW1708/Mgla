@@ -23,7 +23,9 @@ import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
-    private TextSettingsCell textAnimationCell;
+    private TextSettingsCell commonAnimCell;
+    private TextSettingsCell chatsAnimCell;
+    private TextSettingsCell dialogsAnimCell;
 
     public MglaAppearanceSettingsActivity() {
         this(null);
@@ -156,43 +158,23 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         LinearLayout animationBlock = createBlock(context, "Анимация");
 
-        TextView predictiveBackTitle = new TextView(context);
-        predictiveBackTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-        predictiveBackTitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        predictiveBackTitle.setText("Анимация назад");
-        predictiveBackTitle.setPadding(dp(22), dp(12), dp(22), dp(4));
-        animationBlock.addView(predictiveBackTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        commonAnimCell = new TextSettingsCell(context);
+        commonAnimCell.setBackground(null);
+        commonAnimCell.setTextAndValue("Общие анимации", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_COMMON), true);
+        commonAnimCell.setOnClickListener(v -> presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON)));
+        animationBlock.addView(commonAnimCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        final int[] styles = {
-                MglaGlassConfig.PREDICTIVE_BACK_DEFAULT,
-                MglaGlassConfig.PREDICTIVE_BACK_MD3,
-                MglaGlassConfig.PREDICTIVE_BACK_PAGES,
-                MglaGlassConfig.PREDICTIVE_BACK_PUSH
-        };
-        final RadioCell[] styleCells = new RadioCell[styles.length];
-        final int currentStyle = MglaGlassConfig.getPredictiveBackStyle();
-        for (int i = 0; i < styles.length; i++) {
-            final int style = styles[i];
-            RadioCell cell = new RadioCell(context);
-            cell.setBackground(null);
-            cell.setText(MglaGlassConfig.getPredictiveBackStyleTitle(style), currentStyle == style, i < styles.length - 1);
-            cell.setOnClickListener(v -> {
-                MglaGlassConfig.setPredictiveBackStyle(style);
-                for (int j = 0; j < styleCells.length; j++) {
-                    styleCells[j].setChecked(styles[j] == style, true);
-                }
-            });
-            styleCells[i] = cell;
-            animationBlock.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        }
+        chatsAnimCell = new TextSettingsCell(context);
+        chatsAnimCell.setBackground(null);
+        chatsAnimCell.setTextAndValue("В чатах", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_CHATS), true);
+        chatsAnimCell.setOnClickListener(v -> presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_CHATS)));
+        animationBlock.addView(chatsAnimCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        animationBlock.addView(MglaUi.createDivider(context));
-
-        textAnimationCell = new TextSettingsCell(context);
-        textAnimationCell.setBackground(null);
-        textAnimationCell.setTextAndValue("Анимация текста", MglaTextAnimConfig.getSummary(), false);
-        textAnimationCell.setOnClickListener(v -> presentFragment(new MglaTextAnimationActivity()));
-        animationBlock.addView(textAnimationCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        dialogsAnimCell = new TextSettingsCell(context);
+        dialogsAnimCell.setBackground(null);
+        dialogsAnimCell.setTextAndValue("В списке чатов", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_DIALOGS), false);
+        dialogsAnimCell.setOnClickListener(v -> presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_DIALOGS)));
+        animationBlock.addView(dialogsAnimCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         rootLayout.addView(animationBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 16));
 
@@ -208,8 +190,14 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
     @Override
     public void onResume() {
         super.onResume();
-        if (textAnimationCell != null) {
-            textAnimationCell.setTextAndValue("Анимация текста", MglaTextAnimConfig.getSummary(), false);
+        if (commonAnimCell != null) {
+            commonAnimCell.setTextAndValue("Общие анимации", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_COMMON), true);
+        }
+        if (chatsAnimCell != null) {
+            chatsAnimCell.setTextAndValue("В чатах", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_CHATS), true);
+        }
+        if (dialogsAnimCell != null) {
+            dialogsAnimCell.setTextAndValue("В списке чатов", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_DIALOGS), false);
         }
     }
 

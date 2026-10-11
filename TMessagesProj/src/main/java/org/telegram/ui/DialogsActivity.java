@@ -4503,6 +4503,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                             dialogCell.avatarImage.getImageX(), dialogCell.avatarImage.getImageY(),
                             dialogCell.avatarImage.getImageX2(), dialogCell.avatarImage.getImageY2()
                     );
+                    if (MglaGlassConfig.isDialogsAvatarHeroEnabled()) {
+                        MglaAvatarHero.prepareFromDialogCell(dialogCell, dialogCell.getDialogId());
+                    } else {
+                        MglaAvatarHero.clear();
+                    }
                 }
                 onItemClick(view, position, viewPage.dialogsAdapter, x, y);
             });
@@ -4815,6 +4820,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         floatingButton3 = new FragmentFloatingButton(context, resourceProvider);
         contentView.addView(floatingButton3, FragmentFloatingButton.createDefaultLayoutParams());
+        floatingButton3.setMorphEnabled(MglaGlassConfig.isDialogsFabMorphEnabled() && initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect);
+        floatingButton3.setLabelText("Создать");
+        floatingButton3.setExtended(MglaGlassConfig.isDialogsFabMorphEnabled() && initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect, false);
         floatingButton3.setOnClickListener(v -> {
             if (parentLayout != null && parentLayout.isInPreviewMode()) {
                 finishPreviewFragment();
@@ -7646,12 +7654,18 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             searchAnimator = new AnimatorSet();
             ArrayList<Animator> animators = new ArrayList<>();
             animators.add(ObjectAnimator.ofFloat(viewPages[0], View.ALPHA, show ? 0.0f : 1.0f));
+            final boolean expressiveSearchScale = MglaGlassConfig.isDialogsSearchExpandEnabled();
+            final float listScale = expressiveSearchScale ? 0.92f : 0.95f;
             if (!budget) {
-                animators.add(ObjectAnimator.ofFloat(viewPages[0], View.SCALE_X, show ? 0.95f : 1.0f));
-                animators.add(ObjectAnimator.ofFloat(viewPages[0], View.SCALE_Y, show ? 0.95f : 1.0f));
+                animators.add(ObjectAnimator.ofFloat(viewPages[0], View.SCALE_X, show ? listScale : 1.0f));
+                animators.add(ObjectAnimator.ofFloat(viewPages[0], View.SCALE_Y, show ? listScale : 1.0f));
             } else {
                 viewPages[0].setScaleX(1);
                 viewPages[0].setScaleY(1);
+            }
+            if (expressiveSearchScale && fragmentSearchField != null) {
+                fragmentSearchField.setPivotY(0);
+                animators.add(ObjectAnimator.ofFloat(fragmentSearchField, View.SCALE_Y, show ? 0.92f : 1f, show ? 1f : 0.92f));
             }
             if (rightSlidingDialogContainer != null) {
                 rightSlidingDialogContainer.setVisibility(View.VISIBLE);
@@ -7681,8 +7695,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
             animators.add(valueAnimator);
             searchAnimator.playTogether(animators);
-            searchAnimator.setDuration(show ? 200 : 180);
-            searchAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT);
+            final boolean expressiveSearch = MglaGlassConfig.isDialogsSearchExpandEnabled();
+            searchAnimator.setDuration(show ? (expressiveSearch ? 320 : 200) : (expressiveSearch ? 240 : 180));
+            searchAnimator.setInterpolator(expressiveSearch
+                    ? CubicBezierInterpolator.EASE_OUT_QUINT
+                    : CubicBezierInterpolator.EASE_OUT);
 
             if (!show) {
                 searchAnimator.setStartDelay(20);
@@ -8946,7 +8963,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         final boolean isVisible = !(onlySelect && initialDialogsType != 10 || folderId != 0 || communityId != 0 || inPreviewMode || (searching && !onlySelect) || floatingButtonHidden);
 
         if (floatingButton3 != null) {
+            floatingButton3.setMorphEnabled(MglaGlassConfig.isDialogsFabMorphEnabled() && initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect);
             floatingButton3.setButtonVisible(isVisible, animated);
+            floatingButton3.setExtended(isVisible && MglaGlassConfig.isDialogsFabMorphEnabled() && initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect && !searching, animated);
         }
         if (floatingButtonStories != null) {
             floatingButtonStories.setButtonVisible(isVisible, animated);
@@ -10828,7 +10847,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             }
         } else if (id == NotificationCenter.dialogsUnreadCounterChanged) {
             if (filterTabsView != null && filterTabsView.getVisibility() == View.VISIBLE) {
-                filterTabsView.notifyTabCounterChanged(filterTabsView.getDefaultTabId());
+                // все папки, не только «Все чаты» — иначе бейджи на кастомных
+                // папках отставали до следующего UPDATE_MASK_READ
+                filterTabsView.checkTabsCounter();
             }
         } else if (id == NotificationCenter.dialogsUnreadPollVotesCounterChanged) {
             updateVisibleRows(0);

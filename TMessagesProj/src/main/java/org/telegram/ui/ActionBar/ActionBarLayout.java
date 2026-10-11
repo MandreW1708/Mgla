@@ -1650,6 +1650,8 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private boolean predictiveInput;
     private boolean predictiveBackInProgress;
     private boolean predictiveBackHasProgress;
+    private boolean spatialOpenInProgress;
+    private AnimatorSet reverseOpenAnimation;
     private int predictiveBackStyle = MglaGlassConfig.PREDICTIVE_BACK_DEFAULT;
     private float predictiveBackProgress;
     private float spatialAnimProgress = -1f;
@@ -1660,6 +1662,14 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         return predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_MD3
                 || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES
                 || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH;
+    }
+
+    private boolean shouldUseReversePredictiveOpen(BaseFragment opening, BaseFragment previous) {
+        // Pulling-down chat→chat already provides onCustomTransitionAnimation, so we only
+        // land here when that returns null.
+        return MglaGlassConfig.isReverseChatOpenEnabled()
+                && opening instanceof ChatActivity
+                && previous != null;
     }
 
     private float predictivePeekPx() {
@@ -1902,11 +1912,102 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     }
 
     private boolean newBackTransitions() {
+        if (spatialOpenInProgress && isSpatialPredictiveBack()) {
+            return true;
+        }
         if (predictiveBackInProgress && predictiveBackHasProgress) {
             return true;
         }
         // In-app swipe-back (chat → dialogs) with a selected spatial predictive style.
         return isSpatialPredictiveBack() && (startedTracking || spatialAnimProgress >= 0f);
+    }
+
+    /**
+     * Open animation = reverse of the selected predictive-back style
+     * (chat enters the way it would leave when going back).
+     */
+    private AnimatorSet createReversePredictiveOpenAnimation(Runnable onEnd) {
+        predictiveBackStyle = MglaGlassConfig.getPredictiveBackStyle();
+        predictiveBackLeft = true;
+        predictiveBackY = getMeasuredHeight() / 2f;
+        final float width = Math.max(1, containerView.getMeasuredWidth() > 0
+                ? containerView.getMeasuredWidth()
+                : AndroidUtilities.displaySize.x);
+
+        containerView.setAlpha(1f);
+        containerView.setScaleX(1f);
+        containerView.setScaleY(1f);
+        containerView.setTranslationX(0f);
+
+        final AnimatorSet animatorSet = new AnimatorSet();
+        if (!isSpatialPredictiveBack()) {
+            // Classic reverse: full-width slide in from the right (same as swipe-back close, inverted).
+            containerView.setTranslationX(width);
+            setInnerTranslationX(width);
+            containerViewBack.setVisibility(View.VISIBLE);
+            animatorSet.playTogether(
+                    ObjectAnimator.ofFloat(containerView, View.TRANSLATION_X, width, 0f),
+                    ObjectAnimator.ofFloat(this, "innerTranslationX", width, 0f)
+            );
+            animatorSet.setDuration(280);
+            animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        } else {
+            spatialOpenInProgress = true;
+            // Match close's end-state (spatialAnimProgress → 2, x → width), then reverse to idle.
+            final float startProgress = 2f;
+            spatialAnimProgress = startProgress;
+            setInnerTranslationX(width);
+            containerViewBack.setVisibility(View.VISIBLE);
+            animatorSet.playTogether(
+                    ObjectAnimator.ofFloat(this, "spatialAnimProgress", startProgress, 0f),
+                    ObjectAnimator.ofFloat(this, "innerTranslationX", width, 0f)
+            );
+            if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
+                animatorSet.setDuration(380);
+                animatorSet.setInterpolator(PUSH_SPRING);
+            } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES) {
+                animatorSet.setDuration(280);
+                animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            } else {
+                animatorSet.setDuration(300);
+                animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            }
+        }
+        animatorSet.addListener(new AnimatorListenerAdapter() {
+            private boolean finished;
+
+            private void finish() {
+                if (finished) {
+                    return;
+                }
+                finished = true;
+                spatialOpenInProgress = false;
+                if (reverseOpenAnimation == animatorSet) {
+                    reverseOpenAnimation = null;
+                }
+                spatialAnimProgress = -1f;
+                predictiveBackStyle = MglaGlassConfig.PREDICTIVE_BACK_DEFAULT;
+                setInnerTranslationX(0);
+                containerView.setTranslationX(0);
+                containerView.setAlpha(1f);
+                if (onEnd != null) {
+                    onEnd.run();
+                }
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                finish();
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                finish();
+            }
+        });
+        reverseOpenAnimation = animatorSet;
+        invalidate();
+        return animatorSet;
     }
 
     private boolean backAnimatorIsBack;
@@ -2567,6 +2668,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 AnimatorSet animation = null;
                 if (!preview) {
                     animation = fragment.onCustomTransitionAnimation(true, () -> onAnimationEndCheck(false));
+                    if (animation == null && shouldUseReversePredictiveOpen(fragment, currentFragment)) {
+                        animation = createReversePredictiveOpenAnimation(() -> onAnimationEndCheck(false));
+                    }
                 }
                 if (animation == null) {
                     containerView.setAlpha(0.0f);
@@ -2644,6 +2748,28 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         currentFragment.saveKeyboardPositionBeforeTransition();
                     }
                     currentAnimation = animation;
+                    // Reverse predictive-open is owned here (other custom transitions start themselves).
+                    if (animation == reverseOpenAnimation) {
+                        final AnimatorSet toStart = animation;
+                        final boolean startsAlreadyFired = noDelay;
+                        final Runnable startReverse = () -> {
+                            if (currentAnimation != toStart || reverseOpenAnimation != toStart) {
+                                return;
+                            }
+                            if (!startsAlreadyFired) {
+                                if (currentFragment != null) {
+                                    currentFragment.onTransitionAnimationStart(false, false);
+                                }
+                                fragment.onTransitionAnimationStart(true, false);
+                            }
+                            toStart.start();
+                        };
+                        if (startsAlreadyFired) {
+                            AndroidUtilities.runOnUIThread(startReverse);
+                        } else {
+                            AndroidUtilities.runOnUIThread(startReverse, 200);
+                        }
+                    }
                 }
             }
         } else {

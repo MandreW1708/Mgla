@@ -154,6 +154,9 @@ public final class MglaSettingsSearch {
         final Utilities.Callback0Return<BaseFragment> appearanceScreen = MglaAppearanceSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> cleanHeaderScreen = MglaCleanHeaderSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> sideMenuScreen = MglaSideMenuSettingsActivity::new;
+        final Utilities.Callback0Return<BaseFragment> animCommonScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON);
+        final Utilities.Callback0Return<BaseFragment> animChatsScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_CHATS);
+        final Utilities.Callback0Return<BaseFragment> animDialogsScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_DIALOGS);
         final Utilities.Callback0Return<BaseFragment> cameraScreen = MglaCameraSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> connectionScreen = MglaDpiBypassActivity::new;
         final Utilities.Callback0Return<BaseFragment> aiScreen = MglaAiSettingsActivity::new;
@@ -211,13 +214,23 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1069, sideMenu, hub, appearance, appearanceIcon, sideMenuScreen, null, "appearance/side-menu"));
         l.add(new Entry(1070, "Включить боковое меню", hub, sideMenu, appearanceIcon, sideMenuScreen, "Включить боковое меню", "appearance/side-menu/enable"));
         l.add(new Entry(1071, "Настроить элементы", hub, sideMenu, appearanceIcon, sideMenuScreen, "Настроить элементы", "appearance/side-menu/elements"));
-        l.add(new Entry(1072, "Анимация назад", hub, appearance, appearanceIcon, appearanceScreen, "Анимация назад", "appearance/predictive-back"));
-        l.add(new Entry(1076, "В стиле MD3", hub, "Анимация назад", appearanceIcon, appearanceScreen, "В стиле MD3", "appearance/predictive-back/md3"));
-        l.add(new Entry(1077, "Страницы", hub, "Анимация назад", appearanceIcon, appearanceScreen, "Страницы", "appearance/predictive-back/pages"));
-        l.add(new Entry(1078, "Выталкивание", hub, "Анимация назад", appearanceIcon, appearanceScreen, "Выталкивание", "appearance/predictive-back/push"));
-        l.add(new Entry(1073, "Анимация текста", hub, appearance, appearanceIcon, MglaTextAnimationActivity::new, null, "appearance/text-animation"));
+        final String animCommon = "Общие анимации";
+        final String animChats = "В чатах";
+        final String animDialogs = "В списке чатов";
+        l.add(new Entry(1072, animCommon, hub, appearance, appearanceIcon, animCommonScreen, null, "appearance/animation/common"));
+        l.add(new Entry(1115, "Анимация назад", hub, animCommon, appearanceIcon, animCommonScreen, "Анимация назад", "appearance/animation/common/back"));
+        l.add(new Entry(1076, "В стиле MD3", hub, animCommon, appearanceIcon, animCommonScreen, "В стиле MD3", "appearance/animation/common/md3"));
+        l.add(new Entry(1077, "Страницы", hub, animCommon, appearanceIcon, animCommonScreen, "Страницы", "appearance/animation/common/pages"));
+        l.add(new Entry(1078, "Выталкивание", hub, animCommon, appearanceIcon, animCommonScreen, "Выталкивание", "appearance/animation/common/push"));
+        l.add(new Entry(1118, "Открытие чата как назад", hub, animCommon, appearanceIcon, animCommonScreen, "Открытие чата как назад", "appearance/animation/common/reverse-open"));
+        l.add(new Entry(1116, animChats, hub, appearance, appearanceIcon, animChatsScreen, null, "appearance/animation/chats"));
+        l.add(new Entry(1073, "Анимация текста", hub, animChats, appearanceIcon, MglaTextAnimationActivity::new, null, "appearance/text-animation"));
         l.add(new Entry(1074, "Эффект анимации текста", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Эффект", "appearance/text-animation/effect"));
         l.add(new Entry(1075, "Каскад при вставке", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Каскад", "appearance/text-animation/cascade"));
+        l.add(new Entry(1117, animDialogs, hub, appearance, appearanceIcon, animDialogsScreen, null, "appearance/animation/dialogs"));
+        l.add(new Entry(1079, "Перелёт аватара", hub, animDialogs, appearanceIcon, animDialogsScreen, "Перелёт аватара", "appearance/dialogs-avatar-hero"));
+        l.add(new Entry(1113, "Раскрытие поиска", hub, animDialogs, appearanceIcon, animDialogsScreen, "Раскрытие поиска", "appearance/dialogs-search-expand"));
+        l.add(new Entry(1114, "Кнопка «Создать»", hub, animDialogs, appearanceIcon, animDialogsScreen, "Кнопка «Создать»", "appearance/dialogs-fab-morph"));
 
         l.add(new Entry(1080, "API", hub, camera, cameraIcon, cameraScreen, "API", "camera/api"));
         l.add(new Entry(1081, "60 FPS", hub, camera, cameraIcon, cameraScreen, "60 FPS", "camera/60fps"));
