@@ -252,6 +252,7 @@ import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.Crop.CropTransform;
 import org.telegram.ui.Components.Crop.CropView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
+import org.telegram.ui.MglaGlassConfig;
 import org.telegram.ui.Components.EditCoverButton;
 import org.telegram.ui.Components.FilterShaders;
 import org.telegram.ui.Components.FloatSeekBarAccessibilityDelegate;
@@ -17429,7 +17430,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private boolean checkAnimation() {
         if (animationInProgress != 0) {
             invalidateBlur();
-            if (Math.abs(transitionAnimationStartTime - System.currentTimeMillis()) >= 500) {
+            final long timeout = MglaGlassConfig.isProfileMediaGrowEnabled() ? 700 : 500;
+            if (Math.abs(transitionAnimationStartTime - System.currentTimeMillis()) >= timeout) {
                 if (animationEndRunnable != null) {
                     animationEndRunnable.run();
                     animationEndRunnable = null;
@@ -17438,6 +17440,18 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             }
         }
         return animationInProgress != 0;
+    }
+
+    /** Soft spring grow/shrink for thumb ↔ fullscreen when enabled in Appearance. */
+    private void stylePhotoViewerGrowAnimator(AnimatorSet animatorSet, boolean opening) {
+        if (MglaGlassConfig.isProfileMediaGrowEnabled()) {
+            animatorSet.setDuration(opening ? 320 : 280);
+            animatorSet.setInterpolator(opening
+                    ? new CubicBezierInterpolator(0.22, 1.12, 0.36, 1)
+                    : CubicBezierInterpolator.EASE_OUT_QUINT);
+        } else {
+            animatorSet.setDuration(200);
+        }
     }
 
     private void setCropBitmap() {
@@ -17872,7 +17886,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                             animators.add(ObjectAnimator.ofFloat(photoCropView, View.ALPHA, 0, 1.0f));
                         }
                         animatorSet.playTogether(animators);
-                        animatorSet.setDuration(200);
+                        stylePhotoViewerGrowAnimator(animatorSet, true);
                         animatorSet.addListener(new AnimatorListenerAdapter() {
                             @Override
                             public void onAnimationEnd(Animator animation) {
@@ -18528,7 +18542,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     }
                 };
 
-                animatorSet.setDuration(200);
+                if (object != null) {
+                    stylePhotoViewerGrowAnimator(animatorSet, false);
+                } else {
+                    animatorSet.setDuration(200);
+                }
                 animatorSet.addListener(new AnimatorListenerAdapter() {
                     @Override
                     public void onAnimationEnd(Animator animation) {

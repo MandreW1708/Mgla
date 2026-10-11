@@ -223,10 +223,14 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1077, "Страницы", hub, animCommon, appearanceIcon, animCommonScreen, "Страницы", "appearance/animation/common/pages"));
         l.add(new Entry(1078, "Выталкивание", hub, animCommon, appearanceIcon, animCommonScreen, "Выталкивание", "appearance/animation/common/push"));
         l.add(new Entry(1118, "Открытие чата как назад", hub, animCommon, appearanceIcon, animCommonScreen, "Открытие чата как назад", "appearance/animation/common/reverse-open"));
+        l.add(new Entry(1122, "Вырастание фото", hub, animCommon, appearanceIcon, animCommonScreen, "Вырастание фото", "appearance/animation/common/media-grow"));
+        l.add(new Entry(1123, "Пружина при тапе", hub, animCommon, appearanceIcon, animCommonScreen, "Пружина при тапе", "appearance/animation/common/press-spring"));
         l.add(new Entry(1116, animChats, hub, appearance, appearanceIcon, animChatsScreen, null, "appearance/animation/chats"));
         l.add(new Entry(1073, "Анимация текста", hub, animChats, appearanceIcon, MglaTextAnimationActivity::new, null, "appearance/text-animation"));
         l.add(new Entry(1074, "Эффект анимации текста", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Эффект", "appearance/text-animation/effect"));
         l.add(new Entry(1075, "Каскад при вставке", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Каскад", "appearance/text-animation/cascade"));
+        l.add(new Entry(1119, "Морф кнопки отправки", hub, animChats, appearanceIcon, animChatsScreen, "Морф кнопки отправки", "appearance/animation/chats/send-morph"));
+        l.add(new Entry(1120, "Пружина реакций", hub, animChats, appearanceIcon, animChatsScreen, "Пружина реакций", "appearance/animation/chats/reaction-spring"));
         l.add(new Entry(1117, animDialogs, hub, appearance, appearanceIcon, animDialogsScreen, null, "appearance/animation/dialogs"));
         l.add(new Entry(1079, "Перелёт аватара", hub, animDialogs, appearanceIcon, animDialogsScreen, "Перелёт аватара", "appearance/dialogs-avatar-hero"));
         l.add(new Entry(1113, "Раскрытие поиска", hub, animDialogs, appearanceIcon, animDialogsScreen, "Раскрытие поиска", "appearance/dialogs-search-expand"));

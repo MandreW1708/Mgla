@@ -1,5 +1,7 @@
 package org.telegram.ui;
 
+import android.view.View;
+
 import org.telegram.ui.ActionBar.BaseFragment;
 
 /**
@@ -16,5 +18,25 @@ public abstract class MglaBaseSettingsActivity extends BaseFragment {
 
     public MglaBaseSettingsActivity(android.os.Bundle args) {
         super(args);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        final View root = getFragmentView();
+        if (root != null) {
+            MglaUi.attachPressSpringRecursive(root);
+        }
+    }
+
+    @Override
+    public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
+        super.onTransitionAnimationEnd(isOpen, backward);
+        if (isOpen) {
+            final View root = getFragmentView();
+            if (root != null) {
+                MglaUi.attachPressSpringRecursive(root);
+            }
+        }
     }
 }

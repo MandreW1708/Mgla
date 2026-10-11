@@ -86,7 +86,7 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
             final int style = styles[i];
             RadioCell cell = new RadioCell(context);
             cell.setBackground(null);
-            cell.setText(MglaGlassConfig.getPredictiveBackStyleTitle(style), currentStyle == style, true);
+            cell.setText(MglaGlassConfig.getPredictiveBackStyleTitle(style), currentStyle == style, false);
             cell.setOnClickListener(v -> {
                 MglaGlassConfig.setPredictiveBackStyle(style);
                 for (int j = 0; j < styleCells.length; j++) {
@@ -95,6 +95,7 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
             });
             styleCells[i] = cell;
             block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            block.addView(MglaUi.createDivider(context));
         }
 
         TextCheckCell reverseOpenCell = new TextCheckCell(context);
@@ -108,15 +109,68 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
         block.addView(reverseOpenCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 16));
+
+        LinearLayout profileBlock = MglaUi.createBlock(context, "Профиль");
+        TextCheckCell mediaGrowCell = new TextCheckCell(context);
+        mediaGrowCell.setBackground(null);
+        mediaGrowCell.setTextAndCheck("Вырастание фото", MglaGlassConfig.isProfileMediaGrowEnabled(), false);
+        mediaGrowCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isProfileMediaGrowEnabled();
+            MglaGlassConfig.setProfileMediaGrowEnabled(newVal);
+            mediaGrowCell.setChecked(newVal);
+        });
+        profileBlock.addView(mediaGrowCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(profileBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 16));
+
+        LinearLayout settingsBlock = MglaUi.createBlock(context, "Настройки Mgla");
+        TextCheckCell pressSpringCell = new TextCheckCell(context);
+        pressSpringCell.setBackground(null);
+        pressSpringCell.setTextAndCheck("Пружина при тапе", MglaGlassConfig.isSettingsPressSpringEnabled(), false);
+        pressSpringCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isSettingsPressSpringEnabled();
+            MglaGlassConfig.setSettingsPressSpringEnabled(newVal);
+            pressSpringCell.setChecked(newVal);
+            if (newVal && fragmentView != null) {
+                MglaUi.attachPressSpringRecursive(fragmentView);
+            }
+        });
+        settingsBlock.addView(pressSpringCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(settingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 16));
     }
 
     private void fillChats(Context context, LinearLayout rootLayout) {
         LinearLayout block = MglaUi.createBlock(context, null);
+
         textAnimationCell = new TextSettingsCell(context);
         textAnimationCell.setBackground(null);
         textAnimationCell.setTextAndValue("Анимация текста", MglaTextAnimConfig.getSummary(), false);
         textAnimationCell.setOnClickListener(v -> presentFragment(new MglaTextAnimationActivity()));
         block.addView(textAnimationCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        block.addView(MglaUi.createDivider(context));
+
+        TextCheckCell sendMorphCell = new TextCheckCell(context);
+        sendMorphCell.setBackground(null);
+        sendMorphCell.setTextAndCheck("Морф кнопки отправки", MglaGlassConfig.isChatSendButtonMorphEnabled(), false);
+        sendMorphCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isChatSendButtonMorphEnabled();
+            MglaGlassConfig.setChatSendButtonMorphEnabled(newVal);
+            sendMorphCell.setChecked(newVal);
+        });
+        block.addView(sendMorphCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        block.addView(MglaUi.createDivider(context));
+
+        TextCheckCell reactionSpringCell = new TextCheckCell(context);
+        reactionSpringCell.setBackground(null);
+        reactionSpringCell.setTextAndCheck("Пружина реакций", MglaGlassConfig.isChatReactionSpringEnabled(), false);
+        reactionSpringCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isChatReactionSpringEnabled();
+            MglaGlassConfig.setChatReactionSpringEnabled(newVal);
+            reactionSpringCell.setChecked(newVal);
+        });
+        block.addView(reactionSpringCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 16));
     }
 
@@ -125,7 +179,7 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
 
         TextCheckCell avatarHeroCell = new TextCheckCell(context);
         avatarHeroCell.setBackground(null);
-        avatarHeroCell.setTextAndCheck("Перелёт аватара", MglaGlassConfig.isDialogsAvatarHeroEnabled(), true);
+        avatarHeroCell.setTextAndCheck("Перелёт аватара", MglaGlassConfig.isDialogsAvatarHeroEnabled(), false);
         avatarHeroCell.setOnClickListener(v -> {
             boolean newVal = !MglaGlassConfig.isDialogsAvatarHeroEnabled();
             MglaGlassConfig.setDialogsAvatarHeroEnabled(newVal);
@@ -133,15 +187,19 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
         });
         block.addView(avatarHeroCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        block.addView(MglaUi.createDivider(context));
+
         TextCheckCell searchExpandCell = new TextCheckCell(context);
         searchExpandCell.setBackground(null);
-        searchExpandCell.setTextAndCheck("Раскрытие поиска", MglaGlassConfig.isDialogsSearchExpandEnabled(), true);
+        searchExpandCell.setTextAndCheck("Раскрытие поиска", MglaGlassConfig.isDialogsSearchExpandEnabled(), false);
         searchExpandCell.setOnClickListener(v -> {
             boolean newVal = !MglaGlassConfig.isDialogsSearchExpandEnabled();
             MglaGlassConfig.setDialogsSearchExpandEnabled(newVal);
             searchExpandCell.setChecked(newVal);
         });
         block.addView(searchExpandCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        block.addView(MglaUi.createDivider(context));
 
         TextCheckCell fabMorphCell = new TextCheckCell(context);
         fabMorphCell.setBackground(null);
@@ -177,8 +235,13 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
 
     public static String getSummaryForType(int type) {
         switch (type) {
-            case TYPE_CHATS:
-                return MglaTextAnimConfig.getSummary();
+            case TYPE_CHATS: {
+                int on = 0;
+                if (MglaGlassConfig.isChatSendButtonMorphEnabled()) on++;
+                if (MglaGlassConfig.isChatReactionSpringEnabled()) on++;
+                String md3 = on == 0 ? "Выкл." : on + " из 2";
+                return MglaTextAnimConfig.getSummary() + " · " + md3;
+            }
             case TYPE_DIALOGS: {
                 int on = 0;
                 if (MglaGlassConfig.isDialogsAvatarHeroEnabled()) on++;
@@ -186,8 +249,14 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
                 if (MglaGlassConfig.isDialogsFabMorphEnabled()) on++;
                 return on == 0 ? "Выкл." : on + " из 3";
             }
-            default:
-                return MglaGlassConfig.getPredictiveBackStyleTitle(MglaGlassConfig.getPredictiveBackStyle());
+            default: {
+                String style = MglaGlassConfig.getPredictiveBackStyleTitle(MglaGlassConfig.getPredictiveBackStyle());
+                int extras = 0;
+                if (MglaGlassConfig.isReverseChatOpenEnabled()) extras++;
+                if (MglaGlassConfig.isProfileMediaGrowEnabled()) extras++;
+                if (MglaGlassConfig.isSettingsPressSpringEnabled()) extras++;
+                return extras == 0 ? style : style + " · +" + extras;
+            }
         }
     }
 }

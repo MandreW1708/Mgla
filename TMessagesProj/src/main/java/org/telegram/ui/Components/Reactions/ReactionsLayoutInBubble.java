@@ -48,6 +48,7 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.MessageDrawable;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.ChatActionCell;
+import org.telegram.ui.MglaGlassConfig;
 import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.Cells.IMessageCell;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
@@ -856,7 +857,9 @@ public class ReactionsLayoutInBubble {
         public ReactionButton(ReactionButton reuseFrom, int currentAccount, View parentView, TLRPC.ReactionCount reactionCount, boolean isSmall, boolean isTag, Theme.ResourcesProvider resourcesProvider) {
             this.currentAccount = currentAccount;
             this.parentView = parentView;
-            this.bounce = new ButtonBounce(parentView);
+            this.bounce = MglaGlassConfig.isChatReactionSpringEnabled()
+                    ? new ButtonBounce(parentView, 0.85f, 1.15f, 3.2f)
+                    : new ButtonBounce(parentView);
             this.resourcesProvider = resourcesProvider;
             this.isTag = isTag;
             if (reuseFrom != null) {
@@ -1093,7 +1096,16 @@ public class ReactionsLayoutInBubble {
                 lastScrimProgressDirection = scrimProgressDirection;
             }
 
-            final float bounceScale = bounce.getScale(0.1f);
+            final boolean springPress = MglaGlassConfig.isChatReactionSpringEnabled();
+            final float press = bounce.isPressedProgress();
+            final float bounceScaleX;
+            final float bounceScaleY;
+            if (springPress) {
+                bounceScaleX = 1f - 0.14f * press;
+                bounceScaleY = 1f - 0.24f * press;
+            } else {
+                bounceScaleX = bounceScaleY = bounce.getScale(0.1f);
+            }
             boolean restore = false;
             int w = width;
             if (scrimProgress > 0 && !isTag && scrimPreviewCounterDrawable != null && avatarsDrawable == null) {
@@ -1103,10 +1115,10 @@ public class ReactionsLayoutInBubble {
                 w = (int) (width * progress + animateFromWidth * (1f - progress));
             }
             AndroidUtilities.rectTmp.set(x, y, x + w, y + height);
-            if (bounceScale != 1f) {
+            if (bounceScaleX != 1f || bounceScaleY != 1f) {
                 restore = true;
                 canvas.save();
-                canvas.scale(bounceScale, bounceScale, x + w / 2f, y + height / 2f);
+                canvas.scale(bounceScaleX, bounceScaleY, x + w / 2f, y + height / 2f);
             }
             float rad = height / 2f;
             if (getDrawServiceShaderBackground() > 0 && !drawBgOnlyIfChosen) {

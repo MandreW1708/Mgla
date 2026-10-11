@@ -180,6 +180,7 @@ import org.telegram.ui.BasePermissionsActivity;
 import org.telegram.ui.Business.BusinessLinksController;
 import org.telegram.ui.Business.QuickRepliesController;
 import org.telegram.ui.ChatActivity;
+import org.telegram.ui.MglaGlassConfig;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.Components.Premium.PremiumFeatureBottomSheet;
@@ -1125,6 +1126,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     private Drawable micDrawable;
     private Drawable cameraDrawable;
     private Drawable sendDrawable;
+    private final Paint recordStopPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private RectF pauseRect = new RectF();
     private android.graphics.Rect sendRect = new Rect();
     private android.graphics.Rect rect = new Rect();
@@ -2285,14 +2287,16 @@ public class ChatActivityEnterView extends FrameLayout implements
 
             Drawable drawable;
             Drawable replaceDrawable = null;
+            final boolean morphIcons = MglaGlassConfig.isChatSendButtonMorphEnabled();
             checkDrawables();
             if (isSendButtonVisible()) {
                 if (progressToSendButton != 1f) {
-                    progressToSendButton += dt / 150f;
+                    progressToSendButton += dt / (morphIcons ? 220f : 150f);
                     if (progressToSendButton > 1f) {
                         progressToSendButton = 1f;
                     }
-                    replaceDrawable = isInVideoMode() ? cameraDrawable : micDrawable;
+                    // Morph from stop (MD3) or mic/camera into send.
+                    replaceDrawable = morphIcons ? null : (isInVideoMode() ? cameraDrawable : micDrawable);
                 }
                 drawable = sendDrawable;
                 sendRect.set(cx - drawable.getIntrinsicWidth() / 2, cy - drawable.getIntrinsicHeight() / 2, cx + drawable.getIntrinsicWidth() / 2, cy + drawable.getIntrinsicHeight() / 2);
@@ -2304,6 +2308,8 @@ public class ChatActivityEnterView extends FrameLayout implements
                 sendRect.set(cx - dp(12), cy - dp(12), cx + dp(12), cy + dp(12));
             }
             drawable.setBounds(sendRect);
+            final boolean drawStopInstead = morphIcons && recordingAudioVideo && !isSendButtonVisible();
+            final boolean drawStopAsReplace = morphIcons && isSendButtonVisible() && progressToSendButton < 1f;
 
             if (incIdle) {
                 idleProgress += 0.01f;
@@ -2407,7 +2413,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                     canvas.save();
                     float a = (1f - exitProgress2);
                     canvas.translate(slideDelta, 0);
-                    drawIconInternal(canvas, drawable, replaceDrawable, progressToSendButton, (int) ((1f - progressToSeekbarStep2) * a * 255));
+                    drawIconInternal(canvas, drawable, replaceDrawable, progressToSendButton, (int) ((1f - progressToSeekbarStep2) * a * 255), drawStopInstead, drawStopAsReplace);
                     canvas.restore();
                 }
             }
@@ -2417,7 +2423,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 float a = (canceledByGesture ? (1f - slideToCancelProgress) : 1);
                 canvas.save();
                 canvas.translate(slideDelta, 0);
-                drawIconInternal(canvas, drawable, replaceDrawable, progressToSendButton, (int) (255 * a));
+                drawIconInternal(canvas, drawable, replaceDrawable, progressToSendButton, (int) (255 * a), drawStopInstead, drawStopAsReplace);
                 canvas.restore();
             }
             drawingCircleRadius = radius;
@@ -2434,10 +2440,11 @@ public class ChatActivityEnterView extends FrameLayout implements
         public void drawIcon(Canvas canvas, int cx, int cy, float alpha) {
             Drawable drawable;
             Drawable replaceDrawable = null;
+            final boolean morphIcons = MglaGlassConfig.isChatSendButtonMorphEnabled();
             checkDrawables();
             if (isSendButtonVisible()) {
                 if (progressToSendButton != 1f) {
-                    replaceDrawable = isInVideoMode() ? cameraDrawable : micDrawable;
+                    replaceDrawable = morphIcons ? null : (isInVideoMode() ? cameraDrawable : micDrawable);
                 }
                 drawable = sendDrawable;
                 sendRect.set(cx - drawable.getIntrinsicWidth() / 2, cy - drawable.getIntrinsicHeight() / 2, cx + drawable.getIntrinsicWidth() / 2, cy + drawable.getIntrinsicHeight() / 2);
@@ -2449,11 +2456,59 @@ public class ChatActivityEnterView extends FrameLayout implements
                 sendRect.set(cx - dp(12), cy - dp(12), cx + dp(12), cy + dp(12));
             }
             drawable.setBounds(sendRect);
-            drawIconInternal(canvas, drawable, replaceDrawable, progressToSendButton, (int) (255 * alpha));
+            final boolean drawStopInstead = morphIcons && recordingAudioVideo && !isSendButtonVisible();
+            final boolean drawStopAsReplace = morphIcons && isSendButtonVisible() && progressToSendButton < 1f;
+            drawIconInternal(canvas, drawable, replaceDrawable, progressToSendButton, (int) (255 * alpha), drawStopInstead, drawStopAsReplace);
         }
 
-        private void drawIconInternal(Canvas canvas, Drawable drawable, Drawable replaceDrawable, float progressToSendButton, int alpha) {
+        private void drawRecordStopIcon(Canvas canvas, float cx, float cy, int alpha) {
+            recordStopPaint.setColor(ColorUtils.setAlphaComponent(0xFFFFFFFF, Math.max(0, Math.min(255, alpha))));
+            final float s = dpf2(6.5f);
+            final float r = dpf2(2f);
+            AndroidUtilities.rectTmp.set(cx - s, cy - s, cx + s, cy + s);
+            canvas.drawRoundRect(AndroidUtilities.rectTmp, r, r, recordStopPaint);
+        }
+
+        private void drawIconInternal(Canvas canvas, Drawable drawable, Drawable replaceDrawable, float progressToSendButton, int alpha, boolean drawStopInstead, boolean drawStopAsReplace) {
             checkDrawables();
+            final float cx = drawable.getBounds().exactCenterX();
+            final float cy = drawable.getBounds().exactCenterY();
+            final boolean morphIcons = drawStopInstead || drawStopAsReplace || MglaGlassConfig.isChatSendButtonMorphEnabled();
+
+            if (drawStopInstead) {
+                if (canceledByGesture && slideToCancelProgress == 1f) {
+                    View v = audioVideoSendButton;
+                    v.setAlpha(1f);
+                    setVisibility(View.GONE);
+                    return;
+                }
+                if (!canceledByGesture || slideToCancelProgress < 1f) {
+                    drawRecordStopIcon(canvas, cx, cy, alpha);
+                }
+                return;
+            }
+
+            if (drawStopAsReplace) {
+                final float p = CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(progressToSendButton);
+                canvas.save();
+                canvas.scale(p, p, cx, cy);
+                if (morphIcons) {
+                    canvas.rotate(18f * (1f - p), cx, cy);
+                }
+                drawable.setAlpha((int) (alpha * p));
+                drawable.draw(canvas);
+                canvas.restore();
+
+                canvas.save();
+                canvas.scale(1f - p, 1f - p, cx, cy);
+                if (morphIcons) {
+                    canvas.rotate(-18f * p, cx, cy);
+                }
+                drawRecordStopIcon(canvas, cx, cy, (int) (alpha * (1f - p)));
+                canvas.restore();
+                return;
+            }
+
             if (progressToSendButton == 0 || progressToSendButton == 1 || replaceDrawable == null) {
                 if (canceledByGesture && slideToCancelProgress == 1f) {
                     View v = audioVideoSendButton;
@@ -2469,15 +2524,24 @@ public class ChatActivityEnterView extends FrameLayout implements
                     drawable.draw(canvas);
                 }
             } else {
+                final float p = morphIcons
+                        ? CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(progressToSendButton)
+                        : progressToSendButton;
                 canvas.save();
-                canvas.scale(progressToSendButton, progressToSendButton, drawable.getBounds().centerX(), drawable.getBounds().centerY());
-                drawable.setAlpha((int) (alpha * progressToSendButton));
+                canvas.scale(p, p, cx, cy);
+                if (morphIcons) {
+                    canvas.rotate(18f * (1f - p), cx, cy);
+                }
+                drawable.setAlpha((int) (alpha * p));
                 drawable.draw(canvas);
                 canvas.restore();
 
                 canvas.save();
-                canvas.scale(1f - progressToSendButton, 1f - progressToSendButton, drawable.getBounds().centerX(), drawable.getBounds().centerY());
-                replaceDrawable.setAlpha((int) (alpha * (1f - progressToSendButton)));
+                canvas.scale(1f - p, 1f - p, cx, cy);
+                if (morphIcons) {
+                    canvas.rotate(-18f * p, cx, cy);
+                }
+                replaceDrawable.setAlpha((int) (alpha * (1f - p)));
                 replaceDrawable.draw(canvas);
                 canvas.restore();
             }
@@ -8364,9 +8428,10 @@ public class ChatActivityEnterView extends FrameLayout implements
                     runningAnimation = new AnimatorSet();
 
                     ArrayList<Animator> animators = new ArrayList<>();
+                    final float hideScale = MglaGlassConfig.isChatSendButtonMorphEnabled() ? 0.35f : 0.1f;
                     if (audioVideoButtonContainer.getVisibility() == VISIBLE) {
-                        animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.SCALE_X, 0.1f));
-                        animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.SCALE_Y, 0.1f));
+                        animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.SCALE_X, hideScale));
+                        animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.SCALE_Y, hideScale));
                         animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.ALPHA, 0.0f));
                     }
                     if (expandStickersButton != null && expandStickersButton.getVisibility() == VISIBLE) {
@@ -8396,11 +8461,14 @@ public class ChatActivityEnterView extends FrameLayout implements
                         runningAnimationType = 1;
                         animators.add(animateSendButton(true));
                         getSendButtonInternal().setVisibility(VISIBLE);
+                        if (MglaGlassConfig.isChatSendButtonMorphEnabled() && audioVideoSendButton != null) {
+                            audioVideoSendButton.setRotation(0f);
+                            animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.ROTATION, 0f, 32f));
+                        }
                     }
 
                     runningAnimation.playTogether(animators);
-                    runningAnimation.setDuration(220);
-                    runningAnimation.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+                    styleSendButtonMorphAnimation(runningAnimation, 220);
                     runningAnimation.addListener(new AnimatorListenerAdapter() {
                         @Override
                         public void onAnimationEnd(Animator animation) {
@@ -8417,6 +8485,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                                     expandStickersButton.setVisibility(GONE);
                                 }
                                 setSlowModeButtonVisible(false);
+                                resetSendButtonMorphTransforms();
                                 runningAnimation = null;
                                 runningAnimationType = 0;
                             }
@@ -8810,18 +8879,21 @@ public class ChatActivityEnterView extends FrameLayout implements
                     animators.add(ObjectAnimator.ofFloat(slowModeButton, View.SCALE_Y, 0.1f));
                     animators.add(ObjectAnimator.ofFloat(slowModeButton, View.ALPHA, 0.0f));
                 } else {
-                    animators.add(ObjectAnimator.ofFloat(getSendButtonInternal(), View.SCALE_X, 0.1f));
-                    animators.add(ObjectAnimator.ofFloat(getSendButtonInternal(), View.SCALE_Y, 0.1f));
+                    final float hideScale = MglaGlassConfig.isChatSendButtonMorphEnabled() ? 0.35f : 0.1f;
+                    animators.add(ObjectAnimator.ofFloat(getSendButtonInternal(), View.SCALE_X, hideScale));
+                    animators.add(ObjectAnimator.ofFloat(getSendButtonInternal(), View.SCALE_Y, hideScale));
                     animators.add(ObjectAnimator.ofFloat(getSendButtonInternal(), View.ALPHA, 0.0f));
+                    addMicSendMorphRotations(animators, false);
                 }
 
                 runningAnimation.playTogether(animators);
-                runningAnimation.setDuration(150);
+                styleSendButtonMorphAnimation(runningAnimation, 150);
                 runningAnimation.addListener(new AnimatorListenerAdapter() {
                     @Override
                     public void onAnimationEnd(Animator animation) {
                         if (animation.equals(runningAnimation)) {
                             setSlowModeButtonVisible(false);
+                            resetSendButtonMorphTransforms();
                             runningAnimation = null;
                             runningAnimationType = 0;
 
@@ -8862,6 +8934,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 audioVideoSendButton.setScaleY(1.0f);
                 audioVideoSendButton.setAlpha(1.0f);
                 audioVideoButtonContainer.setVisibility(VISIBLE);
+                resetSendButtonMorphTransforms();
                 if (attachLayout != null) {
                     if (getVisibility() == VISIBLE) {
                         delegate.onAttachButtonShow();
@@ -10543,23 +10616,83 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     public ValueAnimator animateSendButton(boolean show) {
-        final float fromAlpha = getSendButtonInternal().getAlpha();
+        final View button = getSendButtonInternal();
+        final boolean morph = MglaGlassConfig.isChatSendButtonMorphEnabled();
+        final float fromAlpha = button.getAlpha();
         final float toAlpha = show ? 1.0f : 0.0f;
-        final float fromScaleX = /*show ? 1 :*/ getSendButtonInternal().getScaleX();
-        final float toScaleX = show ? 1.0f : 0.1f;
-        final float fromScaleY = /*show ? 1 :*/ getSendButtonInternal().getScaleY();
-        final float toScaleY = show ? 1.0f : 0.1f;
-        if (show && fromAlpha < 0.25f && getSendButtonInternal() instanceof SendButton) {
-            ((SendButton) getSendButtonInternal()).appear();
+        final float fromScale = button.getScaleX();
+        final float toScale = show ? 1.0f : (morph ? 0.35f : 0.1f);
+        if (show && morph && fromAlpha < 0.25f) {
+            button.setRotation(-28f);
+        }
+        final float fromRotation = button.getRotation();
+        final float toRotation = show ? 0f : (morph ? 28f : fromRotation);
+        if (show && fromAlpha < 0.25f && button instanceof SendButton) {
+            ((SendButton) button).appear();
         }
         ValueAnimator a = ValueAnimator.ofFloat(0, 1);
         a.addUpdateListener(anm -> {
             final float t = (float) anm.getAnimatedValue();
-            getSendButtonInternal().setAlpha(lerp(fromAlpha, toAlpha, t));
-            getSendButtonInternal().setScaleX(lerp(fromScaleX, toScaleX, t));
-            getSendButtonInternal().setScaleY(lerp(fromScaleY, toScaleY, t));
+            final float eased = morph ? CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(t) : t;
+            button.setAlpha(lerp(fromAlpha, toAlpha, eased));
+            float scale = lerp(fromScale, toScale, eased);
+            if (morph && show) {
+                scale *= 1f + 0.06f * (float) Math.sin(Math.PI * Math.min(1f, t));
+            }
+            button.setScaleX(scale);
+            button.setScaleY(scale);
+            if (morph) {
+                button.setRotation(lerp(fromRotation, toRotation, eased));
+            }
         });
         return a;
+    }
+
+    private void resetSendButtonMorphTransforms() {
+        if (audioVideoSendButton != null) {
+            audioVideoSendButton.setRotation(0f);
+        }
+        View send = getSendButtonInternal();
+        if (send != null) {
+            send.setRotation(0f);
+        }
+    }
+
+    private void styleSendButtonMorphAnimation(AnimatorSet set, long defaultDuration) {
+        if (MglaGlassConfig.isChatSendButtonMorphEnabled()) {
+            set.setDuration(Math.max(defaultDuration, 280));
+            set.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        } else {
+            set.setDuration(defaultDuration);
+            set.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        }
+    }
+
+    private void addMicSendMorphRotations(ArrayList<Animator> animators, boolean toSend) {
+        if (!MglaGlassConfig.isChatSendButtonMorphEnabled() || animators == null) {
+            return;
+        }
+        if (toSend) {
+            if (audioVideoSendButton != null) {
+                audioVideoSendButton.setRotation(0f);
+                animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.ROTATION, 0f, 32f));
+            }
+            View send = getSendButtonInternal();
+            if (send != null) {
+                send.setRotation(-32f);
+                animators.add(ObjectAnimator.ofFloat(send, View.ROTATION, -32f, 0f));
+            }
+        } else {
+            View send = getSendButtonInternal();
+            if (send != null) {
+                send.setRotation(0f);
+                animators.add(ObjectAnimator.ofFloat(send, View.ROTATION, 0f, -32f));
+            }
+            if (audioVideoSendButton != null) {
+                audioVideoSendButton.setRotation(32f);
+                animators.add(ObjectAnimator.ofFloat(audioVideoSendButton, View.ROTATION, 32f, 0f));
+            }
+        }
     }
 
     public View getAudioVideoButtonContainer() {

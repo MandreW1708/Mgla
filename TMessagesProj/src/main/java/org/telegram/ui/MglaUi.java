@@ -6,7 +6,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -16,6 +18,10 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.RadioCell;
+import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.ButtonBounce;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -70,6 +76,66 @@ public final class MglaUi {
         divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
         divider.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 21, 0, 21, 0));
         return divider;
+    }
+
+    private static final int PRESS_SPRING_TAG = 0x6D676C61; // "mgla"
+
+    /** Soft MD3-like press spring for interactive settings rows. */
+    public static void attachPressSpring(View view) {
+        if (view == null || !MglaGlassConfig.isSettingsPressSpringEnabled()) {
+            return;
+        }
+        if (view.getTag(PRESS_SPRING_TAG) instanceof ButtonBounce) {
+            return;
+        }
+        final ButtonBounce bounce = new ButtonBounce(view, 0.85f, 1.15f, 2.6f);
+        bounce.setAdditionalInvalidate(() -> {
+            final float s = bounce.getScale(0.045f);
+            view.setScaleX(s);
+            view.setScaleY(s);
+        });
+        view.setTag(PRESS_SPRING_TAG, bounce);
+        view.setOnTouchListener((v, event) -> {
+            final Object tag = v.getTag(PRESS_SPRING_TAG);
+            if (!(tag instanceof ButtonBounce)) {
+                return false;
+            }
+            final ButtonBounce b = (ButtonBounce) tag;
+            if (!MglaGlassConfig.isSettingsPressSpringEnabled()) {
+                if (b.isPressed()) {
+                    b.setPressed(false);
+                }
+                v.setScaleX(1f);
+                v.setScaleY(1f);
+                return false;
+            }
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    b.setPressed(true);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    b.setPressed(false);
+                    break;
+            }
+            return false;
+        });
+    }
+
+    /** Attach press spring to all interactive cells under a settings root. */
+    public static void attachPressSpringRecursive(View root) {
+        if (root == null || !MglaGlassConfig.isSettingsPressSpringEnabled()) {
+            return;
+        }
+        if (root instanceof TextCheckCell || root instanceof TextSettingsCell || root instanceof RadioCell) {
+            attachPressSpring(root);
+        }
+        if (root instanceof ViewGroup) {
+            final ViewGroup group = (ViewGroup) root;
+            for (int i = 0, n = group.getChildCount(); i < n; i++) {
+                attachPressSpringRecursive(group.getChildAt(i));
+            }
+        }
     }
 
     /**

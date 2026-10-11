@@ -33,6 +33,10 @@ public class MglaGlassConfig {
     public static final String PREF_DIALOGS_SEARCH_EXPAND = "dialogs_search_expand";
     public static final String PREF_DIALOGS_FAB_MORPH = "dialogs_fab_morph";
     public static final String PREF_REVERSE_CHAT_OPEN = "reverse_chat_open";
+    public static final String PREF_CHAT_SEND_BUTTON_MORPH = "chat_send_button_morph";
+    public static final String PREF_CHAT_REACTION_SPRING = "chat_reaction_spring";
+    public static final String PREF_PROFILE_MEDIA_GROW = "profile_media_grow";
+    public static final String PREF_SETTINGS_PRESS_SPRING = "settings_press_spring";
 
     // In-memory cache — prefs are hit from Switch/ActionBar draw paths every frame.
     private static boolean cacheLoaded;
@@ -50,6 +54,10 @@ public class MglaGlassConfig {
     private static boolean dialogsSearchExpand = true;
     private static boolean dialogsFabMorph = true;
     private static boolean reverseChatOpen = true;
+    private static boolean chatSendButtonMorph = true;
+    private static boolean chatReactionSpring = true;
+    private static boolean profileMediaGrow = true;
+    private static boolean settingsPressSpring = true;
 
     private static void ensureCache() {
         if (cacheLoaded) {
@@ -75,6 +83,10 @@ public class MglaGlassConfig {
         dialogsSearchExpand = p.getBoolean(PREF_DIALOGS_SEARCH_EXPAND, true);
         dialogsFabMorph = p.getBoolean(PREF_DIALOGS_FAB_MORPH, true);
         reverseChatOpen = p.getBoolean(PREF_REVERSE_CHAT_OPEN, true);
+        chatSendButtonMorph = p.getBoolean(PREF_CHAT_SEND_BUTTON_MORPH, true);
+        chatReactionSpring = p.getBoolean(PREF_CHAT_REACTION_SPRING, true);
+        profileMediaGrow = p.getBoolean(PREF_PROFILE_MEDIA_GROW, true);
+        settingsPressSpring = p.getBoolean(PREF_SETTINGS_PRESS_SPRING, true);
         cacheLoaded = true;
     }
 
@@ -311,6 +323,62 @@ public class MglaGlassConfig {
         }
         reverseChatOpen = enabled;
         getPrefs().edit().putBoolean(PREF_REVERSE_CHAT_OPEN, enabled).apply();
+    }
+
+    public static boolean isChatSendButtonMorphEnabled() {
+        ensureCache();
+        return chatSendButtonMorph;
+    }
+
+    public static void setChatSendButtonMorphEnabled(boolean enabled) {
+        ensureCache();
+        if (chatSendButtonMorph == enabled) {
+            return;
+        }
+        chatSendButtonMorph = enabled;
+        getPrefs().edit().putBoolean(PREF_CHAT_SEND_BUTTON_MORPH, enabled).apply();
+    }
+
+    public static boolean isChatReactionSpringEnabled() {
+        ensureCache();
+        return chatReactionSpring;
+    }
+
+    public static void setChatReactionSpringEnabled(boolean enabled) {
+        ensureCache();
+        if (chatReactionSpring == enabled) {
+            return;
+        }
+        chatReactionSpring = enabled;
+        getPrefs().edit().putBoolean(PREF_CHAT_REACTION_SPRING, enabled).apply();
+    }
+
+    public static boolean isProfileMediaGrowEnabled() {
+        ensureCache();
+        return profileMediaGrow;
+    }
+
+    public static void setProfileMediaGrowEnabled(boolean enabled) {
+        ensureCache();
+        if (profileMediaGrow == enabled) {
+            return;
+        }
+        profileMediaGrow = enabled;
+        getPrefs().edit().putBoolean(PREF_PROFILE_MEDIA_GROW, enabled).apply();
+    }
+
+    public static boolean isSettingsPressSpringEnabled() {
+        ensureCache();
+        return settingsPressSpring;
+    }
+
+    public static void setSettingsPressSpringEnabled(boolean enabled) {
+        ensureCache();
+        if (settingsPressSpring == enabled) {
+            return;
+        }
+        settingsPressSpring = enabled;
+        getPrefs().edit().putBoolean(PREF_SETTINGS_PRESS_SPRING, enabled).apply();
     }
 
     public static void notifyGlassAppearanceChanged() {

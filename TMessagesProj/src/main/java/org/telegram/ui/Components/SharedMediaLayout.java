@@ -1321,6 +1321,12 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     object.imageReceiver = imageReceiver;
                     object.allowTakeAnimation = true;
                     object.radius = object.imageReceiver.getRoundRadius(true);
+                    if (org.telegram.ui.MglaGlassConfig.isProfileMediaGrowEnabled()
+                            && (object.radius == null || (object.radius[0] == 0 && object.radius[1] == 0
+                            && object.radius[2] == 0 && object.radius[3] == 0))) {
+                        final int r = dp(4);
+                        object.radius = new int[]{r, r, r, r};
+                    }
                     object.thumb = object.imageReceiver.getBitmapSafe();
                     object.parentView.getLocationInWindow(coords);
                     object.clipTopAddition = 0;

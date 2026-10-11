@@ -160,15 +160,19 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         commonAnimCell = new TextSettingsCell(context);
         commonAnimCell.setBackground(null);
-        commonAnimCell.setTextAndValue("Общие анимации", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_COMMON), true);
+        commonAnimCell.setTextAndValue("Общие анимации", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_COMMON), false);
         commonAnimCell.setOnClickListener(v -> presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON)));
         animationBlock.addView(commonAnimCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        animationBlock.addView(MglaUi.createDivider(context));
+
         chatsAnimCell = new TextSettingsCell(context);
         chatsAnimCell.setBackground(null);
-        chatsAnimCell.setTextAndValue("В чатах", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_CHATS), true);
+        chatsAnimCell.setTextAndValue("В чатах", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_CHATS), false);
         chatsAnimCell.setOnClickListener(v -> presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_CHATS)));
         animationBlock.addView(chatsAnimCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        animationBlock.addView(MglaUi.createDivider(context));
 
         dialogsAnimCell = new TextSettingsCell(context);
         dialogsAnimCell.setBackground(null);
