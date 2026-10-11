@@ -391,6 +391,8 @@ public class NotificationCenter {
     public static final int mglaExportCanceled = totalEvents++;
     public static final int mglaExportFailed = totalEvents++;
     public static final int dpiBypassChanged = totalEvents++;
+    /** Fired when Mgla camera API (Cam1/Cam2) prefs change — ChatActivity recreates InstantCameraView. */
+    public static final int cameraApiSettingsChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 

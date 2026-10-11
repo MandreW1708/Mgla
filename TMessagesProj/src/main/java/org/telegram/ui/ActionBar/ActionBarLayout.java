@@ -1949,7 +1949,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     ObjectAnimator.ofFloat(containerView, View.TRANSLATION_X, width, 0f),
                     ObjectAnimator.ofFloat(this, "innerTranslationX", width, 0f)
             );
-            animatorSet.setDuration(280);
+            animatorSet.setDuration(220);
             animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
         } else {
             spatialOpenInProgress = true;
@@ -1963,13 +1963,13 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     ObjectAnimator.ofFloat(this, "innerTranslationX", width, 0f)
             );
             if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
-                animatorSet.setDuration(380);
+                animatorSet.setDuration(300);
                 animatorSet.setInterpolator(PUSH_SPRING);
             } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES) {
-                animatorSet.setDuration(280);
+                animatorSet.setDuration(220);
                 animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
             } else {
-                animatorSet.setDuration(300);
+                animatorSet.setDuration(240);
                 animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
             }
         }
@@ -2749,26 +2749,22 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     }
                     currentAnimation = animation;
                     // Reverse predictive-open is owned here (other custom transitions start themselves).
+                    // Never wait for needDelayOpenAnimation/firstLoading — that 200ms feels like a freeze.
                     if (animation == reverseOpenAnimation) {
                         final AnimatorSet toStart = animation;
-                        final boolean startsAlreadyFired = noDelay;
-                        final Runnable startReverse = () -> {
+                        if (!noDelay) {
+                            if (currentFragment != null) {
+                                currentFragment.onTransitionAnimationStart(false, false);
+                            }
+                            fragment.onTransitionAnimationStart(true, false);
+                        }
+                        // Next frame only: start transforms are already applied; avoid a long delay.
+                        AndroidUtilities.runOnUIThread(() -> {
                             if (currentAnimation != toStart || reverseOpenAnimation != toStart) {
                                 return;
                             }
-                            if (!startsAlreadyFired) {
-                                if (currentFragment != null) {
-                                    currentFragment.onTransitionAnimationStart(false, false);
-                                }
-                                fragment.onTransitionAnimationStart(true, false);
-                            }
                             toStart.start();
-                        };
-                        if (startsAlreadyFired) {
-                            AndroidUtilities.runOnUIThread(startReverse);
-                        } else {
-                            AndroidUtilities.runOnUIThread(startReverse, 200);
-                        }
+                        });
                     }
                 }
             }

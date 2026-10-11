@@ -2875,6 +2875,7 @@ public class ChatActivity extends BaseFragment implements
         getNotificationCenter().addPostponeNotificationsCallback(postponeNotificationsWhileLoadingCallback);
         getNotificationCenter().addObserver(this, NotificationCenter.closeChats);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.didSetNewTheme);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.cameraApiSettingsChanged);
 
         if (chatMode != MODE_SCHEDULED) {
             if (threadMessageId == 0) {
@@ -3399,6 +3400,7 @@ public class ChatActivity extends BaseFragment implements
 
         getNotificationCenter().removeObserver(this, NotificationCenter.closeChats);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.didSetNewTheme);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.cameraApiSettingsChanged);
 
         if (chatMode == 0 && AndroidUtilities.isTablet()) {
             getNotificationCenter().postNotificationName(NotificationCenter.openedChatChanged, dialog_id, getTopicId(), true);
@@ -10898,8 +10900,33 @@ public class ChatActivity extends BaseFragment implements
         dimBehindView(enable ? 0.2f : 0, false, true);
     }
 
+    private void destroyInstantCameraView() {
+        if (instantCameraView == null) {
+            return;
+        }
+        try {
+            instantCameraView.destroy(true);
+        } catch (Throwable ignore) {
+        }
+        if (instantCameraView.getParent() instanceof ViewGroup) {
+            ((ViewGroup) instantCameraView.getParent()).removeView(instantCameraView);
+        }
+        instantCameraView = null;
+    }
+
     private void checkInstantCameraView() {
-        if (instantCameraView != null || !CameraView.isCameraAllowed() || getContext() == null) {
+        if (!CameraView.isCameraAllowed() || getContext() == null) {
+            return;
+        }
+        // Recreate when Camera1 InstantCameraView ↔ Camera2 InstantCameraView2 selection changes.
+        boolean wantCamera2Recorder = InstantCameraViewBase.isUsingCamera2Implementation();
+        if (instantCameraView != null) {
+            boolean isCamera2Recorder = instantCameraView instanceof InstantCameraView2;
+            if (isCamera2Recorder != wantCamera2Recorder) {
+                destroyInstantCameraView();
+            }
+        }
+        if (instantCameraView != null) {
             return;
         }
         instantCameraView = InstantCameraViewBase.create(
@@ -20797,6 +20824,12 @@ public class ChatActivity extends BaseFragment implements
             // glass appearance toggles (e.g. clean header settings) are broadcast as theme changes —
             // re-apply the pinned/translate panel backgrounds so they don't stay stale
             updateTopPanelBackgrounds();
+        }
+        if (id == NotificationCenter.cameraApiSettingsChanged) {
+            // Camera API changed — drop the cached InstantCameraView so the next
+            // round-video open binds the newly selected stack (Cam1 / Cam2).
+            destroyInstantCameraView();
+            return;
         }
         if (id == NotificationCenter.messagesDidLoad) {
             didReceivedNotification_messagesDidLoad(id, account, args);

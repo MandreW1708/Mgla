@@ -37,6 +37,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
+import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.utils.settings.SharedSettings;
@@ -377,6 +378,7 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
                 .setCameraResolution(SharedSettings.roundVideoCameraResolution.get())
                 .setFrameRate(SharedSettings.roundVideoFrameRate.get())
                 .setCompositionEnabled(SharedSettings.roundVideoComposition.get())
+                .setMaximumDurationMs(MessageObject.MAX_ROUND_VIDEO_DURATION_MS)
                 .setListener(sessionListener)
                 .setOutputListener(upload)
                 .setScreenFlashController(this::setScreenFlashEnabled)
@@ -723,7 +725,7 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
 
         @Override
         public void onPreviewReady(long durationMs, long trimStartMs, long trimEndMs) {
-            progressView.setProgress(durationMs / 60_000f);
+            progressView.setProgress(durationMs / (float) MessageObject.MAX_ROUND_VIDEO_DURATION_MS);
             muted = false;
             muteImageView.setAlpha(0f);
             File previewFile = session == null ? null : session.getPreviewFile();
@@ -872,6 +874,7 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
         info.estimatedDuration = durationMs;
         info.estimatedSize = Math.max(1L, uploadInfo == null ? file.length() : uploadInfo.size);
         info.roundVideo = true;
+        MessageObject.clampRoundVideoEditedInfo(info);
         info.framerate = session == null || session.getActiveFrameRate() == null
                 ? RoundVideoSession.FrameRate.FPS_30.getValue()
                 : session.getActiveFrameRate().getValue();

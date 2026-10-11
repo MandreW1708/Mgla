@@ -48,7 +48,7 @@ import java.util.Comparator;
 import java.util.List;
 
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-public class Camera2Session implements RoundCameraSession {
+public class Camera2Session {
 
     private boolean isError;
     private boolean isSuccess;
@@ -490,7 +490,9 @@ public class Camera2Session implements RoundCameraSession {
             captureRequestBuilder.set(CaptureRequest.FLASH_MODE, flashing ? (recordingVideo ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_SINGLE) : CaptureRequest.FLASH_MODE_OFF);
 
             if (recordingVideo) {
-                captureRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<Integer>(30, 60));
+                // Pin 30 fps for round notes. Stock used (30, 60); variable fps on Camera2
+                // makes InstantCameraView timestamps race ahead and freeze the preview/encode.
+                captureRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(30, 30));
                 captureRequestBuilder.set(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD);
             }
 

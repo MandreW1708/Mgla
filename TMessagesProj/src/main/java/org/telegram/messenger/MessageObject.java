@@ -144,6 +144,36 @@ public class MessageObject {
     public static final int TYPE_LOADING = 6;
     public static final int TYPE_GIF = 8;
     public static final int TYPE_FILE = 9;
+    /**
+     * Soft cap for round video notes. Telegram demotes notes with duration &gt;= 60s to a regular
+     * video/file; keep a margin so encoder lag / float duration never crosses the limit.
+     */
+    public static final long MAX_ROUND_VIDEO_DURATION_MS = 59_500L;
+
+    /**
+     * Ensures a round {@link VideoEditedInfo} stays under {@link #MAX_ROUND_VIDEO_DURATION_MS}.
+     * When the finished source is longer, sets {@code endTime} so {@link VideoEditedInfo#needConvert()}
+     * remuxes a trimmed note instead of uploading an over-limit file (Telegram demotes those to files).
+     */
+    public static void clampRoundVideoEditedInfo(VideoEditedInfo info) {
+        if (info == null || !info.roundVideo || info.estimatedDuration <= MAX_ROUND_VIDEO_DURATION_MS) {
+            return;
+        }
+        if (!info.notReadyYet && (info.endTime < 0 || info.endTime > MAX_ROUND_VIDEO_DURATION_MS)) {
+            // Keep estimatedDuration longer than endTime so needConvert() stays true until remux.
+            info.endTime = MAX_ROUND_VIDEO_DURATION_MS;
+            return;
+        }
+        info.estimatedDuration = MAX_ROUND_VIDEO_DURATION_MS;
+        if (info.endTime > MAX_ROUND_VIDEO_DURATION_MS) {
+            info.endTime = MAX_ROUND_VIDEO_DURATION_MS;
+        }
+    }
+
+    public static double clampRoundVideoDurationSec(double durationSec) {
+        return Math.min(Math.max(0, durationSec), MAX_ROUND_VIDEO_DURATION_MS / 1000.0);
+    }
+
     public static final int TYPE_DATE = 10;
     public static final int TYPE_ACTION_PHOTO = 11;
     public static final int TYPE_CONTACT = 12;

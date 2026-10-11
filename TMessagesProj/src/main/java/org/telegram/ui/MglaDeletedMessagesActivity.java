@@ -3,6 +3,7 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.TextUtils;
@@ -139,7 +140,23 @@ public class MglaDeletedMessagesActivity extends MglaBaseSettingsActivity {
                 }
                 return super.getNewDrawableMotion();
             }
+
+            // Match ChatActivity: draw wallpaper edge-to-edge. Bitmap/pattern global walls otherwise
+            // clip below actionBarHeight and leave a solid strip (our opaque base) above the header.
+            @Override
+            protected boolean isActionBarVisible() {
+                return false;
+            }
+
+            @Override
+            protected boolean isStatusBarVisible() {
+                return false;
+            }
         };
+        // Opaque base so the open ChatActivity under us (pinned bar, bubbles) cannot show through
+        // empty list areas when wallpaper draw is delayed. Kept behind the full-bleed wallpaper.
+        contentView.setBackground(new ColorDrawable(Theme.getColor(Theme.key_windowBackgroundWhite)));
+        contentView.setClickable(true);
         applyChatWallpaper();
         fragmentView = contentView;
 
@@ -239,7 +256,12 @@ public class MglaDeletedMessagesActivity extends MglaBaseSettingsActivity {
         boolean motion = wallpaper != null
             ? wallpaper.settings != null && wallpaper.settings.motion
             : Theme.isWallpaperMotion();
-        contentView.setBackgroundImage(resolveChatWallpaper(), motion);
+        Drawable drawable = resolveChatWallpaper();
+        if (drawable == null) {
+            drawable = new ColorDrawable(Theme.getColor(Theme.key_windowBackgroundWhite));
+            motion = false;
+        }
+        contentView.setBackgroundImage(drawable, motion);
     }
 
     // region data

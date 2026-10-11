@@ -9,9 +9,12 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.utils.settings.SharedSettings;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -21,6 +24,7 @@ import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.InstantCameraViewBase;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.utils.camera.roundvideo.RoundVideoSession;
@@ -88,7 +92,16 @@ public class RoundVideoSettingsActivity extends BaseFragment {
 
     private void onRowClicked(int position) {
         if (position == ROW_ENABLED) {
-            SharedSettings.roundVideoCamera2Enabled.set(!SharedSettings.roundVideoCamera2Enabled.get());
+            boolean enabled = !SharedSettings.roundVideoCamera2Enabled.get();
+            SharedSettings.roundVideoCamera2Enabled.set(enabled);
+            InstantCameraViewBase.setUseCamera2Implementation(enabled);
+            SharedConfig.setCameraApi(enabled ? 1 : 0);
+            SharedConfig.useCamera2Force = enabled;
+            ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("useCamera2Force_2", enabled)
+                    .apply();
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.cameraApiSettingsChanged);
             adapter.notifyDataSetChanged();
             return;
         }

@@ -233,6 +233,11 @@ public class MglaDeletedStorage {
         if (database == null || message == null) {
             return;
         }
+        // Never archive emptied once-stubs — they would REPLACE a good full copy and show up as
+        // "Photo/Video has expired" junk in «Удалённые».
+        if (isEmptiedDisappearingMedia(message)) {
+            return;
+        }
         ensureTable(database);
 
         SQLitePreparedStatement state = null;
@@ -240,6 +245,15 @@ public class MglaDeletedStorage {
         try {
             if (message.dialog_id == 0) {
                 message.dialog_id = dialogId;
+            }
+            // Keep an existing richer archive if this write is somehow worse.
+            TLRPC.Message existing = loadMessage(database, currentAccount, dialogId, message.id);
+            if (existing != null && !isEmptiedDisappearingMedia(existing) && isEmptiedDisappearingMedia(message)) {
+                return;
+            }
+            if (existing != null && isDisappearingMedia(existing) && !isDisappearingMedia(message)
+                    && message.media != null && existing.media != null) {
+                return;
             }
             data = new NativeByteBuffer(message.getObjectSize());
             message.serializeToStream(data);
@@ -398,6 +412,11 @@ public class MglaDeletedStorage {
                 message.readAttachPath(data, clientUserId);
                 if (message.dialog_id == 0) {
                     message.dialog_id = dialogId;
+                }
+                // Skip emptied once-stubs that leaked into the archive (no real media left).
+                if (isEmptiedDisappearingMedia(message)) {
+                    data.reuse();
+                    continue;
                 }
                 message.mglaDeleted = true;
                 out.add(message);

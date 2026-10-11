@@ -1512,7 +1512,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             float progressToSeekbarStep1 = 0f;
             float progressToSeekbarStep2 = 0;
             float exitProgress2 = 0f;
-            float hidePause = hidePauseT.set(isInVideoMode && millisecondsRecorded >= 59_000);
+            float hidePause = hidePauseT.set(isInVideoMode && millisecondsRecorded >= MessageObject.MAX_ROUND_VIDEO_DURATION_MS);
 
             if (transformToSeekbar != 0 && audioTimelineView != null) {
                 float step1Time = 0.38f;

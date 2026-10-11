@@ -237,7 +237,6 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1114, "Кнопка «Создать»", hub, animDialogs, appearanceIcon, animDialogsScreen, "Кнопка «Создать»", "appearance/dialogs-fab-morph"));
 
         l.add(new Entry(1080, "API", hub, camera, cameraIcon, cameraScreen, "API", "camera/api"));
-        l.add(new Entry(1081, "60 FPS", hub, camera, cameraIcon, cameraScreen, "60 FPS", "camera/60fps"));
 
         l.add(new Entry(1090, "Авто-обход", hub, connection, connectionIcon, connectionScreen, "Авто-обход", "connection/websocket"));
         l.add(new Entry(1091, "Обход через ByeDPI", hub, connection, connectionIcon, connectionScreen, "Обход через ByeDPI", "connection/byedpi"));
