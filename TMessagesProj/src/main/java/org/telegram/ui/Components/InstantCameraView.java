@@ -80,7 +80,6 @@ import org.telegram.messenger.ImageLoader;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
-import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
@@ -176,7 +175,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
     private boolean recording;
     private long recordedTime;
     private boolean cancelled;
-    /** True after we auto-paused at {@link MessageObject#MAX_ROUND_VIDEO_DURATION_MS}. */
     private boolean autoStoppedAtDurationLimit;
 
     private CameraGLThread cameraThread;
@@ -185,26 +183,12 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
     private Size aspectRatio = SharedConfig.roundCamera16to9 ? new Size(16, 9) : new Size(4, 3);
     private TextureView textureView;
     private BackupImageView textureOverlayView;
-    // Frozen at construct like stock Telegram InstantCameraView. ChatActivity recreates
-    // this view when cameraApi prefs change.
     private final boolean useCamera2 = SharedConfig.isUsingCamera2(currentAccount);
-
     private CameraSession cameraSession;
     private boolean bothCameras;
     private Camera2Session[] camera2Sessions = new Camera2Session[2];
     private Camera2Session camera2SessionCurrent;
     private boolean needDrawFlickerStub;
-
-    /**
-     * Stock Telegram VideoEditedInfo metadata for Cam1/Cam2
-     * (DrKLO InstantCameraView: framerate 25, 360×360).
-     */
-    private void applyStockRoundVideoEditedInfo(VideoEditedInfo info) {
-        info.roundVideo = true;
-        info.framerate = 25;
-        info.resultWidth = info.originalWidth = 360;
-        info.resultHeight = info.originalHeight = 360;
-    }
 
     private boolean isCameraSessionInitiated() {
         if (useCamera2) {
@@ -610,7 +594,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
     }
 
     public void destroy(boolean async) {
-        // Stock Telegram: tear down the stack selected at construct (Cam2 or Cam1).
         if (useCamera2) {
             for (int a = 0; a < camera2Sessions.length; ++a) {
                 if (camera2Sessions[a] != null) {
@@ -618,13 +601,10 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                     camera2Sessions[a] = null;
                 }
             }
-            camera2SessionCurrent = null;
-            bothCameras = false;
         } else {
             if (cameraSession != null) {
                 cameraSession.destroy();
                 CameraController.getInstance().close(cameraSession, !async ? new CountDownLatch(1) : null, null);
-                cameraSession = null;
             }
         }
     }
@@ -636,9 +616,9 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         rect.set(x - dp(8), y - dp(8), x + cameraContainer.getMeasuredWidth() + dp(8), y + cameraContainer.getMeasuredHeight() + dp(8));
         if (recording) {
             recordedTime = System.currentTimeMillis() - recordStartTime + recordPlusTime;
-            progress = Math.min(1f, recordedTime / (float) MessageObject.MAX_ROUND_VIDEO_DURATION_MS);
-            // Hard-stop before Telegram's 60s demotion threshold (Camera1/2/X share this path).
-            if (!autoStoppedAtDurationLimit && recordedTime >= MessageObject.MAX_ROUND_VIDEO_DURATION_MS) {
+            progress = Math.min(1f, recordedTime / 60000.0f);
+            // Stop under Telegram's 60s threshold: server demotes notes >= 60s to regular videos.
+            if (!autoStoppedAtDurationLimit && recordedTime >= 59_500) {
                 autoStoppedAtDurationLimit = true;
                 AndroidUtilities.runOnUIThread(this::autoStopAtDurationLimit);
             }
@@ -687,15 +667,10 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         }
     }
 
-    /** Pause into preview when the 60s round-video budget is exhausted. */
     private void autoStopAtDurationLimit() {
-        if (!recording) {
-            return;
+        if (recording) {
+            togglePause();
         }
-        if (BuildVars.LOGS_ENABLED) {
-            FileLog.d("InstantCamera auto-stop at max round duration recordedTime=" + recordedTime);
-        }
-        togglePause();
     }
 
     public void togglePause() {
@@ -717,8 +692,8 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 videoEncoder.pause();
             }
         } else if (videoEncoder != null) {
-            if (recordedTime >= MessageObject.MAX_ROUND_VIDEO_DURATION_MS) {
-                // Already at Telegram's round-video budget — stay in preview/send.
+            if (recordedTime >= 59_500) {
+                // At the round-video duration cap — stay in preview/send.
                 return;
             }
             videoEncoder.resume();
@@ -817,12 +792,29 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         }
 
         if (useCamera2) {
-            // Single Camera2 session only — dual front+back freezes preview on many devices.
-            bothCameras = false;
-            camera2SessionCurrent = camera2Sessions[isFrontface ? 0 : 1] = Camera2Session.create(isFrontface, MessagesController.getInstance(UserConfig.selectedAccount).roundVideoSize, MessagesController.getInstance(UserConfig.selectedAccount).roundVideoSize);
-            if (camera2SessionCurrent == null) return;
-            camera2SessionCurrent.setRecordingVideo(true);
-            previewSize[0] = new Size(camera2SessionCurrent.getPreviewWidth(), camera2SessionCurrent.getPreviewHeight());
+            bothCameras = DualCameraView.roundDualAvailableStatic(getContext());
+            if (bothCameras) {
+                for (int a = 0; a < 2; ++a) {
+                    if (camera2Sessions[a] == null) {
+                        camera2Sessions[a] = Camera2Session.create(a == 0, MessagesController.getInstance(UserConfig.selectedAccount).roundVideoSize, MessagesController.getInstance(UserConfig.selectedAccount).roundVideoSize);
+                        if (camera2Sessions[a] != null) {
+                            camera2Sessions[a].setRecordingVideo(true);
+                            previewSize[a] = new Size(camera2Sessions[a].getPreviewWidth(), camera2Sessions[a].getPreviewHeight());
+                        }
+                    }
+                }
+                updateFlash();
+                camera2SessionCurrent = camera2Sessions[isFrontface ? 0 : 1];
+                if (camera2SessionCurrent != null && camera2Sessions[isFrontface ? 1 : 0] == null) {
+                    bothCameras = false;
+                }
+                if (camera2SessionCurrent == null) return;
+            } else {
+                camera2SessionCurrent = camera2Sessions[isFrontface ? 0 : 1] = Camera2Session.create(isFrontface, MessagesController.getInstance(UserConfig.selectedAccount).roundVideoSize, MessagesController.getInstance(UserConfig.selectedAccount).roundVideoSize);
+                if (camera2SessionCurrent == null) return;
+                camera2SessionCurrent.setRecordingVideo(true);
+                previewSize[0] = new Size(camera2SessionCurrent.getPreviewWidth(), camera2SessionCurrent.getPreviewHeight());
+            }
         }
         textureView = new TextureView(getContext());
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
@@ -1006,12 +998,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 videoEditedInfo = new VideoEditedInfo();
                 videoEditedInfo.startTime = -1;
                 videoEditedInfo.endTime = -1;
-                videoEditedInfo.estimatedDuration = recordedTime;
-                videoEditedInfo.originalPath = cameraFile != null ? cameraFile.getAbsolutePath() : null;
             }
-            // Stock Cam1/Cam2 metadata + always round_message (Mgla: never demote to a file).
-            applyStockRoundVideoEditedInfo(videoEditedInfo);
-            MessageObject.clampRoundVideoEditedInfo(videoEditedInfo);
             if (videoEditedInfo.needConvert()) {
                 file = null;
                 encryptedFile = null;
@@ -1022,7 +1009,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 long endTime = videoEditedInfo.endTime >= 0 ? videoEditedInfo.endTime : videoEditedInfo.estimatedDuration;
                 videoEditedInfo.estimatedDuration = endTime - startTime;
                 videoEditedInfo.estimatedSize = Math.max(1, (long) (size * (videoEditedInfo.estimatedDuration / totalDuration)));
-                videoEditedInfo.bitrate = 1000000; // stock InstantCameraView
+                videoEditedInfo.bitrate = 1000000;
                 if (videoEditedInfo.startTime > 0) {
                     videoEditedInfo.startTime *= 1000;
                 }
@@ -1033,8 +1020,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             } else {
                 videoEditedInfo.estimatedSize = Math.max(1, size);
             }
-            applyStockRoundVideoEditedInfo(videoEditedInfo);
-            MessageObject.clampRoundVideoEditedInfo(videoEditedInfo);
             videoEditedInfo.file = file;
             videoEditedInfo.encryptedFile = encryptedFile;
             videoEditedInfo.key = key;
@@ -1521,7 +1506,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         private final int DO_REINIT_MESSAGE = 2;
         private final int DO_SETSESSION_MESSAGE = 3;
         private final int DO_FLIP = 4;
-        private final int DO_UPDATE_TEXDATA = 5;
 
         private int drawProgram;
         private int vertexMatrixHandle;
@@ -1745,14 +1729,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             Handler handler = getHandler();
             if (handler != null) {
                 sendMessage(handler.obtainMessage(DO_REINIT_MESSAGE), 0);
-            }
-        }
-
-        /** пересобрать кроп-текстуру под актуальный previewSize без пересоздания поверхностей */
-        public void updateTexData() {
-            Handler handler = getHandler();
-            if (handler != null) {
-                sendMessage(handler.obtainMessage(DO_UPDATE_TEXDATA), 0);
             }
         }
 
@@ -2023,23 +1999,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                     textureBuffer.put(texData).position(0);
                     break;
                 }
-                case DO_UPDATE_TEXDATA: {
-                    updateScale();
-
-                    float tX = 1.0f / scaleX / 2.0f;
-                    float tY = 1.0f / scaleY / 2.0f;
-
-                    float[] texData = {
-                            0.5f - tX, 0.5f - tY,
-                            0.5f + tX, 0.5f - tY,
-                            0.5f - tX, 0.5f + tY,
-                            0.5f + tX, 0.5f + tY
-                    };
-
-                    textureBuffer = ByteBuffer.allocateDirect(texData.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
-                    textureBuffer.put(texData).position(0);
-                    break;
-                }
             }
         }
 
@@ -2174,10 +2133,8 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
 
         private static final String VIDEO_MIME_TYPE = "video/avc";
         private static final String AUDIO_MIME_TYPE = "audio/mp4a-latm";
-        private static final int IFRAME_INTERVAL = 1;
-
-        // Stock Telegram InstantCameraView: always 30 fps for Cam1/Cam2.
         private static final int FRAME_RATE = 30;
+        private static final int IFRAME_INTERVAL = 1;
 
         private File videoFile;
         private File fileToWrite;
@@ -2380,7 +2337,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             }
 
             started = true;
-            // roundVideoSize only — oversized notes get demoted to regular video by the server
             int resolution = MessagesController.getInstance(currentAccount).roundVideoSize;
             int bitrate = MessagesController.getInstance(currentAccount).roundVideoBitrate * 1024;
             AndroidUtilities.runOnUIThread(() -> {
@@ -2560,14 +2516,12 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                         for (int a = input.lastWroteBuffer; a <= input.results; a++) {
                             if (a < input.results) {
                                 long totalTime = input.offset[a] - audioStartTime;
-                                final long maxAudioUs = MessageObject.MAX_ROUND_VIDEO_DURATION_MS * 1000L;
-                                // videoLast is nanoseconds; audio offsets are microseconds (Camera2 VFR desync fix).
-                                if (!running && (input.offset[a] >= videoLast / 1000 - desyncTime || totalTime >= maxAudioUs)) {
+                                if (!running && (input.offset[a] >= videoLast - desyncTime || totalTime >= 60_000000)) {
                                     if (BuildVars.LOGS_ENABLED) {
-                                        if (totalTime >= maxAudioUs) {
-                                            FileLog.d("InstantCamera stop audio encoding because recorded time more than max round duration");
+                                        if (totalTime >= 60_000000) {
+                                            FileLog.d("InstantCamera stop audio encoding because recorded time more than 60s");
                                         } else {
-                                            FileLog.d("InstantCamera stop audio encoding because of stoped video recording at " + input.offset[a] + " last video " + (videoLast / 1000));
+                                            FileLog.d("InstantCamera stop audio encoding because of stoped video recording at " + input.offset[a] + " last video " + videoLast);
                                         }
 
                                     }
@@ -2655,18 +2609,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 }
                 lastTimestamp = timestampNanos;
             } else {
-                // Guard Camera2 VFR timestamps — unguarded dts make the encoder race ahead then freeze.
-                long dtTimestamps = (timestampNanos - lastTimestamp);
-                long dtReal = (System.currentTimeMillis() - lastCommitedFrameTime) * 1000000;
-                if (dtTimestamps < 0 || Math.abs(dtReal - dtTimestamps) > 100_000_000) {
-                    dt = dtReal;
-                } else {
-                    dt = dtTimestamps;
-                }
-                if (dt < 0) {
-                    dt = 0;
-                }
-                alphaDt = dtTimestamps;
+                alphaDt = dt = (timestampNanos - lastTimestamp);
                 lastTimestamp = timestampNanos;
             }
             firstVideoFrameSincePause = false;
@@ -2865,6 +2808,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
 //            FileLoader.getInstance(currentAccount).cancelFileUpload(videoFile.getAbsolutePath(), false);
             AndroidUtilities.runOnUIThread(() -> {
                 videoEditedInfo = new VideoEditedInfo();
+                videoEditedInfo.roundVideo = true;
                 videoEditedInfo.startTime = -1;
                 videoEditedInfo.endTime = -1;
                 videoEditedInfo.file = file;
@@ -2872,11 +2816,12 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 videoEditedInfo.key = key;
                 videoEditedInfo.iv = iv;
                 videoEditedInfo.estimatedSize = Math.max(1, size);
-                applyStockRoundVideoEditedInfo(videoEditedInfo);
+                videoEditedInfo.framerate = 25;
+                videoEditedInfo.resultWidth = videoEditedInfo.originalWidth = 360;
+                videoEditedInfo.resultHeight = videoEditedInfo.originalHeight = 360;
                 videoEditedInfo.originalPath = previewFile.getAbsolutePath();
                 setupVideoPlayer(previewFile);
                 videoEditedInfo.estimatedDuration = recordedTime;
-                MessageObject.clampRoundVideoEditedInfo(videoEditedInfo);
                 NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.audioDidSent, recordingGuid, videoEditedInfo, previewFile.getAbsolutePath(), keyframeThumbs);
             });
         }
@@ -2962,16 +2907,18 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                         videoEditedInfo.startTime = -1;
                         videoEditedInfo.endTime = -1;
                         videoEditedInfo.estimatedSize = Math.max(1, size);
+                        videoEditedInfo.roundVideo = true;
                         videoEditedInfo.file = file;
                         videoEditedInfo.encryptedFile = encryptedFile;
                         videoEditedInfo.key = key;
                         videoEditedInfo.iv = iv;
-                        applyStockRoundVideoEditedInfo(videoEditedInfo);
+                        videoEditedInfo.framerate = 25;
+                        videoEditedInfo.resultWidth = videoEditedInfo.originalWidth = 360;
+                        videoEditedInfo.resultHeight = videoEditedInfo.originalHeight = 360;
                         videoEditedInfo.originalPath = videoFile.getAbsolutePath();
                         videoEditedInfo.notReadyYet = true;
                         videoEditedInfo.thumb = firstFrameThumb;
                         videoEditedInfo.estimatedDuration = recordedTime;
-                        MessageObject.clampRoundVideoEditedInfo(videoEditedInfo);
                         firstFrameThumb = null;
                         MediaController.PhotoEntry entry = new MediaController.PhotoEntry(0, 0, 0, videoFile.getAbsolutePath(), 0, true, 0, 0, 0);
                         if (sendOptions != null) {
@@ -3112,16 +3059,15 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                         } else {
                             videoEditedInfo.estimatedSize = Math.max(1, size);
                         }
+                        videoEditedInfo.roundVideo = true;
                         videoEditedInfo.file = file;
                         videoEditedInfo.encryptedFile = encryptedFile;
                         videoEditedInfo.key = key;
                         videoEditedInfo.iv = iv;
-                        applyStockRoundVideoEditedInfo(videoEditedInfo);
+                        videoEditedInfo.framerate = 25;
+                        videoEditedInfo.resultWidth = videoEditedInfo.originalWidth = 360;
+                        videoEditedInfo.resultHeight = videoEditedInfo.originalHeight = 360;
                         videoEditedInfo.originalPath = videoFile.getAbsolutePath();
-                        if (videoEditedInfo.estimatedDuration <= 0) {
-                            videoEditedInfo.estimatedDuration = recordedTime;
-                        }
-                        MessageObject.clampRoundVideoEditedInfo(videoEditedInfo);
                         final VideoEditedInfo info = videoEditedInfo;
                         if (send == ENCODER_SEND_SEND) {
                             if (delegate.isInScheduleMode()) {
@@ -3148,7 +3094,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                         } else {
                             setupVideoPlayer(videoFile);
                             info.estimatedDuration = recordedTime;
-                            MessageObject.clampRoundVideoEditedInfo(info);
                             NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.audioDidSent, recordingGuid, info, videoFile.getAbsolutePath(), keyframeThumbs);
                         }
                     });
@@ -3327,8 +3272,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                     recordPlusTime = fromPause ? recordedTime : 0;
                     recordStartTime = System.currentTimeMillis();
                     recording = true;
-                    // Allow another auto-stop if the user resumes at/near the cap.
-                    autoStoppedAtDurationLimit = false;
                     updateFlash();
                     invalidate();
                     NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.recordStarted, recordingGuid, false);

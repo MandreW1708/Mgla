@@ -15,7 +15,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
@@ -24,11 +23,11 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.InstantCameraViewBase;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.utils.settings.SharedSettings;
 
 /**
  * Настройки камеры: выбор API «1 / 2» (стоковые Camera1 и Camera2 из Telegram).
- * Порядок api: 0 — Camera1, 1 — Camera2 ({@link SharedConfig#cameraApi}).
+ * Camera 2 — стоковый {@link InstantCameraViewBase} на Camera2, Camera 1 — классическая
+ * реализация с принудительным старым API ({@link SharedConfig#setUseCamera2Force}).
  */
 public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
 
@@ -133,16 +132,10 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
         }
         selectedApi = api;
         boolean camera2 = api == API_2;
-        SharedConfig.setCameraApi(api);
-        SharedConfig.useCamera2Force = camera2;
-        getParentActivity().getSharedPreferences("mainconfig", Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean("useCamera2Force_2", camera2)
-                .apply();
-        // Camera 2 → InstantCameraView2 + Round Video settings (480p / bitrate / 60fps).
+        // Camera 2 → стоковый InstantCameraView2; Camera 1 → классический InstantCameraView
+        // с принудительным старым API. Оба пишутся только здесь — никаких дублей.
         InstantCameraViewBase.setUseCamera2Implementation(camera2);
-        SharedSettings.roundVideoCamera2Enabled.set(camera2);
-        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.cameraApiSettingsChanged);
+        SharedConfig.setUseCamera2Force(camera2 ? null : false);
         for (int i = 0; i < buttons.length; i++) {
             buttons[i].setSelectedState(i == api, true);
         }

@@ -11900,9 +11900,6 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             boolean isEncrypted = DialogObject.isEncryptedDialog(dialogId);
 
             boolean isRound = videoEditedInfo != null && videoEditedInfo.roundVideo;
-            if (isRound) {
-                MessageObject.clampRoundVideoEditedInfo(videoEditedInfo);
-            }
             Bitmap thumb = null;
             String thumbKey = null;
 
@@ -12021,18 +12018,6 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         }
                         fillVideoAttribute(videoPath, attributeVideo, null);
                     }
-                    if (isRound) {
-                        // Never let measured/encoder duration cross Telegram's demotion threshold.
-                        attributeVideo.round_message = true;
-                        attributeVideo.duration = MessageObject.clampRoundVideoDurationSec(attributeVideo.duration);
-                        if (videoEditedInfo != null) {
-                            // Prefer square dimensions from the round encoder when MediaMetadataRetriever disagrees.
-                            if (videoEditedInfo.resultWidth > 0 && videoEditedInfo.resultHeight > 0) {
-                                attributeVideo.w = videoEditedInfo.resultWidth;
-                                attributeVideo.h = videoEditedInfo.resultHeight;
-                            }
-                        }
-                    }
                 } else if (document.thumbs.isEmpty()) {
                     if (videoEditedInfo != null && videoEditedInfo.notReadyYet) {
                         thumb = videoEditedInfo.thumb;
@@ -12078,31 +12063,6 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     File cacheFile = new File(FileLoader.getDirectory(FileLoader.MEDIA_DIR_CACHE), fileName);
                     SharedConfig.saveConfig();
                     path = cacheFile.getAbsolutePath();
-                }
-
-                // Cached re-sends / alternate attribute types must still leave as a video note.
-                if (isRound && document != null) {
-                    boolean hasRoundAttr = false;
-                    for (int a = 0; a < document.attributes.size(); a++) {
-                        TLRPC.DocumentAttribute attr = document.attributes.get(a);
-                        if (attr instanceof TLRPC.TL_documentAttributeVideo) {
-                            TLRPC.TL_documentAttributeVideo videoAttr = (TLRPC.TL_documentAttributeVideo) attr;
-                            videoAttr.round_message = true;
-                            videoAttr.duration = MessageObject.clampRoundVideoDurationSec(videoAttr.duration);
-                            hasRoundAttr = true;
-                        }
-                    }
-                    if (!hasRoundAttr) {
-                        TLRPC.TL_documentAttributeVideo attributeVideo = new TLRPC.TL_documentAttributeVideo();
-                        attributeVideo.supports_streaming = true;
-                        attributeVideo.round_message = true;
-                        if (videoEditedInfo != null) {
-                            attributeVideo.w = videoEditedInfo.resultWidth;
-                            attributeVideo.h = videoEditedInfo.resultHeight;
-                            attributeVideo.duration = MessageObject.clampRoundVideoDurationSec(videoEditedInfo.estimatedDuration / 1000.0);
-                        }
-                        document.attributes.add(attributeVideo);
-                    }
                 }
 
                 final TLRPC.TL_document videoFinal = document;

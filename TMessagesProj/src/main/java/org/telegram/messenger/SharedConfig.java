@@ -263,8 +263,6 @@ public class SharedConfig {
     public static boolean updateStickersOrderOnSend = true;
     public static boolean bigCameraForRound;
     public static Boolean useCamera2Force;
-    /** 0 = Camera1, 1 = Camera2 (Mgla settings). Legacy CameraX value 2 is migrated to 1. */
-    public static int cameraApi;
     public static boolean useNewBlur;
     public static boolean useSurfaceInStories;
     public static boolean photoViewerBlur = true;
@@ -674,12 +672,6 @@ public class SharedConfig {
             bigCameraForRound = preferences.getBoolean("bigCameraForRound", false);
             useNewBlur = preferences.getBoolean("useNewBlur", true);
             useCamera2Force = !preferences.contains("useCamera2Force_2") ? null : preferences.getBoolean("useCamera2Force_2", false);
-            cameraApi = preferences.getInt("cameraApi", 0);
-            if (cameraApi == 2) {
-                // Former CameraX selection — migrate to stock Camera2.
-                cameraApi = 1;
-                preferences.edit().putInt("cameraApi", cameraApi).remove("cameraX60Fps").apply();
-            }
             useSurfaceInStories = preferences.getBoolean("useSurfaceInStories", Build.VERSION.SDK_INT >= 30);
             payByInvoice = preferences.getBoolean("payByInvoice", false);
             photoViewerBlur = preferences.getBoolean("photoViewerBlur", true);
@@ -1812,42 +1804,28 @@ public class SharedConfig {
                 .apply();
     }
 
-    /**
-     * Camera1 vs Camera2 for round video / camera UI.
-     * {@code cameraApi == 0} forces Camera1, {@code cameraApi == 1} forces Camera2;
-     * otherwise stock Telegram ({@code useCamera2Force} / {@code androidDisableRoundCamera2}).
-     */
     public static boolean isUsingCamera2(int currentAccount) {
-        if (cameraApi == 1) {
-            return true;
-        }
-        if (cameraApi == 0) {
-            return false;
-        }
-        return useCamera2Force == null
-                ? !MessagesController.getInstance(currentAccount).androidDisableRoundCamera2
-                : useCamera2Force;
+        return useCamera2Force == null ? !MessagesController.getInstance(currentAccount).androidDisableRoundCamera2 : useCamera2Force;
     }
 
-    public static void setCameraApi(int api) {
-        if (api != 0 && api != 1) {
-            api = 1;
-        }
-        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
-                .edit()
-                .putInt("cameraApi", cameraApi = api)
-                .apply();
-    }
-
-    /** Stock Telegram toggle between Camera1 and Camera2. */
     public static void toggleUseCamera2(int currentAccount) {
-        boolean next = !isUsingCamera2(currentAccount);
-        useCamera2Force = next;
-        setCameraApi(next ? 1 : 0);
-        ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE)
-                .edit()
-                .putBoolean("useCamera2Force_2", useCamera2Force)
-                .apply();
+        setUseCamera2Force(!isUsingCamera2(currentAccount));
+    }
+
+    /**
+     * Mgla camera settings: explicit Camera1/Camera2 override for the legacy round-video view.
+     * {@code null} restores stock Telegram behavior (server flag {@code androidDisableRoundCamera2}).
+     */
+    public static void setUseCamera2Force(Boolean value) {
+        useCamera2Force = value;
+        android.content.SharedPreferences.Editor editor = ApplicationLoader.applicationContext
+                .getSharedPreferences("mainconfig", Activity.MODE_PRIVATE).edit();
+        if (value == null) {
+            editor.remove("useCamera2Force_2");
+        } else {
+            editor.putBoolean("useCamera2Force_2", value);
+        }
+        editor.apply();
     }
 
     @Deprecated

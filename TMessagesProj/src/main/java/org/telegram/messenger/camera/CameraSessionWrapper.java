@@ -79,6 +79,7 @@ public class CameraSessionWrapper {
         }
     }
 
+
     public void setCurrentFlashMode(String flashMode) {
         if (camera2Session != null) {
             // TODO

@@ -491,7 +491,7 @@ public final class RoundVideoSession {
         public @NonNull FrameRate getFrameRate() { return frameRate; }
     }
 
-    /** Stay under Telegram's 60s demotion threshold (same as {@code MessageObject.MAX_ROUND_VIDEO_DURATION_MS}). */
+    // Stay under Telegram's 60s threshold: server demotes notes with duration >= 60s to regular videos.
     private static final long DEFAULT_MAXIMUM_DURATION_MS = 59_500L;
     private static final long MINIMUM_TRIM_DURATION_MS = 800L;
     private static final long PREVIEW_PROGRESS_DELAY_MS = 33L;
