@@ -97,7 +97,8 @@ public final class MtprotoHandshake {
 
             short dcIdx = ByteBuffer.wrap(decrypted, DC_IDX_POS, 2).order(ByteOrder.LITTLE_ENDIAN).getShort();
             int dcId = Math.abs((int) dcIdx);
-            if (dcId <= 0 || dcId > 1000) return null;
+            // CDN / test DCs can sit above 1000; keep a generous ceiling.
+            if (dcId <= 0 || dcId > 10000) return null;
 
             int protoInt = ByteBuffer.wrap(protoTag).order(ByteOrder.LITTLE_ENDIAN).getInt();
 

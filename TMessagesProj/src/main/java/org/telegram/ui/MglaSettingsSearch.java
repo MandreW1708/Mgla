@@ -211,7 +211,10 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1069, sideMenu, hub, appearance, appearanceIcon, sideMenuScreen, null, "appearance/side-menu"));
         l.add(new Entry(1070, "Включить боковое меню", hub, sideMenu, appearanceIcon, sideMenuScreen, "Включить боковое меню", "appearance/side-menu/enable"));
         l.add(new Entry(1071, "Настроить элементы", hub, sideMenu, appearanceIcon, sideMenuScreen, "Настроить элементы", "appearance/side-menu/elements"));
-        l.add(new Entry(1072, "В стиле MD3", hub, appearance, appearanceIcon, appearanceScreen, "В стиле MD3", "appearance/md3-predictive-back"));
+        l.add(new Entry(1072, "Анимация назад", hub, appearance, appearanceIcon, appearanceScreen, "Анимация назад", "appearance/predictive-back"));
+        l.add(new Entry(1076, "В стиле MD3", hub, "Анимация назад", appearanceIcon, appearanceScreen, "В стиле MD3", "appearance/predictive-back/md3"));
+        l.add(new Entry(1077, "Страницы", hub, "Анимация назад", appearanceIcon, appearanceScreen, "Страницы", "appearance/predictive-back/pages"));
+        l.add(new Entry(1078, "Выталкивание", hub, "Анимация назад", appearanceIcon, appearanceScreen, "Выталкивание", "appearance/predictive-back/push"));
         l.add(new Entry(1073, "Анимация текста", hub, appearance, appearanceIcon, MglaTextAnimationActivity::new, null, "appearance/text-animation"));
         l.add(new Entry(1074, "Эффект анимации текста", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Эффект", "appearance/text-animation/effect"));
         l.add(new Entry(1075, "Каскад при вставке", hub, "Анимация текста", appearanceIcon, MglaTextAnimationActivity::new, "Каскад", "appearance/text-animation/cascade"));

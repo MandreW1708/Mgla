@@ -13,6 +13,15 @@ public class MglaGlassConfig {
     public static final String PREFS = "mgla_config";
     public static final String PREF_GLASS_DARKENING_LEVEL = "glass_darkening_level";
     public static final String PREF_MD3_PREDICTIVE_BACK = "md3_predictive_back";
+    public static final String PREF_PREDICTIVE_BACK_STYLE = "predictive_back_style";
+    /** Classic Telegram edge-slide. */
+    public static final int PREDICTIVE_BACK_DEFAULT = 0;
+    /** Material 3 shrinking card. */
+    public static final int PREDICTIVE_BACK_MD3 = 1;
+    /** Flat page slide left/right. */
+    public static final int PREDICTIVE_BACK_PAGES = 2;
+    /** Both screens shrink; previous pushes the active one out. */
+    public static final int PREDICTIVE_BACK_PUSH = 3;
     public static final String PREF_MD3_SWITCHES = "md3_switches";
     public static final String PREF_EDITED_ICON = "edited_icon_enabled";
     public static final String PREF_CLEAN_HEADER = "clean_header_enabled";
@@ -25,6 +34,7 @@ public class MglaGlassConfig {
     private static boolean cacheLoaded;
     private static int glassDarkeningLevel = 100;
     private static boolean md3PredictiveBack;
+    private static int predictiveBackStyle = PREDICTIVE_BACK_DEFAULT;
     private static boolean md3Switches;
     private static boolean editedIcon;
     private static boolean cleanHeader;
@@ -40,6 +50,12 @@ public class MglaGlassConfig {
         SharedPreferences p = getPrefs();
         glassDarkeningLevel = p.getInt(PREF_GLASS_DARKENING_LEVEL, 100);
         md3PredictiveBack = p.getBoolean(PREF_MD3_PREDICTIVE_BACK, false);
+        if (p.contains(PREF_PREDICTIVE_BACK_STYLE)) {
+            predictiveBackStyle = clampPredictiveBackStyle(p.getInt(PREF_PREDICTIVE_BACK_STYLE, PREDICTIVE_BACK_DEFAULT));
+        } else {
+            predictiveBackStyle = md3PredictiveBack ? PREDICTIVE_BACK_MD3 : PREDICTIVE_BACK_DEFAULT;
+        }
+        md3PredictiveBack = predictiveBackStyle == PREDICTIVE_BACK_MD3;
         md3Switches = p.getBoolean(PREF_MD3_SWITCHES, false);
         editedIcon = p.getBoolean(PREF_EDITED_ICON, false);
         cleanHeader = p.getBoolean(PREF_CLEAN_HEADER, false);
@@ -141,17 +157,55 @@ public class MglaGlassConfig {
     }
 
     public static boolean isMd3PredictiveBackEnabled() {
-        ensureCache();
-        return md3PredictiveBack;
+        return getPredictiveBackStyle() == PREDICTIVE_BACK_MD3;
     }
 
     public static void setMd3PredictiveBackEnabled(boolean enabled) {
+        setPredictiveBackStyle(enabled ? PREDICTIVE_BACK_MD3 : PREDICTIVE_BACK_DEFAULT);
+    }
+
+    public static int getPredictiveBackStyle() {
         ensureCache();
-        if (md3PredictiveBack == enabled) {
+        return predictiveBackStyle;
+    }
+
+    public static void setPredictiveBackStyle(int style) {
+        ensureCache();
+        style = clampPredictiveBackStyle(style);
+        if (predictiveBackStyle == style) {
             return;
         }
-        md3PredictiveBack = enabled;
-        getPrefs().edit().putBoolean(PREF_MD3_PREDICTIVE_BACK, enabled).apply();
+        predictiveBackStyle = style;
+        md3PredictiveBack = style == PREDICTIVE_BACK_MD3;
+        getPrefs().edit()
+                .putInt(PREF_PREDICTIVE_BACK_STYLE, style)
+                .putBoolean(PREF_MD3_PREDICTIVE_BACK, md3PredictiveBack)
+                .apply();
+    }
+
+    public static boolean isPredictiveBackSpatial() {
+        int style = getPredictiveBackStyle();
+        return style == PREDICTIVE_BACK_MD3 || style == PREDICTIVE_BACK_PAGES || style == PREDICTIVE_BACK_PUSH;
+    }
+
+    public static String getPredictiveBackStyleTitle(int style) {
+        switch (clampPredictiveBackStyle(style)) {
+            case PREDICTIVE_BACK_MD3:
+                return "В стиле MD3";
+            case PREDICTIVE_BACK_PAGES:
+                return "Страницы";
+            case PREDICTIVE_BACK_PUSH:
+                return "Выталкивание";
+            default:
+                return "Обычная";
+        }
+    }
+
+    private static int clampPredictiveBackStyle(int style) {
+        if (style < PREDICTIVE_BACK_DEFAULT || style > PREDICTIVE_BACK_PUSH) {
+            return PREDICTIVE_BACK_DEFAULT;
+        }
+        return style;
     }
 
     public static boolean isMd3SwitchesEnabled() {

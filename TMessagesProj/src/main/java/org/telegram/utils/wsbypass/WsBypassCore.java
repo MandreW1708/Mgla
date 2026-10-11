@@ -69,7 +69,7 @@ public final class WsBypassCore {
     private static final int ACCEPT_TIMEOUT_MS = 1_000;
     private static final int HANDSHAKE_READ_TIMEOUT_MS = 10_000;
     private static final int LISTEN_BACKLOG = 64;
-    private static final int MAX_HANDLER_THREADS = 256;
+    private static final int MAX_HANDLER_THREADS = 512;
 
     private static volatile WsBypassCore instance;
 
@@ -437,7 +437,7 @@ public final class WsBypassCore {
             throw new IOException("релей не сконфигурирован");
         }
         int effective = dc == 203 ? 2 : dc;
-        String path = "/apiws?dc=" + effective;
+        String path = "/apiws?dc=" + effective + (isMedia ? "&media=1" : "");
         Map<String, String> headers = new HashMap<>();
         headers.put("X-Mgla-Token", token);
         dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : ""));

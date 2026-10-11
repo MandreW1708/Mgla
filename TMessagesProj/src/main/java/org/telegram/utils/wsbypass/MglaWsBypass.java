@@ -305,10 +305,8 @@ public final class MglaWsBypass {
 
     private void checkRoute() {
         long now = SystemClock.elapsedRealtime();
-        int state;
-        try {
-            state = ConnectionsManager.getInstance(UserConfig.selectedAccount).getConnectionState();
-        } catch (Throwable e) {
+        int state = bestConnectionState();
+        if (state < 0) {
             return;
         }
         if (state == ConnectionsManager.ConnectionStateConnected
@@ -393,6 +391,31 @@ public final class MglaWsBypass {
             return "Работает (WS)";
         }
         return "Ожидание соединения…";
+    }
+
+    /** Любой живой аккаунт держит маршрут: переключение аккаунта само по себе не повод менять его. */
+    private static int bestConnectionState() {
+        int fallback = -1;
+        try {
+            for (int i = 0; i < UserConfig.MAX_ACCOUNT_COUNT; i++) {
+                if (!UserConfig.getInstance(i).isClientActivated()) {
+                    continue;
+                }
+                int state = ConnectionsManager.getInstance(i).getConnectionState();
+                if (state == ConnectionsManager.ConnectionStateConnected
+                    || state == ConnectionsManager.ConnectionStateUpdating) {
+                    return state;
+                }
+                if (fallback < 0) {
+                    fallback = state;
+                }
+            }
+            if (fallback < 0) {
+                fallback = ConnectionsManager.getInstance(UserConfig.selectedAccount).getConnectionState();
+            }
+        } catch (Throwable ignored) {
+        }
+        return fallback;
     }
 
     private static int getConnectionStateSafe() {

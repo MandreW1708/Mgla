@@ -156,15 +156,35 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         LinearLayout animationBlock = createBlock(context, "Анимация");
 
-        TextCheckCell predictiveBackCell = new TextCheckCell(context);
-        predictiveBackCell.setBackground(null);
-        predictiveBackCell.setTextAndCheck("В стиле MD3", MglaGlassConfig.isMd3PredictiveBackEnabled(), false);
-        predictiveBackCell.setOnClickListener(v -> {
-            boolean newVal = !MglaGlassConfig.isMd3PredictiveBackEnabled();
-            MglaGlassConfig.setMd3PredictiveBackEnabled(newVal);
-            predictiveBackCell.setChecked(newVal);
-        });
-        animationBlock.addView(predictiveBackCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        TextView predictiveBackTitle = new TextView(context);
+        predictiveBackTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        predictiveBackTitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        predictiveBackTitle.setText("Анимация назад");
+        predictiveBackTitle.setPadding(dp(22), dp(12), dp(22), dp(4));
+        animationBlock.addView(predictiveBackTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        final int[] styles = {
+                MglaGlassConfig.PREDICTIVE_BACK_DEFAULT,
+                MglaGlassConfig.PREDICTIVE_BACK_MD3,
+                MglaGlassConfig.PREDICTIVE_BACK_PAGES,
+                MglaGlassConfig.PREDICTIVE_BACK_PUSH
+        };
+        final RadioCell[] styleCells = new RadioCell[styles.length];
+        final int currentStyle = MglaGlassConfig.getPredictiveBackStyle();
+        for (int i = 0; i < styles.length; i++) {
+            final int style = styles[i];
+            RadioCell cell = new RadioCell(context);
+            cell.setBackground(null);
+            cell.setText(MglaGlassConfig.getPredictiveBackStyleTitle(style), currentStyle == style, i < styles.length - 1);
+            cell.setOnClickListener(v -> {
+                MglaGlassConfig.setPredictiveBackStyle(style);
+                for (int j = 0; j < styleCells.length; j++) {
+                    styleCells[j].setChecked(styles[j] == style, true);
+                }
+            });
+            styleCells[i] = cell;
+            animationBlock.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        }
 
         animationBlock.addView(MglaUi.createDivider(context));
 
