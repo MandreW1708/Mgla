@@ -149,6 +149,7 @@ public final class MglaSettingsSearch {
 
         final Utilities.Callback0Return<BaseFragment> hubScreen = MglaSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> generalScreen = MglaMainSettingsActivity::new;
+        final Utilities.Callback0Return<BaseFragment> hapticScreen = MglaHapticSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> chatsScreen = MglaChatsSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> notifScreen = MglaNotificationsSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> appearanceScreen = MglaAppearanceSettingsActivity::new;
@@ -176,8 +177,16 @@ public final class MglaSettingsSearch {
 
         l.add(new Entry(1010, "Прокси в шапке", hub, general, generalIcon, generalScreen, "Прокси в шапке", "general/proxy-header"));
         l.add(new Entry(1011, "Загрузки в шапке", hub, general, generalIcon, generalScreen, "Загрузки в шапке", "general/downloads-header"));
-        l.add(new Entry(1012, "Виброотклик", hub, general, generalIcon, generalScreen, "Виброотклик", "general/haptic"));
-        l.add(new Entry(1013, "Сила вибрации", hub, general, generalIcon, generalScreen, "Сила вибрации", "general/haptic-strength"));
+        final String haptic = "Виброэффекты";
+        l.add(new Entry(1012, haptic, hub, general, generalIcon, hapticScreen, null, "general/haptic"));
+        l.add(new Entry(1126, "Виброотклик", hub, haptic, generalIcon, hapticScreen, "Виброотклик", "general/haptic/enable"));
+        l.add(new Entry(1013, "Сила вибрации", hub, haptic, generalIcon, hapticScreen, "Сила вибрации", "general/haptic/strength"));
+        l.add(new Entry(1127, "Эффект по умолчанию", hub, haptic, generalIcon, hapticScreen, "Эффект по умолчанию", "general/haptic/default"));
+        l.add(new Entry(1128, "Клик", hub, haptic, generalIcon, hapticScreen, "Клик", "general/haptic/click"));
+        l.add(new Entry(1129, "Отправка", hub, haptic, generalIcon, hapticScreen, "Отправка", "general/haptic/send"));
+        l.add(new Entry(1130, "Долгое нажатие", hub, haptic, generalIcon, hapticScreen, "Долгое нажатие", "general/haptic/long-press"));
+        l.add(new Entry(1131, "Меню", hub, haptic, generalIcon, hapticScreen, "Меню", "general/haptic/menu"));
+        l.add(new Entry(1132, "Назад", hub, haptic, generalIcon, hapticScreen, "Назад", "general/haptic/back"));
         l.add(new Entry(1014, "Последний онлайн", hub, general, generalIcon, generalScreen, "Последний онлайн", "general/last-online"));
         l.add(new Entry(1015, "Сохранение удаленных", hub, general, generalIcon, generalScreen, "Сохранение удаленных", "general/save-deleted"));
         l.add(new Entry(1016, "Режим призрака", hub, general, generalIcon, generalScreen, "Режим призрака", "general/ghost-mode"));

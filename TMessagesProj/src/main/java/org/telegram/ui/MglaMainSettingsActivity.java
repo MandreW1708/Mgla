@@ -3,7 +3,6 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -24,13 +23,14 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.TextCheckCell;
+import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
-    private SharedPreferences prefs;
     private TextCheckCell ghostModeCell;
+    private TextSettingsCell hapticCell;
 
     public MglaMainSettingsActivity() {
         this(null);
@@ -60,9 +60,15 @@ public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implement
     }
 
     @Override
-    public View createView(Context context) {
-        prefs = context.getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
+    public void onResume() {
+        super.onResume();
+        if (hapticCell != null) {
+            hapticCell.setTextAndValue("Виброэффекты", MglaHapticManager.getSummary(), true);
+        }
+    }
 
+    @Override
+    public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
         actionBar.setTitle("Общие настройки");
@@ -117,27 +123,11 @@ public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implement
 
         block.addView(MglaUi.createDivider(context));
 
-        TextCheckCell hapticCell = new TextCheckCell(context);
+        hapticCell = new TextSettingsCell(context);
         hapticCell.setBackground(null);
-        boolean hapticOn = MglaFeatureFlags.isAllowed("haptic_enabled") && prefs.getBoolean("haptic_enabled", false);
-        hapticCell.setTextAndCheck("Виброотклик", hapticOn, false);
-        hapticCell.setOnClickListener(v -> {
-            boolean newVal = !prefs.getBoolean("haptic_enabled", false);
-            if (newVal && !MglaFeatureFlags.isAllowed("haptic_enabled")) {
-                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
-                return;
-            }
-            prefs.edit().putBoolean("haptic_enabled", newVal).apply();
-            hapticCell.setChecked(newVal && MglaFeatureFlags.isAllowed("haptic_enabled"));
-        });
+        hapticCell.setTextAndValue("Виброэффекты", MglaHapticManager.getSummary(), false);
+        hapticCell.setOnClickListener(v -> presentFragment(new MglaHapticSettingsActivity()));
         block.addView(hapticCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        block.addView(MglaUi.createDivider(context));
-
-        TextView[] strengthValueRef = new TextView[1];
-        addSelectRow(block, "Сила вибрации", MglaHapticManager.STRENGTH_NAMES[MglaHapticManager.getStrength()], () -> {
-            showStrengthDialog(strengthValueRef[0]);
-        }, strengthValueRef);
 
         rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
@@ -280,20 +270,6 @@ public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implement
             if (valueView != null) {
                 valueView.setText(MglaTransferConfig.MODE_NAMES[which]);
             }
-        });
-        showDialog(dlg.create());
-    }
-
-    private void showStrengthDialog(TextView valueView) {
-        if (getParentActivity() == null) return;
-        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
-        dlg.setTitle("Сила вибрации");
-        dlg.setItems(MglaHapticManager.STRENGTH_NAMES, (dialog, which) -> {
-            prefs.edit().putInt("haptic_strength", which).apply();
-            if (valueView != null) {
-                valueView.setText(MglaHapticManager.STRENGTH_NAMES[which]);
-            }
-            MglaHapticManager.previewPattern(MglaHapticManager.getPatternForAction(MglaHapticManager.ACTION_DEFAULT));
         });
         showDialog(dlg.create());
     }
