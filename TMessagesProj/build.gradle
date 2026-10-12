@@ -154,6 +154,7 @@ android {
         def mglaHubHost = getProps("MGLA_HUB_HOST")
         def mglaWebProxyHost = getProps("MGLA_WEB_PROXY_HOST")
         def mglaWebProxySecret = getProps("MGLA_WEB_PROXY_SECRET")
+        def mglaWebUpdateSecret = getProps("MGLA_WEB_UPDATE_SECRET")
 
         buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
         buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
@@ -165,6 +166,7 @@ android {
         buildConfigField "String", "MGLA_HUB_HOST", "\"" + ((mglaHubHost != null && !mglaHubHost.isEmpty()) ? mglaHubHost : "mglahub.mooo.com") + "\""
         buildConfigField "String", "MGLA_WEB_PROXY_HOST", "\"" + ((mglaWebProxyHost != null && !mglaWebProxyHost.isEmpty()) ? mglaWebProxyHost : "mglabot.mooo.com/tgweb") + "\""
         buildConfigField "String", "MGLA_WEB_PROXY_SECRET", "\"" + ((mglaWebProxySecret != null && !mglaWebProxySecret.isEmpty()) ? mglaWebProxySecret : "") + "\""
+        buildConfigField "String", "MGLA_WEB_UPDATE_SECRET", "\"" + ((mglaWebUpdateSecret != null && !mglaWebUpdateSecret.isEmpty()) ? mglaWebUpdateSecret : "") + "\""
 
         manifestPlaceholders = [mapsApiKey: (mapsKey != null && !mapsKey.isEmpty()) ? mapsKey : ""]
 

@@ -142,6 +142,17 @@ public final class MglaWsConfig {
         return !TextUtils.isEmpty(getWebProxyHost()) && !TextUtils.isEmpty(getWebProxySecret());
     }
 
+    /** Секрет профиля mgla-upd tproxy-server: туннель к эндпоинтам обновлений через WEB proxy. */
+    public static String getWebUpdateSecret() {
+        String fromBuild = BuildConfig.MGLA_WEB_UPDATE_SECRET;
+        return fromBuild == null ? "" : fromBuild.trim().toLowerCase(java.util.Locale.US);
+    }
+
+    public static boolean isWebUpdateTunnelConfigured() {
+        return !TextUtils.isEmpty(getWebProxyHost()) && !TextUtils.isEmpty(getWebUpdateSecret())
+            && !TextUtils.isEmpty(getRelayToken());
+    }
+
     /** Хост хаба статистики / панели ({@code mglahub.mooo.com}). */
     public static String getHubHost() {
         // BuildConfig (local.properties) wins over stale prefs overrides.

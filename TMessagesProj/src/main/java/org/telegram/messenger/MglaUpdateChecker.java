@@ -9,11 +9,15 @@ import android.text.TextUtils;
 import org.json.JSONObject;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.MglaUpdateSheet;
+import org.telegram.utils.proxy.WebProxyTransport;
+import org.telegram.utils.wsbypass.MglaWsBypass;
 import org.telegram.utils.wsbypass.MglaWsConfig;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.cert.Certificate;
@@ -22,7 +26,8 @@ import java.util.Base64;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Polls mglahub (or mglabot when WS relay is active) for a newer build.
+ * Polls mglahub (or mglabot when auto-bypass is active — over HTTPS on the WS route,
+ * through the WEB proxy update tunnel on the WEB route) for a newer build.
  * Hub decides by app versionName and/or versionCode; Mgla version is display-only.
  */
 public final class MglaUpdateChecker {
@@ -200,78 +205,132 @@ public final class MglaUpdateChecker {
         body.put("app_version", BuildVars.BUILD_VERSION_STRING);
         body.put("version_code", currentVersionCode());
 
-        final String host;
-        final String path;
-        final String token;
-        final String expectedPin;
-        final boolean pinDefaultHost;
-        if (viaRelay) {
-            host = MglaWsConfig.getRelayHost();
-            path = "/mgla-ai/v1/update-check";
-            token = MglaWsConfig.getRelayToken();
-            expectedPin = MglaWsConfig.RELAY_SPKI_SHA256_BASE64;
-            pinDefaultHost = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host);
-        } else {
-            host = MglaWsConfig.getHubHost();
-            path = "/mgla-updates/v1/check";
-            token = MglaWsConfig.getHubToken();
-            expectedPin = MglaWsConfig.HUB_SPKI_SHA256_BASE64;
-            pinDefaultHost = MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host);
-        }
-
-        String url = "https://" + host + path;
-        HttpsURLConnection conn = MglaDirectHttp.openHttps(url);
+        Channel channel = viaRelay ? (isWebRouteActive() ? Channel.WEB : Channel.RELAY) : Channel.HUB;
+        String path = channel == Channel.HUB ? "/mgla-updates/v1/check" : "/mgla-ai/v1/update-check";
+        UpdateConnection uc = UpdateConnection.open(channel, path);
         try {
+            HttpURLConnection conn = uc.conn;
             conn.setConnectTimeout(12_000);
-            conn.setReadTimeout(12_000);
+            conn.setReadTimeout(channel == Channel.WEB ? 30_000 : 12_000);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            conn.setRequestProperty("X-Mgla-Token", token);
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
-                if (pinDefaultHost) {
-                    verifySpkiPin(conn.getServerCertificates(), expectedPin);
-                }
+                uc.verifyPin();
                 os.write(payload);
             }
             int code = conn.getResponseCode();
             InputStream is = code < 400 ? conn.getInputStream() : conn.getErrorStream();
             String response = readUtf8(is, 64 * 1024);
             if (code != 200) {
-                FileLog.e("MglaUpdateChecker HTTP " + code + " via=" + (viaRelay ? "relay" : "hub") + ": " + response);
+                FileLog.e("MglaUpdateChecker HTTP " + code + " via=" + channel + ": " + response);
                 return null;
             }
             return MglaUpdateInfo.fromJson(response);
         } finally {
-            conn.disconnect();
+            uc.close();
         }
     }
 
-    /** Absolute HTTPS URL for the APK on the same host used for the check. */
-    public static String apkDownloadUrl(MglaUpdateInfo info) {
-        boolean viaRelay = MglaRemoteConfig.shouldFetchViaRelay();
-        String host = viaRelay ? MglaWsConfig.getRelayHost() : MglaWsConfig.getHubHost();
+    /** HUB: напрямую на хаб; RELAY: HTTPS на релей; WEB: через туннель WEB proxy к релею. */
+    public enum Channel { HUB, RELAY, WEB }
+
+    /** Авто-обход сейчас держит резервный WEB proxy (WS-релей недоступен). */
+    private static boolean isWebRouteActive() {
+        try {
+            MglaWsBypass bypass = MglaWsBypass.getInstance();
+            return bypass.isProxyApplied()
+                && bypass.getRoute() == MglaWsBypass.Route.WEB
+                && MglaWsConfig.isWebUpdateTunnelConfigured()
+                && WebProxyTransport.isSupported();
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    public static Channel currentChannel() {
+        if (!MglaRemoteConfig.shouldFetchViaRelay()) {
+            return Channel.HUB;
+        }
+        return isWebRouteActive() ? Channel.WEB : Channel.RELAY;
+    }
+
+    /** APK download on the channel matching the current auto-bypass state. */
+    public static UpdateConnection openApkConnection(MglaUpdateInfo info) throws Exception {
+        Channel channel = currentChannel();
         String path;
-        if (viaRelay) {
-            path = "/mgla-ai/v1/update-apk";
-        } else {
+        if (channel == Channel.HUB) {
             path = TextUtils.isEmpty(info.apkPath) ? "/mgla-updates/v1/apk" : info.apkPath;
+            if (!path.startsWith("/")) {
+                path = "/" + path;
+            }
+        } else {
+            path = "/mgla-ai/v1/update-apk";
         }
-        if (!path.startsWith("/")) {
-            path = "/" + path;
-        }
-        return "https://" + host + path;
+        return UpdateConnection.open(channel, path);
     }
 
-    public static String apkAuthToken() {
-        return MglaRemoteConfig.shouldFetchViaRelay()
-            ? MglaWsConfig.getRelayToken()
-            : MglaWsConfig.getHubToken();
-    }
+    public static final class UpdateConnection {
+        public final HttpURLConnection conn;
+        public final Channel channel;
+        private boolean tunnelHeld;
 
-    public static boolean apkPinIsRelay() {
-        return MglaRemoteConfig.shouldFetchViaRelay();
+        private UpdateConnection(HttpURLConnection conn, Channel channel, boolean tunnelHeld) {
+            this.conn = conn;
+            this.channel = channel;
+            this.tunnelHeld = tunnelHeld;
+        }
+
+        static UpdateConnection open(Channel channel, String path) throws Exception {
+            if (channel == Channel.WEB) {
+                int port = WebProxyTransport.acquireUpdateTunnel(
+                    MglaWsConfig.getWebProxyHost(), MglaWsConfig.getWebUpdateSecret());
+                if (port <= 0) {
+                    throw new IOException("WEB proxy недоступен");
+                }
+                try {
+                    if (!WebProxyTransport.awaitUpdateTunnelReady(25_000)) {
+                        throw new IOException("WEB proxy не подключился");
+                    }
+                    HttpURLConnection conn = MglaDirectHttp.open("http://127.0.0.1:" + port + path);
+                    conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
+                    return new UpdateConnection(conn, channel, true);
+                } catch (Exception e) {
+                    WebProxyTransport.releaseUpdateTunnel();
+                    throw e;
+                }
+            }
+            boolean relay = channel == Channel.RELAY;
+            String host = relay ? MglaWsConfig.getRelayHost() : MglaWsConfig.getHubHost();
+            HttpsURLConnection conn = MglaDirectHttp.openHttps("https://" + host + path);
+            conn.setRequestProperty("X-Mgla-Token", relay ? MglaWsConfig.getRelayToken() : MglaWsConfig.getHubToken());
+            return new UpdateConnection(conn, channel, false);
+        }
+
+        /** Call after the connection is established. WEB rides the WebView's TLS to the relay host. */
+        public void verifyPin() throws Exception {
+            if (!(conn instanceof HttpsURLConnection)) {
+                return;
+            }
+            String host = conn.getURL().getHost();
+            if (channel == Channel.RELAY && MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
+                verifySpkiPin(((HttpsURLConnection) conn).getServerCertificates(), MglaWsConfig.RELAY_SPKI_SHA256_BASE64);
+            } else if (channel == Channel.HUB && MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
+                verifySpkiPin(((HttpsURLConnection) conn).getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
+            }
+        }
+
+        public void close() {
+            try {
+                conn.disconnect();
+            } catch (Throwable ignored) {
+            }
+            if (tunnelHeld) {
+                tunnelHeld = false;
+                WebProxyTransport.releaseUpdateTunnel();
+            }
+        }
     }
 
     public static int currentVersionCode() {

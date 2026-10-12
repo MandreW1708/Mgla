@@ -255,17 +255,21 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                 }
             }
         } else if (id == NotificationCenter.recentDocumentsDidLoad) {
-            if (checkAgainRunnable != null) {
-                AndroidUtilities.runOnUIThread(checkAgainRunnable);
-                checkAgainRunnable = null;
-            }
+            postCheckAgain();
         } else if (id == NotificationCenter.stickersDidLoad) {
             if ((int) args[0] == MediaDataController.TYPE_IMAGE) {
-                if (checkAgainRunnable != null) {
-                    AndroidUtilities.runOnUIThread(checkAgainRunnable);
-                    checkAgainRunnable = null;
-                }
+                postCheckAgain();
             }
+        }
+    }
+
+    // The posted runnable captures the old query, so the field must stay set until it runs:
+    // searchUsernameOrHashtag() cancels it through this reference when the input changes
+    // (e.g. cleared after sending a suggested sticker), otherwise the panel reopens.
+    private void postCheckAgain() {
+        if (checkAgainRunnable != null) {
+            AndroidUtilities.cancelRunOnUIThread(checkAgainRunnable);
+            AndroidUtilities.runOnUIThread(checkAgainRunnable);
         }
     }
 

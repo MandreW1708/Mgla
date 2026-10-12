@@ -171,6 +171,84 @@ public final class WebProxyTransport implements ForegroundDetector.Listener {
         }
     }
 
+    private static WebProxyTransport updateInstance;
+    private static int updateUsers;
+
+    /**
+     * Independent tunnel for Mgla update HTTP (separate tproxy profile/secret).
+     * Each successful call must be paired with {@link #releaseUpdateTunnel()}.
+     * @return local port, or 0 on failure
+     */
+    public static int acquireUpdateTunnel(String address, String secret) {
+        Address normalized = normalizeAddress(address);
+        byte[] secretBytes = decodeSecret(secret);
+        if (normalized == null || secretBytes == null || !isSupported()) {
+            return 0;
+        }
+        synchronized (staticLock) {
+            if (updateInstance != null
+                    && (!updateInstance.address.equals(normalized.value) || !updateInstance.secret.equals(secret))) {
+                updateInstance.stopInternal();
+                updateInstance = null;
+            }
+            if (updateInstance == null) {
+                try {
+                    updateInstance = new WebProxyTransport(normalized, secret, secretBytes);
+                    updateInstance.startInternal();
+                } catch (Exception e) {
+                    FileLog.e(e);
+                    if (updateInstance != null) {
+                        updateInstance.stopInternal();
+                        updateInstance = null;
+                    }
+                    return 0;
+                }
+            }
+            updateUsers++;
+            return updateInstance.serverSocket.getLocalPort();
+        }
+    }
+
+    public static void releaseUpdateTunnel() {
+        synchronized (staticLock) {
+            if (updateUsers > 0) {
+                updateUsers--;
+            }
+            if (updateUsers == 0 && updateInstance != null) {
+                updateInstance.stopInternal();
+                updateInstance = null;
+            }
+        }
+    }
+
+    /** Blocks (not on UI thread) until the update tunnel's carrier is up. */
+    public static boolean awaitUpdateTunnelReady(long timeoutMs) {
+        WebProxyTransport transport;
+        synchronized (staticLock) {
+            transport = updateInstance;
+        }
+        return transport != null && transport.awaitCarrier(timeoutMs);
+    }
+
+    private boolean awaitCarrier(long timeoutMs) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        synchronized (lock) {
+            while (!stopped && !carrierConnected) {
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) {
+                    return false;
+                }
+                try {
+                    lock.wait(left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return carrierConnected;
+        }
+    }
+
     private ReadyCallback readyCallback;
 
     public interface ReadyCallback {

@@ -27,7 +27,6 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
-import org.telegram.messenger.MglaDirectHttp;
 import org.telegram.messenger.MglaUpdateChecker;
 import org.telegram.messenger.MglaUpdateInfo;
 import org.telegram.messenger.R;
@@ -35,14 +34,12 @@ import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.utils.wsbypass.MglaWsConfig;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.security.MessageDigest;
-
-import javax.net.ssl.HttpsURLConnection;
 
 /**
  * Mgla-branded update bottom sheet: version, changelog, download + install.
@@ -218,23 +215,15 @@ public final class MglaUpdateSheet {
                 //noinspection ResultOfMethodCallIgnored
                 apk.delete();
             }
-            HttpsURLConnection conn = null;
+            MglaUpdateChecker.UpdateConnection uc = null;
             try {
-                String url = MglaUpdateChecker.apkDownloadUrl(info);
-                conn = MglaDirectHttp.openHttps(url);
+                uc = MglaUpdateChecker.openApkConnection(info);
+                HttpURLConnection conn = uc.conn;
                 conn.setConnectTimeout(20_000);
                 conn.setReadTimeout(300_000);
                 conn.setRequestMethod("GET");
-                conn.setRequestProperty("X-Mgla-Token", MglaUpdateChecker.apkAuthToken());
                 conn.connect();
-                String host = Uri.parse(url).getHost();
-                if (MglaUpdateChecker.apkPinIsRelay()) {
-                    if (MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
-                        MglaUpdateChecker.verifySpkiPin(conn.getServerCertificates(), MglaWsConfig.RELAY_SPKI_SHA256_BASE64);
-                    }
-                } else if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
-                    MglaUpdateChecker.verifySpkiPin(conn.getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
-                }
+                uc.verifyPin();
                 int code = conn.getResponseCode();
                 if (code != 200) {
                     failUi(button, "Ошибка загрузки HTTP " + code);
@@ -286,8 +275,8 @@ public final class MglaUpdateSheet {
                 //noinspection ResultOfMethodCallIgnored
                 apk.delete();
             } finally {
-                if (conn != null) {
-                    conn.disconnect();
+                if (uc != null) {
+                    uc.close();
                 }
             }
         });
