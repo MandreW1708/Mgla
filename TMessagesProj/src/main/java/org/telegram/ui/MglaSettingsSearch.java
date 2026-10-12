@@ -222,7 +222,7 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1076, "В стиле MD3", hub, animCommon, appearanceIcon, animCommonScreen, "В стиле MD3", "appearance/animation/common/md3"));
         l.add(new Entry(1077, "Страницы", hub, animCommon, appearanceIcon, animCommonScreen, "Страницы", "appearance/animation/common/pages"));
         l.add(new Entry(1078, "Выталкивание", hub, animCommon, appearanceIcon, animCommonScreen, "Выталкивание", "appearance/animation/common/push"));
-        l.add(new Entry(1118, "Открытие чата как назад", hub, animCommon, appearanceIcon, animCommonScreen, "Открытие чата как назад", "appearance/animation/common/reverse-open"));
+        l.add(new Entry(1118, "Открытие экранов как назад", hub, animCommon, appearanceIcon, animCommonScreen, "Открытие экранов как назад", "appearance/animation/common/reverse-open"));
         l.add(new Entry(1122, "Вырастание фото", hub, animCommon, appearanceIcon, animCommonScreen, "Вырастание фото", "appearance/animation/common/media-grow"));
         l.add(new Entry(1123, "Пружина при тапе", hub, animCommon, appearanceIcon, animCommonScreen, "Пружина при тапе", "appearance/animation/common/press-spring"));
         l.add(new Entry(1116, animChats, hub, appearance, appearanceIcon, animChatsScreen, null, "appearance/animation/chats"));

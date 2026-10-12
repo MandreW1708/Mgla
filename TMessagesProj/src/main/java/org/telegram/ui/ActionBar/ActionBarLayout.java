@@ -1665,10 +1665,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     }
 
     private boolean shouldUseReversePredictiveOpen(BaseFragment opening, BaseFragment previous) {
-        // Pulling-down chat→chat already provides onCustomTransitionAnimation, so we only
-        // land here when that returns null.
+        // Custom transitions (e.g. pulling-down chat→chat) take priority via
+        // onCustomTransitionAnimation; we only land here when that returns null.
         return MglaGlassConfig.isReverseChatOpenEnabled()
-                && opening instanceof ChatActivity
+                && opening != null
                 && previous != null;
     }
 
@@ -1924,7 +1924,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
 
     /**
      * Open animation = reverse of the selected predictive-back style
-     * (chat enters the way it would leave when going back).
+     * (screen enters the way it would leave when going back).
      */
     private AnimatorSet createReversePredictiveOpenAnimation(Runnable onEnd) {
         predictiveBackStyle = MglaGlassConfig.getPredictiveBackStyle();

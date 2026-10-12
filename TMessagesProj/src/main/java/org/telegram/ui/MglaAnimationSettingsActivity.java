@@ -100,7 +100,7 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
 
         TextCheckCell reverseOpenCell = new TextCheckCell(context);
         reverseOpenCell.setBackground(null);
-        reverseOpenCell.setTextAndCheck("Открытие чата как назад", MglaGlassConfig.isReverseChatOpenEnabled(), false);
+        reverseOpenCell.setTextAndCheck("Открытие экранов как назад", MglaGlassConfig.isReverseChatOpenEnabled(), false);
         reverseOpenCell.setOnClickListener(v -> {
             boolean newVal = !MglaGlassConfig.isReverseChatOpenEnabled();
             MglaGlassConfig.setReverseChatOpenEnabled(newVal);
