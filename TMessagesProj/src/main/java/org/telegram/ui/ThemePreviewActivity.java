@@ -2765,7 +2765,8 @@ public class ThemePreviewActivity extends BaseFragment implements DownloadContro
                 if (Theme.THEME_BACKGROUND_SLUG.equals(wallpaperInfo.slug)) {
                     wallpaperInfo = null;
                 }
-                Theme.getActiveTheme().setOverrideWallpaper(wallpaperInfo);
+                // Mirror to day + night themes so auto-night doesn't restore the light default.
+                Theme.setOverrideWallpaperForDayAndNight(wallpaperInfo);
                 Theme.reloadWallpaper(true);
                 if (!sameFile) {
                     ImageLoader.getInstance().removeImage(ImageLoader.getHttpFileName(toFile.getAbsolutePath()) + "@100_100");

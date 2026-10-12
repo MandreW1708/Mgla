@@ -6467,6 +6467,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         topView = view;
         addView(topView, 0, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, height, Gravity.TOP | Gravity.LEFT));
         updateTopViewLeftOffset(useStaticAttachButton() ? getStaticAttachContentLeftOffset() : 0);
+        final int p = (int) (org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress);
+        topView.setPadding(p, 0, p, 0);
         needShowTopView = false;
 
         checkUi_TopViewVisibility();

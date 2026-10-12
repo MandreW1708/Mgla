@@ -37,6 +37,7 @@ public class MglaGlassConfig {
     public static final String PREF_CHAT_REACTION_SPRING = "chat_reaction_spring";
     public static final String PREF_PROFILE_MEDIA_GROW = "profile_media_grow";
     public static final String PREF_SETTINGS_PRESS_SPRING = "settings_press_spring";
+    public static final String PREF_FOLDER_ACTIVE_OUTLINE = "folder_active_outline";
 
     // In-memory cache — prefs are hit from Switch/ActionBar draw paths every frame.
     private static boolean cacheLoaded;
@@ -58,6 +59,7 @@ public class MglaGlassConfig {
     private static boolean chatReactionSpring = true;
     private static boolean profileMediaGrow = true;
     private static boolean settingsPressSpring = true;
+    private static boolean folderActiveOutline;
 
     private static void ensureCache() {
         if (cacheLoaded) {
@@ -87,6 +89,7 @@ public class MglaGlassConfig {
         chatReactionSpring = p.getBoolean(PREF_CHAT_REACTION_SPRING, true);
         profileMediaGrow = p.getBoolean(PREF_PROFILE_MEDIA_GROW, true);
         settingsPressSpring = p.getBoolean(PREF_SETTINGS_PRESS_SPRING, true);
+        folderActiveOutline = p.getBoolean(PREF_FOLDER_ACTIVE_OUTLINE, false);
         cacheLoaded = true;
     }
 
@@ -379,6 +382,21 @@ public class MglaGlassConfig {
         }
         settingsPressSpring = enabled;
         getPrefs().edit().putBoolean(PREF_SETTINGS_PRESS_SPRING, enabled).apply();
+    }
+
+    public static boolean isFolderActiveOutlineEnabled() {
+        ensureCache();
+        return folderActiveOutline;
+    }
+
+    public static void setFolderActiveOutlineEnabled(boolean enabled) {
+        ensureCache();
+        if (folderActiveOutline == enabled) {
+            return;
+        }
+        folderActiveOutline = enabled;
+        getPrefs().edit().putBoolean(PREF_FOLDER_ACTIVE_OUTLINE, enabled).apply();
+        notifyGlassAppearanceChanged();
     }
 
     public static void notifyGlassAppearanceChanged() {

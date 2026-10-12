@@ -155,15 +155,10 @@ public class Theme {
 
     public static final int MSG_OUT_COLOR_BLACK = 0xff212121;
     public static final int MSG_OUT_COLOR_WHITE = 0xffffffff;
-    /** Dark burgundy #77221D — primary surfaces (bubbles, accent remap). */
-    public static final int BURGUNDY_ACCENT_COLOR = 0xFF77221D;
-    /** Same family, lifted — links, checks, switches, badges. */
-    public static final int BURGUNDY_ACCENT_LIGHT = 0xFFB8443A;
-    /** Soft highlight for tiny controls on black. */
-    public static final int BURGUNDY_ACCENT_BRIGHT = 0xFFD45A50;
-    /** Deeper shade so bubbles don’t flatten into the accent. */
-    public static final int BURGUNDY_BUBBLE_COLOR_DARK = 0xFF4A1410;
-    public static final int BURGUNDY_BUBBLE_COLOR = BURGUNDY_ACCENT_COLOR;
+    /** Burgundy accent #6D2619 — links, controls, accent remap. */
+    public static final int BURGUNDY_ACCENT_COLOR = 0xFF6D2619;
+    /** Burgundy out-bubble #2F090E. */
+    public static final int BURGUNDY_BUBBLE_COLOR = 0xFF2F090E;
     public static final int default_shadow_color = ColorUtils.setAlphaComponent(Color.BLACK, 27);
     public static boolean disallowChangeServiceMessageColor;
 
@@ -1549,6 +1544,8 @@ public class Theme {
                 return "Material 3 Чёрная";
             } else if ("Burgundy".equals(name)) {
                 return "Бордовая";
+            } else if ("Gray Burgundy".equals(name)) {
+                return "Серо-бордовая";
             }
             return info != null ? info.title : name;
         }
@@ -1599,7 +1596,7 @@ public class Theme {
                 return Theme.getMaterialSystemBubbleColor(isDark());
             }
             if (Theme.isBurgundyTheme(this)) {
-                return Theme.BURGUNDY_ACCENT_COLOR;
+                return Theme.BURGUNDY_BUBBLE_COLOR;
             }
             return previewOutColor;
         }
@@ -1671,7 +1668,7 @@ public class Theme {
             if (isDark != UNKNOWN) {
                 return isDark == DARK;
             }
-            if ("Dark Blue".equals(name) || "Night".equals(name) || "AMOLED".equals(name) || "Material Dark".equals(name) || "Material Black".equals(name) || "Burgundy".equals(name)) {
+            if ("Dark Blue".equals(name) || "Night".equals(name) || "AMOLED".equals(name) || "Material Dark".equals(name) || "Material Black".equals(name) || "Burgundy".equals(name) || "Gray Burgundy".equals(name)) {
                 isDark = DARK;
             } else if ("Blue".equals(name) || "Arctic Blue".equals(name) || "Day".equals(name) || "Material Light".equals(name)) {
                 isDark = LIGHT;
@@ -4091,16 +4088,27 @@ public class Theme {
             themesDict.put("Material Black", themeInfo);
         }
 
-        // Built-in like MD3 (no accent list): black base + dark burgundy #77221D.
+        // Built-in like MD3 (no accent list): AMOLED black base + burgundy accents.
         themeInfo = new ThemeInfo();
         themeInfo.name = "Burgundy";
         themeInfo.assetName = "amoled.attheme";
         themeInfo.previewBackgroundColor = 0xff000000;
-        themeInfo.previewInColor = 0xff140A09;
-        themeInfo.previewOutColor = BURGUNDY_ACCENT_COLOR;
+        themeInfo.previewInColor = 0xff101010;
+        themeInfo.previewOutColor = BURGUNDY_BUBBLE_COLOR;
         themeInfo.sortIndex = 10;
         themes.add(themeInfo);
         themesDict.put("Burgundy", themeInfo);
+
+        // Same burgundy accents on the Material 3 dark gray base (night.attheme).
+        themeInfo = new ThemeInfo();
+        themeInfo.name = "Gray Burgundy";
+        themeInfo.assetName = "night.attheme";
+        themeInfo.previewBackgroundColor = 0xff1c1b1f;
+        themeInfo.previewInColor = 0xff211f26;
+        themeInfo.previewOutColor = BURGUNDY_BUBBLE_COLOR;
+        themeInfo.sortIndex = 11;
+        themes.add(themeInfo);
+        themesDict.put("Gray Burgundy", themeInfo);
 
         String themesString = themeConfig.getString("themes2", null);
 
@@ -5564,7 +5572,7 @@ public class Theme {
             isApplyingAccent = false;
             reloadWallpaper(true);
         } else {
-            currentTheme.setOverrideWallpaper(null);
+            setOverrideWallpaperForDayAndNight(null);
         }
     }
 
@@ -6211,7 +6219,7 @@ public class Theme {
     }
 
     public static boolean isBurgundyTheme(ThemeInfo themeInfo) {
-        return themeInfo != null && "Burgundy".equals(themeInfo.name);
+        return themeInfo != null && ("Burgundy".equals(themeInfo.name) || "Gray Burgundy".equals(themeInfo.name));
     }
 
     public static int getMaterialSystemAccentColor(boolean dark) {
@@ -6233,6 +6241,8 @@ public class Theme {
             baseTheme = themesDict.get("Night");
         } else if ("Material Black".equals(themeInfo.name) || "Burgundy".equals(themeInfo.name)) {
             baseTheme = themesDict.get("AMOLED");
+        } else if ("Gray Burgundy".equals(themeInfo.name)) {
+            baseTheme = themesDict.get("Night");
         }
         if (baseTheme != null && baseTheme.accentBaseColor != 0) {
             themeInfo.accentBaseColor = baseTheme.accentBaseColor;
@@ -6264,51 +6274,14 @@ public class Theme {
         ensureMaterialAccentBase(themeInfo);
         ThemeAccent accentObj = new ThemeAccent();
         accentObj.parentTheme = themeInfo;
-        // Main remap + out-bubble accents use the primary; small UI gets a lift after fill.
+        // Accent hue remap uses #6D2619; out-bubbles are flat #2F090E. No extra shades.
         accentObj.accentColor = BURGUNDY_ACCENT_COLOR;
-        accentObj.accentColor2 = BURGUNDY_ACCENT_LIGHT;
-        accentObj.myMessagesAccentColor = BURGUNDY_BUBBLE_COLOR_DARK;
-        accentObj.myMessagesGradientAccentColor1 = BURGUNDY_ACCENT_COLOR;
+        accentObj.accentColor2 = 0;
+        accentObj.myMessagesAccentColor = BURGUNDY_BUBBLE_COLOR;
+        accentObj.myMessagesGradientAccentColor1 = BURGUNDY_BUBBLE_COLOR;
         accentObj.myMessagesGradientAccentColor2 = 0;
         accentObj.myMessagesGradientAccentColor3 = 0;
         accentObj.fillAccentColors(currentColorsNoAccent, currentColors);
-
-        // Hierarchy: big surfaces stay #77221D; tiny interactive bits read lighter on black.
-        final int light = BURGUNDY_ACCENT_LIGHT;
-        final int bright = BURGUNDY_ACCENT_BRIGHT;
-        currentColors.put(key_windowBackgroundWhiteBlueText, light);
-        currentColors.put(key_windowBackgroundWhiteBlueText2, light);
-        currentColors.put(key_windowBackgroundWhiteBlueText3, light);
-        currentColors.put(key_windowBackgroundWhiteBlueText4, bright);
-        currentColors.put(key_windowBackgroundWhiteBlueText5, light);
-        currentColors.put(key_windowBackgroundWhiteBlueText6, light);
-        currentColors.put(key_windowBackgroundWhiteBlueText7, light);
-        currentColors.put(key_chat_messageLinkIn, bright);
-        currentColors.put(key_chat_messageLinkOut, bright);
-        currentColors.put(key_switchTrackChecked, light);
-        currentColors.put(key_radioBackgroundChecked, light);
-        currentColors.put(key_checkbox, light);
-        currentColors.put(key_checkboxCheck, 0xffffffff);
-        currentColors.put(key_chats_unreadCounter, light);
-        currentColors.put(key_chats_actionBackground, BURGUNDY_ACCENT_COLOR);
-        currentColors.put(key_chats_actionPressedBackground, light);
-        currentColors.put(key_featuredStickers_addButton, BURGUNDY_ACCENT_COLOR);
-        currentColors.put(key_featuredStickers_addButtonPressed, light);
-        currentColors.put(key_featuredStickers_buttonProgress, bright);
-        currentColors.put(key_featuredStickers_buttonText, 0xffffffff);
-        currentColors.put(key_profile_tabSelectedLine, light);
-        currentColors.put(key_profile_tabSelectedText, light);
-        currentColors.put(key_dialogRadioBackgroundChecked, light);
-        currentColors.put(key_groupcreate_cursor, bright);
-        currentColors.put(key_windowBackgroundWhiteInputFieldActivated, light);
-        currentColors.put(key_chat_outSentCheck, bright);
-        currentColors.put(key_chat_outSentCheckRead, bright);
-        currentColors.put(key_chat_outSentCheckSelected, bright);
-        currentColors.put(key_chat_outSentCheckReadSelected, bright);
-        currentColors.put(key_chat_outViews, bright);
-        currentColors.put(key_chat_outViewsSelected, bright);
-        currentColors.put(key_chat_outAudioSeekbarFill, bright);
-        currentColors.put(key_chat_outVoiceSeekbarFill, bright);
     }
 
     private static int getAndroidSystemColor(String name, int fallback) {
@@ -6670,6 +6643,36 @@ public class Theme {
 
     public static ThemeInfo getActiveTheme() {
         return currentTheme;
+    }
+
+    /**
+     * Save a global chat wallpaper on the active theme and mirror it to the
+     * paired day/night theme. Auto-night keeps separate ThemeInfo instances;
+     * applying to only the active one makes the other fall back to the default
+     * light MotionsBackground after a day↔night switch.
+     */
+    public static void setOverrideWallpaperForDayAndNight(OverrideWallpaperInfo info) {
+        ThemeInfo active = getActiveTheme();
+        if (active != null) {
+            active.setOverrideWallpaper(info);
+        }
+        ThemeInfo day = currentDayTheme;
+        ThemeInfo night = currentNightTheme;
+        if (info == null) {
+            if (day != null && day != active) {
+                day.setOverrideWallpaper(null);
+            }
+            if (night != null && night != active) {
+                night.setOverrideWallpaper(null);
+            }
+            return;
+        }
+        if (day != null && day != active) {
+            day.setOverrideWallpaper(new OverrideWallpaperInfo(info, day, day.getAccent(false)));
+        }
+        if (night != null && night != active) {
+            night.setOverrideWallpaper(new OverrideWallpaperInfo(info, night, night.getAccent(false)));
+        }
     }
 
     private static long getAutoNightSwitchThemeDelay() {
@@ -7348,7 +7351,7 @@ public class Theme {
             return new TLRPC.TL_baseThemeTinted();
         } else if ("Arctic Blue".equals(key)) {
             return new TLRPC.TL_baseThemeArctic();
-        } else if ("Night".equals(key) || "AMOLED".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key) || "Burgundy".equals(key)) {
+        } else if ("Night".equals(key) || "AMOLED".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key) || "Burgundy".equals(key) || "Gray Burgundy".equals(key)) {
             return new TLRPC.TL_baseThemeNight();
         }
         return null;

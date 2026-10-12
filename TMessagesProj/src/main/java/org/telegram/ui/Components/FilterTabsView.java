@@ -67,6 +67,7 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.MglaGlassConfig;
 import org.telegram.ui.Stories.recorder.HintView2;
 
 import java.util.ArrayList;
@@ -819,6 +820,8 @@ public class FilterTabsView extends FrameLayout {
 
     private int scrollingToChild = -1;
     private final GradientDrawable selectorDrawable;
+    private final Paint selectorOutlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF selectorOutlineRect = new RectF();
 
     private int tabLineColorKey = Theme.key_actionBarTabLine;
     private int activeTextColorKey = Theme.key_actionBarTabActiveText;
@@ -916,6 +919,8 @@ public class FilterTabsView extends FrameLayout {
         float rad = AndroidUtilities.dpf2(14);
         selectorDrawable.setCornerRadii(new float[]{rad, rad, rad, rad, rad, rad, rad, rad});
         selectorDrawable.setColor(Theme.getColor(tabLineColorKey, resourcesProvider));
+        selectorOutlinePaint.setStyle(Paint.Style.STROKE);
+        selectorOutlinePaint.setStrokeWidth(dpf2(1.5f));
 
         setHorizontalScrollBarEnabled(false);
         listView = new RecyclerListView(context) {
@@ -1507,9 +1512,19 @@ public class FilterTabsView extends FrameLayout {
             final float add = additionalTabWidth / 2f;
 
             final int y = height / 2 - dp(14);
-            selectorDrawable.setBounds((int) (indicatorX - dp(TAB_INTERNAL_PADDING) - add), y, (int) (indicatorX + indicatorWidth + dp(TAB_INTERNAL_PADDING) + add), y + dp(28));
+            final int left = (int) (indicatorX - dp(TAB_INTERNAL_PADDING) - add);
+            final int right = (int) (indicatorX + indicatorWidth + dp(TAB_INTERNAL_PADDING) + add);
+            final int bottom = y + dp(28);
+            selectorDrawable.setBounds(left, y, right, bottom);
             selectorDrawable.setAlpha(31);
             selectorDrawable.draw(canvas);
+            if (MglaGlassConfig.isFolderActiveOutlineEnabled()) {
+                final float inset = selectorOutlinePaint.getStrokeWidth() / 2f;
+                selectorOutlineRect.set(left + inset, y + inset, right - inset, bottom - inset);
+                final int accent = Theme.getColor(tabLineColorKey, resourcesProvider);
+                selectorOutlinePaint.setColor(ColorUtils.setAlphaComponent(accent, (int) (255 * listView.getAlpha())));
+                canvas.drawRoundRect(selectorOutlineRect, AndroidUtilities.dpf2(14) - inset, AndroidUtilities.dpf2(14) - inset, selectorOutlinePaint);
+            }
             canvas.restore();
         }
     }

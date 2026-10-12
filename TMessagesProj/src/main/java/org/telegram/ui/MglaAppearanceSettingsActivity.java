@@ -145,6 +145,18 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
+        LinearLayout foldersBlock = createBlock(context, "Папки");
+        TextCheckCell folderOutlineCell = new TextCheckCell(context);
+        folderOutlineCell.setBackground(null);
+        folderOutlineCell.setTextAndCheck("Обводка активной папки", MglaGlassConfig.isFolderActiveOutlineEnabled(), false);
+        folderOutlineCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isFolderActiveOutlineEnabled();
+            MglaGlassConfig.setFolderActiveOutlineEnabled(newVal);
+            folderOutlineCell.setChecked(newVal);
+        });
+        foldersBlock.addView(folderOutlineCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(foldersBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         LinearLayout sideMenuBlock = createBlock(context, "Боковое меню");
 
         TextSettingsCell configureCell = new TextSettingsCell(context);

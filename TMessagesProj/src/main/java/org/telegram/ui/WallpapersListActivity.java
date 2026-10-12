@@ -564,7 +564,7 @@ public class WallpapersListActivity extends BaseFragment implements Notification
 
                             if (wallPaper.slug != null && wallPaper.slug.equals(selectedBackgroundSlug)) {
                                 selectedBackgroundSlug = Theme.hasWallpaperFromTheme() ? Theme.THEME_BACKGROUND_SLUG : Theme.DEFAULT_BACKGROUND_SLUG;
-                                Theme.getActiveTheme().setOverrideWallpaper(null);
+                                Theme.setOverrideWallpaperForDayAndNight(null);
                                 Theme.reloadWallpaper(true);
                             }
 
