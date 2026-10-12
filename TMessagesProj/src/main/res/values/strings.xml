@@ -5765,7 +5765,7 @@
     <string name="BioLimitTitle">Bio</string>
     <string name="BioLimitSubtitle">Add more symbols and use links in your bio.</string>
     <string name="AppIcon">App Icon</string>
-    <string name="AppIconDefault">Default</string>
+    <string name="AppIconDefault">Основная</string>
     <string name="AppIconGoogle">Google</string>
     <string name="AppIconSimple">Простая</string>
     <string name="AppIconWhite">Белая</string>

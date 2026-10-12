@@ -59,7 +59,7 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
     private static final ConcurrentHashMap<Integer, Bitmap> previewCache = new ConcurrentHashMap<>();
     private static boolean prewarmStarted;
     /** Bump when icon inset/art changes so stale previews are not reused. */
-    private static final int PREVIEW_CACHE_GENERATION = 4;
+    private static final int PREVIEW_CACHE_GENERATION = 6;
     private static int previewCacheGeneration = -1;
 
     /**
@@ -247,8 +247,6 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
 
     private final static class IconHolderView extends LinearLayout {
         private Paint outlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
         private AdaptiveIconImageView iconView;
         private TextView titleView;
 
@@ -261,7 +259,7 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
 
             setWillNotDraw(false);
             iconView = new AdaptiveIconImageView(context);
-            iconView.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+            iconView.setPadding(AndroidUtilities.dp(2), AndroidUtilities.dp(2), AndroidUtilities.dp(2), AndroidUtilities.dp(2));
             addView(iconView, LayoutHelper.createLinear(58, 58, Gravity.CENTER_HORIZONTAL));
 
             titleView = new TextView(context);
@@ -272,19 +270,24 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
 
             outlinePaint.setStyle(Paint.Style.STROKE);
             outlinePaint.setStrokeWidth(Math.max(2, AndroidUtilities.dp(0.5f)));
-
-            fillPaint.setColor(Color.WHITE);
         }
 
         @Override
         public void draw(Canvas canvas) {
             float stroke = outlinePaint.getStrokeWidth();
-            AndroidUtilities.rectTmp.set(iconView.getLeft() + stroke, iconView.getTop() + stroke, iconView.getRight() - stroke, iconView.getBottom() - stroke);
-            canvas.drawRoundRect(AndroidUtilities.rectTmp, AndroidUtilities.dp(ICONS_ROUND_RADIUS), AndroidUtilities.dp(ICONS_ROUND_RADIUS), fillPaint);
+            AndroidUtilities.rectTmp.set(
+                    iconView.getLeft() + iconView.getPaddingLeft() + stroke,
+                    iconView.getTop() + iconView.getPaddingTop() + stroke,
+                    iconView.getRight() - iconView.getPaddingRight() - stroke,
+                    iconView.getBottom() - iconView.getPaddingBottom() - stroke
+            );
 
             super.draw(canvas);
 
-            canvas.drawRoundRect(AndroidUtilities.rectTmp, AndroidUtilities.dp(ICONS_ROUND_RADIUS), AndroidUtilities.dp(ICONS_ROUND_RADIUS), outlinePaint);
+            // Accent outline only for the selected icon — no white backing frame.
+            if (progress > 0f) {
+                canvas.drawRoundRect(AndroidUtilities.rectTmp, AndroidUtilities.dp(ICONS_ROUND_RADIUS), AndroidUtilities.dp(ICONS_ROUND_RADIUS), outlinePaint);
+            }
         }
 
         private void setProgress(float progress) {
@@ -425,7 +428,14 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
 
         private void updatePath() {
             path.rewind();
-            path.addCircle(getWidth() / 2f, getHeight() / 2f, Math.min(getWidth() - getPaddingLeft() - getPaddingRight(), getHeight() - getPaddingTop() - getPaddingBottom()) / 2f, Path.Direction.CW);
+            AndroidUtilities.rectTmp.set(
+                    getPaddingLeft(),
+                    getPaddingTop(),
+                    getWidth() - getPaddingRight(),
+                    getHeight() - getPaddingBottom()
+            );
+            float radius = AndroidUtilities.dp(ICONS_ROUND_RADIUS);
+            path.addRoundRect(AndroidUtilities.rectTmp, radius, radius, Path.Direction.CW);
         }
     }
 }

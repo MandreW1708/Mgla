@@ -155,10 +155,12 @@ public class Theme {
 
     public static final int MSG_OUT_COLOR_BLACK = 0xff212121;
     public static final int MSG_OUT_COLOR_WHITE = 0xffffffff;
-    /** Burgundy accent #6D2619 — links, controls, accent remap. */
-    public static final int BURGUNDY_ACCENT_COLOR = 0xFF6D2619;
-    /** Burgundy out-bubble #2F090E. */
-    public static final int BURGUNDY_BUBBLE_COLOR = 0xFF2F090E;
+    /** Mgla accent — синий (#4272DF): links, controls, accent remap. */
+    public static final int MGLA_ACCENT_COLOR = 0xFF4272DF;
+    /** Mgla out-bubble gradient: голубой → синий → фиолетовый. */
+    public static final int MGLA_BUBBLE_COLOR_1 = 0xFF258DE5;
+    public static final int MGLA_BUBBLE_COLOR_2 = 0xFF4272DF;
+    public static final int MGLA_BUBBLE_COLOR_3 = 0xFF8146D7;
     public static final int default_shadow_color = ColorUtils.setAlphaComponent(Color.BLACK, 27);
     public static boolean disallowChangeServiceMessageColor;
 
@@ -1543,9 +1545,9 @@ public class Theme {
             } else if ("Material Black".equals(name)) {
                 return "Material 3 Чёрная";
             } else if ("Burgundy".equals(name)) {
-                return "Бордовая";
+                return "Amoled цвета Mgla";
             } else if ("Gray Burgundy".equals(name)) {
-                return "Серо-бордовая";
+                return "Темные цвета Mgla";
             }
             return info != null ? info.title : name;
         }
@@ -1595,8 +1597,8 @@ public class Theme {
             if (Theme.isMaterialSystemTheme(this)) {
                 return Theme.getMaterialSystemBubbleColor(isDark());
             }
-            if (Theme.isBurgundyTheme(this)) {
-                return Theme.BURGUNDY_BUBBLE_COLOR;
+            if (Theme.isMglaTheme(this)) {
+                return Theme.MGLA_ACCENT_COLOR;
             }
             return previewOutColor;
         }
@@ -4088,24 +4090,24 @@ public class Theme {
             themesDict.put("Material Black", themeInfo);
         }
 
-        // Built-in like MD3 (no accent list): AMOLED black base + burgundy accents.
+        // Built-in like MD3 (no accent list): AMOLED black base + Mgla blue/violet accents.
         themeInfo = new ThemeInfo();
         themeInfo.name = "Burgundy";
         themeInfo.assetName = "amoled.attheme";
         themeInfo.previewBackgroundColor = 0xff000000;
         themeInfo.previewInColor = 0xff101010;
-        themeInfo.previewOutColor = BURGUNDY_BUBBLE_COLOR;
+        themeInfo.previewOutColor = MGLA_ACCENT_COLOR;
         themeInfo.sortIndex = 10;
         themes.add(themeInfo);
         themesDict.put("Burgundy", themeInfo);
 
-        // Same burgundy accents on the Material 3 dark gray base (night.attheme).
+        // Same Mgla accents on the Material 3 dark gray base (night.attheme).
         themeInfo = new ThemeInfo();
         themeInfo.name = "Gray Burgundy";
         themeInfo.assetName = "night.attheme";
         themeInfo.previewBackgroundColor = 0xff1c1b1f;
         themeInfo.previewInColor = 0xff211f26;
-        themeInfo.previewOutColor = BURGUNDY_BUBBLE_COLOR;
+        themeInfo.previewOutColor = MGLA_ACCENT_COLOR;
         themeInfo.sortIndex = 11;
         themes.add(themeInfo);
         themesDict.put("Gray Burgundy", themeInfo);
@@ -4205,7 +4207,7 @@ public class Theme {
             SharedPreferences.Editor oldEditor = null;
             SharedPreferences.Editor oldEditorNew = null;
             for (ThemeInfo info : themesDict.values()) {
-                if (info.assetName != null && info.accentBaseColor != 0 && !isMaterialSystemTheme(info) && !isBurgundyTheme(info)) {
+                if (info.assetName != null && info.accentBaseColor != 0 && !isMaterialSystemTheme(info) && !isMglaTheme(info)) {
                     String accents = themeConfig.getString("accents_" + info.assetName, null);
                     info.currentAccentId = themeConfig.getInt("accent_current_" + info.assetName, info.firstAccentIsDefault ? DEFALT_THEME_ACCENT_ID : 0);
                     ArrayList<ThemeAccent> newAccents = new ArrayList<>();
@@ -4349,7 +4351,7 @@ public class Theme {
                         info.overrideWallpaper = accent.overrideWallpaper;
                     }
                 } else if (info.assetName != null && (info.themeAccents == null || info.themeAccents.isEmpty())) {
-                    // MD3 / Burgundy-style themes have no accents — still restore their saved wallpapers.
+                    // MD3 / Mgla-style themes have no accents — still restore their saved wallpapers.
                     info.loadWallpapers(themeConfig);
                 }
             }
@@ -6189,8 +6191,8 @@ public class Theme {
             shouldDrawGradientIcons = accent.fillAccentColors(currentColorsNoAccent, currentColors);
         } else if (isMaterialSystemTheme(currentTheme)) {
             applyMaterialSystemAccent(currentTheme);
-        } else if (isBurgundyTheme(currentTheme)) {
-            applyBurgundyAccent(currentTheme);
+        } else if (isMglaTheme(currentTheme)) {
+            applyMglaAccent(currentTheme);
         }
         applyCalculatedTableColors(currentColorsNoAccent, currentColors, currentTheme.isDark());
         applyCalculatedArticleCodeColors(currentColorsNoAccent, currentColors, currentTheme.isDark());
@@ -6218,7 +6220,9 @@ public class Theme {
         return "Material Light".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key);
     }
 
-    public static boolean isBurgundyTheme(ThemeInfo themeInfo) {
+    // Internal keys "Burgundy"/"Gray Burgundy" are kept as storage/prefs identifiers;
+    // display names ("Amoled цвета Mgla" / "Темные цвета Mgla") come from ThemeInfo.getName().
+    public static boolean isMglaTheme(ThemeInfo themeInfo) {
         return themeInfo != null && ("Burgundy".equals(themeInfo.name) || "Gray Burgundy".equals(themeInfo.name));
     }
 
@@ -6270,16 +6274,16 @@ public class Theme {
         accentObj.fillAccentColors(currentColorsNoAccent, currentColors);
     }
 
-    private static void applyBurgundyAccent(ThemeInfo themeInfo) {
+    private static void applyMglaAccent(ThemeInfo themeInfo) {
         ensureMaterialAccentBase(themeInfo);
         ThemeAccent accentObj = new ThemeAccent();
         accentObj.parentTheme = themeInfo;
-        // Accent hue remap uses #6D2619; out-bubbles are flat #2F090E. No extra shades.
-        accentObj.accentColor = BURGUNDY_ACCENT_COLOR;
+        // Accent hue remap uses синий #4272DF; out-bubbles are a голубой → синий → фиолетовый gradient.
+        accentObj.accentColor = MGLA_ACCENT_COLOR;
         accentObj.accentColor2 = 0;
-        accentObj.myMessagesAccentColor = BURGUNDY_BUBBLE_COLOR;
-        accentObj.myMessagesGradientAccentColor1 = BURGUNDY_BUBBLE_COLOR;
-        accentObj.myMessagesGradientAccentColor2 = 0;
+        accentObj.myMessagesAccentColor = MGLA_BUBBLE_COLOR_1;
+        accentObj.myMessagesGradientAccentColor1 = MGLA_BUBBLE_COLOR_2;
+        accentObj.myMessagesGradientAccentColor2 = MGLA_BUBBLE_COLOR_3;
         accentObj.myMessagesGradientAccentColor3 = 0;
         accentObj.fillAccentColors(currentColorsNoAccent, currentColors);
     }
