@@ -5769,11 +5769,6 @@
     <string name="AppIconGoogle">Google</string>
     <string name="AppIconSimple">Простая</string>
     <string name="AppIconWhite">Белая</string>
-    <string name="AppIconVintage">Vintage</string>
-    <string name="AppIconAqua">Aqua</string>
-    <string name="AppIconPremium">Premium</string>
-    <string name="AppIconTurbo">Turbo</string>
-    <string name="AppIconNox">Nox</string>
     <string name="AppIconGreen">Зеленая</string>
     <string name="AppIcon3D">3D</string>
     <string name="AppIconAbstraction">Абстракция</string>
@@ -5788,6 +5783,9 @@
     <string name="AppIconPaper">Рисунок</string>
     <string name="AppIconPerlamutr">Перламутровый</string>
     <string name="AppIconUfc">UFC</string>
+    <string name="AppIconDymka">Дымка</string>
+    <string name="AppIconGradient">Градиент</string>
+    <string name="AppIconZhidkost">Жидкость</string>
     <string name="AppIconChangedTo">App icon has been changed to %1$s</string>
     <string name="FileTooLarge">File Too Large</string>
     <string name="PremiumPreviewAppIcon">Premium App Icon</string>

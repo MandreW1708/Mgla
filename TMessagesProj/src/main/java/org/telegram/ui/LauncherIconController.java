@@ -35,13 +35,11 @@ public class LauncherIconController {
 
     public enum LauncherIcon {
         DEFAULT("DefaultIcon", R.drawable.osnova_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconDefault),
+        DYMKA("DymkaIcon", R.drawable.dymka_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconDymka),
+        GRADIENT("GradientIcon", R.drawable.gradient_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGradient),
+        ZHIDKOST("ZhidkostIcon", R.drawable.zhidkost_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconZhidkost),
         SIMPLE("SimpleIcon", R.drawable.icon_background_sa, R.drawable.simple_foreground, R.string.AppIconSimple),
         WHITE("WhiteIcon", R.drawable.icon_background_sa, R.drawable.white_foreground, R.string.AppIconWhite),
-        VINTAGE("VintageIcon", R.drawable.icon_6_background_sa, R.mipmap.icon_6_foreground_sa, R.string.AppIconVintage),
-        AQUA("AquaIcon", R.drawable.icon_4_background_sa, R.mipmap.icon_foreground_sa, R.string.AppIconAqua),
-        PREMIUM("PremiumIcon", R.drawable.icon_3_background_sa, R.mipmap.icon_3_foreground_sa, R.string.AppIconPremium, true),
-        TURBO("TurboIcon", R.drawable.icon_5_background_sa, R.mipmap.icon_5_foreground_sa, R.string.AppIconTurbo, true),
-        NOX("NoxIcon", R.mipmap.icon_2_background_sa, R.mipmap.icon_foreground_sa, R.string.AppIconNox, true),
         GREEN("GreenIcon", R.drawable.green_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGreen),
         PERLAMUTR("PerlamutrIcon", R.drawable.perlamutr_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconPerlamutr),
         UFC("UfcIcon", R.drawable.ufc_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconUfc),
