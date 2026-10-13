@@ -155,12 +155,14 @@ public class Theme {
 
     public static final int MSG_OUT_COLOR_BLACK = 0xff212121;
     public static final int MSG_OUT_COLOR_WHITE = 0xffffffff;
-    /** Mgla accent — синий (#4272DF): links, controls, accent remap. */
-    public static final int MGLA_ACCENT_COLOR = 0xFF4272DF;
-    /** Mgla out-bubble gradient: голубой → синий → фиолетовый. */
-    public static final int MGLA_BUBBLE_COLOR_1 = 0xFF258DE5;
-    public static final int MGLA_BUBBLE_COLOR_2 = 0xFF4272DF;
-    public static final int MGLA_BUBBLE_COLOR_3 = 0xFF8146D7;
+    /** Mgla accent — тёмно-синий (#2E509C): links, controls, accent remap. */
+    public static final int MGLA_ACCENT_COLOR = 0xFF2E509C;
+    /** Mgla out-bubble gradient: тёмно-голубой → тёмно-синий → тёмно-фиолетовый. */
+    public static final int MGLA_BUBBLE_COLOR_1 = 0xFF1962A0;
+    public static final int MGLA_BUBBLE_COLOR_2 = 0xFF2E509C;
+    public static final int MGLA_BUBBLE_COLOR_3 = 0xFF5A3196;
+    /** Built-in wallpaper of the branded Mgla themes (fixed, cannot be changed). */
+    public static final String MGLA_WALLPAPER_ASSET = "wallpaper_mgla.png";
     public static final int default_shadow_color = ColorUtils.setAlphaComponent(Color.BLACK, 27);
     public static boolean disallowChangeServiceMessageColor;
 
@@ -1507,6 +1509,10 @@ public class Theme {
         }
 
         public void setOverrideWallpaper(OverrideWallpaperInfo info) {
+            if (Theme.isMglaTheme(this)) {
+                // Фирменные темы имеют фиксированные обои — переопределения не сохраняем.
+                return;
+            }
             if (overrideWallpaper == info) {
                 return;
             }
@@ -1545,9 +1551,9 @@ public class Theme {
             } else if ("Material Black".equals(name)) {
                 return "Material 3 Чёрная";
             } else if ("Burgundy".equals(name)) {
-                return "Amoled цвета Mgla";
+                return "Фирм. amoled";
             } else if ("Gray Burgundy".equals(name)) {
-                return "Темные цвета Mgla";
+                return "Фирм. темная";
             }
             return info != null ? info.title : name;
         }
@@ -6221,7 +6227,7 @@ public class Theme {
     }
 
     // Internal keys "Burgundy"/"Gray Burgundy" are kept as storage/prefs identifiers;
-    // display names ("Amoled цвета Mgla" / "Темные цвета Mgla") come from ThemeInfo.getName().
+    // display names ("Фирм. amoled" / "Фирм. темная") come from ThemeInfo.getName().
     public static boolean isMglaTheme(ThemeInfo themeInfo) {
         return themeInfo != null && ("Burgundy".equals(themeInfo.name) || "Gray Burgundy".equals(themeInfo.name));
     }
@@ -6656,6 +6662,10 @@ public class Theme {
      * light MotionsBackground after a day↔night switch.
      */
     public static void setOverrideWallpaperForDayAndNight(OverrideWallpaperInfo info) {
+        if (isMglaTheme(getActiveTheme())) {
+            // Фирменные темы имеют фиксированные обои — менять нельзя.
+            return;
+        }
         ThemeInfo active = getActiveTheme();
         if (active != null) {
             active.setOverrideWallpaper(info);
@@ -9335,6 +9345,10 @@ public class Theme {
     }
 
     public static void setThemeWallpaper(ThemeInfo themeInfo, Bitmap bitmap, File path) {
+        if (isMglaTheme(themeInfo)) {
+            // Фирменные темы имеют фиксированные обои — менять нельзя.
+            return;
+        }
         currentColors.delete(key_chat_wallpaper);
         currentColors.delete(key_chat_wallpaper_gradient_to1);
         currentColors.delete(key_chat_wallpaper_gradient_to2);
@@ -9612,6 +9626,26 @@ public class Theme {
         return createBackgroundDrawable(currentTheme, overrideWallpaper, currentColors, wallpaperFile, wallpaperLink, wallpaperFileOffset, intensity, prevoiusPhase, defaultTheme, false, false, wallpaperMotion, null, local);
     }
 
+    private static Drawable mglaWallpaper;
+    private static Drawable getMglaWallpaper() {
+        if (mglaWallpaper == null) {
+            try {
+                File file = getAssetFile(MGLA_WALLPAPER_ASSET);
+                Bitmap bitmap = loadScreenSizedBitmap(new FileInputStream(file), 0);
+                if (bitmap != null) {
+                    mglaWallpaper = new BitmapDrawable(bitmap);
+                    mglaWallpaper.setFilterBitmap(true);
+                }
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+            if (mglaWallpaper == null) {
+                mglaWallpaper = new ColorDrawable(0xff101014);
+            }
+        }
+        return mglaWallpaper;
+    }
+
     public static BackgroundDrawableSettings createBackgroundDrawable(
             ThemeInfo currentTheme,
             OverrideWallpaperInfo overrideWallpaper,
@@ -9629,6 +9663,15 @@ public class Theme {
             boolean local
     ) {
         BackgroundDrawableSettings settings = new BackgroundDrawableSettings();
+        if (isMglaTheme(currentTheme)) {
+            // Фирменные темы: обои зашиты в APK, смена и переопределения запрещены.
+            settings.wallpaper = getMglaWallpaper();
+            settings.themedWallpaper = settings.wallpaper;
+            settings.isWallpaperMotion = false;
+            settings.isPatternWallpaper = false;
+            settings.isCustomTheme = true;
+            return settings;
+        }
         settings.wallpaper = local ? null : wallpaper;
         boolean overrideTheme = (!hasPreviousTheme || isApplyingAccent) && overrideWallpaper != null;
         if (overrideWallpaper != null) {
