@@ -55,6 +55,7 @@ import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Components.AnimationProperties;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MglaBrandedThemeOffer;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SeekBarView;
 import org.telegram.ui.LaunchActivity;
@@ -495,6 +496,10 @@ public class FloatingDebugView extends FrameLayout implements NotificationCenter
         }));
         items.add(new FloatingDebugController.DebugItem("Show blur settings", () -> {
             BlurSettingsBottomSheet.show(LaunchActivity.getLastFragment());
+            showBigMenu(false);
+        }));
+        items.add(new FloatingDebugController.DebugItem("Show branded theme offer", () -> {
+            MglaBrandedThemeOffer.showAgain(LaunchActivity.instance);
             showBigMenu(false);
         }));
 

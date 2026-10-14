@@ -113,6 +113,7 @@ import org.telegram.ui.Components.InstantCameraView;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.LinkSpanDrawable;
+import org.telegram.ui.Components.MglaBrandedThemeOffer;
 import org.telegram.ui.Components.Paint.PersistColorPalette;
 import org.telegram.ui.Components.Premium.boosts.UserSelectorBottomSheet;
 import org.telegram.ui.Components.RadialProgressView;
@@ -1476,7 +1477,8 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 (SharedConfig.frameMetricsEnabled ? "hide frame metrics" : "show frame metrics"),
                 BuildVars.DEBUG_PRIVATE_VERSION ? (SharedConfig.shadowsInSections ? "disable shadows in settings" : "enable shadows in settings") : null,
                 BuildVars.DEBUG_PRIVATE_VERSION ? (SharedConfig.debugViewMetrics ? "disable debug view metrics" : "enable debug view metrics") : null,
-                (SharedSettings.experimentalSettingsAllowed.get() ? "hide experimental settings" : "show experimental settings")
+                (SharedSettings.experimentalSettingsAllowed.get() ? "hide experimental settings" : "show experimental settings"),
+                "Показать оффер фирменных тем"
         };
 
         builder.setItems(items, (dialog, which) -> {
@@ -1789,6 +1791,8 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             } else if (which == 42) {
                 SharedSettings.experimentalSettingsAllowed.toggle();
                 listView.adapter.update(true);
+            } else if (which == 43) { // Показать оффер фирменных тем
+                MglaBrandedThemeOffer.showAgain((LaunchActivity) getParentActivity());
             }
         });
         builder.setNegativeButton(getString(R.string.Cancel), null);

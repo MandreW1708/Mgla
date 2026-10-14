@@ -157,10 +157,6 @@ public class Theme {
     public static final int MSG_OUT_COLOR_WHITE = 0xffffffff;
     /** Mgla accent — тёмно-синий (#2E509C): links, controls, accent remap. */
     public static final int MGLA_ACCENT_COLOR = 0xFF2E509C;
-    /** Mgla out-bubble gradient: тёмно-голубой → тёмно-синий → тёмно-фиолетовый. */
-    public static final int MGLA_BUBBLE_COLOR_1 = 0xFF1962A0;
-    public static final int MGLA_BUBBLE_COLOR_2 = 0xFF2E509C;
-    public static final int MGLA_BUBBLE_COLOR_3 = 0xFF5A3196;
     /** Built-in wallpaper of the branded Mgla themes (fixed, cannot be changed). */
     public static final String MGLA_WALLPAPER_ASSET = "wallpaper_mgla.png";
     public static final int default_shadow_color = ColorUtils.setAlphaComponent(Color.BLACK, 27);
@@ -6284,12 +6280,13 @@ public class Theme {
         ensureMaterialAccentBase(themeInfo);
         ThemeAccent accentObj = new ThemeAccent();
         accentObj.parentTheme = themeInfo;
-        // Accent hue remap uses синий #4272DF; out-bubbles are a голубой → синий → фиолетовый gradient.
+        // Accent hue remap uses тёмно-синий #2E509C; out-bubbles — плоский тот же цвет
+        // (одинаковый цвет в обоих слотах градиента = без градиента).
         accentObj.accentColor = MGLA_ACCENT_COLOR;
         accentObj.accentColor2 = 0;
-        accentObj.myMessagesAccentColor = MGLA_BUBBLE_COLOR_1;
-        accentObj.myMessagesGradientAccentColor1 = MGLA_BUBBLE_COLOR_2;
-        accentObj.myMessagesGradientAccentColor2 = MGLA_BUBBLE_COLOR_3;
+        accentObj.myMessagesAccentColor = MGLA_ACCENT_COLOR;
+        accentObj.myMessagesGradientAccentColor1 = MGLA_ACCENT_COLOR;
+        accentObj.myMessagesGradientAccentColor2 = 0;
         accentObj.myMessagesGradientAccentColor3 = 0;
         accentObj.fillAccentColors(currentColorsNoAccent, currentColors);
     }
@@ -9627,7 +9624,7 @@ public class Theme {
     }
 
     private static Drawable mglaWallpaper;
-    private static Drawable getMglaWallpaper() {
+    public static Drawable getMglaWallpaper() {
         if (mglaWallpaper == null) {
             try {
                 File file = getAssetFile(MGLA_WALLPAPER_ASSET);

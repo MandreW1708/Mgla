@@ -258,10 +258,13 @@ class Report:
         for column, title, hint in (
             ("ver", "🏷️ Версии Mgla", "Какая сборка у людей"),
             ("man", "🏭 Производители", None),
-            ("model", "📱 Модели", None),
+            ("model", "📱 Модели", "По производителям"),
             ("sdk", "🤖 Android (SDK)", "Чем выше — тем новее Android"),
             ("lang", "🌍 Язык системы", None),
         ):
+            if column == "model":
+                sections.append(self.models_by_manufacturer_section(title, hint))
+                continue
             rows = self.q(
                 f"SELECT COALESCE({column}, '?'), COUNT(*) FROM installs WHERE last_seen >= ? "
                 f"GROUP BY 1 ORDER BY 2 DESC LIMIT ?", (self.since, self.top))
@@ -389,6 +392,42 @@ class Report:
         })
         return sections
 
+    def models_by_manufacturer_section(self, title, hint=None):
+        """Модели устройства, сгруппированные по производителю (не плоский топ)."""
+        limit = max(self.top * 5, 120)
+        rows = self.q(
+            "SELECT COALESCE(man, '?'), COALESCE(model, '?'), COUNT(*) FROM installs "
+            "WHERE last_seen >= ? GROUP BY 1, 2 ORDER BY 3 DESC LIMIT ?",
+            (self.since, limit),
+        )
+        by_man = {}
+        for man, model, n in rows:
+            by_man.setdefault(man, []).append((model, n))
+        groups = []
+        for man, items in by_man.items():
+            items.sort(key=lambda x: -x[1])
+            total = sum(n for _, n in items)
+            groups.append((man, total, items))
+        groups.sort(key=lambda x: (-x[1], x[0].lower()))
+        grand = sum(t for _, t, _ in groups) or 1
+        bar_max = max((n for _, _, items in groups for _, n in items), default=1)
+        return {
+            "kind": "models_grouped",
+            "title": title,
+            "subtitle": hint,
+            "groups": [
+                {
+                    "man": man,
+                    "total": total,
+                    "pct": pct(total, grand),
+                    "rows": [(model, n, pct(n, grand)) for model, n in items],
+                }
+                for man, total, items in groups
+            ],
+            "bar_max": bar_max,
+            "group": "devices",
+        }
+
     def counter_section(self, prefix, title, note=None):
         rows = []
         for n, u, c in self.counters(prefix):
@@ -423,6 +462,14 @@ def render_text(sections, days, since):
                     f"  {it['icon']} {it['name']}: вкл. {it['on']} / выкл. {it['off']} "
                     f"({it['pct']} из {it['total']})"
                 )
+        elif s.get("kind") == "models_grouped":
+            groups = s.get("groups") or []
+            if not groups:
+                out.append("  (нет данных)")
+            for g in groups:
+                out.append(f"  {g['man']}  —  {g['total']} ({g['pct']})")
+                for model, n, share in g.get("rows") or []:
+                    out.append(f"      {model}: {n}  ({share})")
         elif "chart" in s:
             out += [f"  {d}  активны: {a:<6} новых: {n}" for d, a, n in s["chart"]]
         else:
@@ -605,6 +652,46 @@ svg text { fill:var(--muted); font-size:10px; }
   td.bar { min-width:72px; width:30%; }
   .nav a { padding:7px 10px; font-size:12.5px; }
 }
+.models-block { margin-top:10px; }
+.models-block > h2 { margin:10px 0 4px; font-size:15px; }
+.man-group {
+  margin:10px 0 14px; padding:0;
+  background:var(--card2); border:1px solid var(--line); border-radius:14px;
+  overflow:hidden;
+}
+.man-group > summary {
+  list-style:none; cursor:pointer; user-select:none;
+  display:flex; gap:10px; align-items:center;
+  justify-content:space-between;
+  padding:12px 12px 12px 14px;
+}
+.man-group > summary::-webkit-details-marker { display:none; }
+.man-group > summary:hover { background:rgba(255,255,255,.03); }
+.man-head-left {
+  display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; min-width:0;
+}
+.man-name { font-weight:700; font-size:14px; }
+.man-meta { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
+.man-toggle {
+  flex:0 0 auto;
+  width:34px; height:34px; border-radius:10px;
+  display:grid; place-items:center;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.04);
+  color:var(--muted); font-size:16px; line-height:1;
+  transition:transform .18s ease, color .18s ease, border-color .18s ease;
+}
+.man-group > summary:hover .man-toggle {
+  color:#f3e9ec; border-color:rgba(194,59,95,.45);
+}
+.man-group[open] > summary { border-bottom:1px solid var(--line); }
+.man-group[open] .man-toggle {
+  transform:rotate(180deg);
+  color:#f3e9ec; border-color:rgba(194,59,95,.5);
+  background:rgba(139,30,63,.2);
+}
+.man-group .table-wrap { padding:4px 10px 8px; }
+.man-group td.name { padding-left:10px; color:#e8dce0; }
 """
 
 
@@ -698,14 +785,63 @@ def render_features(s):
     return legend + '<div class="feat-grid">' + "".join(cards) + "</div>"
 
 
-def _render_devices_card(devices):
-    parts = ['<div class="card"><h2>💻 Версии и устройства</h2><div class="grid2">']
-    for s in devices:
-        sub = f'<p class="sub">{html.escape(s["subtitle"])}</p>' if s.get("subtitle") else ""
+def render_models_grouped(s):
+    groups = s.get("groups") or []
+    sub = f'<p class="sub">{html.escape(s["subtitle"])}</p>' if s.get("subtitle") else ""
+    parts = [
+        f'<div class="models-block"><h2>{html.escape(s["title"])}</h2>{sub}'
+    ]
+    if not groups:
+        parts.append('<div class="empty">Пока нет данных за этот период</div></div>')
+        return "".join(parts)
+    bar_max = s.get("bar_max") or 1
+    for i, g in enumerate(groups):
+        # Первый производитель (самый крупный) открыт, остальные свёрнуты.
+        open_attr = " open" if i == 0 else ""
         parts.append(
-            f'<div><h2 style="font-size:15px;margin:14px 0 4px">{html.escape(s["title"])}</h2>'
-            f'{sub}{render_table(s)}</div>')
-    parts.append("</div></div>")
+            f'<details class="man-group"{open_attr}>'
+            f'<summary>'
+            f'<span class="man-head-left">'
+            f'<span class="man-name">{html.escape(str(g["man"]))}</span>'
+            f'<span class="man-meta">{g["total"]} · {html.escape(str(g["pct"]))}</span>'
+            f'</span>'
+            f'<span class="man-toggle" aria-hidden="true">▾</span>'
+            f'</summary>')
+        parts.append(render_table({
+            "headers": ["Модель", "Установок", "Доля"],
+            "rows": g.get("rows") or [],
+            "bar": 1,
+            "bar_max": bar_max,
+        }))
+        parts.append("</details>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _render_devices_card(devices):
+    parts = ['<div class="card"><h2>💻 Версии и устройства</h2>']
+    flat_buf = []
+
+    def flush_flat():
+        if not flat_buf:
+            return
+        parts.append('<div class="grid2">')
+        for s in flat_buf:
+            sub = f'<p class="sub">{html.escape(s["subtitle"])}</p>' if s.get("subtitle") else ""
+            parts.append(
+                f'<div><h2 style="font-size:15px;margin:14px 0 4px">{html.escape(s["title"])}</h2>'
+                f'{sub}{render_table(s)}</div>')
+        parts.append("</div>")
+        flat_buf.clear()
+
+    for s in devices:
+        if s.get("kind") == "models_grouped":
+            flush_flat()
+            parts.append(render_models_grouped(s))
+        else:
+            flat_buf.append(s)
+    flush_flat()
+    parts.append("</div>")
     return "".join(parts)
 
 
