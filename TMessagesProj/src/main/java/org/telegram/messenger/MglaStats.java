@@ -318,6 +318,7 @@ public final class MglaStats {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             conn.setRequestProperty("X-Mgla-Token", token);
+            conn.setRequestProperty("X-Mgla-Client", "mgla");
             byte[] body = json.getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
                 // getOutputStream completes the TLS handshake.

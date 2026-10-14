@@ -52,6 +52,7 @@ public final class MglaHubHttp {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
+            conn.setRequestProperty("X-Mgla-Client", "mgla");
             conn.connect();
             if (MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
                 verifyRelayPin(conn.getServerCertificates());

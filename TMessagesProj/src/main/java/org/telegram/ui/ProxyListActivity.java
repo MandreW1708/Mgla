@@ -618,7 +618,12 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
         if (notify) {
             proxyList.clear();
-            proxyList.addAll(SharedConfig.proxyList);
+            for (SharedConfig.ProxyInfo info : SharedConfig.proxyList) {
+                if (info == null || org.telegram.utils.proxy.MglaInternalProxy.isInternal(info.settings)) {
+                    continue;
+                }
+                proxyList.add(info);
+            }
 
             boolean checking = false;
             if (!wasCheckedAllList) {

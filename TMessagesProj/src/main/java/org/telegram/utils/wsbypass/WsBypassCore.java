@@ -440,6 +440,8 @@ public final class WsBypassCore {
         String path = "/apiws?dc=" + effective + (isMedia ? "&media=1" : "");
         Map<String, String> headers = new HashMap<>();
         headers.put("X-Mgla-Token", token);
+        // Stock Telegram и чужие клиенты этот заголовок не шлют — релей их отвергнет.
+        headers.put("X-Mgla-Client", "mgla");
         dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : ""));
         long attemptDeadline = Math.min(deadlineNanos,
             System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RELAY_ATTEMPT_MS));

@@ -251,6 +251,10 @@ public class ApplicationLoader extends Application {
             // Локальный прокси обхода должен слушать порт ДО создания ConnectionsManager:
             // init() каждого аккаунта сам подхватит прокси из mainconfig.
             // WS (kws) и ByeDPI взаимоисключающие — каждый init сам выключит другой, если был.
+            try {
+                org.telegram.utils.proxy.MglaInternalProxy.scrubProxyList();
+            } catch (Throwable ignored) {
+            }
             org.telegram.utils.wsbypass.MglaWsBypass.initOnAppStart();
             MglaDpiBypass.initOnAppStart();
         } catch (Throwable e) {

@@ -295,6 +295,7 @@ public final class MglaUpdateChecker {
                     }
                     HttpURLConnection conn = MglaDirectHttp.open("http://127.0.0.1:" + port + path);
                     conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
+                    conn.setRequestProperty("X-Mgla-Client", "mgla");
                     return new UpdateConnection(conn, channel, true);
                 } catch (Exception e) {
                     WebProxyTransport.releaseUpdateTunnel();
@@ -305,6 +306,7 @@ public final class MglaUpdateChecker {
             String host = relay ? MglaWsConfig.getRelayHost() : MglaWsConfig.getHubHost();
             HttpsURLConnection conn = MglaDirectHttp.openHttps("https://" + host + path);
             conn.setRequestProperty("X-Mgla-Token", relay ? MglaWsConfig.getRelayToken() : MglaWsConfig.getHubToken());
+            conn.setRequestProperty("X-Mgla-Client", "mgla");
             return new UpdateConnection(conn, channel, false);
         }
 

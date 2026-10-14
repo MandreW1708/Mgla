@@ -1,0 +1,13 @@
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -20,8 +20,10 @@ import (
+ )
+ 
+ const (
+-	capabilityContext   = "tdesktop-web-proxy-bridge-v1\n"
+-	capabilityContextV2 = "tdesktop-web-proxy-bridge-v2\n"
++	// Mgla-only: stock Telegram Desktop with the same secret fails to auth.
++	capabilityContext   = "mgla-web-proxy-bridge-v1\n"
++	capabilityContextV2 = "mgla-web-proxy-bridge-v2\n"
+ 	MaxBasePathLength   = 128
+ )
