@@ -1,0 +1,24 @@
+[Unit]
+Description=Mgla public site + CMS (mgla.home.mooo.com)
+After=network.target
+# Independent of mgla-ws-relay / mgla-stats / tproxy — do not start/stop those.
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mgla-site
+EnvironmentFile=/opt/mgla-site/env
+ExecStart=/opt/mgla-site/venv/bin/gunicorn \
+  --workers 2 \
+  --bind 127.0.0.1:8770 \
+  --access-logfile - \
+  --error-logfile - \
+  app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

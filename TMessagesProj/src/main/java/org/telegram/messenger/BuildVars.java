@@ -29,6 +29,8 @@ public class BuildVars {
     public static String MGLA_VERSION_STRING = "v1.5.6";
     public static String MGLA_DEV_CHANNEL_USERNAME = "mgla_fork";
     public static String MGLA_SUPPORT_USERNAME = "lkpk_k";
+    public static String MGLA_SITE_URL = "https://mgla.home.mooo.com";
+    public static String MGLA_GUIDE_URL = "https://mgla.home.mooo.com/guide";
 
     public static int APP_ID = BuildConfig.APP_ID;
     public static String APP_HASH = BuildConfig.APP_HASH;

@@ -1,0 +1,41 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ chapter.title }} — глава{% endblock %}
+{% block content %}
+<p class="muted"><a href="{{ url_for('admin_page', slug=chapter.page_slug) }}">← {{ chapter.section_title }}</a></p>
+<h1>Глава</h1>
+
+<form method="post" id="chapter-form">
+  <div class="admin-card">
+    <label>Заголовок</label>
+    <input type="text" name="title" value="{{ chapter.title }}">
+    <div class="form-row">
+      <button class="btn btn-primary" type="submit" name="action" value="save">Сохранить</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="btn-preview">Обновить превью</button>
+      <label class="btn btn-ghost btn-sm" style="margin:0;cursor:pointer">
+        Вставить картинку
+        <input type="file" id="img-upload" accept="image/*" hidden>
+      </label>
+      <button class="btn btn-danger btn-sm" type="submit" name="action" value="delete" onclick="return confirm('Удалить главу?')">Удалить</button>
+    </div>
+  </div>
+
+  <div class="split-2">
+    <div class="admin-card">
+      <h3>Markdown</h3>
+      <p class="muted" style="margin-top:0">Поддерживаются заголовки, списки, ссылки, код и картинки <code>![](/uploads/...)</code></p>
+      <textarea name="body" id="body">{{ chapter.body }}</textarea>
+    </div>
+    <div class="admin-card">
+      <h3>Превью</h3>
+      <div class="preview-box prose" id="preview">{{ preview_html|safe }}</div>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+<script>
+  window.MglaChapterEditor && window.MglaChapterEditor.init();
+</script>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }} — Mgla{% endblock %}
+{% block content %}
+<div class="wrap doc-layout {% if active == 'guide' %}doc-layout-guide{% endif %}">
+  <aside class="doc-side {% if active == 'guide' %}doc-side-guide{% endif %}" data-reveal>
+    {% if active == 'guide' %}
+    <div id="guide-search" class="guide-search">
+      <label class="search-label" for="guide-q">Поиск по настройкам</label>
+      <input id="guide-q" type="search" enterkeyhint="search" data-search-input placeholder="Скрытые чаты, обход, ИИ…" autocomplete="off">
+      <div class="search-caption" hidden>Пути в клиенте → откроют инструкцию</div>
+      <div class="settings-results" data-settings-results hidden></div>
+    </div>
+    {% endif %}
+
+    {% if active == 'guide' %}
+    <div class="guide-index">
+      {% if page.intro %}
+      <div class="intro guide-index-intro">{{ page.intro }}</div>
+      {% endif %}
+      {% for item in tree %}
+        <section class="guide-cat" data-cat>
+          <h3 class="sec-title">{{ item.section.title }}</h3>
+          <div class="guide-cat-items">
+            {% for ch in item.chapters %}
+              <button type="button" class="guide-item" data-open-chapter="ch-{{ ch.id }}">
+                <span>{{ ch.title }}</span>
+                <span class="guide-item-chevron" aria-hidden="true"></span>
+              </button>
+            {% else %}
+              <div class="muted" style="font-size:.85rem;padding:.2rem .45rem">Пока нет глав</div>
+            {% endfor %}
+          </div>
+        </section>
+      {% else %}
+        <div class="muted">Разделы появятся здесь.</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Desktop TOC #}
+    <details class="mobile-toc {% if active == 'guide' %}desktop-only-toc{% endif %}" data-mobile-toc open>
+      <summary>
+        <span>{{ page.title }}</span>
+        <span class="toc-hint">оглавление</span>
+      </summary>
+      <div class="toc-body">
+        {% if page.intro %}
+        <div class="intro">{{ page.intro }}</div>
+        {% endif %}
+        {% for item in tree %}
+          <div class="sec-title">{{ item.section.title }}</div>
+          {% for ch in item.chapters %}
+            <a href="#ch-{{ ch.id }}">{{ ch.title }}</a>
+          {% else %}
+            <div class="muted" style="font-size:.85rem;padding:.2rem .45rem">Пока нет глав</div>
+          {% endfor %}
+        {% else %}
+          <div class="muted">Разделы появятся здесь.</div>
+        {% endfor %}
+      </div>
+    </details>
+  </aside>
+
+  <div class="doc-main">
+    {% if active == 'guide' %}
+    <div class="search-banner muted" data-search-empty hidden>
+      По инструкциям ничего не найдено — посмотрите совпадения в поиске настроек или очистите запрос.
+    </div>
+    {% endif %}
+    {% if not tree %}
+      <div class="empty">Контент ещё не добавлен. Зайдите в админку и наполните страницу.</div>
+    {% endif %}
+    {% set ns = namespace(i=0) %}
+    {% for item in tree %}
+      {% for ch in item.chapters %}
+      <article class="chapter" id="ch-{{ ch.id }}" data-reveal data-reveal-delay="{{ (ns.i % 4) * 60 }}">
+        {% set ns.i = ns.i + 1 %}
+        <h3>{{ ch.title }}</h3>
+        <div class="prose">{{ render_md(ch.body)|safe }}</div>
+      </article>
+      {% endfor %}
+    {% endfor %}
+  </div>
+</div>
+
+{% if active == 'guide' %}
+<div class="chapter-sheet" id="chapter-sheet" hidden aria-hidden="true">
+  <div class="chapter-sheet-bar">
+    <button type="button" class="chapter-sheet-back" data-close-chapter aria-label="Назад">← Назад</button>
+    <div class="chapter-sheet-title" data-sheet-title></div>
+  </div>
+  <div class="chapter-sheet-body prose" data-sheet-body></div>
+</div>
+<script src="{{ url_for('static', filename='js/guide_search.js') }}"></script>
+{% endif %}
+{% endblock %}

@@ -37,6 +37,7 @@ import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.NotificationCenter;
@@ -68,6 +69,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private static final int NAV_QR = 6;
     private static final int NAV_BROWSER = 7;
     private static final int NAV_MGLA_SETTINGS = 1001;
+    private static final int NAV_MEMORY = 1002;
 
     private final LaunchActivity activity;
     private View scrim;
@@ -367,6 +369,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
         navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 20, 8, 20, 8));
 
+        if (MglaMemoryConfig.isActive()) {
+            addNavItem(context, R.drawable.msg_saved, "Живая память", NAV_MEMORY);
+        }
         addNavItem(context, R.drawable.msg_settings, "Настройки Mgla", NAV_MGLA_SETTINGS);
 
         return navContainer;
@@ -440,6 +445,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 break;
             case MglaSideMenuController.ITEM_NEW_CHANNEL:
                 openFragment(new ChannelCreateActivity(new Bundle()));
+                break;
+            case NAV_MEMORY:
+                openFragment(new MglaMemoryActivity());
                 break;
             case NAV_MGLA_SETTINGS:
                 openFragment(new MglaSettingsActivity());

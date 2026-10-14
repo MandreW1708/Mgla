@@ -388,6 +388,7 @@ public class MessagesStorage extends BaseController {
             databaseCreated = true;
             MglaEditHistoryStorage.ensureTable(database);
             MglaDeletedStorage.ensureTable(database);
+            MglaMemoryStorage.ensureTable(database);
         } catch (Exception e) {
             FileLog.e(e);
             if (openTries < 3 && e.getMessage() != null && e.getMessage().contains("malformed")) {
@@ -774,6 +775,7 @@ public class MessagesStorage extends BaseController {
 
         MglaEditHistoryStorage.ensureTable(database);
         MglaDeletedStorage.ensureTable(database);
+        MglaMemoryStorage.ensureTable(database);
         database.executeFast("CREATE TABLE ephemeral_messages (id INTEGER, dialog_id INTEGER, topic_id INTEGER, date INTEGER, data BLOB, PRIMARY KEY(dialog_id, id));").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS ephemeral_messages_date_idx ON ephemeral_messages(date);").stepThis().dispose();
 

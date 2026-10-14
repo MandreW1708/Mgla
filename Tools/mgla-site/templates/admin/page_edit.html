@@ -1,0 +1,74 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ page.title }} — конструктор{% endblock %}
+{% block content %}
+<h1>{{ page.title }}</h1>
+<p class="muted">Добавляйте разделы и главы, меняйте порядок перетаскиванием, скрывайте черновики.</p>
+
+<form method="post" action="{{ url_for('admin_page_intro', slug=slug) }}" class="admin-card">
+  <h3>Шапка страницы</h3>
+  <label>Название</label>
+  <input type="text" name="title" value="{{ page.title }}">
+  <label>Краткое введение (plain text)</label>
+  <textarea name="intro" style="min-height:100px">{{ page.intro }}</textarea>
+  <div class="form-row">
+    <button class="btn btn-primary btn-sm" type="submit">Сохранить шапку</button>
+    <a class="btn btn-ghost btn-sm" href="{{ url_for(slug) }}" target="_blank">Открыть на сайте</a>
+  </div>
+</form>
+
+<form method="post" action="{{ url_for('admin_add_section', slug=slug) }}" class="admin-card">
+  <h3>Новый раздел</h3>
+  <div class="form-row">
+    <input type="text" name="title" placeholder="Название раздела" style="flex:1;min-width:200px">
+    <button class="btn btn-primary btn-sm" type="submit">Добавить раздел</button>
+  </div>
+</form>
+
+<div id="sections" data-kind="sections">
+{% for item in tree %}
+  <div class="admin-card section-card" data-id="{{ item.section.id }}">
+    <div class="item-row" style="border:0;padding-top:0">
+      <span class="drag-handle" title="Перетащить">⋮⋮</span>
+      <form method="post" action="{{ url_for('admin_update_section', section_id=item.section.id) }}" class="grow" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+        <input type="text" name="title" value="{{ item.section.title }}" style="flex:1;min-width:180px">
+        {% if item.section.published %}
+          <span class="badge">опубликован</span>
+        {% else %}
+          <span class="badge off">скрыт</span>
+        {% endif %}
+        <button class="btn btn-ghost btn-sm" type="submit" name="action" value="save">Сохранить</button>
+        <button class="btn btn-ghost btn-sm" type="submit" name="action" value="toggle">{{ 'Скрыть' if item.section.published else 'Показать' }}</button>
+        <button class="btn btn-danger btn-sm" type="submit" name="action" value="delete" onclick="return confirm('Удалить раздел и все главы?')">Удалить</button>
+      </form>
+    </div>
+
+    <div class="chapters" data-kind="chapters" data-section="{{ item.section.id }}">
+      {% for ch in item.chapters %}
+      <div class="item-row chapter-row" data-id="{{ ch.id }}">
+        <span class="drag-handle">⋮⋮</span>
+        <div class="grow">
+          <strong>{{ ch.title }}</strong>
+          {% if not ch.published %}<span class="badge off">скрыта</span>{% endif %}
+        </div>
+        <a class="btn btn-ghost btn-sm" href="{{ url_for('admin_chapter', chapter_id=ch.id) }}">Редактировать</a>
+        <form method="post" action="{{ url_for('admin_chapter', chapter_id=ch.id) }}">
+          <button class="btn btn-ghost btn-sm" name="action" value="toggle">{{ 'Скрыть' if ch.published else 'Показать' }}</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+
+    <form method="post" action="{{ url_for('admin_add_chapter', section_id=item.section.id) }}" class="form-row">
+      <input type="text" name="title" placeholder="Новая глава" style="flex:1;min-width:180px">
+      <button class="btn btn-primary btn-sm" type="submit">Добавить главу</button>
+    </form>
+  </div>
+{% else %}
+  <div class="empty">Пока нет разделов — создайте первый выше.</div>
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

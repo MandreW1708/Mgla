@@ -74,12 +74,7 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
     private void fillCommon(Context context, LinearLayout rootLayout) {
         LinearLayout block = MglaUi.createBlock(context, "Анимация назад");
 
-        final int[] styles = {
-                MglaGlassConfig.PREDICTIVE_BACK_DEFAULT,
-                MglaGlassConfig.PREDICTIVE_BACK_MD3,
-                MglaGlassConfig.PREDICTIVE_BACK_PAGES,
-                MglaGlassConfig.PREDICTIVE_BACK_PUSH
-        };
+        final int[] styles = MglaGlassConfig.PREDICTIVE_BACK_STYLES;
         final RadioCell[] styleCells = new RadioCell[styles.length];
         final int currentStyle = MglaGlassConfig.getPredictiveBackStyle();
         for (int i = 0; i < styles.length; i++) {

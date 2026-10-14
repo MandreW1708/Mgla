@@ -235,6 +235,18 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1076, "В стиле MD3", hub, animCommon, appearanceIcon, animCommonScreen, "В стиле MD3", "appearance/animation/common/md3"));
         l.add(new Entry(1077, "Страницы", hub, animCommon, appearanceIcon, animCommonScreen, "Страницы", "appearance/animation/common/pages"));
         l.add(new Entry(1078, "Выталкивание", hub, animCommon, appearanceIcon, animCommonScreen, "Выталкивание", "appearance/animation/common/push"));
+        l.add(new Entry(1134, "Поверхность", hub, animCommon, appearanceIcon, animCommonScreen, "Поверхность", "appearance/animation/common/surface"));
+        l.add(new Entry(1135, "Отрыв", hub, animCommon, appearanceIcon, animCommonScreen, "Отрыв", "appearance/animation/common/shared"));
+        l.add(new Entry(1136, "Проявление", hub, animCommon, appearanceIcon, animCommonScreen, "Проявление", "appearance/animation/common/fade-through"));
+        l.add(new Entry(1137, "Ось X", hub, animCommon, appearanceIcon, animCommonScreen, "Ось X", "appearance/animation/common/axis-x"));
+        l.add(new Entry(1138, "Ось Y", hub, animCommon, appearanceIcon, animCommonScreen, "Ось Y", "appearance/animation/common/axis-y"));
+        l.add(new Entry(1139, "Ось Z", hub, animCommon, appearanceIcon, animCommonScreen, "Ось Z", "appearance/animation/common/axis-z"));
+        l.add(new Entry(1141, "Глубина", hub, animCommon, appearanceIcon, animCommonScreen, "Глубина", "appearance/animation/common/depth"));
+        l.add(new Entry(1142, "Зум", hub, animCommon, appearanceIcon, animCommonScreen, "Зум", "appearance/animation/common/zoom"));
+        l.add(new Entry(1143, "3D страницы", hub, animCommon, appearanceIcon, animCommonScreen, "3D страницы", "appearance/animation/common/cube"));
+        l.add(new Entry(1145, "Укрытие", hub, animCommon, appearanceIcon, animCommonScreen, "Укрытие", "appearance/animation/common/cover"));
+        l.add(new Entry(1147, "Карточки", hub, animCommon, appearanceIcon, animCommonScreen, "Карточки", "appearance/animation/common/cards"));
+        l.add(new Entry(1149, "Затемнение", hub, animCommon, appearanceIcon, animCommonScreen, "Затемнение", "appearance/animation/common/fade"));
         l.add(new Entry(1118, "Открытие экранов как назад", hub, animCommon, appearanceIcon, animCommonScreen, "Открытие экранов как назад", "appearance/animation/common/reverse-open"));
         l.add(new Entry(1122, "Вырастание фото", hub, animCommon, appearanceIcon, animCommonScreen, "Вырастание фото", "appearance/animation/common/media-grow"));
         l.add(new Entry(1123, "Пружина при тапе", hub, animCommon, appearanceIcon, animCommonScreen, "Пружина при тапе", "appearance/animation/common/press-spring"));
@@ -270,6 +282,12 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1112, "Язык Whisper", hub, transcribe, aiIcon, transcribeScreen, "Язык", "ai/transcribe/whisper/language"));
         l.add(new Entry(1107, "Главные темы Chat DNA", hub, ai, aiIcon, aiScreen, "Главные темы Chat DNA", "ai/chat-dna"));
         l.add(new Entry(1108, "Локальные модели", hub, ai, aiIcon, aiScreen, "Локальные модели", "ai/models"));
+        l.add(new Entry(1135, "Memory", hub, ai, aiIcon, MglaMemoryActivity::new, null, "ai/memory"));
+        l.add(new Entry(1140, "Живая память", hub, ai, aiIcon, MglaMemoryActivity::new, null, "ai/living-memory"));
+        l.add(new Entry(1136, "Включить память", hub, "Живая память", aiIcon, aiScreen, "Включить живую память", "ai/memory/enable"));
+        l.add(new Entry(1137, "Провайдер памяти", hub, "Живая память", aiIcon, aiScreen, "Провайдер памяти", "ai/memory/provider"));
+        l.add(new Entry(1138, "Интервал обновления памяти", hub, "Живая память", aiIcon, aiScreen, "Интервал обновления", "ai/memory/interval"));
+        l.add(new Entry(1139, "Лимит запросов памяти", hub, "Живая память", aiIcon, aiScreen, "Лимит запросов памяти", "ai/memory/limit"));
 
         return l;
     }

@@ -1714,6 +1714,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int open_direct = 70;
     private final static int mgla_view_deleted = 76;
     private final static int mgla_chat_dna = 75;
+    private final static int mgla_memory_chat = 77;
     private final static int remove_fee = 71;
     private final static int charge_fee = 72;
 
@@ -3793,6 +3794,19 @@ public class ChatActivity extends BaseFragment implements
                     openMglaDeletedMessages();
                 } else if (id == mgla_chat_dna) {
                     MglaChatDnaActivity.openWithPeriodPicker(ChatActivity.this, dialog_id);
+                } else if (id == mgla_memory_chat) {
+                    if (!org.telegram.messenger.MglaMemoryConfig.isActive()) {
+                        BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                        return;
+                    }
+                    boolean watched = org.telegram.messenger.MglaMemoryConfig.isWatched(currentAccount, dialog_id);
+                    org.telegram.messenger.MglaMemoryConfig.toggleWatched(currentAccount, dialog_id);
+                    if (!watched) {
+                        org.telegram.messenger.MglaMemoryExtractor.kick();
+                        BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.contact_check, "Чат добавлен в Живую память").show();
+                    } else {
+                        BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.error, "Чат убран из Живой памяти").show();
+                    }
                 } else if (id == charge_fee ) {
                     long user_id = dialog_id;
                     long parent_id = 0;
@@ -4531,6 +4545,12 @@ public class ChatActivity extends BaseFragment implements
                     && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_chat_dna")
                     && getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE).getBoolean("ai_enabled", true)) {
                 headerItem.lazilyAddSubItem(mgla_chat_dna, R.drawable.msg_topics, "Chat DNA");
+            }
+            if (chatMode == MODE_DEFAULT && currentEncryptedChat == null
+                    && org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_memory")) {
+                boolean memoryWatched = org.telegram.messenger.MglaMemoryConfig.isWatched(currentAccount, dialog_id);
+                headerItem.lazilyAddSubItem(mgla_memory_chat, R.drawable.msg_saved,
+                    memoryWatched ? "Убрать чат из памяти" : "Добавить чат в память");
             }
             SharedPreferences mglaCfg = getContext().getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
             if (org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")

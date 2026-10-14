@@ -38,6 +38,7 @@ public final class MglaFeatureFlags {
         "ai_retell",
         "ai_editor",
         "ai_transcribe_enabled",
+        "ai_memory",
         "ws_enabled",
         "dpi_enabled",
         "spy_ghost_mode",

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05070c">
+  <meta name="color-scheme" content="dark">
+  <meta name="format-detection" content="telephone=no">
+  <title>{% block title %}Mgla{% endblock %}</title>
+  <meta name="description" content="Mgla — клиент Telegram с обходом блокировок, ИИ и гибкими настройками.">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo-sm.png') }}" type="image/png">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/logo-sm.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/fx.css') }}">
+</head>
+<body class="fx-page">
+  <div class="fx-aurora" aria-hidden="true"></div>
+  <div class="fx-grid" aria-hidden="true"></div>
+  <div class="fx-spot" id="fx-spot" aria-hidden="true"></div>
+  <canvas class="fx-canvas" id="fx-canvas" aria-hidden="true"></canvas>
+
+  <header class="site-header" data-reveal data-reveal-delay="0">
+    <div class="wrap nav">
+      <a class="brand" href="{{ url_for('home') }}">
+        <img src="{{ url_for('static', filename='img/logo-sm.png') }}" alt="Mgla" width="42" height="42">
+        <span>Mgla</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Меню">
+        <span></span><span></span><span></span>
+      </button>
+      <nav id="site-nav" class="nav-links">
+        <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Главная</a>
+        <a href="{{ url_for('guide') }}" class="{{ 'active' if active=='guide' else '' }}">Инструкция</a>
+        <a href="{{ url_for('support') }}" class="{{ 'active' if active=='support' else '' }}">Поддержать</a>
+      </nav>
+    </div>
+  </header>
+  <main class="fx-main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer" data-reveal>
+    <div class="wrap">
+      <div>© Mgla</div>
+      <div><a href="https://t.me/mgla_admin" target="_blank" rel="noopener">t.me/mgla_admin</a></div>
+    </div>
+  </footer>
+  <script src="{{ url_for('static', filename='js/mobile.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/fx.js') }}" defer></script>
+</body>
+</html>

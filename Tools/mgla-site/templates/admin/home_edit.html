@@ -1,0 +1,18 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Главная — Mgla CMS{% endblock %}
+{% block content %}
+<h1>Главная страница</h1>
+<form method="post" class="admin-card">
+  <label>Заголовок</label>
+  <input type="text" name="hero_title" value="{{ home.hero_title }}">
+  <label>Подзаголовок</label>
+  <textarea name="hero_subtitle" style="min-height:120px">{{ home.hero_subtitle }}</textarea>
+  <label>Ссылка для связи</label>
+  <input type="text" name="contact_url" value="{{ home.contact_url }}">
+  <label>Подпись кнопки</label>
+  <input type="text" name="contact_label" value="{{ home.contact_label }}">
+  <div class="form-row">
+    <button class="btn btn-primary" type="submit">Сохранить</button>
+  </div>
+</form>
+{% endblock %}

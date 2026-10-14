@@ -16,12 +16,64 @@ public class MglaGlassConfig {
     public static final String PREF_PREDICTIVE_BACK_STYLE = "predictive_back_style";
     /** Classic Telegram edge-slide. */
     public static final int PREDICTIVE_BACK_DEFAULT = 0;
-    /** Material 3 shrinking card. */
+    /** Material 3 shrinking floating card. */
     public static final int PREDICTIVE_BACK_MD3 = 1;
     /** Flat page slide left/right. */
     public static final int PREDICTIVE_BACK_PAGES = 2;
     /** Both screens shrink; previous pushes the active one out. */
     public static final int PREDICTIVE_BACK_PUSH = 3;
+    /** Google full-screen surface: exit 100→90%, enter 110→100%, fade-through @35%. */
+    public static final int PREDICTIVE_BACK_SURFACE = 4;
+    /** Google shared-element: detach, scale 90%, X/Y shift with margins. */
+    public static final int PREDICTIVE_BACK_SHARED = 5;
+    /** Material Fade Through (crossfade + slight scale). */
+    public static final int PREDICTIVE_BACK_FADE_THROUGH = 6;
+    /** Material Shared Axis X. */
+    public static final int PREDICTIVE_BACK_AXIS_X = 7;
+    /** Material Shared Axis Y (vertical). */
+    public static final int PREDICTIVE_BACK_AXIS_Y = 8;
+    /** Material Shared Axis Z (depth). */
+    public static final int PREDICTIVE_BACK_AXIS_Z = 9;
+    /** Front slides full-speed; previous lags (parallax). */
+    public static final int PREDICTIVE_BACK_PARALLAX = 10;
+    /** Previous sits deep and scaled; front slides off as a card. */
+    public static final int PREDICTIVE_BACK_DEPTH = 11;
+    /** Strong zoom-out of the active screen. */
+    public static final int PREDICTIVE_BACK_ZOOM = 12;
+    /** 3D cube rotation around Y. */
+    public static final int PREDICTIVE_BACK_CUBE = 13;
+    /** 3D flip around Y. */
+    public static final int PREDICTIVE_BACK_FLIP = 14;
+    /** Front covers and slides away; previous stays put. */
+    public static final int PREDICTIVE_BACK_COVER = 15;
+    /** Vertical dismiss upward (sheet-like). */
+    public static final int PREDICTIVE_BACK_SLIDE_UP = 16;
+    /** Stacked cards with slight tilt. */
+    public static final int PREDICTIVE_BACK_CARDS = 17;
+    /** Elastic / springy page slide. */
+    public static final int PREDICTIVE_BACK_ELASTIC = 18;
+    /** Soft fade of the active screen (Material Fade). */
+    public static final int PREDICTIVE_BACK_FADE = 19;
+    public static final int PREDICTIVE_BACK_LAST = PREDICTIVE_BACK_FADE;
+    /** All selectable styles in display order. */
+    public static final int[] PREDICTIVE_BACK_STYLES = {
+            PREDICTIVE_BACK_DEFAULT,
+            PREDICTIVE_BACK_MD3,
+            PREDICTIVE_BACK_PAGES,
+            PREDICTIVE_BACK_PUSH,
+            PREDICTIVE_BACK_SURFACE,
+            PREDICTIVE_BACK_SHARED,
+            PREDICTIVE_BACK_FADE_THROUGH,
+            PREDICTIVE_BACK_AXIS_X,
+            PREDICTIVE_BACK_AXIS_Y,
+            PREDICTIVE_BACK_AXIS_Z,
+            PREDICTIVE_BACK_DEPTH,
+            PREDICTIVE_BACK_ZOOM,
+            PREDICTIVE_BACK_CUBE,
+            PREDICTIVE_BACK_COVER,
+            PREDICTIVE_BACK_CARDS,
+            PREDICTIVE_BACK_FADE
+    };
     public static final String PREF_MD3_SWITCHES = "md3_switches";
     public static final String PREF_EDITED_ICON = "edited_icon_enabled";
     public static final String PREF_CLEAN_HEADER = "clean_header_enabled";
@@ -237,8 +289,59 @@ public class MglaGlassConfig {
     }
 
     public static boolean isPredictiveBackSpatial() {
-        int style = getPredictiveBackStyle();
-        return style == PREDICTIVE_BACK_MD3 || style == PREDICTIVE_BACK_PAGES || style == PREDICTIVE_BACK_PUSH;
+        return isPredictiveBackSpatial(getPredictiveBackStyle());
+    }
+
+    /** Everything except classic Telegram slide uses canvas spatial transforms. */
+    public static boolean isPredictiveBackSpatial(int style) {
+        return clampPredictiveBackStyle(style) != PREDICTIVE_BACK_DEFAULT;
+    }
+
+    /** Fill gaps between layers with the theme surface instead of black. */
+    public static boolean usesThemedPredictiveStage(int style) {
+        switch (clampPredictiveBackStyle(style)) {
+            case PREDICTIVE_BACK_PAGES:
+            case PREDICTIVE_BACK_PUSH:
+            case PREDICTIVE_BACK_COVER:
+            case PREDICTIVE_BACK_AXIS_X:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Soft floating-card shadow under the active layer. */
+    public static boolean usesPredictiveFrontShadow(int style) {
+        switch (clampPredictiveBackStyle(style)) {
+            case PREDICTIVE_BACK_MD3:
+            case PREDICTIVE_BACK_SURFACE:
+            case PREDICTIVE_BACK_SHARED:
+            case PREDICTIVE_BACK_DEPTH:
+            case PREDICTIVE_BACK_CARDS:
+            case PREDICTIVE_BACK_ZOOM:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Target corner radius (dp) for the active card during spatial back; 0 = square/page. */
+    public static float predictiveFrontRadiusDp(int style) {
+        switch (clampPredictiveBackStyle(style)) {
+            case PREDICTIVE_BACK_PAGES:
+            case PREDICTIVE_BACK_FADE_THROUGH:
+            case PREDICTIVE_BACK_FADE:
+            case PREDICTIVE_BACK_AXIS_X:
+            case PREDICTIVE_BACK_AXIS_Y:
+                return 0f;
+            case PREDICTIVE_BACK_PUSH:
+            case PREDICTIVE_BACK_COVER:
+                return 20f;
+            case PREDICTIVE_BACK_CUBE:
+                return 12f;
+            default:
+                return 28f;
+        }
     }
 
     public static String getPredictiveBackStyleTitle(int style) {
@@ -249,13 +352,46 @@ public class MglaGlassConfig {
                 return "Страницы";
             case PREDICTIVE_BACK_PUSH:
                 return "Выталкивание";
+            case PREDICTIVE_BACK_SURFACE:
+                return "Поверхность";
+            case PREDICTIVE_BACK_SHARED:
+                return "Отрыв";
+            case PREDICTIVE_BACK_FADE_THROUGH:
+                return "Проявление";
+            case PREDICTIVE_BACK_AXIS_X:
+                return "Ось X";
+            case PREDICTIVE_BACK_AXIS_Y:
+                return "Ось Y";
+            case PREDICTIVE_BACK_AXIS_Z:
+                return "Ось Z";
+            case PREDICTIVE_BACK_DEPTH:
+                return "Глубина";
+            case PREDICTIVE_BACK_ZOOM:
+                return "Зум";
+            case PREDICTIVE_BACK_CUBE:
+                return "3D страницы";
+            case PREDICTIVE_BACK_COVER:
+                return "Укрытие";
+            case PREDICTIVE_BACK_CARDS:
+                return "Карточки";
+            case PREDICTIVE_BACK_FADE:
+                return "Затемнение";
             default:
                 return "Обычная";
         }
     }
 
     private static int clampPredictiveBackStyle(int style) {
-        if (style < PREDICTIVE_BACK_DEFAULT || style > PREDICTIVE_BACK_PUSH) {
+        // Удалённые из списка варианты: параллакс ≈ ось X, остальное — обычная.
+        if (style == PREDICTIVE_BACK_PARALLAX) {
+            return PREDICTIVE_BACK_AXIS_X;
+        }
+        if (style == PREDICTIVE_BACK_FLIP
+                || style == PREDICTIVE_BACK_SLIDE_UP
+                || style == PREDICTIVE_BACK_ELASTIC) {
+            return PREDICTIVE_BACK_DEFAULT;
+        }
+        if (style < PREDICTIVE_BACK_DEFAULT || style > PREDICTIVE_BACK_LAST) {
             return PREDICTIVE_BACK_DEFAULT;
         }
         return style;

@@ -19,6 +19,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaChatDna;
 import org.telegram.messenger.MglaLocalModelsManager;
+import org.telegram.messenger.MglaMemoryConfig;
+import org.telegram.messenger.MglaMemoryExtractor;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -52,7 +54,13 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
     private static final int ROW_DNA_HEADER = 14;
     private static final int ROW_DNA_TOPICS = 15;
     private static final int ROW_DNA_MODELS = 16;
-    private static final int ROW_COUNT = 17;
+    private static final int ROW_SHADOW_5 = 17;
+    private static final int ROW_MEMORY_HEADER = 18;
+    private static final int ROW_MEMORY_ENABLED = 19;
+    private static final int ROW_MEMORY_PROVIDER = 20;
+    private static final int ROW_MEMORY_INTERVAL = 21;
+    private static final int ROW_MEMORY_LIMIT = 22;
+    private static final int ROW_COUNT = 23;
 
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_TEXT = 1;
@@ -109,7 +117,8 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
                     View child = parent.getChildAt(i);
                     int position = parent.getChildAdapterPosition(child);
                     if (position != ROW_AI_SUMMARY && position != ROW_AI_RETELL && position != ROW_AI_EDITOR
-                            && position != ROW_PROVIDER_BASIC && position != ROW_DNA_TOPICS) {
+                            && position != ROW_PROVIDER_BASIC && position != ROW_DNA_TOPICS
+                            && position != ROW_MEMORY_ENABLED && position != ROW_MEMORY_PROVIDER && position != ROW_MEMORY_INTERVAL) {
                         continue;
                     }
                     float bottom = child.getBottom() + child.getTranslationY();
@@ -136,6 +145,34 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
                     return;
                 }
                 presentFragment(new MglaLocalModelsActivity());
+            } else if (position == ROW_MEMORY_PROVIDER) {
+                if (!MglaMemoryConfig.isActive()) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    return;
+                }
+                showMemoryProviderDialog(context);
+            } else if (position == ROW_MEMORY_INTERVAL) {
+                if (!MglaMemoryConfig.isActive()) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    return;
+                }
+                showMemoryIntervalDialog(context);
+            } else if (position == ROW_MEMORY_ENABLED) {
+                if (!MglaMemoryConfig.isActive()) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    return;
+                }
+                boolean enabled = !MglaMemoryConfig.isEnabled();
+                MglaMemoryConfig.setEnabled(enabled);
+                if (enabled) {
+                    MglaMemoryExtractor.kick();
+                }
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(enabled);
+                }
+                if (listView != null && listView.getAdapter() != null) {
+                    listView.getAdapter().notifyItemChanged(ROW_MEMORY_LIMIT);
+                }
             } else if (position == ROW_PROVIDER_BASIC) {
                 if (!"openrouter".equals(prefs.getString("ai_provider", "openrouter"))) {
                     prefs.edit().putString("ai_provider", "openrouter").apply();
@@ -208,6 +245,58 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
         showDialog(dlg.create());
     }
 
+    /** Провайдер фонового анализа для «Живой памяти». */
+    private void showMemoryProviderDialog(Context context) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String[] names = {"Авто (Gemini → OpenRouter → локально)", "Gemini (Ваш API)", "OpenRouter / хаб"};
+        String[] values = {MglaMemoryConfig.PROVIDER_AUTO, MglaMemoryConfig.PROVIDER_GEMINI, MglaMemoryConfig.PROVIDER_OPENROUTER};
+        int checked = 0;
+        String current = MglaMemoryConfig.getProvider();
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(current)) {
+                checked = i;
+                break;
+            }
+        }
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Провайдер памяти");
+        dlg.setItems(names, (dialog, which) -> {
+            MglaMemoryConfig.setProvider(values[which]);
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyItemChanged(ROW_MEMORY_PROVIDER);
+            }
+        });
+        showDialog(dlg.create());
+    }
+
+    /** Как часто экстрактор дочитывает новые сообщения в наблюдаемых чатах. */
+    private void showMemoryIntervalDialog(Context context) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String[] names = {"Каждые 15 минут", "Каждый час", "Каждые 4 часа", "Раз в сутки"};
+        int[] values = {15, 60, 240, 1440};
+        int checked = 2;
+        int current = MglaMemoryConfig.getIntervalMin();
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == current) {
+                checked = i;
+                break;
+            }
+        }
+        AlertDialog.Builder dlg = new AlertDialog.Builder(getParentActivity());
+        dlg.setTitle("Интервал обновления памяти");
+        dlg.setItems(names, (dialog, which) -> {
+            MglaMemoryConfig.setIntervalMin(values[which]);
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyItemChanged(ROW_MEMORY_INTERVAL);
+            }
+        });
+        showDialog(dlg.create());
+    }
+
     private String modelSummary() {
         String id = MglaLocalModelsManager.getSelectedModelId();
         if (id.isEmpty()) {
@@ -222,7 +311,37 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
         super.onResume();
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyItemChanged(ROW_AI_EDITOR_LIMIT);
+            listView.getAdapter().notifyItemChanged(ROW_MEMORY_LIMIT);
         }
+    }
+
+    /** Прокрутка к переключателю живой памяти и подсветка строки. */
+    public void highlightMemoryToggle() {
+        AndroidUtilities.runOnUIThread(() -> {
+            if (listView == null) {
+                return;
+            }
+            RecyclerView.LayoutManager lm = listView.getLayoutManager();
+            if (lm instanceof LinearLayoutManager) {
+                ((LinearLayoutManager) lm).scrollToPositionWithOffset(ROW_MEMORY_HEADER, dp(24));
+            } else {
+                listView.scrollToPosition(ROW_MEMORY_ENABLED);
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                if (listView == null) {
+                    return;
+                }
+                RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(ROW_MEMORY_ENABLED);
+                if (holder == null) {
+                    holder = listView.findViewHolderForAdapterPosition(ROW_MEMORY_HEADER);
+                }
+                if (holder != null && holder.itemView != null) {
+                    MglaSettingsHighlight.flashRow(holder.itemView);
+                } else {
+                    MglaSettingsHighlight.highlight(this, "Включить живую память");
+                }
+            }, 360);
+        }, 450);
     }
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
@@ -235,7 +354,8 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE || position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS;
+            return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE || position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS
+                || position == ROW_MEMORY_ENABLED || position == ROW_MEMORY_PROVIDER || position == ROW_MEMORY_INTERVAL;
         }
 
         @Override
@@ -245,11 +365,12 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
 
         @Override
         public int getItemViewType(int position) {
-            if (position == ROW_SHADOW_1 || position == ROW_SHADOW_2 || position == ROW_SHADOW_3 || position == ROW_SHADOW_4) {
+            if (position == ROW_SHADOW_1 || position == ROW_SHADOW_2 || position == ROW_SHADOW_3 || position == ROW_SHADOW_4 || position == ROW_SHADOW_5) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == ROW_AI_EDITOR_LIMIT || position == ROW_AI_TRANSCRIBE || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS) {
+            } else if (position == ROW_AI_EDITOR_LIMIT || position == ROW_AI_TRANSCRIBE || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS
+                    || position == ROW_MEMORY_PROVIDER || position == ROW_MEMORY_INTERVAL || position == ROW_MEMORY_LIMIT) {
                 return VIEW_TYPE_TEXT;
-            } else if (position == ROW_PROVIDER_HEADER || position == ROW_DNA_HEADER || position == ROW_FUNCTIONS_HEADER) {
+            } else if (position == ROW_PROVIDER_HEADER || position == ROW_DNA_HEADER || position == ROW_FUNCTIONS_HEADER || position == ROW_MEMORY_HEADER) {
                 return VIEW_TYPE_HEADER;
             } else if (position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI) {
                 return VIEW_TYPE_RADIO;
@@ -297,12 +418,28 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                 cell.setTextAndValue("Локальные модели", modelSummary(), false);
                 cell.setCanDisable(false);
+            } else if (position == ROW_MEMORY_PROVIDER) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Провайдер памяти", MglaMemoryConfig.getProviderTitle(), false);
+                cell.setCanDisable(false);
+            } else if (position == ROW_MEMORY_INTERVAL) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Интервал обновления", MglaMemoryConfig.getIntervalTitle(), false);
+                cell.setCanDisable(false);
+            } else if (position == ROW_MEMORY_LIMIT) {
+                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                cell.setTextAndValue("Лимит запросов памяти",
+                    MglaMemoryConfig.getUsedToday() + "/" + MglaMemoryConfig.AI_DAILY_LIMIT
+                        + " (сброс " + MglaMemoryConfig.getResetInLabel() + ")", false);
+                cell.setCanDisable(false);
             } else if (holder.itemView instanceof HeaderCell) {
                 String headerText = "Провайдер AI";
                 if (position == ROW_DNA_HEADER) {
                     headerText = "Chat DNA";
                 } else if (position == ROW_FUNCTIONS_HEADER) {
                     headerText = "Функции";
+                } else if (position == ROW_MEMORY_HEADER) {
+                    headerText = "Живая память";
                 }
                 ((HeaderCell) holder.itemView).setText(headerText);
             } else if (holder.itemView instanceof RadioCell) {
@@ -331,6 +468,10 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
                     case ROW_AI_EDITOR:
                         cell.setTextAndCheck("AI-редактор",
                             org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor") && prefs.getBoolean("ai_editor", true), false);
+                        break;
+                    case ROW_MEMORY_ENABLED:
+                        cell.setTextAndCheck("Включить живую память",
+                            MglaMemoryConfig.isActive() && MglaMemoryConfig.isEnabled(), true);
                         break;
                 }
             }

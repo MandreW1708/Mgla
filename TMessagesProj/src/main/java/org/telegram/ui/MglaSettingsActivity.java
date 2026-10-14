@@ -26,6 +26,7 @@ import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
@@ -33,6 +34,7 @@ import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
@@ -45,6 +47,7 @@ import org.telegram.utils.wsbypass.MglaWsBypass;
 public class MglaSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private SettingCell dpiBypassCell;
+    private SettingCell memoryCell;
 
     public MglaSettingsActivity() {
         this(null);
@@ -67,6 +70,13 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        updateMemoryCell();
+        updateDpiBypassCell();
+    }
+
+    @Override
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.dpiBypassChanged) {
             updateDpiBypassCell();
@@ -81,6 +91,37 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
                 bypassStatusLabel(), false, true
             );
         }
+    }
+
+    private void openMemory() {
+        if (!MglaMemoryConfig.isEnabled()) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.info,
+                "Сначала включите живую память в разделе «Искусственный интеллект»").show();
+            MglaAiSettingsActivity ai = new MglaAiSettingsActivity();
+            presentFragment(ai);
+            ai.highlightMemoryToggle();
+            return;
+        }
+        presentFragment(new MglaMemoryActivity());
+    }
+
+    private void updateMemoryCell() {
+        if (memoryCell == null) {
+            return;
+        }
+        boolean on = MglaMemoryConfig.isEnabled();
+        memoryCell.set(
+            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
+            R.drawable.msg_saved, "Живая память", null,
+            memoryStatusLabel(), false, false
+        );
+        memoryCell.setAlpha(on ? 1f : 0.4f);
+        memoryCell.setEnabled(true);
+        memoryCell.setClickable(true);
+    }
+
+    private static String memoryStatusLabel() {
+        return MglaMemoryConfig.isEnabled() ? "Вкл" : "Выкл";
     }
 
     private static String bypassStatusLabel() {
@@ -139,6 +180,11 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
             IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект");
+        mainBlock.addView(MglaUi.createDivider(context));
+        memoryCell = addMenuItem(mainBlock, this::openMemory,
+            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.msg_saved, "Живая память",
+            memoryStatusLabel());
+        updateMemoryCell();
         rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
         LinearLayout extraBlock = createBlock(context, "Дополнительно");
@@ -147,6 +193,9 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         extraBlock.addView(MglaUi.createDivider(context));
         addMenuItem(extraBlock, null,
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Поддержка");
+        extraBlock.addView(MglaUi.createDivider(context));
+        addMenuItem(extraBlock, () -> openMglaGuide(),
+            IconBackgroundColors.BLUE_DEEP.top, IconBackgroundColors.BLUE_DEEP.bottom, R.drawable.menu_website, "Инструкция");
         rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
 
         fragmentView = scrollView;
@@ -244,6 +293,13 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             return;
         }
         Browser.openUrl(getParentActivity(), "https://t.me/" + username);
+    }
+
+    private void openMglaGuide() {
+        if (getParentActivity() == null || TextUtils.isEmpty(BuildVars.MGLA_GUIDE_URL)) {
+            return;
+        }
+        Browser.openUrl(getParentActivity(), BuildVars.MGLA_GUIDE_URL);
     }
 
     public static class SettingCell extends LinearLayout implements Theme.Colorable {

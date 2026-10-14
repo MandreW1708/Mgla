@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}CMS — Mgla{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.png') }}" type="image/png">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
+</head>
+<body class="admin-body">
+  <div class="admin-shell">
+    <div class="admin-top">
+      <div class="brand">
+        <img src="{{ url_for('static', filename='img/logo.png') }}" alt="" style="width:36px;height:36px;border-radius:10px">
+        <span>Конструктор</span>
+      </div>
+      <div class="nav-links">
+        <a href="{{ url_for('admin_dashboard') }}">Обзор</a>
+        <a href="{{ url_for('admin_home') }}">Главная</a>
+        <a href="{{ url_for('admin_page', slug='guide') }}">Инструкция</a>
+        <a href="{{ url_for('admin_page', slug='support') }}">Поддержать</a>
+        <a href="{{ url_for('home') }}" target="_blank">Сайт</a>
+        <a href="{{ url_for('admin_logout') }}">Выйти</a>
+      </div>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

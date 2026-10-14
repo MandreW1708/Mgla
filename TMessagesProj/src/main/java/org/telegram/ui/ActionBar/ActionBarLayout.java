@@ -22,6 +22,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Camera;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -688,8 +689,12 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private final RectF predictiveBackShadowRect = new RectF();
     private final Paint predictiveBackShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix predictiveBackMatrix = new Matrix();
+    private final Matrix predictiveBackCameraMatrix = new Matrix();
+    private final Camera predictiveBackCamera = new Camera();
     /** Soft push settle — lighter overshoot than EASE_OUT_BACK. */
     private static final CubicBezierInterpolator PUSH_SPRING = new CubicBezierInterpolator(0.28, 1.12, 0.45, 1);
+    /** Google full-screen surface commit interpolator (.1, .1, 0, 1). */
+    private static final CubicBezierInterpolator SURFACE_EXIT = new CubicBezierInterpolator(0.1, 0.1, 0, 1);
 
     public ActionBarLayout(Context context, boolean main) {
         super(context);
@@ -1140,16 +1145,14 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
                         sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
                     }
-                    final boolean pageStyle = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES;
-                    final boolean pushStyle = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH;
-                    final float targetRadius = pageStyle ? 0f : dpf2(pushStyle ? 20 : 28);
-                    final float radiusProgress = pageStyle ? 0f : p;
+                    final float targetRadiusDp = MglaGlassConfig.predictiveFrontRadiusDp(predictiveBackStyle);
+                    final float targetRadius = dpf2(targetRadiusDp);
+                    final float radiusProgress = targetRadiusDp <= 0f ? 0f : p;
                     radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, targetRadius), radiusProgress);
                     radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, targetRadius), radiusProgress);
                     radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, targetRadius), radiusProgress);
                     radii[6] = radii[7] = lerp(sysBL, Math.max(sysBL, targetRadius), radiusProgress);
-                    // MD3 keeps the floating-card shadow; pages/push stay flat.
-                    if (!pageStyle && !pushStyle) {
+                    if (MglaGlassConfig.usesPredictiveFrontShadow(predictiveBackStyle)) {
                         drawSpatialFrontShadow(canvas, AndroidUtilities.rectTmp, Math.max(radii[0], radii[2]), Math.min(1.2f, getSpatialBackProgress()));
                     }
                     clipPath.rewind();
@@ -1212,8 +1215,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             } else if (child == containerViewBack) {
                 if (spatialBack) {
                     // Fill gaps between sliding layers with the theme surface (not hard black).
-                    final boolean themedStage = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES
-                            || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH;
+                    final boolean themedStage = MglaGlassConfig.usesThemedPredictiveStage(predictiveBackStyle);
                     canvas.drawColor(themedStage ? getPredictiveStageColor() : 0xFF000000);
                     AndroidUtilities.rectTmp.set(0, 0, child.getWidth(), getHeight());
                     applySpatialBackTransform(canvas, AndroidUtilities.rectTmp);
@@ -1230,9 +1232,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                         sysBR = bottomRight == null ? 0 : bottomRight.getRadius();
                         sysBL = bottomLeft == null ? 0 : bottomLeft.getRadius();
                     }
-                    final boolean pageStyle = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES;
-                    final float deepRadius = pageStyle ? 0f : dpf2(predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH ? 20 : 28);
-                    final float radiusProgress = pageStyle ? 0f : (1f - p);
+                    final float deepRadiusDp = MglaGlassConfig.predictiveFrontRadiusDp(predictiveBackStyle);
+                    final float deepRadius = dpf2(deepRadiusDp);
+                    final float radiusProgress = deepRadiusDp <= 0f ? 0f : (1f - p);
                     radii[0] = radii[1] = lerp(sysTL, Math.max(sysTL, deepRadius), radiusProgress);
                     radii[2] = radii[3] = lerp(sysTR, Math.max(sysTR, deepRadius), radiusProgress);
                     radii[4] = radii[5] = lerp(sysBR, Math.max(sysBR, deepRadius), radiusProgress);
@@ -1240,7 +1242,8 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     clipPath.rewind();
                     clipPath.addRoundRect(AndroidUtilities.rectTmp, radii, Path.Direction.CW);
                     canvas.clipPath(clipPath);
-                    if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
+                    if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH
+                            || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_CARDS) {
                         // Paint the card body with the stage colour so scaled edges don't show a seam.
                         canvas.drawColor(getPredictiveStageColor());
                     }
@@ -1298,17 +1301,37 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 int maxAlpha;
                 if (spatialBack) {
                     float p = Math.min(1f, getSpatialBackProgress());
-                    if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES) {
-                        opacity = lerp(0.35f, 0.0f, p);
-                        maxAlpha = 28;
-                    } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
-                        // No scrim — keeps previous screen the same colour as the stage.
-                        opacity = 0f;
-                        maxAlpha = 0;
-                    } else {
-                        // Subtle M3 scrim — adds depth without darkening the previous screen much
-                        opacity = lerp(1.0f, 0.0f, p);
-                        maxAlpha = 44;
+                    switch (predictiveBackStyle) {
+                        case MglaGlassConfig.PREDICTIVE_BACK_PAGES:
+                        case MglaGlassConfig.PREDICTIVE_BACK_AXIS_X:
+                        case MglaGlassConfig.PREDICTIVE_BACK_ELASTIC:
+                            opacity = lerp(0.35f, 0.0f, p);
+                            maxAlpha = 28;
+                            break;
+                        case MglaGlassConfig.PREDICTIVE_BACK_PUSH:
+                        case MglaGlassConfig.PREDICTIVE_BACK_COVER:
+                        case MglaGlassConfig.PREDICTIVE_BACK_PARALLAX:
+                            // No scrim — keeps previous screen the same colour as the stage.
+                            opacity = 0f;
+                            maxAlpha = 0;
+                            break;
+                        case MglaGlassConfig.PREDICTIVE_BACK_FADE_THROUGH:
+                        case MglaGlassConfig.PREDICTIVE_BACK_FADE:
+                        case MglaGlassConfig.PREDICTIVE_BACK_SURFACE:
+                            opacity = 0f;
+                            maxAlpha = 0;
+                            break;
+                        case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Z:
+                        case MglaGlassConfig.PREDICTIVE_BACK_DEPTH:
+                        case MglaGlassConfig.PREDICTIVE_BACK_ZOOM:
+                            opacity = lerp(1.0f, 0.0f, p);
+                            maxAlpha = 72;
+                            break;
+                        default:
+                            // Subtle M3-style scrim — depth without heavy darkening
+                            opacity = lerp(1.0f, 0.0f, p);
+                            maxAlpha = 44;
+                            break;
                     }
                 } else {
                     opacity = MathUtils.clamp(widthOffset / (float) width, 0, 0.8f);
@@ -1659,9 +1682,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
     private boolean predictiveBackLeft;
 
     private boolean isSpatialPredictiveBack() {
-        return predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_MD3
-                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES
-                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH;
+        return MglaGlassConfig.isPredictiveBackSpatial(predictiveBackStyle);
     }
 
     private boolean shouldUseReversePredictiveOpen(BaseFragment opening, BaseFragment previous) {
@@ -1672,14 +1693,38 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 && previous != null;
     }
 
+    private boolean usesSpringPredictiveSettle() {
+        return predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH
+                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_ELASTIC
+                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_CARDS;
+    }
+
     private float predictivePeekPx() {
         switch (predictiveBackStyle) {
             case MglaGlassConfig.PREDICTIVE_BACK_PAGES:
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_X:
+            case MglaGlassConfig.PREDICTIVE_BACK_ELASTIC:
+            case MglaGlassConfig.PREDICTIVE_BACK_COVER:
+            case MglaGlassConfig.PREDICTIVE_BACK_PARALLAX:
                 return Math.max(dpf2(120), Math.min(dpf2(180), getWidth() * 0.42f));
             case MglaGlassConfig.PREDICTIVE_BACK_PUSH:
+            case MglaGlassConfig.PREDICTIVE_BACK_CARDS:
+            case MglaGlassConfig.PREDICTIVE_BACK_CUBE:
+            case MglaGlassConfig.PREDICTIVE_BACK_FLIP:
                 return dpf2(110);
             case MglaGlassConfig.PREDICTIVE_BACK_MD3:
+            case MglaGlassConfig.PREDICTIVE_BACK_SURFACE:
+            case MglaGlassConfig.PREDICTIVE_BACK_SHARED:
+            case MglaGlassConfig.PREDICTIVE_BACK_DEPTH:
+            case MglaGlassConfig.PREDICTIVE_BACK_ZOOM:
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Z:
                 return dpf2(90);
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Y:
+            case MglaGlassConfig.PREDICTIVE_BACK_SLIDE_UP:
+                return dpf2(100);
+            case MglaGlassConfig.PREDICTIVE_BACK_FADE_THROUGH:
+            case MglaGlassConfig.PREDICTIVE_BACK_FADE:
+                return dpf2(72);
             default:
                 return dpf2(56);
         }
@@ -1754,38 +1799,130 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         return bestColor;
     }
 
+    /** Apply a Camera rotateY into {@link #predictiveBackMatrix} around (pivotX, pivotY). */
+    private void postCameraRotateY(float degrees, float pivotX, float pivotY, float width) {
+        predictiveBackCamera.save();
+        // Closer camera → stronger perspective, so faces read as a cube, not a flat spin.
+        predictiveBackCamera.setLocation(0f, 0f, -Math.max(8f, width * 0.018f));
+        predictiveBackCamera.rotateY(degrees);
+        predictiveBackCamera.getMatrix(predictiveBackCameraMatrix);
+        predictiveBackCamera.restore();
+        predictiveBackCameraMatrix.preTranslate(-pivotX, -pivotY);
+        predictiveBackCameraMatrix.postTranslate(pivotX, pivotY);
+        predictiveBackMatrix.postConcat(predictiveBackCameraMatrix);
+    }
+
     /** Previous layer transform for spatial predictive-back styles. */
     private void applySpatialBackTransform(Canvas canvas, RectF rect) {
         final float raw = getSpatialBackProgress();
         final float p = Math.min(1f, raw);
         final float commit = Math.max(0f, raw - 1f);
-        final float commitEase = CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(Math.min(1f, commit));
         final float cx = rect.centerX();
         final float cy = rect.centerY();
         final float dir = predictiveBackLeft ? 1f : -1f;
         final float w = rect.width();
+        final float h = rect.height();
 
         predictiveBackMatrix.reset();
-        if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES) {
-            // Keep previous flush with the trailing edge of the active page (same Y, side-by-side).
-            // Active → right ⇒ previous enters from its left edge; mirrored for the other side.
-            final float tx = (innerTranslationX - w) * dir;
-            predictiveBackMatrix.postTranslate(tx, 0);
-        } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
-            // Both shrink while dragging; previous stays on the trailing flank of the active card,
-            // then expands into place on commit while the active is pushed away.
-            final float spring = PUSH_SPRING.getInterpolation(Math.min(1f, commit));
-            final float scaleF = lerp(1.0f, 0.88f, p) * lerp(1f, 0.78f, Math.min(1f, commit));
-            final float scaleBDrag = lerp(0.94f, 0.88f, p);
-            final float scaleB = lerp(scaleBDrag, 1.0f, spring);
-            final float txF = (innerTranslationX + w * 0.22f * commit) * dir;
-            final float edgeGap = (scaleF + scaleB) * w * 0.5f;
-            final float stickTx = txF - edgeGap * dir;
-            final float txB = lerp(stickTx, 0f, spring);
-            predictiveBackMatrix.postScale(scaleB, scaleB, cx, cy);
-            predictiveBackMatrix.postTranslate(txB, 0);
+        switch (predictiveBackStyle) {
+            case MglaGlassConfig.PREDICTIVE_BACK_PAGES:
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_X: {
+                // Keep previous flush with the trailing edge of the active page.
+                final float tx = (innerTranslationX - w) * dir;
+                predictiveBackMatrix.postTranslate(tx, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_ELASTIC: {
+                final float spring = PUSH_SPRING.getInterpolation(Math.min(1f, Math.max(p, commit)));
+                final float tx = (innerTranslationX - w) * dir * lerp(0.92f, 1f, spring);
+                predictiveBackMatrix.postTranslate(tx, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_PUSH: {
+                final float spring = PUSH_SPRING.getInterpolation(Math.min(1f, commit));
+                final float scaleF = lerp(1.0f, 0.88f, p) * lerp(1f, 0.78f, Math.min(1f, commit));
+                final float scaleBDrag = lerp(0.94f, 0.88f, p);
+                final float scaleB = lerp(scaleBDrag, 1.0f, spring);
+                final float txF = (innerTranslationX + w * 0.22f * commit) * dir;
+                final float edgeGap = (scaleF + scaleB) * w * 0.5f;
+                final float stickTx = txF - edgeGap * dir;
+                final float txB = lerp(stickTx, 0f, spring);
+                predictiveBackMatrix.postScale(scaleB, scaleB, cx, cy);
+                predictiveBackMatrix.postTranslate(txB, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_SURFACE: {
+                // Google full-screen: enter scale 110% → 100%.
+                final float scale = lerp(1.10f, 1.0f, SURFACE_EXIT.getInterpolation(p));
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_FADE_THROUGH: {
+                final float scale = lerp(1.05f, 1.0f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Y:
+            case MglaGlassConfig.PREDICTIVE_BACK_SLIDE_UP: {
+                final float ty = lerp(h * 0.18f, 0f, p);
+                final float scale = lerp(0.94f, 1.0f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(0, ty);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Z: {
+                final float scale = lerp(0.80f, 1.0f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_PARALLAX: {
+                final float tx = (innerTranslationX - w) * dir * 0.40f;
+                predictiveBackMatrix.postTranslate(tx, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_DEPTH: {
+                final float scale = lerp(0.86f, 1.0f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_ZOOM: {
+                final float scale = lerp(1.28f, 1.0f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_CUBE: {
+                // Previous face sits on the side of the cube and unfolds to front.
+                // Hinge = trailing edge of the previous page (right when going back to the left).
+                final float progress = Math.min(1f, p + commit * 0.35f);
+                final float angle = lerp(-90f, 0f, progress) * dir;
+                final float hingeX = dir > 0 ? rect.right : rect.left;
+                postCameraRotateY(angle, hingeX, cy, w);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_FLIP: {
+                final float angle = lerp(180f, 0f, p) * dir;
+                postCameraRotateY(angle, cx, cy, w);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_COVER:
+                // Previous stays put — front slides off like a cover.
+                break;
+            case MglaGlassConfig.PREDICTIVE_BACK_CARDS: {
+                final float spring = PUSH_SPRING.getInterpolation(Math.min(1f, commit));
+                final float scale = lerp(0.92f, 1.0f, Math.max(p, spring));
+                final float rot = lerp(-4f, 0f, p) * dir;
+                predictiveBackMatrix.postRotate(rot, cx, cy);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate((-w * 0.06f * (1f - p)) * dir, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_FADE:
+            case MglaGlassConfig.PREDICTIVE_BACK_SHARED:
+            case MglaGlassConfig.PREDICTIVE_BACK_MD3:
+            default:
+                // Previous stays still / fully visible under the floating front.
+                break;
         }
-        // MD3: previous stays still, fully visible.
         canvas.concat(predictiveBackMatrix);
     }
 
@@ -1794,28 +1931,155 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         final float raw = getSpatialBackProgress();
         final float p = Math.min(1f, raw);
         final float commit = Math.max(0f, raw - 1f);
+        final float commitEase = CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(Math.min(1f, commit));
         final float cx = rect.centerX();
         final float cy = rect.centerY();
         final float dir = predictiveBackLeft ? 1f : -1f;
         final float w = rect.width();
+        final float h = rect.height();
 
         containerView.setAlpha(1.0f);
         predictiveBackMatrix.reset();
 
-        if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES) {
-            // Pure page slide — no window/card scale, just content leaving sideways.
-            predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
-        } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
-            final float scale = lerp(1.0f, 0.88f, p) * lerp(1f, 0.78f, Math.min(1f, commit));
-            final float tx = (innerTranslationX + w * 0.22f * commit) * dir;
-            predictiveBackMatrix.postScale(scale, scale, cx, cy);
-            predictiveBackMatrix.postTranslate(tx, 0);
-            containerView.setAlpha(lerp(1f, 0.0f, CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(Math.min(1f, commit))));
-        } else {
-            // M3: flat card that subtly zooms out — no 3D rotation
-            final float scale = lerp(1.0f, 0.93f, p) * lerp(1f, 0.96f, commit);
-            predictiveBackMatrix.postScale(scale, scale, cx, cy);
-            predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+        switch (predictiveBackStyle) {
+            case MglaGlassConfig.PREDICTIVE_BACK_PAGES:
+            case MglaGlassConfig.PREDICTIVE_BACK_COVER:
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_X: {
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+                if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_AXIS_X) {
+                    containerView.setAlpha(lerp(1f, 0.55f, p) * lerp(1f, 0f, commitEase));
+                }
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_ELASTIC: {
+                final float bounce = PUSH_SPRING.getInterpolation(p);
+                final float scale = lerp(1.0f, 0.97f, bounce);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_PUSH: {
+                final float scale = lerp(1.0f, 0.88f, p) * lerp(1f, 0.78f, Math.min(1f, commit));
+                final float tx = (innerTranslationX + w * 0.22f * commit) * dir;
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(tx, 0);
+                containerView.setAlpha(lerp(1f, 0.0f, commitEase));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_MD3: {
+                final float scale = lerp(1.0f, 0.93f, p) * lerp(1f, 0.96f, commit);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_SURFACE: {
+                // Google full-screen: preview scales 100→90%; commit uses fade-through @35%.
+                final float scale = lerp(1.0f, 0.90f, SURFACE_EXIT.getInterpolation(p)) * lerp(1f, 0.88f, commit);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir * 0.25f, 0);
+                if (commit > 0f) {
+                    final float fadeThrough = commit < 0.35f
+                            ? lerp(1f, 0f, commit / 0.35f)
+                            : 0f;
+                    containerView.setAlpha(fadeThrough);
+                }
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_SHARED: {
+                // Shared-element: scale to 90%, X/Y shift with 8dp margins.
+                final float scale = lerp(1.0f, 0.90f, p);
+                final float maxX = Math.max(dpf2(8), (w / 20f) - dpf2(8));
+                final float maxY = Math.max(dpf2(8), (h / 20f) - dpf2(8));
+                final float tx = Math.min(innerTranslationX, maxX) * dir;
+                final float yNorm = Utilities.clamp((predictiveBackY - cy) / Math.max(1f, h * 0.5f), 1f, -1f);
+                final float ty = yNorm * maxY * p;
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(tx, ty);
+                containerView.setAlpha(lerp(1f, 0.0f, commitEase));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_FADE_THROUGH: {
+                final float scale = lerp(1.0f, 0.92f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                final float fadeP = p < 0.35f ? 1f : lerp(1f, 0f, (p - 0.35f) / 0.65f);
+                containerView.setAlpha(fadeP * lerp(1f, 0f, commitEase));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Y:
+            case MglaGlassConfig.PREDICTIVE_BACK_SLIDE_UP: {
+                final float ty = -h * (0.55f * p + 0.45f * commit);
+                final float scale = lerp(1.0f, 0.94f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(0, ty);
+                containerView.setAlpha(lerp(1f, 0.0f, Math.max(p * 0.35f, commitEase)));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_AXIS_Z: {
+                final float scale = lerp(1.0f, 0.72f, p) * lerp(1f, 0.55f, commit);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                containerView.setAlpha(lerp(1f, 0.0f, Math.max(p * 0.5f, commitEase)));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_PARALLAX: {
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_DEPTH: {
+                final float scale = lerp(1.0f, 0.94f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_ZOOM: {
+                final float scale = lerp(1.0f, 0.70f, p) * lerp(1f, 0.55f, commit);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                containerView.setAlpha(lerp(1f, 0.0f, Math.max(p * 0.4f, commitEase)));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_CUBE: {
+                // Active face swings away around the shared cube edge (not around center).
+                final float progress = Math.min(1f, p + commit * 0.5f);
+                final float angle = lerp(0f, 90f, progress) * dir;
+                final float hingeX = dir > 0 ? rect.left : rect.right;
+                postCameraRotateY(angle, hingeX, cy, w);
+                // Near edge-on the face is almost invisible — fade only at the very end.
+                if (progress > 0.88f) {
+                    containerView.setAlpha(lerp(1f, 0f, (progress - 0.88f) / 0.12f));
+                } else {
+                    containerView.setAlpha(1f);
+                }
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_FLIP: {
+                final float angle = lerp(0f, -180f, Math.min(1f, p + commit * 0.5f)) * dir;
+                postCameraRotateY(angle, cx, cy, w);
+                // Hide reverse face mid-flip.
+                final float mid = Math.abs(Math.min(1f, p + commit * 0.5f) - 0.5f) * 2f;
+                containerView.setAlpha(mid);
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_CARDS: {
+                final float scale = lerp(1.0f, 0.90f, p) * lerp(1f, 0.82f, commit);
+                final float rot = lerp(0f, 8f, p) * dir;
+                predictiveBackMatrix.postRotate(rot, cx, cy);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate((innerTranslationX + w * 0.12f * commit) * dir, h * 0.02f * p);
+                containerView.setAlpha(lerp(1f, 0.0f, commitEase));
+                break;
+            }
+            case MglaGlassConfig.PREDICTIVE_BACK_FADE: {
+                final float scale = lerp(1.0f, 0.96f, p);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir * 0.15f, 0);
+                containerView.setAlpha(lerp(1f, 0.0f, Math.max(p, commitEase)));
+                break;
+            }
+            default: {
+                final float scale = lerp(1.0f, 0.93f, p) * lerp(1f, 0.96f, commit);
+                predictiveBackMatrix.postScale(scale, scale, cx, cy);
+                predictiveBackMatrix.postTranslate(innerTranslationX * dir, 0);
+                break;
+            }
         }
 
         canvas.concat(predictiveBackMatrix);
@@ -1962,11 +2226,22 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     ObjectAnimator.ofFloat(this, "spatialAnimProgress", startProgress, 0f),
                     ObjectAnimator.ofFloat(this, "innerTranslationX", width, 0f)
             );
-            if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH) {
+            if (usesSpringPredictiveSettle()) {
                 animatorSet.setDuration(300);
                 animatorSet.setInterpolator(PUSH_SPRING);
-            } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES) {
+            } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES
+                    || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_AXIS_X
+                    || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_COVER
+                    || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PARALLAX) {
                 animatorSet.setDuration(220);
+                animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_SURFACE
+                    || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_FADE_THROUGH) {
+                animatorSet.setDuration(260);
+                animatorSet.setInterpolator(SURFACE_EXIT);
+            } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_CUBE
+                    || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_FLIP) {
+                animatorSet.setDuration(320);
                 animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
             } else {
                 animatorSet.setDuration(240);
@@ -2023,15 +2298,27 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         final float peek = predictivePeekPx();
         final boolean enhanced = isSpatialPredictiveBack() && newBackTransitions();
         final float spatialFrom = enhanced ? getSpatialBackProgress() : 0f;
-        final boolean pushStyle = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PUSH;
-        final boolean pageStyle = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES;
+        final boolean springStyle = usesSpringPredictiveSettle();
+        final boolean pageStyle = predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PAGES
+                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_AXIS_X
+                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_COVER
+                || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_PARALLAX;
 
         if (!backAnimation) {
             distToMove = Math.abs(containerView.getMeasuredWidth() - Math.max(x, peek));
             int duration = Math.max((int) (150.0f / containerView.getMeasuredWidth() * distToMove), newBackTransitions() ? (enhanced ? 180 : 260) : 50);
             if (enhanced) {
                 // Fly away smoothly completely off-screen
-                duration = pushStyle ? 380 : (pageStyle ? 280 : 300);
+                if (springStyle) {
+                    duration = 380;
+                } else if (pageStyle) {
+                    duration = 280;
+                } else if (predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_CUBE
+                        || predictiveBackStyle == MglaGlassConfig.PREDICTIVE_BACK_FLIP) {
+                    duration = 340;
+                } else {
+                    duration = 300;
+                }
             }
             if (!overrideTransition) {
                 if (enhanced) {
@@ -2048,14 +2335,14 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     );
                 }
                 if (newBackTransitions()) {
-                    animatorSet.setInterpolator(pushStyle ? PUSH_SPRING : CubicBezierInterpolator.EASE_BOTH);
+                    animatorSet.setInterpolator(springStyle ? PUSH_SPRING : CubicBezierInterpolator.EASE_BOTH);
                 }
             }
         } else {
             distToMove = x;
             int duration = Math.max((int) ((enhanced ? 180.0f : 240.0f) / containerView.getMeasuredWidth() * Math.max(distToMove, 1)), newBackTransitions() ? (enhanced ? 180 : 240) : 100);
             if (enhanced) {
-                duration = Math.max(160, (int) ((pushStyle ? 320 : 200) * Math.max(0.15f, spatialFrom)));
+                duration = Math.max(160, (int) ((springStyle ? 320 : 200) * Math.max(0.15f, spatialFrom)));
             }
             if (!overrideTransition) {
                 if (enhanced) {
@@ -2073,7 +2360,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                 }
                 if (newBackTransitions()) {
                     // Cancel: soft settle without overshoot past zero.
-                    animatorSet.setInterpolator(pushStyle
+                    animatorSet.setInterpolator(springStyle
                             ? CubicBezierInterpolator.EmphasizedDecelerate
                             : CubicBezierInterpolator.EASE_OUT_QUINT);
                 }

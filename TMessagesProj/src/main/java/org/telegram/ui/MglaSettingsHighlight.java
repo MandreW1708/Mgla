@@ -28,9 +28,9 @@ import org.telegram.ui.ActionBar.Theme;
  */
 public final class MglaSettingsHighlight {
 
-    private static final int FIRST_ATTEMPT_DELAY_MS = 350;
-    private static final int RETRY_DELAY_MS = 150;
-    private static final int MAX_ATTEMPTS = 10;
+    private static final int FIRST_ATTEMPT_DELAY_MS = 420;
+    private static final int RETRY_DELAY_MS = 180;
+    private static final int MAX_ATTEMPTS = 14;
 
     private MglaSettingsHighlight() {
     }
@@ -53,10 +53,17 @@ public final class MglaSettingsHighlight {
         }
         View label = findLabel(root, title.trim());
         if (label == null) {
-            // RecyclerView only lays out visible rows — page down and look again.
+            // RecyclerView only lays out visible rows — step toward the end and look again.
             RecyclerView rv = findFirst(root, RecyclerView.class);
-            if (rv != null && rv.canScrollVertically(1)) {
-                rv.scrollBy(0, (int) (rv.getHeight() * 0.7f));
+            if (rv != null) {
+                RecyclerView.Adapter<?> adapter = rv.getAdapter();
+                int count = adapter != null ? adapter.getItemCount() : 0;
+                if (count > 0) {
+                    int target = Math.min(count - 1, ((attempt + 1) * count) / Math.max(1, MAX_ATTEMPTS - 1));
+                    rv.scrollToPosition(target);
+                } else if (rv.canScrollVertically(1)) {
+                    rv.scrollBy(0, (int) (rv.getHeight() * 0.7f));
+                }
             }
             AndroidUtilities.runOnUIThread(() -> attempt(fragment, title, attempt + 1), RETRY_DELAY_MS);
             return;
@@ -166,8 +173,12 @@ public final class MglaSettingsHighlight {
         return 0;
     }
 
+    public static void flashRow(View row) {
+        flash(row);
+    }
+
     private static void flash(View row) {
-        if (!row.isAttachedToWindow() || row.getWidth() == 0) {
+        if (row == null || !row.isAttachedToWindow() || row.getWidth() == 0) {
             return;
         }
         GradientDrawable drawable = new GradientDrawable();

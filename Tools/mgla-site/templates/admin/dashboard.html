@@ -1,0 +1,19 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Обзор — Mgla CMS{% endblock %}
+{% block content %}
+<h1>Обзор</h1>
+<p class="muted">Полный конструктор только для разделов «Инструкция» и «Поддержать». Главную можно править отдельно.</p>
+
+<div class="grid" style="margin-top:1.25rem">
+  <a class="card" href="{{ url_for('admin_home') }}">
+    <h3>Главная</h3>
+    <p>Заголовок, описание и контакт {{ home.contact_label }}</p>
+  </a>
+  {% for p in pages %}
+  <a class="card" href="{{ url_for('admin_page', slug=p.slug) }}">
+    <h3>{{ p.title }}</h3>
+    <p>{{ counts[p.slug].sections }} разделов · {{ counts[p.slug].chapters }} глав</p>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

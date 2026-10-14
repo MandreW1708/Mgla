@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Mgla — клиент Telegram{% endblock %}
+{% block content %}
+<section class="wrap hero">
+  <div class="hero-badge" data-reveal data-reveal-delay="40" aria-hidden="true">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="" width="280" height="280" decoding="async">
+  </div>
+  <div class="hero-copy" data-reveal>
+    <h1>{{ home.hero_title }}</h1>
+    <div class="hero-kicker">Telegram-клиент нового уровня</div>
+    <p data-reveal data-reveal-delay="180">{{ home.hero_subtitle }}</p>
+    <div class="hero-actions" data-reveal data-reveal-delay="280">
+      <a class="btn btn-primary" href="{{ url_for('guide') }}"><span>Инструкция</span></a>
+      <a class="btn btn-ghost" href="{{ url_for('support') }}"><span>Поддержать</span></a>
+      <a class="btn btn-tg" href="{{ home.contact_url }}" target="_blank" rel="noopener"><span>{{ home.contact_label }}</span></a>
+    </div>
+  </div>
+</section>
+
+<section class="wrap section">
+  <h2 data-reveal>Возможности</h2>
+  <p class="lead" data-reveal data-reveal-delay="80">Краткий обзор того, что уже есть в клиенте.</p>
+  <div class="grid">
+    {% for f in features %}
+    <article class="card" data-reveal data-reveal-delay="{{ loop.index0 * 70 }}">
+      <div class="icon">{{ f.icon[:1]|upper }}</div>
+      <h3>{{ f.title }}</h3>
+      <p>{{ f.text }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="wrap section">
+  <div class="contact-strip" data-reveal>
+    <div>
+      <strong>Связь</strong>
+      <span>Вопросы по клиенту, обходу и поддержке — в Telegram.</span>
+    </div>
+    <a class="btn btn-primary" href="{{ home.contact_url }}" target="_blank" rel="noopener"><span>{{ home.contact_label }}</span></a>
+  </div>
+</section>
+{% endblock %}

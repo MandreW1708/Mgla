@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — Mgla CMS</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.png') }}" type="image/png">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
+</head>
+<body class="admin-body">
+  <div class="login-box">
+    <div class="brand" style="margin-bottom:1rem">
+      <img src="{{ url_for('static', filename='img/logo.png') }}" alt="" style="width:40px;height:40px;border-radius:10px">
+      <span>Mgla CMS</span>
+    </div>
+    <h1>Вход</h1>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post">
+      <label>Логин</label>
+      <input type="text" name="username" autocomplete="username" required>
+      <label>Пароль</label>
+      <input type="password" name="password" autocomplete="current-password" required>
+      <div class="form-row">
+        <button class="btn btn-primary" type="submit">Войти</button>
+        <a class="btn btn-ghost btn-sm" href="{{ url_for('home') }}">На сайт</a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
