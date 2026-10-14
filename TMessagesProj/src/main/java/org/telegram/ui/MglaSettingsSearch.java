@@ -220,6 +220,7 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1066, "Затемнение стекла", hub, appearance, appearanceIcon, appearanceScreen, "Затемнение стекла", "appearance/glass-darkening"));
         l.add(new Entry(1067, "Переключатели MD3", hub, appearance, appearanceIcon, appearanceScreen, "Переключатели MD3", "appearance/md3-switches"));
         l.add(new Entry(1068, "Значок вместо \"изменено\"", hub, appearance, appearanceIcon, appearanceScreen, "Значок вместо \"изменено\"", "appearance/edited-icon"));
+        l.add(new Entry(1133, "Значок уведомлений", hub, appearance, appearanceIcon, appearanceScreen, "Значок уведомлений", "appearance/notification-icon"));
         l.add(new Entry(1124, "Папки", hub, appearance, appearanceIcon, appearanceScreen, "Папки", "appearance/folders"));
         l.add(new Entry(1125, "Обводка активной папки", hub, appearance, appearanceIcon, appearanceScreen, "Обводка активной папки", "appearance/folders/active-outline"));
         l.add(new Entry(1069, sideMenu, hub, appearance, appearanceIcon, sideMenuScreen, null, "appearance/side-menu"));

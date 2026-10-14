@@ -38,6 +38,8 @@ public class MglaGlassConfig {
     public static final String PREF_PROFILE_MEDIA_GROW = "profile_media_grow";
     public static final String PREF_SETTINGS_PRESS_SPRING = "settings_press_spring";
     public static final String PREF_FOLDER_ACTIVE_OUTLINE = "folder_active_outline";
+    /** false = Telegram plane, true = custom status-bar notification icon. */
+    public static final String PREF_CUSTOM_NOTIFICATION_ICON = "custom_notification_icon";
 
     // In-memory cache — prefs are hit from Switch/ActionBar draw paths every frame.
     private static boolean cacheLoaded;
@@ -46,6 +48,7 @@ public class MglaGlassConfig {
     private static int predictiveBackStyle = PREDICTIVE_BACK_DEFAULT;
     private static boolean md3Switches;
     private static boolean editedIcon;
+    private static boolean customNotificationIcon = true;
     private static boolean cleanHeader;
     private static boolean cleanHeaderHideBackBtn = true;
     private static boolean cleanHeaderHideTitleBlock = true;
@@ -90,7 +93,30 @@ public class MglaGlassConfig {
         profileMediaGrow = p.getBoolean(PREF_PROFILE_MEDIA_GROW, true);
         settingsPressSpring = p.getBoolean(PREF_SETTINGS_PRESS_SPRING, true);
         folderActiveOutline = p.getBoolean(PREF_FOLDER_ACTIVE_OUTLINE, false);
+        customNotificationIcon = p.getBoolean(PREF_CUSTOM_NOTIFICATION_ICON, true);
         cacheLoaded = true;
+    }
+
+    public static boolean isCustomNotificationIconEnabled() {
+        ensureCache();
+        return customNotificationIcon;
+    }
+
+    public static void setCustomNotificationIconEnabled(boolean enabled) {
+        ensureCache();
+        if (customNotificationIcon == enabled) {
+            return;
+        }
+        customNotificationIcon = enabled;
+        getPrefs().edit().putBoolean(PREF_CUSTOM_NOTIFICATION_ICON, enabled).apply();
+    }
+
+    /** Status-bar / notification {@code setSmallIcon} resource for message notifications. */
+    public static int getNotificationSmallIconRes() {
+        // Standard = stock Telegram paper-plane (drawable*/notification.webp).
+        return isCustomNotificationIconEnabled()
+                ? org.telegram.messenger.R.drawable.notific_icon_custom
+                : org.telegram.messenger.R.drawable.notification;
     }
 
     public static int getGlassDarkeningLevel() {

@@ -4801,7 +4801,7 @@ public class NotificationsController extends BaseController implements Notificat
             PendingIntent contentIntent = PendingIntent.getActivity(ApplicationLoader.applicationContext, 0, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             mBuilder.setContentTitle(name)
-                    .setSmallIcon(R.drawable.notific_icon)
+                    .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
                     .setAutoCancel(true)
                     .setNumber(total_unread_count)
                     .setContentIntent(contentIntent)
@@ -5803,7 +5803,7 @@ public class NotificationsController extends BaseController implements Notificat
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext)
                     .setContentTitle(name)
-                    .setSmallIcon(R.drawable.notific_icon)
+                    .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
                     .setContentText(text.toString())
                     .setAutoCancel(true)
                     .setNumber(dialogKey.story ? storyPushMessages.size() : messageObjects.size())

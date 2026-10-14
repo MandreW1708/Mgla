@@ -143,6 +143,25 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
         });
         glassBlock.addView(editedIconCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        glassBlock.addView(MglaUi.createDivider(context));
+
+        TextView notifyIconTitle = new TextView(context);
+        notifyIconTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        notifyIconTitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        notifyIconTitle.setText("Значок уведомлений");
+        notifyIconTitle.setPadding(dp(22), dp(12), dp(22), 0);
+        glassBlock.addView(notifyIconTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        org.telegram.ui.Components.MglaSegmentedControl notifyIconControl = new org.telegram.ui.Components.MglaSegmentedControl(context);
+        // 0 = стандартный (самолётик), 1 = кастомный
+        notifyIconControl.setOptions(
+                "Стандартный",
+                "Кастомный",
+                MglaGlassConfig.isCustomNotificationIconEnabled() ? 1 : 0
+        );
+        notifyIconControl.setCallback(index -> MglaGlassConfig.setCustomNotificationIconEnabled(index == 1));
+        glassBlock.addView(notifyIconControl, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         rootLayout.addView(glassBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout foldersBlock = createBlock(context, "Папки");

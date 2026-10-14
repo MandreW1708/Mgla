@@ -143,7 +143,7 @@ public class ChatExportManager {
                 );
 
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext, EXPORT_CHANNEL_ID)
-                        .setSmallIcon(R.drawable.notific_icon)
+                        .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
                         .setContentTitle(getExportTitle())
                         .setContentText(text)
                         .setOngoing(true)
@@ -175,7 +175,7 @@ public class ChatExportManager {
                 );
 
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext, EXPORT_CHANNEL_ID)
-                        .setSmallIcon(R.drawable.notific_icon)
+                        .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
                         .setContentTitle(getExportTitle())
                         .setContentText(text)
                         .setOngoing(true)
@@ -200,7 +200,7 @@ public class ChatExportManager {
                 PendingIntent openPendingIntent = buildOpenFileIntent(file);
 
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext, EXPORT_CHANNEL_ID)
-                        .setSmallIcon(R.drawable.notific_icon)
+                        .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
                         .setContentTitle(getExportTitle())
                         .setContentText("Экспорт завершён: " + file.getName())
                         .setOngoing(false)
@@ -226,7 +226,7 @@ public class ChatExportManager {
             try {
                 ensureExportChannel();
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext, EXPORT_CHANNEL_ID)
-                        .setSmallIcon(R.drawable.notific_icon)
+                        .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
                         .setContentTitle(getExportTitle())
                         .setContentText("Ошибка экспорта: " + (error != null ? error : "неизвестная ошибка"))
                         .setOngoing(false)
