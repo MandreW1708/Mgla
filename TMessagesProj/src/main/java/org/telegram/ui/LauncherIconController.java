@@ -43,7 +43,6 @@ public class LauncherIconController {
         GREEN("GreenIcon", R.drawable.green_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconGreen),
         PERLAMUTR("PerlamutrIcon", R.drawable.perlamutr_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconPerlamutr),
         UFC("UfcIcon", R.drawable.ufc_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconUfc),
-        ICON_3D("Icon3D", R.drawable.icon_3d_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIcon3D),
         ABSTRACTION("AbstractionIcon", R.drawable.abstraction_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconAbstraction),
         IT("ItIcon", R.drawable.it_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconIt),
         RACE("RaceIcon", R.drawable.race_icon_background, R.drawable.transparent_icon_foreground, R.string.AppIconRace),

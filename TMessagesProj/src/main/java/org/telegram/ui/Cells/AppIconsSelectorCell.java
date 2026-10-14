@@ -59,7 +59,7 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
     private static final ConcurrentHashMap<Integer, Bitmap> previewCache = new ConcurrentHashMap<>();
     private static boolean prewarmStarted;
     /** Bump when icon inset/art changes so stale previews are not reused. */
-    private static final int PREVIEW_CACHE_GENERATION = 11;
+    private static final int PREVIEW_CACHE_GENERATION = 14;
     private static int previewCacheGeneration = -1;
 
     /**

@@ -46,7 +46,6 @@ ART_TO_LAUNCHERS = {
     "green": ["green_launcher"],
     "perlamutr": ["perlamutr_launcher"],
     "ufc": ["ufc_launcher"],
-    "icon_3d": ["icon_3d_launcher"],
     "abstraction": ["abstraction_launcher"],
     "it": ["it_launcher"],
     "race": ["race_launcher"],
