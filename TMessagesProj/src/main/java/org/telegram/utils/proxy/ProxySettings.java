@@ -100,6 +100,9 @@ public final class ProxySettings {
     }
 
     public String getLink() {
+        if (MglaInternalProxy.isInternal(this)) {
+            return "";
+        }
         StringBuilder url;
         switch (type) {
             case MTPROTO:

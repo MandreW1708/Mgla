@@ -14,6 +14,7 @@ import org.telegram.messenger.VpnMonitor;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.utils.bypass.MglaBypassVpnGuard;
 import org.telegram.utils.dpi.MglaDpiBypass;
+import org.telegram.utils.proxy.MglaInternalProxy;
 import org.telegram.utils.proxy.ProxySettings;
 import org.telegram.utils.proxy.WebProxyTransport;
 
@@ -545,15 +546,23 @@ public final class MglaWsBypass {
             .remove("proxy_type");
     }
 
+    /**
+     * Активирует обход как currentProxy, но не кладёт его в SharedConfig.proxyList —
+     * иначе WEB/локальный MTProto светятся в настройках и шарятся в другие клиенты.
+     */
     private void addBypassProxyToList() {
         try {
             SharedConfig.loadProxyList();
+            MglaInternalProxy.scrubProxyList();
             if (bypassProxyInfo == null) {
                 savedCurrentProxyRef = SharedConfig.currentProxy;
-                bypassProxyInfo = SharedConfig.addProxy(new SharedConfig.ProxyInfo(buildActiveSettings()));
+                // Если ранее currentProxy был нашей же внутренней записью из списка — не восстанавливать.
+                if (savedCurrentProxyRef != null && MglaInternalProxy.isInternal(savedCurrentProxyRef.settings)) {
+                    savedCurrentProxyRef = null;
+                }
             }
+            bypassProxyInfo = new SharedConfig.ProxyInfo(buildActiveSettings());
             SharedConfig.currentProxy = bypassProxyInfo;
-            SharedConfig.saveProxyList();
             AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged));
         } catch (Throwable e) {
@@ -572,15 +581,9 @@ public final class MglaWsBypass {
             if (next.equals(old.settings)) {
                 return;
             }
-            SharedConfig.loadProxyList();
-            // deleteProxy() on the current entry would wipe proxy_* prefs and disable the proxy.
-            if (SharedConfig.currentProxy == old) {
-                SharedConfig.currentProxy = null;
-            }
-            SharedConfig.deleteProxy(old);
-            bypassProxyInfo = SharedConfig.addProxy(new SharedConfig.ProxyInfo(next));
+            bypassProxyInfo = new SharedConfig.ProxyInfo(next);
             SharedConfig.currentProxy = bypassProxyInfo;
-            SharedConfig.saveProxyList();
+            MglaInternalProxy.scrubProxyList();
             AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged));
         } catch (Throwable e) {
@@ -592,13 +595,16 @@ public final class MglaWsBypass {
         try {
             SharedConfig.ProxyInfo info = bypassProxyInfo;
             bypassProxyInfo = null;
-            if (info != null) {
-                SharedConfig.deleteProxy(info);
+            // Не вызываем deleteProxy: записи в proxyList нет, а deleteProxy ещё и сбрасывает prefs.
+            if (info != null && SharedConfig.currentProxy == info) {
+                SharedConfig.currentProxy = null;
             }
-            if (savedCurrentProxyRef != null) {
+            if (savedCurrentProxyRef != null
+                    && !MglaInternalProxy.isInternal(savedCurrentProxyRef.settings)) {
                 SharedConfig.currentProxy = savedCurrentProxyRef;
-                savedCurrentProxyRef = null;
             }
+            savedCurrentProxyRef = null;
+            MglaInternalProxy.scrubProxyList();
             AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged));
         } catch (Throwable e) {

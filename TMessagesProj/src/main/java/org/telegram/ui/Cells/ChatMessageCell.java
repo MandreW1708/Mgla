@@ -12666,6 +12666,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             !currentMessageObject.isRepostPreview &&
             (!currentMessageObject.isOutOwner() || currentMessageObject.isSent()) &&
             (
+                // Mgla Gemini/Whisper: show for everyone when AI transcription is on.
+                TranscribeButton.isMglaTranscribeEnabled()
+                ||
                 UserConfig.getInstance(currentAccount).isPremium()
                 ||
                 TranscribeButton.isFreeTranscribeInChat(currentMessageObject)
@@ -12686,7 +12689,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                     currentMessageObject.getDuration() >= 60
                 )
             ) && (
-                currentMessageObject.isVoice() && useSeekBarWaveform ||
+                // Waveform can be missing on some voices; still show when Mgla AI transcription is on.
+                currentMessageObject.isVoice() && (useSeekBarWaveform || TranscribeButton.isMglaTranscribeEnabled()) ||
                 currentMessageObject.isRoundVideo()
             ) && currentMessageObject.messageOwner != null && !(MessageObject.getMedia(currentMessageObject.messageOwner) instanceof TLRPC.TL_messageMediaWebPage) &&
             (currentMessageObject.messageOwner.media == null || currentMessageObject.messageOwner.media.ttl_seconds == 0)

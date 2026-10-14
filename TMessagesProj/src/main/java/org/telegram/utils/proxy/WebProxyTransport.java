@@ -343,9 +343,8 @@ public final class WebProxyTransport implements ForegroundDetector.Listener {
         this.secret = secret;
         origin = "https://" + host;
         androidNonce = randomToken(32);
-        String context = path.isEmpty()
-                ? "tdesktop-web-proxy-bridge-v1\n" + host
-                : "tdesktop-web-proxy-bridge-v2\n" + host + "\n" + path;
+        // Для нашего хоста — Mgla-only HMAC (stock Telegram Desktop с тем же секретом не пройдёт).
+        String context = MglaInternalProxy.webCapabilityContext(host, path);
         Mac hmac = Mac.getInstance("HmacSHA256");
         hmac.init(new SecretKeySpec(secretBytes, "HmacSHA256"));
         String capability = Base64.encodeToString(

@@ -13,6 +13,7 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.VpnMonitor;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.utils.bypass.MglaBypassVpnGuard;
+import org.telegram.utils.proxy.MglaInternalProxy;
 import org.telegram.utils.proxy.ProxySettings;
 
 /**
@@ -410,16 +411,19 @@ public final class MglaDpiBypass {
 
     // ---------------------------------------------------------------- proxy list visibility
 
-    /** Пока обход включён, локальный прокси показывается в списке прокси Telegram как активный. */
+    /** Активирует локальный SOCKS как currentProxy, не кладя его в пользовательский список. */
     private void addBypassProxyToList() {
         try {
             SharedConfig.loadProxyList();
+            MglaInternalProxy.scrubProxyList();
             if (bypassProxyInfo == null) {
                 savedCurrentProxyRef = SharedConfig.currentProxy;
-                bypassProxyInfo = SharedConfig.addProxy(new SharedConfig.ProxyInfo(buildLocalSettings()));
+                if (savedCurrentProxyRef != null && MglaInternalProxy.isInternal(savedCurrentProxyRef.settings)) {
+                    savedCurrentProxyRef = null;
+                }
             }
+            bypassProxyInfo = new SharedConfig.ProxyInfo(buildLocalSettings());
             SharedConfig.currentProxy = bypassProxyInfo;
-            SharedConfig.saveProxyList();
             AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged));
         } catch (Throwable e) {
@@ -431,15 +435,15 @@ public final class MglaDpiBypass {
         try {
             SharedConfig.ProxyInfo info = bypassProxyInfo;
             bypassProxyInfo = null;
-            if (info != null) {
-                // deleteProxy очистит mainconfig и вызовет setProxySettings(false) —
-                // restoreUserProxy() ниже всё равно восстановит пользовательский прокси.
-                SharedConfig.deleteProxy(info);
+            if (info != null && SharedConfig.currentProxy == info) {
+                SharedConfig.currentProxy = null;
             }
-            if (savedCurrentProxyRef != null) {
+            if (savedCurrentProxyRef != null
+                    && !MglaInternalProxy.isInternal(savedCurrentProxyRef.settings)) {
                 SharedConfig.currentProxy = savedCurrentProxyRef;
-                savedCurrentProxyRef = null;
             }
+            savedCurrentProxyRef = null;
+            MglaInternalProxy.scrubProxyList();
             AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged));
         } catch (Throwable e) {

@@ -528,7 +528,11 @@ public class TranscribeButton {
         );
     }
 
-    private static boolean isMglaTranscribeEnabled() {
+    /** Mgla AI transcription (Gemini / local Whisper) is enabled in settings and allowed by flags. */
+    public static boolean isMglaTranscribeEnabled() {
+        if (org.telegram.messenger.ApplicationLoader.applicationContext == null) {
+            return false;
+        }
         android.content.SharedPreferences prefs = org.telegram.messenger.ApplicationLoader.applicationContext
             .getSharedPreferences("mgla_config", android.content.Context.MODE_PRIVATE);
         return org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_enabled")
@@ -1276,6 +1280,10 @@ public class TranscribeButton {
 
     public static boolean showTranscribeLock(MessageObject messageObject) {
         if (messageObject == null || messageObject.messageOwner == null) {
+            return false;
+        }
+        // Local/cloud Mgla transcription does not require Premium — never show the lock.
+        if (isMglaTranscribeEnabled()) {
             return false;
         }
         if (isFreeTranscribeInChat(messageObject)) {
