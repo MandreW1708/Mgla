@@ -149,11 +149,36 @@ def ws_headers(ws):
     return {}
 
 
-def token_ok(headers) -> bool:
+def _header_get(headers, *names):
+    if headers is None:
+        return ""
+    wanted = {n.lower() for n in names}
+    for name in names:
+        try:
+            if hasattr(headers, "get"):
+                val = headers.get(name)
+                if val:
+                    return val if isinstance(val, str) else str(val)
+        except Exception:
+            pass
+        try:
+            val = headers[name]
+            if val:
+                return val if isinstance(val, str) else str(val)
+        except Exception:
+            pass
     try:
-        got = headers.get("X-Mgla-Token") or headers.get("x-mgla-token") or ""
+        items = headers.items() if hasattr(headers, "items") else []
+        for k, v in items:
+            if str(k).lower() in wanted and v:
+                return v if isinstance(v, str) else str(v)
     except Exception:
-        got = ""
+        pass
+    return ""
+
+
+def token_ok(headers) -> bool:
+    got = _header_get(headers, "X-Mgla-Token", "x-mgla-token")
     try:
         import mgla_token
         if mgla_token.token_ok(got):
@@ -166,17 +191,8 @@ def token_ok(headers) -> bool:
 
 
 def client_ok(headers) -> bool:
-    """Только клиент Mgla шлёт X-Mgla-Client: mgla[...]. Stock Telegram — нет."""
-    try:
-        import mgla_token
-        return mgla_token.client_header_ok(headers)
-    except Exception:
-        pass
-    try:
-        got = headers.get("X-Mgla-Client") or headers.get("x-mgla-client") or ""
-    except Exception:
-        got = ""
-    got = (got or "").strip().lower()
+    """Marker header from Mgla APK. Optional when token already validates."""
+    got = _header_get(headers, "X-Mgla-Client", "x-mgla-client").strip().lower()
     return got == "mgla" or got.startswith("mgla/")
 
 
@@ -448,9 +464,8 @@ async def handler(ws):
         await ws.close(code=1008, reason="unauthorized")
         return
     if not client_ok(headers):
-        LOG.info("%s reject client path=%s", peer, path)
-        await ws.close(code=1008, reason="client")
-        return
+        # Token already proved access; do not drop the call if a proxy stripped the marker.
+        LOG.warning("%s missing X-Mgla-Client path=%s (allowing valid token)", peer, path)
 
     dc = resolve_dc(path)
     if dc is None:

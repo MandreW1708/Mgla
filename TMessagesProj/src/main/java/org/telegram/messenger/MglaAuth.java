@@ -64,38 +64,42 @@ public final class MglaAuth {
 
     /**
      * Token for X-Mgla-Token on relay and hub. Never empty if legacy BuildConfig exists.
+     * Does not perform network I/O — safe to call from the WS connect path.
      */
     public static String getAccessToken() {
-        SharedPreferences prefs = prefs();
-        if (prefs != null) {
-            String access = prefs.getString(KEY_ACCESS, null);
-            long exp = prefs.getLong(KEY_ACCESS_EXPIRES_AT, 0);
-            if (!TextUtils.isEmpty(access) && exp > System.currentTimeMillis() + 30_000) {
-                return access;
-            }
+        String cached = peekCachedAccessToken();
+        if (!TextUtils.isEmpty(cached)) {
+            return cached;
         }
+        // Schedule refresh in background; return legacy immediately so connects don't stall.
         try {
-            ensureAccessToken(false);
+            Utilities.globalQueue.postRunnable(() -> {
+                try {
+                    ensureAccessToken(false);
+                } catch (Throwable ignored) {
+                }
+            });
         } catch (Throwable ignored) {
-        }
-        if (prefs != null) {
-            String access = prefs.getString(KEY_ACCESS, null);
-            long exp = prefs.getLong(KEY_ACCESS_EXPIRES_AT, 0);
-            if (!TextUtils.isEmpty(access) && exp > System.currentTimeMillis()) {
-                return access;
-            }
         }
         return legacyFallbackToken();
     }
 
-    public static boolean hasSessionToken() {
+    /** Non-blocking: valid cached JWT or null. */
+    public static String peekCachedAccessToken() {
         SharedPreferences prefs = prefs();
         if (prefs == null) {
-            return false;
+            return null;
         }
         String access = prefs.getString(KEY_ACCESS, null);
         long exp = prefs.getLong(KEY_ACCESS_EXPIRES_AT, 0);
-        return !TextUtils.isEmpty(access) && exp > System.currentTimeMillis();
+        if (!TextUtils.isEmpty(access) && exp > System.currentTimeMillis() + 30_000) {
+            return access;
+        }
+        return null;
+    }
+
+    public static boolean hasSessionToken() {
+        return !TextUtils.isEmpty(peekCachedAccessToken());
     }
 
     private static String legacyFallbackToken() {
