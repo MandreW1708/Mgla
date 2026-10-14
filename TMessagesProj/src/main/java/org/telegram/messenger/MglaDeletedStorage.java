@@ -1,5 +1,7 @@
 package org.telegram.messenger;
 
+import androidx.collection.LongSparseArray;
+
 import org.telegram.SQLite.SQLiteCursor;
 import org.telegram.SQLite.SQLiteDatabase;
 import org.telegram.SQLite.SQLiteException;
@@ -9,6 +11,8 @@ import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLRPC;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 
 /**
  * Deleted messages archive, stored in the regular Telegram cache database.
@@ -20,6 +24,14 @@ import java.util.ArrayList;
 public class MglaDeletedStorage {
 
     private static final String TABLE = "mgla_deleted_messages";
+
+    /**
+     * Message ids the user opted not to archive on the next local delete
+     * ("Сохранить у себя" unchecked). Checked from the UI thread (keep-visible)
+     * and consumed on the storage thread when archiving.
+     */
+    private static final Object skipArchiveLock = new Object();
+    private static final LongSparseArray<HashSet<Integer>> skipArchiveByDialog = new LongSparseArray<>();
 
     public static void ensureTable(SQLiteDatabase database) {
         if (database == null) {
@@ -85,6 +97,58 @@ public class MglaDeletedStorage {
             return MglaSpyConfig.MSG_TYPE_PHOTO;
         }
         return MglaSpyConfig.MSG_TYPE_TEXT;
+    }
+
+    /** Whether the delete dialog should offer the "Сохранить у себя" checkbox. */
+    public static boolean shouldOfferSaveOnDelete(int currentAccount, long dialogId) {
+        if (!MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            return false;
+        }
+        if (dialogId == 0 || DialogObject.isEncryptedDialog(dialogId)) {
+            return false;
+        }
+        return MglaSpyConfig.isSaveDeletedForCategoryEnabled(resolveChatType(currentAccount, dialogId));
+    }
+
+    /**
+     * Mark message ids so the upcoming local delete does not write them into the archive.
+     * Call on the UI thread before {@code deleteMessages}.
+     */
+    public static void skipArchiveForDeletion(long dialogId, Collection<Integer> messageIds) {
+        if (dialogId == 0 || messageIds == null || messageIds.isEmpty()) {
+            return;
+        }
+        synchronized (skipArchiveLock) {
+            HashSet<Integer> set = skipArchiveByDialog.get(dialogId);
+            if (set == null) {
+                set = new HashSet<>();
+                skipArchiveByDialog.put(dialogId, set);
+            }
+            set.addAll(messageIds);
+        }
+    }
+
+    /** UI-thread peek: whether this mid is marked to skip archiving (not consumed). */
+    public static boolean isSkipArchivePending(long dialogId, int messageId) {
+        synchronized (skipArchiveLock) {
+            HashSet<Integer> set = skipArchiveByDialog.get(dialogId);
+            return set != null && set.contains(messageId);
+        }
+    }
+
+    /** Storage-thread: consume a skip mark for this mid. Returns true if archiving must be skipped. */
+    public static boolean consumeSkipArchive(long dialogId, int messageId) {
+        synchronized (skipArchiveLock) {
+            HashSet<Integer> set = skipArchiveByDialog.get(dialogId);
+            if (set == null) {
+                return false;
+            }
+            boolean removed = set.remove(messageId);
+            if (set.isEmpty()) {
+                skipArchiveByDialog.remove(dialogId);
+            }
+            return removed;
+        }
     }
 
     /**

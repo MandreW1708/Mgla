@@ -372,6 +372,11 @@ public final class MglaStats {
         return false;
     }
 
+    /** Stable anonymous install id (32 hex), shared with {@link MglaAuth}. */
+    public static String getInstallId() {
+        return installId();
+    }
+
     private static String installId() {
         SharedPreferences prefs = prefs();
         String id = prefs.getString(KEY_INSTALL_ID, null);

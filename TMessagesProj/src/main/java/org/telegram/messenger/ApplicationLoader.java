@@ -266,6 +266,11 @@ public class ApplicationLoader extends Application {
         } catch (Throwable ignored) {
         }
         try {
+            MglaAuth.init();
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        try {
             MglaStats.init();
         } catch (Throwable e) {
             FileLog.e(e);

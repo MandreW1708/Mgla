@@ -623,6 +623,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(UItem.asCustomShadow(topView, 200 - 12));
 
         items.add(SettingCell.Factory.of(100, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, "Настройки Mgla"));
+        items.add(SettingCell.Factory.of(101, 0xFFEFA612, 0xFFE77512, R.drawable.settings_mgla_premium, "Mgla Premium"));
         items.add(UItem.asShadow(null));
 
         accountNumbers.clear();
@@ -848,6 +849,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
 
             case 100:
                 presentFragment(new MglaSettingsActivity());
+                break;
+            case 101:
+                presentFragment(new MglaPremiumActivity());
                 break;
 
             case 11:

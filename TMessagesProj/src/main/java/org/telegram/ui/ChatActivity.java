@@ -26682,6 +26682,7 @@ public class ChatActivity extends BaseFragment implements
             && !obj.scheduled
             && !obj.isDateObject
             && obj.getId() > 0
+            && !MglaDeletedStorage.isSkipArchivePending(dialog_id, obj.getId())
             && MglaDeletedStorage.shouldSave(currentAccount, dialog_id, obj.messageOwner);
     }
 

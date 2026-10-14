@@ -138,7 +138,10 @@ umask 022
 
 # ---- systemd units (UFW already drops 2398/8888 externally, so the nft firewall unit is not used)
 strip_fw() { sed -e 's/ tproxy-firewall\.service//g' -e '/^Requires=tproxy-firewall\.service$/d' -e '/^Requires=$/d'; }
-strip_fw < "$SRC/deploy/mtproxy.service" > /etc/systemd/system/mgla-mtproxy.service
+strip_fw < "$SRC/deploy/mtproxy.service" \
+	| sed -e 's|ExecStart=/usr/local/bin/mtproto-proxy|ExecStart=/usr/local/bin/mtproto-proxy --address 127.0.0.1|' \
+	      -e 's|ExecStart=/opt/MTProxy/objs/bin/mtproto-proxy|ExecStart=/opt/MTProxy/objs/bin/mtproto-proxy --address 127.0.0.1|' \
+	> /etc/systemd/system/mgla-mtproxy.service
 strip_fw < "$SRC/deploy/tproxy-server.service" \
 	| sed -e 's/mtproxy\.service/mgla-mtproxy.service/g' \
 	> /etc/systemd/system/mgla-tproxy.service

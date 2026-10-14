@@ -106,9 +106,17 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Токен WS-релея (mglabot): prefs → {@code MGLA_WS_RELAY_TOKEN} в local.properties.
+     * Токен WS-релея: короткоживущий JWT установки ({@link org.telegram.messenger.MglaAuth}),
+     * иначе legacy из prefs / BuildConfig.
      */
     public static String getRelayToken() {
+        try {
+            String session = org.telegram.messenger.MglaAuth.getAccessToken();
+            if (!TextUtils.isEmpty(session)) {
+                return session;
+            }
+        } catch (Throwable ignored) {
+        }
         String override = getPrefs().getString(PREF_RELAY_TOKEN, null);
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
@@ -121,9 +129,22 @@ public final class MglaWsConfig {
         getPrefs().edit().putString(PREF_RELAY_TOKEN, token == null ? "" : token.trim()).apply();
     }
 
-    /** Релей обхода готов: есть хост и непустой токен. */
+    /** Релей обхода готов: есть хост и способ получить токен (session / legacy). */
     public static boolean isRelayConfigured() {
-        return !TextUtils.isEmpty(getRelayHost()) && !TextUtils.isEmpty(getRelayToken());
+        if (TextUtils.isEmpty(getRelayHost())) {
+            return false;
+        }
+        if (!TextUtils.isEmpty(BuildConfig.MGLA_WS_RELAY_TOKEN)) {
+            return true;
+        }
+        if (!TextUtils.isEmpty(getPrefs().getString(PREF_RELAY_TOKEN, null))) {
+            return true;
+        }
+        try {
+            return org.telegram.messenger.MglaAuth.hasSessionToken();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     /** Адрес запасного WEB proxy в форме {@code host/path} (без https://). */
@@ -172,12 +193,16 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Токен хаба (stats / feature flags на mglahub): {@code MGLA_HUB_TOKEN} из сборки,
-     * иначе prefs, иначе {@link #getRelayToken()}.
+     * Токен хаба: JWT установки, иначе legacy {@code MGLA_HUB_TOKEN} / prefs / relay token.
      */
     public static String getHubToken() {
-        // Prefer BuildConfig so a rebuild always picks up local.properties;
-        // an old prefs override previously caused silent 401 on /mgla-config/.
+        try {
+            String session = org.telegram.messenger.MglaAuth.getAccessToken();
+            if (!TextUtils.isEmpty(session)) {
+                return session;
+            }
+        } catch (Throwable ignored) {
+        }
         String fromBuild = BuildConfig.MGLA_HUB_TOKEN;
         if (!TextUtils.isEmpty(fromBuild)) {
             return fromBuild.trim();
@@ -186,7 +211,8 @@ public final class MglaWsConfig {
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
         }
-        return getRelayToken();
+        String fromRelayBuild = BuildConfig.MGLA_WS_RELAY_TOKEN;
+        return fromRelayBuild == null ? "" : fromRelayBuild.trim();
     }
 
     public static void setHubToken(String token) {
@@ -195,7 +221,20 @@ public final class MglaWsConfig {
 
     /** Хаб (статистика, ИИ-прокси) готов к запросам. */
     public static boolean isHubConfigured() {
-        return !TextUtils.isEmpty(getHubHost()) && !TextUtils.isEmpty(getHubToken());
+        if (TextUtils.isEmpty(getHubHost())) {
+            return false;
+        }
+        if (!TextUtils.isEmpty(BuildConfig.MGLA_HUB_TOKEN) || !TextUtils.isEmpty(BuildConfig.MGLA_WS_RELAY_TOKEN)) {
+            return true;
+        }
+        if (!TextUtils.isEmpty(getPrefs().getString(PREF_HUB_TOKEN, null))) {
+            return true;
+        }
+        try {
+            return org.telegram.messenger.MglaAuth.hasSessionToken();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static boolean hasSavedUserProxy() {

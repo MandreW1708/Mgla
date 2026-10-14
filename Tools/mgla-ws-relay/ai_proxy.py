@@ -34,6 +34,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
+import mgla_token
+
 HOST = os.environ.get("MGLA_AI_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MGLA_AI_PORT", "8768"))
 TOKEN = os.environ.get("MGLA_WS_TOKEN", "").strip()
@@ -59,6 +61,14 @@ HUB_UPDATE_APK_URL = os.environ.get(
 HUB_STATS_BATCH_URL = os.environ.get(
     "MGLA_HUB_STATS_BATCH_URL",
     "https://mglahub.mooo.com/mgla-stats/v1/batch",
+).strip()
+HUB_AUTH_REGISTER_URL = os.environ.get(
+    "MGLA_HUB_AUTH_REGISTER_URL",
+    "https://mglahub.mooo.com/mgla-auth/v1/register",
+).strip()
+HUB_AUTH_TOKEN_URL = os.environ.get(
+    "MGLA_HUB_AUTH_TOKEN_URL",
+    "https://mglahub.mooo.com/mgla-auth/v1/token",
 ).strip()
 MODELS_PATH = Path(
     os.environ.get("MGLA_OPENROUTER_MODELS_FILE", "/opt/mgla-ws-relay/openrouter_models.json")
@@ -258,6 +268,22 @@ def _extract_gemini_text(payload: dict) -> str:
     return text
 
 
+def _hub_client_token() -> str:
+    if not HUB_FEATURES_TOKEN:
+        raise RuntimeError("hub features proxy not configured (MGLA_HUB_FEATURES_TOKEN)")
+    return HUB_FEATURES_TOKEN
+
+
+def _hub_headers(content_type: str | None = "application/json; charset=utf-8") -> dict:
+    headers = {
+        "X-Mgla-Token": _hub_client_token(),
+        "X-Mgla-Client": "mgla",
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
 def proxy_hub_features(body_bytes: bytes) -> tuple[int, bytes]:
     """Forward the client's features body to mglahub with the hub client token."""
     if not HUB_FEATURES_URL or not HUB_FEATURES_TOKEN:
@@ -266,23 +292,13 @@ def proxy_hub_features(body_bytes: bytes) -> tuple[int, bytes]:
         HUB_FEATURES_URL,
         data=body_bytes,
         method="POST",
-        headers={
-            "Content-Type": "application/json; charset=utf-8",
-            "X-Mgla-Token": HUB_FEATURES_TOKEN,
-        },
+        headers=_hub_headers(),
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return int(resp.status), resp.read()
     except urllib.error.HTTPError as e:
         return int(e.code), e.read()
-
-
-
-def _hub_client_token() -> str:
-    if not HUB_FEATURES_TOKEN:
-        raise RuntimeError("hub features proxy not configured (MGLA_HUB_FEATURES_TOKEN)")
-    return HUB_FEATURES_TOKEN
 
 
 def proxy_hub_update_check(body_bytes: bytes) -> tuple[int, bytes]:
@@ -293,10 +309,7 @@ def proxy_hub_update_check(body_bytes: bytes) -> tuple[int, bytes]:
         url,
         data=body_bytes,
         method="POST",
-        headers={
-            "Content-Type": "application/json; charset=utf-8",
-            "X-Mgla-Token": _hub_client_token(),
-        },
+        headers=_hub_headers(),
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
@@ -313,10 +326,7 @@ def proxy_hub_stats_batch(body_bytes: bytes) -> tuple[int, bytes]:
         url,
         data=body_bytes,
         method="POST",
-        headers={
-            "Content-Type": "application/json; charset=utf-8",
-            "X-Mgla-Token": _hub_client_token(),
-        },
+        headers=_hub_headers(),
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -332,7 +342,7 @@ def proxy_hub_update_apk_open():
     req = urllib.request.Request(
         url,
         method="GET",
-        headers={"X-Mgla-Token": _hub_client_token()},
+        headers=_hub_headers(content_type=None),
     )
     try:
         resp = urllib.request.urlopen(req, timeout=300)
@@ -382,16 +392,26 @@ class Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
-    def _check_token(self) -> bool:
-        token = self.headers.get("X-Mgla-Token", "")
-        if not TOKEN or not hmac.compare_digest(token.encode(), TOKEN.encode()):
-            self._reply(401)
-            return False
-        client = (self.headers.get("X-Mgla-Client") or "").strip().lower()
-        if client != "mgla" and not client.startswith("mgla/"):
+    def _check_client(self) -> bool:
+        if not mgla_token.client_header_ok(self.headers):
             self._reply(401)
             return False
         return True
+
+    def _check_token(self) -> bool:
+        if not self._check_client():
+            return False
+        token = self.headers.get("X-Mgla-Token", "")
+        if mgla_token.token_ok(token):
+            return True
+        if TOKEN:
+            try:
+                if hmac.compare_digest(token.encode(), TOKEN.encode()):
+                    return True
+            except Exception:
+                pass
+        self._reply(401)
+        return False
 
     def _check_sync_token(self) -> bool:
         token = self.headers.get("X-Mgla-Sync-Token", "")
@@ -444,6 +464,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path.rstrip("/") or "/"
         if path == "/mgla-ai/v1/admin/models":
             self._post_admin_models()
+        elif path in ("/mgla-ai/v1/auth/register", "/mgla-auth/v1/register"):
+            self._post_auth_proxy(HUB_AUTH_REGISTER_URL)
+        elif path in ("/mgla-ai/v1/auth/token", "/mgla-auth/v1/token"):
+            self._post_auth_proxy(HUB_AUTH_TOKEN_URL)
         elif path == "/mgla-ai/v1/features":
             self._post_features_proxy()
         elif path == "/mgla-ai/v1/update-check":
@@ -458,6 +482,35 @@ class Handler(BaseHTTPRequestHandler):
             self._post_gemini_transcribe()
         else:
             self._reply(404)
+
+    def _post_auth_proxy(self, hub_url: str):
+        """Enrollment/refresh: only X-Mgla-Client required (no access token yet)."""
+        if not self._check_client():
+            return
+        if not hub_url:
+            self._reply(503, b'{"error":"auth proxy not configured"}')
+            return
+        raw = self._read_raw_body(8 * 1024)
+        if raw is None:
+            return
+        req = urllib.request.Request(
+            hub_url,
+            data=raw,
+            method="POST",
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "X-Mgla-Client": "mgla",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = resp.read()
+                self._reply(int(resp.status), body)
+        except urllib.error.HTTPError as e:
+            self._reply(int(e.code), e.read() or b'{"error":"hub auth failed"}')
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            log.warning("auth proxy failed: %s", e)
+            self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
 
 
     def _post_update_check(self):

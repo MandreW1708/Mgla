@@ -167,6 +167,7 @@ public final class MglaSettingsSearch {
 
         l.add(new Entry(1000, hub, null, null, hubIcon, hubScreen, null, ""));
 
+        l.add(new Entry(1134, "Mgla Premium", hub, null, R.drawable.settings_mgla_premium, MglaPremiumActivity::new, null, "premium"));
         l.add(new Entry(1001, general, hub, null, generalIcon, generalScreen, null, "general"));
         l.add(new Entry(1002, chats, hub, null, chatsIcon, chatsScreen, null, "chats"));
         l.add(new Entry(1003, notif, hub, null, notifIcon, notifScreen, null, "notifications"));

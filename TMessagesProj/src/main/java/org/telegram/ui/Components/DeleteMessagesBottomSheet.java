@@ -27,6 +27,7 @@ import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaDeletedStorage;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
@@ -120,6 +121,10 @@ public class DeleteMessagesBottomSheet extends BottomSheetWithRecyclerListView {
     private static final int OPTION_DELETE_REACTIONS = 102;
     private static final int OPTION_BAN_FROM_COMMUNITY = 103;
     private static final int OPTION_BAN_FROM_COMMUNITY_INFO = 104;
+    private static final int OPTION_SAVE_FOR_ME = 105;
+
+    private boolean saveForMe = true;
+    private boolean offerSaveForMe;
 
     private class Action {
         int type;
@@ -347,6 +352,10 @@ public class DeleteMessagesBottomSheet extends BottomSheetWithRecyclerListView {
         this.topicId = topicId;
         this.mode = mode;
         this.onDelete = onDelete;
+        this.offerSaveForMe = mode != ChatActivity.MODE_SCHEDULED
+            && mode != ChatActivity.MODE_SAVED
+            && mode != ChatActivity.MODE_QUICK_REPLIES
+            && MglaDeletedStorage.shouldOfferSaveOnDelete(currentAccount, -inChat.id);
 
         this.defaultBannedRights = inChat.default_banned_rights;
         this.bannedRights = new TLRPC.TL_chatBannedRights();
@@ -736,6 +745,10 @@ public class DeleteMessagesBottomSheet extends BottomSheetWithRecyclerListView {
         }
 
         items.add(UItem.asSpace(dp(12)));
+        if (offerSaveForMe) {
+            items.add(UItem.asSwitchNoIcon(OPTION_SAVE_FOR_ME, "Сохранить у себя").setChecked(saveForMe));
+            items.add(UItem.asShadow(null));
+        }
         items.add(UItem.asHeader(getString(R.string.DeleteAdditionalActions)));
         fillAction(items, report);
 
@@ -941,7 +954,10 @@ public class DeleteMessagesBottomSheet extends BottomSheetWithRecyclerListView {
 
     private float shiftDp = 10.0f;
     private void onClick(UItem item, View view, int position, float x, float y) {
-        if (item.id == OPTION_BAN_FROM_COMMUNITY) {
+        if (item.id == OPTION_SAVE_FOR_ME) {
+            saveForMe = !saveForMe;
+            ((TextCheckCell2) view).setChecked(saveForMe);
+        } else if (item.id == OPTION_BAN_FROM_COMMUNITY) {
             banFromCommunity = !banFromCommunity;
             ((TextCheckCell2) view).setChecked(banFromCommunity);
         } else if (item.viewType == VIEW_TYPE_USER_CHECKBOX) {
@@ -1118,9 +1134,15 @@ public class DeleteMessagesBottomSheet extends BottomSheetWithRecyclerListView {
             }
         } else {
             if (!supergroupMessageIds.isEmpty()) {
+                if (offerSaveForMe && !saveForMe) {
+                    MglaDeletedStorage.skipArchiveForDeletion(-inChat.id, supergroupMessageIds);
+                }
                 MessagesController.getInstance(currentAccount).deleteMessages(supergroupMessageIds, null, null, -inChat.id, topicId, false, mode);
             }
             if (!groupMessageIds.isEmpty()) {
+                if (offerSaveForMe && !saveForMe) {
+                    MglaDeletedStorage.skipArchiveForDeletion(mergeDialogId, groupMessageIds);
+                }
                 MessagesController.getInstance(currentAccount).deleteMessages(groupMessageIds, null, null, mergeDialogId, topicId, true, mode);
             }
         }

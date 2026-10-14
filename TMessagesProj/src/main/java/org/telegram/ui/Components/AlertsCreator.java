@@ -92,6 +92,7 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.MglaDeletedStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.OneUIUtilities;
@@ -7908,6 +7909,10 @@ public class AlertsCreator {
         }
 
         final boolean[] deleteForAll = new boolean[1];
+        final boolean[] saveForMe = new boolean[]{true};
+        final boolean offerSaveForMe = !scheduled && !isSavedMessages && !quickReplies
+            && MglaDeletedStorage.shouldOfferSaveOnDelete(currentAccount, dialogId);
+        final LinearLayout[] checksLayoutHolder = new LinearLayout[1];
         boolean canRevokeInbox = user != null && MessagesController.getInstance(currentAccount).canRevokePmInbox;
         int revokeTimeLimit;
         if (user != null) {
@@ -7919,6 +7924,19 @@ public class AlertsCreator {
         boolean hasNotOut = false;
         int myMessagesCount = 0;
         boolean canDeleteInbox = encryptedChat == null && user != null && canRevokeInbox && revokeTimeLimit == 0x7fffffff;
+
+        final java.util.function.Consumer<CheckBoxCell> addDeleteCheckCell = cell -> {
+            if (checksLayoutHolder[0] == null) {
+                checksLayoutHolder[0] = new LinearLayout(activity);
+                checksLayoutHolder[0].setOrientation(LinearLayout.VERTICAL);
+                builder.setView(checksLayoutHolder[0]);
+                builder.setCustomViewOffset(9);
+            }
+            cell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
+            cell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
+            checksLayoutHolder[0].addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+        };
+
         if (chat != null && chat.megagroup && !scheduled && !isSavedMessages) {
             ArrayList<MessageObject> messages = new ArrayList<>();
             if (selectedMessage != null) {
@@ -8041,23 +8059,18 @@ public class AlertsCreator {
                 return;
             } else if (!hasNotOut && myMessagesCount > 0 && hasNonDiceMessages) {
                 hasDeleteForAllCheck = true;
-                FrameLayout frameLayout = new FrameLayout(activity);
                 CheckBoxCell cell = new CheckBoxCell(activity, 1, resourcesProvider);
-                cell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
                 if (chat != null && hasNotOut) {
                     cell.setText(LocaleController.getString(R.string.DeleteForAll), "", false, false);
                 } else {
                     cell.setText(LocaleController.getString(R.string.DeleteMessagesOption), "", false, false);
                 }
-                cell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
-                frameLayout.addView(cell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP | Gravity.LEFT, 0, 0, 0, 0));
                 cell.setOnClickListener(v -> {
                     CheckBoxCell cell12 = (CheckBoxCell) v;
                     deleteForAll[0] = !deleteForAll[0];
                     cell12.setChecked(deleteForAll[0], true);
                 });
-                builder.setView(frameLayout);
-                builder.setCustomViewOffset(9);
+                addDeleteCheckCell.accept(cell);
             }
         } else if (!scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {
             if (user != null && user.id != UserConfig.getInstance(currentAccount).getClientUserId() && (!user.bot || user.support) || chat != null) {
@@ -8098,9 +8111,7 @@ public class AlertsCreator {
             }
             if (myMessagesCount > 0 && hasNonDiceMessages && (user == null || !UserObject.isDeleted(user))) {
                 hasDeleteForAllCheck = true;
-                FrameLayout frameLayout = new FrameLayout(activity);
                 CheckBoxCell cell = new CheckBoxCell(activity, 1, resourcesProvider);
-                cell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
                 if (canDeleteInbox) {
                     cell.setText(LocaleController.formatString("DeleteMessagesOptionAlso", R.string.DeleteMessagesOptionAlso, UserObject.getFirstName(user)), "", false, false);
                 } else if (chat != null && (hasNotOut || myMessagesCount == count)) {
@@ -8108,16 +8119,25 @@ public class AlertsCreator {
                 } else {
                     cell.setText(LocaleController.getString(R.string.DeleteMessagesOption), "", false, false);
                 }
-                cell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
-                frameLayout.addView(cell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP | Gravity.LEFT, 0, 0, 0, 0));
                 cell.setOnClickListener(v -> {
                     CheckBoxCell cell1 = (CheckBoxCell) v;
                     deleteForAll[0] = !deleteForAll[0];
                     cell1.setChecked(deleteForAll[0], true);
                 });
-                builder.setView(frameLayout);
-                builder.setCustomViewOffset(9);
+                addDeleteCheckCell.accept(cell);
             }
+        }
+
+        if (offerSaveForMe) {
+            CheckBoxCell saveCell = new CheckBoxCell(activity, 1, resourcesProvider);
+            saveCell.setText("Сохранить у себя", "", true, false);
+            saveCell.setChecked(true, false);
+            saveCell.setOnClickListener(v -> {
+                CheckBoxCell cell1 = (CheckBoxCell) v;
+                saveForMe[0] = !saveForMe[0];
+                cell1.setChecked(saveForMe[0], true);
+            });
+            addDeleteCheckCell.accept(saveCell);
         }
 
         AlertDialog.OnButtonClickListener deleteAction = (dialogInterface, i) -> {
@@ -8161,6 +8181,9 @@ public class AlertsCreator {
                     thisDialogId = mergeDialogId;
                 }
                 if (!ids.isEmpty()) {
+                    if (offerSaveForMe && !saveForMe[0]) {
+                        MglaDeletedStorage.skipArchiveForDeletion(thisDialogId, ids);
+                    }
                     MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, thisDialogId, topicId, deleteForAll[0], mode);
                 }
                 for (MessageObject msg: ephemeralMessages) {
@@ -8182,7 +8205,11 @@ public class AlertsCreator {
                             }
                         }
                     }
-                    MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, (a == 1 && mergeDialogId != 0) ? mergeDialogId : thisDialogId, topicId, deleteForAll[0], mode);
+                    long batchDialogId = (a == 1 && mergeDialogId != 0) ? mergeDialogId : thisDialogId;
+                    if (offerSaveForMe && !saveForMe[0] && !ids.isEmpty()) {
+                        MglaDeletedStorage.skipArchiveForDeletion(batchDialogId, ids);
+                    }
+                    MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, batchDialogId, topicId, deleteForAll[0], mode);
                     selectedMessages[a].clear();
                 }
             }

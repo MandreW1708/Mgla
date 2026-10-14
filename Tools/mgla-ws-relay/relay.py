@@ -150,17 +150,28 @@ def ws_headers(ws):
 
 
 def token_ok(headers) -> bool:
-    if not AUTH_TOKEN:
-        return True
     try:
         got = headers.get("X-Mgla-Token") or headers.get("x-mgla-token") or ""
     except Exception:
         got = ""
+    try:
+        import mgla_token
+        if mgla_token.token_ok(got):
+            return True
+    except Exception:
+        pass
+    if not AUTH_TOKEN:
+        return True
     return got == AUTH_TOKEN
 
 
 def client_ok(headers) -> bool:
-    """???????????? ???????????? Mgla ???????? X-Mgla-Client: mgla[...]. Stock Telegram ??? ??????."""
+    """Только клиент Mgla шлёт X-Mgla-Client: mgla[...]. Stock Telegram — нет."""
+    try:
+        import mgla_token
+        return mgla_token.client_header_ok(headers)
+    except Exception:
+        pass
     try:
         got = headers.get("X-Mgla-Client") or headers.get("x-mgla-client") or ""
     except Exception:

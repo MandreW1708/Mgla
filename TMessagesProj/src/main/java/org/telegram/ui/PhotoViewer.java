@@ -178,6 +178,7 @@ import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MglaAudioConfig;
+import org.telegram.messenger.MglaDeletedStorage;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessageSuggestionParams;
@@ -5370,8 +5371,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     }
 
                     final boolean[] deleteForAll = new boolean[1];
+                    final boolean[] saveForMe = new boolean[]{true};
+                    final boolean[] offerSaveForMe = new boolean[1];
+                    LinearLayout checksLayout = null;
                     if (currentMessageObject != null && !currentMessageObject.scheduled) {
                         long dialogId = currentMessageObject.getDialogId();
+                        offerSaveForMe[0] = MglaDeletedStorage.shouldOfferSaveOnDelete(currentAccount, dialogId);
                         if (!DialogObject.isEncryptedDialog(dialogId)) {
                             TLRPC.Chat currentChat;
                             TLRPC.User currentUser;
@@ -5383,7 +5388,6 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                                 currentChat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
                             }
                             if (currentUser != null || !ChatObject.isChannel(currentChat)) {
-                                boolean hasOutgoing = false;
                                 int currentDate = ConnectionsManager.getInstance(currentAccount).getCurrentTime();
 
                                 int revokeTimeLimit;
@@ -5396,7 +5400,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                                 if (currentUser != null && currentUser.id != UserConfig.getInstance(currentAccount).getClientUserId() || currentChat != null) {
                                     boolean canRevokeInbox = currentUser != null && MessagesController.getInstance(currentAccount).canRevokePmInbox;
                                     if ((currentMessageObject.messageOwner.action == null || currentMessageObject.messageOwner.action instanceof TLRPC.TL_messageActionEmpty) && (currentMessageObject.isOut() || canRevokeInbox || ChatObject.hasAdminRights(currentChat)) && (currentDate - currentMessageObject.messageOwner.date) <= revokeTimeLimit) {
-                                        FrameLayout frameLayout = new FrameLayout(parentActivity);
+                                        checksLayout = new LinearLayout(parentActivity);
+                                        checksLayout.setOrientation(LinearLayout.VERTICAL);
                                         CheckBoxCell cell = new CheckBoxCell(parentActivity, 1, resourcesProvider);
                                         cell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
                                         if (currentChat != null) {
@@ -5405,17 +5410,36 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                                             cell.setText(LocaleController.formatString("DeleteForUser", R.string.DeleteForUser, UserObject.getFirstName(currentUser)), "", false, false);
                                         }
                                         cell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
-                                        frameLayout.addView(cell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP | Gravity.LEFT, 0, 0, 0, 0));
+                                        checksLayout.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
                                         cell.setOnClickListener(v -> {
                                             CheckBoxCell cell1 = (CheckBoxCell) v;
                                             deleteForAll[0] = !deleteForAll[0];
                                             cell1.setChecked(deleteForAll[0], true);
                                         });
-                                        builder.setView(frameLayout);
-                                        builder.setCustomViewOffset(9);
                                     }
                                 }
                             }
+                        }
+                        if (offerSaveForMe[0]) {
+                            if (checksLayout == null) {
+                                checksLayout = new LinearLayout(parentActivity);
+                                checksLayout.setOrientation(LinearLayout.VERTICAL);
+                            }
+                            CheckBoxCell saveCell = new CheckBoxCell(parentActivity, 1, resourcesProvider);
+                            saveCell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
+                            saveCell.setText("Сохранить у себя", "", true, false);
+                            saveCell.setChecked(true, false);
+                            saveCell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
+                            checksLayout.addView(saveCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+                            saveCell.setOnClickListener(v -> {
+                                CheckBoxCell cell1 = (CheckBoxCell) v;
+                                saveForMe[0] = !saveForMe[0];
+                                cell1.setChecked(saveForMe[0], true);
+                            });
+                        }
+                        if (checksLayout != null) {
+                            builder.setView(checksLayout);
+                            builder.setCustomViewOffset(9);
                         }
                     }
                     builder.setPositiveButton(getString("Delete", R.string.Delete), (dialogInterface, i) -> {
@@ -5445,6 +5469,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                                     encryptedChat = MessagesController.getInstance(currentAccount).getEncryptedChat(DialogObject.getEncryptedChatId(obj.getDialogId()));
                                 }
 
+                                if (offerSaveForMe[0] && !saveForMe[0]) {
+                                    MglaDeletedStorage.skipArchiveForDeletion(obj.getDialogId(), arr);
+                                }
                                 MessagesController.getInstance(currentAccount).deleteMessages(arr, random_ids, encryptedChat, obj.getDialogId(), obj.getQuickReplyId(), deleteForAll[0], obj.getChatMode());
                             }
                         } else if (!avatarsArr.isEmpty()) {

@@ -14724,7 +14724,8 @@ public class MessagesStorage extends BaseController {
                         if (data != null) {
                             TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                             message.readAttachPath(data, currentUser);
-                            if (archiveDeleted && MglaDeletedStorage.shouldSave(currentAccount, did, message)) {
+                            final boolean skipArchive = MglaDeletedStorage.consumeSkipArchive(did, mid);
+                            if (!skipArchive && archiveDeleted && MglaDeletedStorage.shouldSave(currentAccount, did, message)) {
                                 MglaDeletedStorage.save(
                                     database, currentAccount, did,
                                     MessageObject.getTopicId(currentAccount, message, getForumTypeFlags(did)),

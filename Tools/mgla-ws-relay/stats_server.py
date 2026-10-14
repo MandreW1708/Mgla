@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import hub_admin
 import hub_updates
+import mgla_token
 import stats_report
 
 HOST = os.environ.get("MGLA_STATS_HOST", "127.0.0.1")
@@ -125,6 +126,7 @@ class Store:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
+        mgla_token.ensure_schema(self._db)
         self._ensure_default_models()
         self._db.commit()
         self._last_cleanup = 0.0
@@ -682,13 +684,25 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("admin post failed")
             self._redirect(hub_admin.flash_redirect(err="???????????? ????"))
 
-    def _check_token(self):
-        token = self.headers.get("X-Mgla-Token", "")
-        if not TOKEN or not hmac.compare_digest(token.encode(), TOKEN.encode()):
+    def _check_client(self):
+        if not mgla_token.client_header_ok(self.headers):
             self._reply(401)
             return False
-        client = (self.headers.get("X-Mgla-Client") or "").strip().lower()
-        if client != "mgla" and not client.startswith("mgla/"):
+        return True
+
+    def _check_token(self):
+        if not self._check_client():
+            return False
+        token = self.headers.get("X-Mgla-Token", "")
+        with self.store._lock:
+            ok = mgla_token.token_ok(token, self.store._db)
+        # Fallback: exact legacy TOKEN when signing key is not configured yet.
+        if not ok and TOKEN:
+            try:
+                ok = hmac.compare_digest(token.encode(), TOKEN.encode())
+            except Exception:
+                ok = False
+        if not ok:
             self._reply(401)
             return False
         return True
@@ -713,6 +727,10 @@ class Handler(BaseHTTPRequestHandler):
             self._admin_post()
         elif path in ("/admin/updates", "/mgla-admin/updates"):
             self._admin_updates_post()
+        elif path == "/mgla-auth/v1/register":
+            self._post_auth_register()
+        elif path == "/mgla-auth/v1/token":
+            self._post_auth_token()
         elif path == "/mgla-stats/v1/batch":
             self._post_stats()
         elif path == "/mgla-config/v1/features":
@@ -727,6 +745,60 @@ class Handler(BaseHTTPRequestHandler):
             self._post_ai_gemini_transcribe()
         else:
             self._reply(404)
+
+    def _post_auth_register(self):
+        if not self._check_client():
+            return
+        if not mgla_token.SIGNING_KEY:
+            self._reply(503, b'{"error":"auth not configured"}')
+            return
+        raw = self._read_json_body(8 * 1024)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        iid = str(raw.get("iid") or "").strip().lower()
+        try:
+            with self.store._lock:
+                body = mgla_token.register_install(
+                    self.store._db,
+                    iid,
+                    app_version=str(raw.get("app_version") or ""),
+                    mgla_version=str(raw.get("mgla_version") or ""),
+                )
+            self._reply(200, json.dumps(body, ensure_ascii=False).encode("utf-8"))
+        except ValueError as e:
+            self._reply(400, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            log.exception("auth register failed")
+            self._reply(500, b'{"error":"register failed"}')
+
+    def _post_auth_token(self):
+        if not self._check_client():
+            return
+        if not mgla_token.SIGNING_KEY:
+            self._reply(503, b'{"error":"auth not configured"}')
+            return
+        raw = self._read_json_body(8 * 1024)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        iid = str(raw.get("iid") or "").strip().lower()
+        refresh = str(raw.get("refresh_token") or "")
+        try:
+            with self.store._lock:
+                body = mgla_token.refresh_install(self.store._db, iid, refresh)
+            self._reply(200, json.dumps(body, ensure_ascii=False).encode("utf-8"))
+        except PermissionError as e:
+            self._reply(401, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+        except ValueError as e:
+            self._reply(400, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            log.exception("auth refresh failed")
+            self._reply(500, b'{"error":"token failed"}')
 
     def _admin_updates_get(self, query):
         if not self._check_basic_auth():
