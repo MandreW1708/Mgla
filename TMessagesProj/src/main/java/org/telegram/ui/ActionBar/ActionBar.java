@@ -2317,6 +2317,14 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     }
 
     public boolean doNotDrawGlassMenu;
+    private boolean drawGlassTitle = true;
+
+    public void setDrawGlassTitle(boolean draw) {
+        if (drawGlassTitle != draw) {
+            drawGlassTitle = draw;
+            invalidate();
+        }
+    }
 
     /** Fills outLeftRight with [left, right] of visible ActionBarMenuItem children in parent coords. */
     private static boolean computeActionBarMenuItemBounds(ActionBarMenu source, float[] outLeftRight) {
@@ -2359,7 +2367,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         final int t = getHeight() - (getCurrentActionBarHeight() + s) / 2 - p;
         final int b = t + s + p * 2;
 
-        if (glassDrawable != null && !suppressTitleGlass && !glassOnlyBack) {
+        if (glassDrawable != null && !suppressTitleGlass && !glassOnlyBack && drawGlassTitle) {
             if (previewGlassMode && chatAvatarContainer != null) {
                 final int left = p;
                 final int right = getWidth() - p;

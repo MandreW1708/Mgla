@@ -39,7 +39,6 @@ CMD mkdir -p /home/source/TMessagesProj/build/outputs/apk && \
     cp -R /home/source/. /home/gradle && \
     cd /home/gradle && \
     gradle --parallel \
-        :TMessagesProj_App:bundleBundleAfat_SDK23Release \
         :TMessagesProj_App:bundleBundleAfatRelease \
         :TMessagesProj_App:assembleAfatRelease --stacktrace && \
     cp -R /home/gradle/TMessagesProj_App/build/outputs/apk/. /home/source/TMessagesProj/build/outputs/apk && \
