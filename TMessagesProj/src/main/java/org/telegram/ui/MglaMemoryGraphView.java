@@ -35,8 +35,19 @@ public class MglaMemoryGraphView extends View {
         void onNodeClicked(MglaMemoryStorage.MemoryGraph.Node node);
     }
 
-    private static final int LAYOUT_ITERATIONS = 36;
     private static final int MAX_LABEL_CHARS = 18;
+
+    private int layoutIterations() {
+        // На слабых устройствах урезаем силовую раскладку — визуально почти то же, CPU сильно меньше.
+        int perf = org.telegram.messenger.SharedConfig.getDevicePerformanceClass();
+        if (perf == org.telegram.messenger.SharedConfig.PERFORMANCE_CLASS_LOW) {
+            return 12;
+        }
+        if (perf == org.telegram.messenger.SharedConfig.PERFORMANCE_CLASS_AVERAGE) {
+            return 22;
+        }
+        return 32;
+    }
 
     private static class Pos {
         final MglaMemoryStorage.MemoryGraph.Node node;
@@ -252,10 +263,17 @@ public class MglaMemoryGraphView extends View {
     private void playReveal() {
         if (revealAnim != null) {
             revealAnim.cancel();
+            revealAnim = null;
+        }
+        if (org.telegram.messenger.SharedConfig.getDevicePerformanceClass()
+                == org.telegram.messenger.SharedConfig.PERFORMANCE_CLASS_LOW) {
+            reveal = 1f;
+            invalidate();
+            return;
         }
         reveal = 0f;
         revealAnim = ValueAnimator.ofFloat(0f, 1f);
-        revealAnim.setDuration(420);
+        revealAnim.setDuration(320);
         revealAnim.addUpdateListener(a -> {
             reveal = (float) a.getAnimatedValue();
             invalidate();
@@ -327,8 +345,9 @@ public class MglaMemoryGraphView extends View {
         float padX = dp(28);
         float padY = dp(34);
 
-        for (int iter = 0; iter < LAYOUT_ITERATIONS; iter++) {
-            float temp = 1f - iter / (float) LAYOUT_ITERATIONS;
+        final int iters = layoutIterations();
+        for (int iter = 0; iter < iters; iter++) {
+            float temp = 1f - iter / (float) iters;
             for (int i = 0; i < n; i++) {
                 Pos a = positions.get(i);
                 for (int j = i + 1; j < n; j++) {
@@ -394,7 +413,8 @@ public class MglaMemoryGraphView extends View {
         }
 
         // Финальный проход: раздвинуть всё, что всё ещё ближе минимума.
-        for (int pass = 0; pass < 18; pass++) {
+        int polish = layoutIterations() <= 12 ? 4 : (layoutIterations() <= 22 ? 8 : 12);
+        for (int pass = 0; pass < polish; pass++) {
             boolean movedAny = false;
             for (int i = 0; i < n; i++) {
                 Pos a = positions.get(i);

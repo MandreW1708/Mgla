@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 
+import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -140,10 +141,17 @@ public class MglaMemoryPerimeterGlow extends FrameLayout {
         if (running) {
             return;
         }
+        // На слабых телефонах — статичная рамка без бесконечной анимации.
+        if (SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_LOW) {
+            phase = 0.35f;
+            invalidate();
+            return;
+        }
         running = true;
         if (animator == null) {
+            long duration = SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_AVERAGE ? 3600 : 2600;
             animator = ValueAnimator.ofFloat(0f, 1f);
-            animator.setDuration(2600);
+            animator.setDuration(duration);
             animator.setRepeatCount(ValueAnimator.INFINITE);
             animator.setInterpolator(new LinearInterpolator());
             animator.addUpdateListener(a -> {

@@ -24,7 +24,6 @@ import android.widget.Toast;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.MessagesController;
-import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaMemoryEngine;
 import org.telegram.messenger.MglaMemoryExtractor;
@@ -1035,20 +1034,12 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
             return;
         }
         Bundle args = new Bundle();
-        args.putBoolean("onlySelect", true);
-        args.putBoolean("mgla_memory_sources", true);
-        args.putBoolean("checkCanWrite", false);
-        args.putBoolean("allowGlobalSearch", false);
-        args.putInt("dialogsType", DialogsActivity.DIALOGS_TYPE_WIDGET);
-        args.putInt("maxSelectedDialogs", remaining);
-        DialogsActivity picker = new DialogsActivity(args);
-        picker.setDelegate((fragment, dids, message, param, notify, scheduleDate, scheduleRepeatPeriod, topicsFragment) -> {
-            if (dids == null || dids.isEmpty()) {
-                return true;
-            }
+        args.putInt("maxCount", remaining);
+        MglaMemorySourcesPickerActivity picker = new MglaMemorySourcesPickerActivity(args);
+        picker.setDelegate(ids -> {
             int added = 0;
-            for (MessagesStorage.TopicKey key : dids) {
-                long uid = key.dialogId;
+            for (int i = 0; i < ids.size(); i++) {
+                long uid = ids.get(i);
                 if (DialogObject.isEncryptedDialog(uid) || MglaMemoryConfig.isWatched(currentAccount, uid)) {
                     continue;
                 }
@@ -1063,8 +1054,6 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
                 rebuildSources();
                 reloadOverview();
             }
-            fragment.finishFragment();
-            return true;
         });
         presentFragment(picker);
     }
