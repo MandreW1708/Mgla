@@ -50,13 +50,21 @@ public abstract class InstantCameraViewBase extends FrameLayout {
             Theme.ResourcesProvider resourcesProvider,
             boolean isNewDesign
     ) {
-        final boolean useCamera2Impl = SharedSettings.roundVideoCamera2Enabled.isSet() ?
-            SharedSettings.roundVideoCamera2Enabled.get() :
-            AppGlobalConfig.getInstance(UserConfig.selectedAccount).roundVideoRecorder2Allowed.get();
-
-        return useCamera2Impl
+        return isUsingCamera2Implementation()
                 ? new InstantCameraView2(context, delegate, resourcesProvider, isNewDesign)
                 : new InstantCameraView(context, delegate, resourcesProvider, isNewDesign);
+    }
+
+    /** Selects the implementation used by subsequently created views. */
+    public static void setUseCamera2Implementation(boolean enabled) {
+        SharedSettings.roundVideoCamera2Enabled.set(enabled);
+    }
+
+    /** Returns whether subsequently created views use the Camera2 implementation. */
+    public static boolean isUsingCamera2Implementation() {
+        return SharedSettings.roundVideoCamera2Enabled.isSet() ?
+            SharedSettings.roundVideoCamera2Enabled.get() :
+            AppGlobalConfig.getInstance(UserConfig.selectedAccount).roundVideoRecorder2Allowed.get();
     }
 
     /** Sets the host animation callback. */
