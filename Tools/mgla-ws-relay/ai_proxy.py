@@ -335,27 +335,30 @@ def proxy_hub_stats_batch(body_bytes: bytes) -> tuple[int, bytes]:
         return int(e.code), e.read()
 
 
-def proxy_hub_update_apk_open():
+def proxy_hub_update_apk_open(tg_ids_header: str = ""):
     url = HUB_UPDATE_APK_URL
     if not url:
         raise RuntimeError("hub update apk URL not configured")
+    headers = _hub_headers(content_type=None)
+    if tg_ids_header:
+        headers["X-Mgla-Tg-Id"] = tg_ids_header.strip()[:512]
     req = urllib.request.Request(
         url,
         method="GET",
-        headers=_hub_headers(content_type=None),
+        headers=headers,
     )
     try:
         resp = urllib.request.urlopen(req, timeout=300)
     except urllib.error.HTTPError as e:
         return int(e.code), e.read(), None
-    headers = {
+    out_headers = {
         "Content-Type": resp.headers.get("Content-Type") or "application/vnd.android.package-archive",
         "Content-Length": resp.headers.get("Content-Length") or "",
         "Content-Disposition": resp.headers.get("Content-Disposition")
         or 'attachment; filename="mgla-update.apk"',
         "X-Mgla-Sha256": resp.headers.get("X-Mgla-Sha256") or "",
     }
-    return 200, None, (resp, headers)
+    return 200, None, (resp, out_headers)
 
 
 def call_gemini_json(api_key: str, model: str, body: dict) -> str:
@@ -551,7 +554,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._check_token():
             return
         try:
-            code, err_body, opened = proxy_hub_update_apk_open()
+            tg_hdr = self.headers.get("X-Mgla-Tg-Id", "") or ""
+            code, err_body, opened = proxy_hub_update_apk_open(tg_hdr)
         except RuntimeError as e:
             self._reply(503, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return

@@ -95,6 +95,66 @@ def validate_app_version(raw: str) -> str:
     return s.lstrip("vV")
 
 
+DEFAULT_SUPPORTER_IDS = (952260484, 1004685048)
+MAX_SUPPORTERS = 500
+TG_ID_RE = re.compile(r"^\d{1,16}$")
+
+
+def parse_supporter_ids_text(text: str) -> list[int]:
+    """Parse telegram ids from textarea (one per line, or comma/space separated)."""
+    if not isinstance(text, str):
+        raise ValueError("список id обязателен")
+    raw_parts = re.split(r"[\s,;]+", text.strip())
+    out: list[int] = []
+    seen: set[int] = set()
+    for part in raw_parts:
+        part = part.strip()
+        if not part or part.startswith("#"):
+            continue
+        if not TG_ID_RE.match(part):
+            raise ValueError(f"некорректный telegram id: {part[:24]}")
+        tg_id = int(part)
+        if tg_id <= 0:
+            raise ValueError(f"некорректный telegram id: {part[:24]}")
+        if tg_id in seen:
+            continue
+        seen.add(tg_id)
+        out.append(tg_id)
+        if len(out) > MAX_SUPPORTERS:
+            raise ValueError(f"слишком много id (max {MAX_SUPPORTERS})")
+    return out
+
+
+def supporter_ids_to_text(ids) -> str:
+    return "\n".join(str(int(x)) for x in ids)
+
+
+def normalize_client_tg_ids(*sources) -> list[int]:
+    """Collect positive telegram user ids from ints / strings / lists."""
+    out: list[int] = []
+    seen: set[int] = set()
+
+    def add(value):
+        try:
+            tg_id = int(value)
+        except (TypeError, ValueError):
+            return
+        if tg_id <= 0 or tg_id in seen:
+            return
+        seen.add(tg_id)
+        out.append(tg_id)
+
+    for src in sources:
+        if src is None or src is False:
+            continue
+        if isinstance(src, (list, tuple)):
+            for item in src:
+                add(item)
+        else:
+            add(src)
+    return out
+
+
 class UpdateStore:
     def __init__(self, db: sqlite3.Connection, lock: threading.Lock):
         self._db = db
@@ -116,18 +176,71 @@ class UpdateStore:
                     updated_at TEXT NOT NULL DEFAULT ''
                 )"""
             )
+            cols = {
+                row[1]
+                for row in self._db.execute("PRAGMA table_info(app_update)").fetchall()
+            }
+            if "supporters_only" not in cols:
+                self._db.execute(
+                    "ALTER TABLE app_update ADD COLUMN supporters_only INTEGER NOT NULL DEFAULT 0"
+                )
+            self._db.execute(
+                """CREATE TABLE IF NOT EXISTS update_supporters (
+                    tg_id INTEGER PRIMARY KEY
+                )"""
+            )
             row = self._db.execute("SELECT id FROM app_update WHERE id = 1").fetchone()
             if not row:
                 self._db.execute(
                     "INSERT INTO app_update(id, updated_at) VALUES (1, ?)",
                     (_now(),),
                 )
+            count = self._db.execute("SELECT COUNT(*) FROM update_supporters").fetchone()[0]
+            if int(count or 0) == 0:
+                self._db.executemany(
+                    "INSERT OR IGNORE INTO update_supporters(tg_id) VALUES (?)",
+                    [(int(x),) for x in DEFAULT_SUPPORTER_IDS],
+                )
+
+    def get_supporter_ids(self) -> list[int]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT tg_id FROM update_supporters ORDER BY tg_id ASC"
+            ).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def set_supporter_ids(self, ids) -> list[int]:
+        if isinstance(ids, str):
+            cleaned = parse_supporter_ids_text(ids)
+        else:
+            cleaned = parse_supporter_ids_text("\n".join(str(int(x)) for x in (ids or [])))
+        with self._lock, self._db:
+            self._db.execute("DELETE FROM update_supporters")
+            if cleaned:
+                self._db.executemany(
+                    "INSERT INTO update_supporters(tg_id) VALUES (?)",
+                    [(i,) for i in cleaned],
+                )
+        return cleaned
+
+    def is_supporter(self, telegram_ids) -> bool:
+        ids = normalize_client_tg_ids(telegram_ids)
+        if not ids:
+            return False
+        with self._lock:
+            q = ",".join("?" for _ in ids)
+            row = self._db.execute(
+                f"SELECT 1 FROM update_supporters WHERE tg_id IN ({q}) LIMIT 1",
+                ids,
+            ).fetchone()
+        return bool(row)
 
     def get(self) -> Dict[str, Any]:
         with self._lock:
             row = self._db.execute(
                 """SELECT mgla_version, app_version, version_code, changelog,
-                          file_name, file_sha256, file_size, mandatory, published, updated_at
+                          file_name, file_sha256, file_size, mandatory, published,
+                          supporters_only, updated_at
                    FROM app_update WHERE id = 1"""
             ).fetchone()
         if not row:
@@ -141,6 +254,8 @@ class UpdateStore:
                 "file_size": 0,
                 "mandatory": False,
                 "published": False,
+                "supporters_only": False,
+                "supporter_ids": self.get_supporter_ids(),
                 "updated_at": "",
                 "has_file": False,
             }
@@ -154,6 +269,7 @@ class UpdateStore:
             file_size,
             mandatory,
             published,
+            supporters_only,
             updated_at,
         ) = row
         path = UPDATES_DIR / APK_NAME
@@ -168,6 +284,8 @@ class UpdateStore:
             "file_size": int(file_size or 0),
             "mandatory": False,
             "published": bool(published),
+            "supporters_only": bool(supporters_only),
+            "supporter_ids": self.get_supporter_ids(),
             "updated_at": updated_at or "",
             "has_file": has_file,
         }
@@ -180,6 +298,8 @@ class UpdateStore:
         version_code: int,
         changelog: str,
         published: bool,
+        supporters_only: bool = False,
+        supporter_ids_text: Optional[str] = None,
         file_meta: Optional[Dict[str, Any]] = None,
         **_ignored,
     ) -> Dict[str, Any]:
@@ -196,6 +316,16 @@ class UpdateStore:
             # allow newlines/tabs already stripped of other controls below
             changelog = "".join(ch for ch in changelog if ch == "\n" or ch == "\t" or ord(ch) >= 32)
 
+        # Supporters-only overrides public publish: never show that build to everyone.
+        supporters_only = bool(supporters_only)
+        published = bool(published) and not supporters_only
+
+        if supporter_ids_text is not None:
+            ids = parse_supporter_ids_text(supporter_ids_text)
+            self.set_supporter_ids(ids)
+        else:
+            ids = self.get_supporter_ids()
+
         if file_meta is None:
             with self._lock:
                 row = self._db.execute(
@@ -207,15 +337,18 @@ class UpdateStore:
             file_sha256 = file_meta["file_sha256"]
             file_size = file_meta["file_size"]
 
-        if published and not (file_name and (UPDATES_DIR / APK_NAME).is_file()):
+        live = published or supporters_only
+        if live and not (file_name and (UPDATES_DIR / APK_NAME).is_file()):
             raise ValueError("нельзя опубликовать без загруженного APK")
+        if supporters_only and not ids:
+            raise ValueError("для режима «только поддержавшие» нужен хотя бы один telegram id")
 
         with self._lock, self._db:
             self._db.execute(
                 """UPDATE app_update SET
                      mgla_version=?, app_version=?, version_code=?, changelog=?,
                      file_name=?, file_sha256=?, file_size=?,
-                     mandatory=?, published=?, updated_at=?
+                     mandatory=?, published=?, supporters_only=?, updated_at=?
                    WHERE id = 1""",
                 (
                     mgla_version,
@@ -227,10 +360,20 @@ class UpdateStore:
                     int(file_size or 0),
                     0,  # mandatory removed — updates are always dismissible
                     1 if published else 0,
+                    1 if supporters_only else 0,
                     _now(),
                 ),
             )
         return self.get()
+
+    def client_may_see(self, telegram_ids) -> bool:
+        """Whether the current release is visible to this client."""
+        meta = self.get()
+        if not meta["has_file"]:
+            return False
+        if meta["supporters_only"]:
+            return self.is_supporter(telegram_ids)
+        return bool(meta["published"])
 
     def save_apk_bytes(self, data: bytes, original_name: str = "") -> Dict[str, Any]:
         if not data:
@@ -263,9 +406,10 @@ class UpdateStore:
         client_mgla: str,
         client_app: str,
         client_code: int,
+        telegram_ids=None,
     ) -> Dict[str, Any]:
         meta = self.get()
-        if not meta["published"] or not meta["has_file"]:
+        if not self.client_may_see(telegram_ids):
             return {"v": 1, "update": False}
         # Need at least one of the primary indicators set on the release.
         if not meta["app_version"] and not (meta["version_code"] > 0):
@@ -292,6 +436,7 @@ class UpdateStore:
             "file_size": meta["file_size"],
             "file_sha256": meta["file_sha256"],
             "mandatory": False,
+            "supporters_only": bool(meta["supporters_only"]),
             # relative paths — client prefixes hub or relay host
             "apk_path": "/mgla-updates/v1/apk",
         }
@@ -362,8 +507,16 @@ def render_updates_html(meta: Dict[str, Any], flash_ok: str = "", flash_err: str
             f"{mb:.1f} МБ · sha256 <code>{html.escape((meta.get('file_sha256') or '')[:16])}…</code>"
         )
 
-    published = " checked" if meta.get("published") else ""
-    status = "опубликовано" if meta.get("published") and meta.get("has_file") else "черновик"
+    published = " checked" if meta.get("published") and not meta.get("supporters_only") else ""
+    supporters_only = " checked" if meta.get("supporters_only") else ""
+    if meta.get("supporters_only") and meta.get("has_file"):
+        status = "для поддержавших"
+    elif meta.get("published") and meta.get("has_file"):
+        status = "опубликовано"
+    else:
+        status = "черновик"
+    supporters_text = html.escape(supporter_ids_to_text(meta.get("supporter_ids") or []))
+    status_cls = " draft" if status == "черновик" else (" supporters" if status == "для поддержавших" else "")
 
     return f"""<!doctype html>
 <html lang="ru">
@@ -445,8 +598,15 @@ textarea {{ min-height:180px; font-family:ui-monospace, SFMono-Regular, Menlo, C
   background:rgba(139,30,63,.2); color:#e8c4cf; border:1px solid rgba(194,59,95,.4);
 }}
 .pill.draft {{ background:rgba(176,154,162,.12); color:var(--muted); border-color:var(--line); }}
+.pill.supporters {{ background:rgba(154,107,120,.22); color:#f0d6de; border-color:rgba(154,107,120,.5); }}
 .footer {{ margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; }}
 code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
+.supporters-box {{
+  margin-top:16px; padding:14px; border-radius:14px; border:1px solid var(--line);
+  background:rgba(255,255,255,.025);
+}}
+.supporters-box h3 {{ margin:0 0 6px; font-size:15px; }}
+.supporters-box textarea {{ min-height:110px; }}
 @media (max-width:720px) {{
   .wrap {{ padding:14px 10px 48px; }}
   .brand h1 {{ font-size:20px; }}
@@ -476,7 +636,7 @@ code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
   {flash}
 
   <div class="card">
-    <h2>🚀 Релиз <span class="pill{' draft' if status=='черновик' else ''}">{status}</span></h2>
+    <h2>🚀 Релиз <span class="pill{status_cls}">{status}</span></h2>
     <p class="sub">Заполните три версии, список изменений и перетащите APK. Старый файл заменится.</p>
     <form id="upd" method="post" action="/admin/updates" enctype="multipart/form-data">
       <input type="hidden" name="action" value="save_update">
@@ -502,7 +662,8 @@ code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
         <textarea name="changelog" placeholder="- Исправления&#10;- Новые функции">{html.escape(meta.get('changelog') or '')}</textarea>
       </label>
       <div class="checks">
-        <label><input type="checkbox" name="published" value="1"{published}> 📢 Опубликовать (клиенты увидят)</label>
+        <label><input type="checkbox" name="published" id="published" value="1"{published}> 📢 Опубликовать (всем пользователям)</label>
+        <label><input type="checkbox" name="supporters_only" id="supporters_only" value="1"{supporters_only}> 💎 Только для поддержавших</label>
       </div>
       <div class="drop" id="drop">
         <strong>📦 Перетащите APK сюда</strong> — загрузится на сервер сразу<br>
@@ -512,6 +673,14 @@ code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
         <div class="fileinfo" id="picked">Сейчас на сервере: {file_line}</div>
         <div class="upload-ok" id="uploadok" hidden>✓ Файл скопирован на сервер</div>
       </div>
+      <div class="supporters-box">
+        <h3>💎 Telegram ID поддержавших</h3>
+        <p class="sub" style="margin-bottom:8px">По одному id на строку. Окно обновления с галочкой «Только для поддержавших»
+          увидят <b>только</b> эти аккаунты — остальным оно не придёт.</p>
+        <label class="field">Список id
+          <textarea name="supporter_ids" placeholder="952260484&#10;1004685048">{supporters_text}</textarea>
+        </label>
+      </div>
       <div style="margin-top:16px">
         <button class="btn" type="submit" id="savebtn">💾 Сохранить метаданные</button>
       </div>
@@ -520,7 +689,8 @@ code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
 
   <p class="footer">Достаточно одного: выше <b>версия приложения</b> <em>или</em> выше
     <b>код сборки</b> (можно оба). Версия может не меняться — хватит роста кода сборки.
-    APK грузится сразу при выборе; кнопка сохраняет версии/changelog/публикацию.</p>
+    APK грузится сразу при выборе; кнопка сохраняет версии/changelog/публикацию и список поддержавших.
+    «Только для поддержавших» важнее обычной публикации: остальным окно не покажется.</p>
 </div>
 <style>
 .bar {{ display:none; height:8px; margin:14px auto 0; max-width:320px; background:#10141a; border:1px solid var(--line); border-radius:999px; overflow:hidden; }}
@@ -623,6 +793,13 @@ code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
     const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (f) uploadFile(f);
   }});
+
+  const pub = document.getElementById('published');
+  const sup = document.getElementById('supporters_only');
+  if (pub && sup) {{
+    pub.addEventListener('change', () => {{ if (pub.checked) sup.checked = false; }});
+    sup.addEventListener('change', () => {{ if (sup.checked) pub.checked = false; }});
+  }}
 }})();
 </script>
 </body>

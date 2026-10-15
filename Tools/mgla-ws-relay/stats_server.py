@@ -851,6 +851,7 @@ class Handler(BaseHTTPRequestHandler):
                     version_code=int(cur.get("version_code") or 1),
                     changelog=cur.get("changelog") or "",
                     published=bool(cur.get("published")),
+                    supporters_only=bool(cur.get("supporters_only")),
                     file_meta=file_meta,
                 )
                 body = json.dumps(
@@ -883,6 +884,10 @@ class Handler(BaseHTTPRequestHandler):
                 version_code=version_code,
                 changelog=fields.get("changelog") or "",
                 published=bool(fields.get("published")),
+                supporters_only=bool(fields.get("supporters_only")),
+                supporter_ids_text=fields.get("supporter_ids")
+                if "supporter_ids" in fields
+                else None,
                 file_meta=file_meta,
             )
             msg = "?????????? ????????????????"
@@ -925,11 +930,18 @@ class Handler(BaseHTTPRequestHandler):
             client_mgla = str(client_mgla)
         if not isinstance(client_app, str):
             client_app = str(client_app)
+        telegram_ids = hub_updates.normalize_client_tg_ids(
+            raw.get("telegram_ids"),
+            raw.get("telegram_id"),
+            raw.get("tg_id"),
+            raw.get("user_id"),
+        )
         try:
             payload = self.updates.check_for_client(
                 client_mgla=client_mgla.strip(),
                 client_app=client_app.strip(),
                 client_code=client_code,
+                telegram_ids=telegram_ids,
             )
         except Exception:
             log.exception("update check failed")
@@ -942,7 +954,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.updates.apk_path()
         meta = self.updates.get()
-        if not path or not meta.get("published"):
+        if not path:
+            self._reply(404, b'{"error":"no apk"}')
+            return
+        header_ids = self.headers.get("X-Mgla-Tg-Id", "") or ""
+        telegram_ids = hub_updates.normalize_client_tg_ids(
+            [p.strip() for p in header_ids.replace(";", ",").split(",") if p.strip()]
+        )
+        if not self.updates.client_may_see(telegram_ids):
             self._reply(404, b'{"error":"no apk"}')
             return
         try:

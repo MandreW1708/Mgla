@@ -204,6 +204,15 @@ public final class MglaUpdateChecker {
         body.put("mgla_version", BuildVars.MGLA_VERSION_STRING);
         body.put("app_version", BuildVars.BUILD_VERSION_STRING);
         body.put("version_code", currentVersionCode());
+        long[] tgIds = collectTelegramIds();
+        if (tgIds.length > 0) {
+            org.json.JSONArray arr = new org.json.JSONArray();
+            for (long id : tgIds) {
+                arr.put(id);
+            }
+            body.put("telegram_ids", arr);
+            body.put("telegram_id", tgIds[0]);
+        }
 
         Channel channel = viaRelay ? (isWebRouteActive() ? Channel.WEB : Channel.RELAY) : Channel.HUB;
         String path = channel == Channel.HUB ? "/mgla-updates/v1/check" : "/mgla-ai/v1/update-check";
@@ -215,6 +224,10 @@ public final class MglaUpdateChecker {
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            String tgHeader = telegramIdsHeader(tgIds);
+            if (!TextUtils.isEmpty(tgHeader)) {
+                conn.setRequestProperty("X-Mgla-Tg-Id", tgHeader);
+            }
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
                 uc.verifyPin();
@@ -296,6 +309,7 @@ public final class MglaUpdateChecker {
                     HttpURLConnection conn = MglaDirectHttp.open("http://127.0.0.1:" + port + path);
                     conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
                     conn.setRequestProperty("X-Mgla-Client", "mgla");
+                    attachTelegramIds(conn);
                     return new UpdateConnection(conn, channel, true);
                 } catch (Exception e) {
                     WebProxyTransport.releaseUpdateTunnel();
@@ -307,7 +321,15 @@ public final class MglaUpdateChecker {
             HttpsURLConnection conn = MglaDirectHttp.openHttps("https://" + host + path);
             conn.setRequestProperty("X-Mgla-Token", relay ? MglaWsConfig.getRelayToken() : MglaWsConfig.getHubToken());
             conn.setRequestProperty("X-Mgla-Client", "mgla");
+            attachTelegramIds(conn);
             return new UpdateConnection(conn, channel, false);
+        }
+
+        private static void attachTelegramIds(HttpURLConnection conn) {
+            String tgHeader = telegramIdsHeader(collectTelegramIds());
+            if (!TextUtils.isEmpty(tgHeader)) {
+                conn.setRequestProperty("X-Mgla-Tg-Id", tgHeader);
+            }
         }
 
         /** Call after the connection is established. WEB rides the WebView's TLS to the relay host. */
@@ -343,6 +365,53 @@ public final class MglaUpdateChecker {
         } catch (Exception e) {
             return SharedConfig.buildVersion();
         }
+    }
+
+    /** All activated account telegram user ids (selected account first). */
+    static long[] collectTelegramIds() {
+        try {
+            java.util.ArrayList<Long> ids = new java.util.ArrayList<>();
+            int selected = UserConfig.selectedAccount;
+            if (UserConfig.isValidAccount(selected)) {
+                long id = UserConfig.getInstance(selected).getClientUserId();
+                if (id > 0) {
+                    ids.add(id);
+                }
+            }
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (a == selected || !UserConfig.isValidAccount(a)) {
+                    continue;
+                }
+                long id = UserConfig.getInstance(a).getClientUserId();
+                if (id > 0 && !ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+            long[] out = new long[ids.size()];
+            for (int i = 0; i < ids.size(); i++) {
+                out[i] = ids.get(i);
+            }
+            return out;
+        } catch (Throwable e) {
+            return new long[0];
+        }
+    }
+
+    static String telegramIdsHeader(long[] ids) {
+        if (ids == null || ids.length == 0) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (long id : ids) {
+            if (id <= 0) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(id);
+        }
+        return sb.toString();
     }
 
     private static void persistPending(MglaUpdateInfo info) {
