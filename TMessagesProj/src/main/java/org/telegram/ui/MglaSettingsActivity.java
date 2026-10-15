@@ -88,7 +88,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             dpiBypassCell.set(
                 IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
                 R.drawable.mgla_dpi_shield, "Подключение без VPN", null,
-                bypassStatusLabel(), false, true
+                bypassStatusLabel(), false, null
             );
         }
     }
@@ -113,7 +113,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         memoryCell.set(
             IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
             R.drawable.msg_saved, "Живая память", null,
-            memoryStatusLabel(), false, false
+            memoryStatusLabel(), false, "alpha"
         );
         memoryCell.setAlpha(on ? 1f : 0.4f);
         memoryCell.setEnabled(true);
@@ -176,14 +176,14 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         mainBlock.addView(MglaUi.createDivider(context));
         dpiBypassCell = addMenuItem(mainBlock, () -> presentFragment(new MglaDpiBypassActivity()),
             IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.mgla_dpi_shield, "Подключение без VPN",
-            bypassStatusLabel(), true);
+            bypassStatusLabel());
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
             IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект");
         mainBlock.addView(MglaUi.createDivider(context));
         memoryCell = addMenuItem(mainBlock, this::openMemory,
             IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.msg_saved, "Живая память",
-            memoryStatusLabel());
+            memoryStatusLabel(), "alpha");
         updateMemoryCell();
         rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
@@ -191,8 +191,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         addMenuItem(extraBlock, () -> openTelegramUsername(BuildVars.MGLA_DEV_CHANNEL_USERNAME),
             IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_channel, "Канал разработчика");
         extraBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(extraBlock, null,
-            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_faq, "Поддержка");
+        addMenuItem(extraBlock, this::openDonate,
+            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.wallet_buy, "Поддержать проект");
         extraBlock.addView(MglaUi.createDivider(context));
         addMenuItem(extraBlock, () -> openMglaGuide(),
             IconBackgroundColors.BLUE_DEEP.top, IconBackgroundColors.BLUE_DEEP.bottom, R.drawable.menu_website, "Инструкция");
@@ -232,12 +232,31 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         titleView.setGravity(Gravity.CENTER);
         header.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 4));
 
+        LinearLayout versionRow = new LinearLayout(context);
+        versionRow.setOrientation(LinearLayout.HORIZONTAL);
+        versionRow.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView versionView = new TextView(context);
         versionView.setText(BuildVars.MGLA_VERSION_STRING);
         versionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         versionView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         versionView.setGravity(Gravity.CENTER);
-        header.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+        versionRow.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        TextView betaBadge = new TextView(context);
+        betaBadge.setText("beta");
+        betaBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+        betaBadge.setTypeface(AndroidUtilities.bold());
+        betaBadge.setTextColor(0xFFFFFFFF);
+        betaBadge.setGravity(Gravity.CENTER);
+        betaBadge.setPadding(dp(5), dp(1), dp(5), dp(2));
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setCornerRadius(dp(4));
+        badgeBg.setColor(Theme.getColor(Theme.key_chat_messagePanelSend));
+        betaBadge.setBackground(badgeBg);
+        versionRow.addView(betaBadge, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
+
+        header.addView(versionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
         return header;
     }
@@ -268,16 +287,16 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     }
 
     private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title) {
-        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, null);
+        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, null, null);
     }
 
     private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value) {
-        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, value, false);
+        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, value, null);
     }
 
-    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value, boolean showBetaBadge) {
+    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value, String badgeText) {
         SettingCell cell = new SettingCell(getContext(), null);
-        cell.set(iconColorTop, iconColorBottom, icon, title, null, value, false, showBetaBadge);
+        cell.set(iconColorTop, iconColorBottom, icon, title, null, value, false, badgeText);
         if (onClick != null) {
             cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
             cell.setOnClickListener(v -> onClick.run());
@@ -300,6 +319,13 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             return;
         }
         Browser.openUrl(getParentActivity(), BuildVars.MGLA_GUIDE_URL);
+    }
+
+    private void openDonate() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        Browser.openUrl(getParentActivity(), "https://pay.cloudtips.ru/p/98e2d5e0");
     }
 
     public static class SettingCell extends LinearLayout implements Theme.Colorable {
@@ -393,7 +419,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             CharSequence subtitle,
             CharSequence value
         ) {
-            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, false, false);
+            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, false, null);
         }
 
         public void set(
@@ -403,7 +429,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             CharSequence value,
             boolean checked
         ) {
-            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, checked, false);
+            set(iconColorTop, iconColorBottom, icon, title, subtitle, value, checked, null);
         }
 
         public void set(
@@ -412,7 +438,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             CharSequence subtitle,
             CharSequence value,
             boolean checked,
-            boolean showBetaBadge
+            String badgeText
         ) {
             iconLayout.setVisibility(icon != 0 ? View.VISIBLE : View.GONE);
             titleView.setTranslationX(icon == 0 ? dp(2) : 0);
@@ -421,7 +447,11 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             iconBackground.setColor(iconColorTop, iconColorBottom);
             iconView.setImageResource(icon);
             titleView.setText(title);
-            betaBadge.setVisibility(showBetaBadge ? View.VISIBLE : View.GONE);
+            final boolean showBadge = !TextUtils.isEmpty(badgeText);
+            if (showBadge) {
+                betaBadge.setText(badgeText);
+            }
+            betaBadge.setVisibility(showBadge ? View.VISIBLE : View.GONE);
             subtitleView.setVisibility((twoLines = !TextUtils.isEmpty(subtitle)) ? View.VISIBLE : View.GONE);
             subtitleView.setText(subtitle);
             valueView.setVisibility(View.GONE);
@@ -441,7 +471,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
                 valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
                 valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider));
             }
-            if (showBetaBadge && betaBadge.getBackground() instanceof GradientDrawable) {
+            if (showBadge && betaBadge.getBackground() instanceof GradientDrawable) {
                 ((GradientDrawable) betaBadge.getBackground()).setColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourcesProvider));
             }
         }
