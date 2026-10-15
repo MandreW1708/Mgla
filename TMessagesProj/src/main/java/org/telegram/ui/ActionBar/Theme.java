@@ -6382,12 +6382,27 @@ public class Theme {
         currentColors.put(key_windowBackgroundWhiteBlueText7, palette.accent);
         currentColors.put(key_chat_messageLinkIn, palette.accent);
         currentColors.put(key_chat_messageLinkOut, palette.accent);
-        currentColors.put(key_chat_inLoader, palette.accent);
-        currentColors.put(key_chat_outLoader, palette.accent);
         currentColors.put(key_featuredStickers_addButton, palette.accent);
         currentColors.put(key_switchTrackChecked, palette.accent);
         currentColors.put(key_checkbox, palette.accent);
         currentColors.put(key_checkboxCheck, 0xFFFFFFFF);
+        // File/download buttons: circle = outLoader, glyph = outMediaIcon.
+        // Icon themes need white circle + accent glyph (firm amoled/dark keep stock remap).
+        final boolean firmTheme = MGLA_THEME_AMOLED.equals(themeInfo.name)
+                || MGLA_THEME_DARK.equals(themeInfo.name);
+        if (firmTheme) {
+            currentColors.put(key_chat_inLoader, palette.accent);
+            currentColors.put(key_chat_outLoader, palette.accent);
+        } else {
+            currentColors.put(key_chat_outLoader, 0xFFFFFFFF);
+            currentColors.put(key_chat_outLoaderSelected, 0xFFFFFFFF);
+            currentColors.put(key_chat_outMediaIcon, palette.accent);
+            currentColors.put(key_chat_outMediaIconSelected, palette.accent);
+            currentColors.put(key_chat_inLoader, palette.accent);
+            currentColors.put(key_chat_inLoaderSelected, palette.accent);
+            currentColors.put(key_chat_inMediaIcon, 0xFFFFFFFF);
+            currentColors.put(key_chat_inMediaIconSelected, 0xFFFFFFFF);
+        }
     }
 
     private static int getAndroidSystemColor(String name, int fallback) {
