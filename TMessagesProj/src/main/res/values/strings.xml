@@ -5785,6 +5785,8 @@
     <string name="AppIconDymka">Дымка</string>
     <string name="AppIconGradient">Градиент</string>
     <string name="AppIconZhidkost">Жидкость</string>
+    <string name="ApplyIconTheme">Применить тему под иконку</string>
+    <string name="ApplyIconThemeLocked">Тема для этой иконки будет доступна в Mgla Premium</string>
     <string name="AppIconChangedTo">App icon has been changed to %1$s</string>
     <string name="FileTooLarge">File Too Large</string>
     <string name="PremiumPreviewAppIcon">Premium App Icon</string>

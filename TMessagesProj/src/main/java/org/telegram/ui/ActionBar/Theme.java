@@ -159,6 +159,19 @@ public class Theme {
     public static final int MGLA_ACCENT_COLOR = 0xFF2E509C;
     /** Built-in wallpaper of the branded Mgla themes (fixed, cannot be changed). */
     public static final String MGLA_WALLPAPER_ASSET = "wallpaper_mgla.png";
+    /** Internal ThemeInfo.name keys for Mgla / icon themes. */
+    public static final String MGLA_THEME_AMOLED = "Burgundy";
+    public static final String MGLA_THEME_DARK = "Gray Burgundy";
+    public static final String MGLA_THEME_DYMKA = "Mgla Dymka";
+    public static final String MGLA_THEME_GRADIENT = "Mgla Gradient";
+    public static final String MGLA_THEME_ZHIDKOST = "Mgla Zhidkost";
+    public static final String MGLA_THEME_UFC = "Mgla Ufc";
+    public static final String MGLA_THEME_ABSTRACTION = "Mgla Abstraction";
+    public static final String MGLA_THEME_IT = "Mgla It";
+    public static final String MGLA_THEME_RACE = "Mgla Race";
+    public static final String MGLA_THEME_SUMMER = "Mgla Summer";
+    public static final String MGLA_THEME_WINTER = "Mgla Winter";
+    public static final String MGLA_THEME_GIRLS = "Mgla Girls";
     public static final int default_shadow_color = ColorUtils.setAlphaComponent(Color.BLACK, 27);
     public static boolean disallowChangeServiceMessageColor;
 
@@ -1551,6 +1564,10 @@ public class Theme {
             } else if ("Gray Burgundy".equals(name)) {
                 return "Фирм. темная";
             }
+            String mglaName = org.telegram.ui.MglaIconThemes.displayNameForTheme(name);
+            if (mglaName != null) {
+                return mglaName;
+            }
             return info != null ? info.title : name;
         }
 
@@ -1600,7 +1617,7 @@ public class Theme {
                 return Theme.getMaterialSystemBubbleColor(isDark());
             }
             if (Theme.isMglaTheme(this)) {
-                return Theme.MGLA_ACCENT_COLOR;
+                return org.telegram.ui.MglaIconThemes.paletteForTheme(name).bubble;
             }
             return previewOutColor;
         }
@@ -1672,15 +1689,20 @@ public class Theme {
             if (isDark != UNKNOWN) {
                 return isDark == DARK;
             }
-            if ("Dark Blue".equals(name) || "Night".equals(name) || "AMOLED".equals(name) || "Material Dark".equals(name) || "Material Black".equals(name) || "Burgundy".equals(name) || "Gray Burgundy".equals(name)) {
+            if ("Dark Blue".equals(name) || "Night".equals(name) || "AMOLED".equals(name) || "Material Dark".equals(name) || "Material Black".equals(name) || Theme.isMglaThemeName(name)) {
                 isDark = DARK;
             } else if ("Blue".equals(name) || "Arctic Blue".equals(name) || "Day".equals(name) || "Material Light".equals(name)) {
                 isDark = LIGHT;
             }
             if (isDark == UNKNOWN) {
-                String[] wallpaperLink = new String[1];
-                SparseIntArray colors = getThemeFileValues(new File(pathToFile), null, wallpaperLink);
-                checkIsDark(colors, this);
+                // Asset themes use assetName, not pathToFile — never pass null into File().
+                if (pathToFile != null || assetName != null) {
+                    String[] wallpaperLink = new String[1];
+                    SparseIntArray colors = getThemeFileValues(pathToFile != null ? new File(pathToFile) : null, assetName, wallpaperLink);
+                    checkIsDark(colors, this);
+                } else {
+                    isDark = LIGHT;
+                }
             }
             return isDark == DARK;
         }
@@ -4094,25 +4116,38 @@ public class Theme {
 
         // Built-in like MD3 (no accent list): AMOLED black base + Mgla blue/violet accents.
         themeInfo = new ThemeInfo();
-        themeInfo.name = "Burgundy";
+        themeInfo.name = MGLA_THEME_AMOLED;
         themeInfo.assetName = "amoled.attheme";
         themeInfo.previewBackgroundColor = 0xff000000;
         themeInfo.previewInColor = 0xff101010;
         themeInfo.previewOutColor = MGLA_ACCENT_COLOR;
         themeInfo.sortIndex = 10;
         themes.add(themeInfo);
-        themesDict.put("Burgundy", themeInfo);
+        themesDict.put(MGLA_THEME_AMOLED, themeInfo);
 
         // Same Mgla accents on the Material 3 dark gray base (night.attheme).
         themeInfo = new ThemeInfo();
-        themeInfo.name = "Gray Burgundy";
+        themeInfo.name = MGLA_THEME_DARK;
         themeInfo.assetName = "night.attheme";
         themeInfo.previewBackgroundColor = 0xff1c1b1f;
         themeInfo.previewInColor = 0xff211f26;
         themeInfo.previewOutColor = MGLA_ACCENT_COLOR;
         themeInfo.sortIndex = 11;
         themes.add(themeInfo);
-        themesDict.put("Gray Burgundy", themeInfo);
+        themesDict.put(MGLA_THEME_DARK, themeInfo);
+
+        // Icon-linked themes: registered in themesDict for apply, but NOT added to the
+        // public themes list yet — locked for everyone until Mgla Premium.
+        registerMglaIconTheme(MGLA_THEME_DYMKA, 12);
+        registerMglaIconTheme(MGLA_THEME_GRADIENT, 13);
+        registerMglaIconTheme(MGLA_THEME_ZHIDKOST, 14);
+        registerMglaIconTheme(MGLA_THEME_UFC, 15);
+        registerMglaIconTheme(MGLA_THEME_ABSTRACTION, 16);
+        registerMglaIconTheme(MGLA_THEME_IT, 17);
+        registerMglaIconTheme(MGLA_THEME_RACE, 18);
+        registerMglaIconTheme(MGLA_THEME_SUMMER, 19);
+        registerMglaIconTheme(MGLA_THEME_WINTER, 20);
+        registerMglaIconTheme(MGLA_THEME_GIRLS, 21);
 
         String themesString = themeConfig.getString("themes2", null);
 
@@ -6222,10 +6257,46 @@ public class Theme {
         return "Material Light".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key);
     }
 
-    // Internal keys "Burgundy"/"Gray Burgundy" are kept as storage/prefs identifiers;
-    // display names ("Фирм. amoled" / "Фирм. темная") come from ThemeInfo.getName().
+    // Internal keys stay as storage/prefs identifiers; display names come from ThemeInfo.getName().
     public static boolean isMglaTheme(ThemeInfo themeInfo) {
-        return themeInfo != null && ("Burgundy".equals(themeInfo.name) || "Gray Burgundy".equals(themeInfo.name));
+        return themeInfo != null && isMglaThemeName(themeInfo.name);
+    }
+
+    public static boolean isMglaThemeName(String name) {
+        return MGLA_THEME_AMOLED.equals(name)
+                || MGLA_THEME_DARK.equals(name)
+                || MGLA_THEME_DYMKA.equals(name)
+                || MGLA_THEME_GRADIENT.equals(name)
+                || MGLA_THEME_ZHIDKOST.equals(name)
+                || MGLA_THEME_UFC.equals(name)
+                || MGLA_THEME_ABSTRACTION.equals(name)
+                || MGLA_THEME_IT.equals(name)
+                || MGLA_THEME_RACE.equals(name)
+                || MGLA_THEME_SUMMER.equals(name)
+                || MGLA_THEME_WINTER.equals(name)
+                || MGLA_THEME_GIRLS.equals(name);
+    }
+
+    /** Icon themes (not the free firm pair) — locked for everyone until Premium. */
+    public static boolean isMglaIconThemeLocked(ThemeInfo themeInfo) {
+        return themeInfo != null
+                && isMglaThemeName(themeInfo.name)
+                && !MGLA_THEME_AMOLED.equals(themeInfo.name)
+                && !MGLA_THEME_DARK.equals(themeInfo.name);
+    }
+
+    private static void registerMglaIconTheme(String name, int sortIndex) {
+        final org.telegram.ui.MglaIconThemes.Palette palette = org.telegram.ui.MglaIconThemes.paletteForTheme(name);
+        ThemeInfo themeInfo = new ThemeInfo();
+        themeInfo.name = name;
+        themeInfo.assetName = palette.amoledBase ? "amoled.attheme" : "night.attheme";
+        themeInfo.previewBackgroundColor = palette.amoledBase ? 0xff000000 : 0xff1c1b1f;
+        themeInfo.previewInColor = palette.amoledBase ? 0xff101010 : 0xff211f26;
+        themeInfo.previewOutColor = palette.bubble;
+        themeInfo.sortIndex = sortIndex;
+        themeInfo.isDark = ThemeInfo.DARK;
+        // Only in themesDict — hidden from the public theme carousel until Premium unlocks them.
+        themesDict.put(name, themeInfo);
     }
 
     public static int getMaterialSystemAccentColor(boolean dark) {
@@ -6245,10 +6316,11 @@ public class Theme {
             baseTheme = themesDict.get("Day");
         } else if ("Material Dark".equals(themeInfo.name)) {
             baseTheme = themesDict.get("Night");
-        } else if ("Material Black".equals(themeInfo.name) || "Burgundy".equals(themeInfo.name)) {
+        } else if ("Material Black".equals(themeInfo.name) || MGLA_THEME_AMOLED.equals(themeInfo.name)) {
             baseTheme = themesDict.get("AMOLED");
-        } else if ("Gray Burgundy".equals(themeInfo.name)) {
-            baseTheme = themesDict.get("Night");
+        } else if (isMglaThemeName(themeInfo.name)) {
+            final boolean amoled = org.telegram.ui.MglaIconThemes.paletteForTheme(themeInfo.name).amoledBase;
+            baseTheme = themesDict.get(amoled ? "AMOLED" : "Night");
         }
         if (baseTheme != null && baseTheme.accentBaseColor != 0) {
             themeInfo.accentBaseColor = baseTheme.accentBaseColor;
@@ -6278,17 +6350,44 @@ public class Theme {
 
     private static void applyMglaAccent(ThemeInfo themeInfo) {
         ensureMaterialAccentBase(themeInfo);
+        final org.telegram.ui.MglaIconThemes.Palette palette =
+                org.telegram.ui.MglaIconThemes.paletteForTheme(themeInfo != null ? themeInfo.name : null);
         ThemeAccent accentObj = new ThemeAccent();
         accentObj.parentTheme = themeInfo;
-        // Accent hue remap uses тёмно-синий #2E509C; out-bubbles — плоский тот же цвет
-        // (одинаковый цвет в обоих слотах градиента = без градиента).
-        accentObj.accentColor = MGLA_ACCENT_COLOR;
-        accentObj.accentColor2 = 0;
-        accentObj.myMessagesAccentColor = MGLA_ACCENT_COLOR;
-        accentObj.myMessagesGradientAccentColor1 = MGLA_ACCENT_COLOR;
+        accentObj.accentColor = palette.accent;
+        accentObj.accentColor2 = palette.accent2;
+        accentObj.myMessagesAccentColor = palette.bubble;
+        // fillAccentColors only writes outBubble when gradient1 != 0; use same color for a flat bubble.
+        accentObj.myMessagesGradientAccentColor1 = palette.bubble2 != 0 ? palette.bubble2 : palette.bubble;
         accentObj.myMessagesGradientAccentColor2 = 0;
         accentObj.myMessagesGradientAccentColor3 = 0;
         accentObj.fillAccentColors(currentColorsNoAccent, currentColors);
+        // Hue remap washes very dark reds into pink — force exact palette colors.
+        currentColors.put(key_chat_outBubble, palette.bubble);
+        if (palette.bubble2 != 0) {
+            currentColors.put(key_chat_outBubbleGradient1, palette.bubble2);
+        } else {
+            currentColors.delete(key_chat_outBubbleGradient1);
+            currentColors.delete(key_chat_outBubbleGradient2);
+            currentColors.delete(key_chat_outBubbleGradient3);
+            currentColors.delete(key_chat_outBubbleGradientAnimated);
+        }
+        currentColors.put(key_chat_outBubbleSelected, palette.bubble);
+        currentColors.put(key_windowBackgroundWhiteBlueText, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText2, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText3, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText4, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText5, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText6, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText7, palette.accent);
+        currentColors.put(key_chat_messageLinkIn, palette.accent);
+        currentColors.put(key_chat_messageLinkOut, palette.accent);
+        currentColors.put(key_chat_inLoader, palette.accent);
+        currentColors.put(key_chat_outLoader, palette.accent);
+        currentColors.put(key_featuredStickers_addButton, palette.accent);
+        currentColors.put(key_switchTrackChecked, palette.accent);
+        currentColors.put(key_checkbox, palette.accent);
+        currentColors.put(key_checkboxCheck, 0xFFFFFFFF);
     }
 
     private static int getAndroidSystemColor(String name, int fallback) {
@@ -7362,7 +7461,7 @@ public class Theme {
             return new TLRPC.TL_baseThemeTinted();
         } else if ("Arctic Blue".equals(key)) {
             return new TLRPC.TL_baseThemeArctic();
-        } else if ("Night".equals(key) || "AMOLED".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key) || "Burgundy".equals(key) || "Gray Burgundy".equals(key)) {
+        } else if ("Night".equals(key) || "AMOLED".equals(key) || "Material Dark".equals(key) || "Material Black".equals(key) || isMglaThemeName(key)) {
             return new TLRPC.TL_baseThemeNight();
         }
         return null;
@@ -9623,24 +9722,38 @@ public class Theme {
         return createBackgroundDrawable(currentTheme, overrideWallpaper, currentColors, wallpaperFile, wallpaperLink, wallpaperFileOffset, intensity, prevoiusPhase, defaultTheme, false, false, wallpaperMotion, null, local);
     }
 
-    private static Drawable mglaWallpaper;
+    private static final HashMap<String, Drawable> mglaWallpapers = new HashMap<>();
+
     public static Drawable getMglaWallpaper() {
-        if (mglaWallpaper == null) {
-            try {
-                File file = getAssetFile(MGLA_WALLPAPER_ASSET);
-                Bitmap bitmap = loadScreenSizedBitmap(new FileInputStream(file), 0);
-                if (bitmap != null) {
-                    mglaWallpaper = new BitmapDrawable(bitmap);
-                    mglaWallpaper.setFilterBitmap(true);
-                }
-            } catch (Throwable e) {
-                FileLog.e(e);
-            }
-            if (mglaWallpaper == null) {
-                mglaWallpaper = new ColorDrawable(0xff101014);
-            }
+        return getMglaWallpaper(getActiveTheme());
+    }
+
+    public static Drawable getMglaWallpaper(ThemeInfo themeInfo) {
+        String asset = org.telegram.ui.MglaIconThemes.wallpaperAssetForTheme(themeInfo != null ? themeInfo.name : null);
+        if (asset == null) {
+            asset = MGLA_WALLPAPER_ASSET;
         }
-        return mglaWallpaper;
+        Drawable cached = mglaWallpapers.get(asset);
+        if (cached != null) {
+            return cached;
+        }
+        Drawable loaded = null;
+        try {
+            File file = getAssetFile(asset);
+            Bitmap bitmap = loadScreenSizedBitmap(new FileInputStream(file), 0);
+            if (bitmap != null) {
+                BitmapDrawable bd = new BitmapDrawable(bitmap);
+                bd.setFilterBitmap(true);
+                loaded = bd;
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        if (loaded == null) {
+            loaded = new ColorDrawable(0xff101014);
+        }
+        mglaWallpapers.put(asset, loaded);
+        return loaded;
     }
 
     public static BackgroundDrawableSettings createBackgroundDrawable(
@@ -9661,8 +9774,8 @@ public class Theme {
     ) {
         BackgroundDrawableSettings settings = new BackgroundDrawableSettings();
         if (isMglaTheme(currentTheme)) {
-            // Фирменные темы: обои зашиты в APK, смена и переопределения запрещены.
-            settings.wallpaper = getMglaWallpaper();
+            // Фирменные / icon-темы: обои зашиты в APK, смена и переопределения запрещены.
+            settings.wallpaper = getMglaWallpaper(currentTheme);
             settings.themedWallpaper = settings.wallpaper;
             settings.isWallpaperMotion = false;
             settings.isPatternWallpaper = false;

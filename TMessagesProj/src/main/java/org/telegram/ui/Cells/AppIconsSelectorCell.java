@@ -173,6 +173,13 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
             smoothScroller.setTargetPosition(position);
             linearLayoutManager.startSmoothScroll(smoothScroller);
 
+            // Apply + persist theme BEFORE swapping the launcher icon. Changing the icon
+            // often backgrounds/kills the process; theme prefs must already be on disk.
+            if (org.telegram.ui.MglaIconThemes.isAutoApplyEnabled()
+                    && org.telegram.ui.MglaIconThemes.hasThemeOffer(icon)) {
+                org.telegram.ui.MglaIconThemes.applyThemeForIconQuiet(icon);
+            }
+
             LauncherIconController.setIcon(icon);
             holderView.setSelected(true, true);
 
@@ -184,6 +191,9 @@ public class AppIconsSelectorCell extends RecyclerListView implements Notificati
             }
 
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_APP_ICON, icon);
+            if (fragment instanceof org.telegram.ui.ThemeActivity) {
+                ((org.telegram.ui.ThemeActivity) fragment).onAppIconChanged();
+            }
         });
         updateIconsVisibility();
     }

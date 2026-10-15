@@ -234,6 +234,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
     private int appIconHeaderRow;
     @Keep
     private int appIconSelectorRow;
+    private int applyIconThemeRow;
+    private int applyIconThemeShadowRow;
     private int appIconShadowRow;
 
     private int rowCount;
@@ -460,6 +462,25 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         updateRows(true);
     }
 
+    /** Called from {@link AppIconsSelectorCell} after the user picks a new launcher icon. */
+    public void onAppIconChanged() {
+        updateRows(true);
+    }
+
+    private void onApplyIconThemeToggled() {
+        boolean enabled = !MglaIconThemes.isAutoApplyEnabled();
+        MglaIconThemes.setAutoApplyEnabled(enabled);
+        if (enabled) {
+            // Theme already persisted in setAutoApplyEnabled; refresh visible UI if we stayed alive.
+            try {
+                if (getParentLayout() != null) {
+                    getParentLayout().rebuildAllFragmentViews(false, false);
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+    }
+
     private boolean setBubbleRadius(int size, boolean layout) {
         if (size != SharedConfig.bubbleRadius) {
             SharedConfig.bubbleRadius = size;
@@ -608,6 +629,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
 
         appIconHeaderRow = -1;
         appIconSelectorRow = -1;
+        applyIconThemeRow = -1;
+        applyIconThemeShadowRow = -1;
         appIconShadowRow = -1;
         lastShadowRow = -1;
 
@@ -677,6 +700,10 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             appIconHeaderRow = rowCount++;
             appIconSelectorRow = rowCount++;
             appIconShadowRow = rowCount++;
+            if (MglaIconThemes.hasThemeOffer(MglaIconThemes.getCurrentIcon())) {
+                applyIconThemeRow = rowCount++;
+                applyIconThemeShadowRow = rowCount++;
+            }
 
             swipeGestureHeaderRow = rowCount++;
             swipeGestureRow = rowCount++;
@@ -1117,6 +1144,11 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 editor.commit();
                 if (view instanceof TextCheckCell) {
                     ((TextCheckCell) view).setChecked(!animations);
+                }
+            } else if (position == applyIconThemeRow) {
+                onApplyIconThemeToggled();
+                if (view instanceof TextCheckCell) {
+                    ((TextCheckCell) view).setChecked(MglaIconThemes.isAutoApplyEnabled());
                 }
             } else if (position == backgroundRow) {
                 presentFragment(new WallpapersListActivity(WallpapersListActivity.TYPE_ALL));
@@ -2625,6 +2657,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                         textCheckCell.setTextAndValueAndCheck(getString(R.string.ShowSensitiveContent), getString(R.string.ShowSensitiveContentInfo), getMessagesController().showSensitiveContent(), true, true);
                     } else if (position == chatBlurRow) {
                         textCheckCell.setTextAndCheck(getString("BlurInChat", R.string.BlurInChat), SharedConfig.chatBlurEnabled(), true);
+                    } else if (position == applyIconThemeRow) {
+                        textCheckCell.setTextAndCheck(getString(R.string.ApplyIconTheme), MglaIconThemes.isAutoApplyEnabled(), false);
                     }
                     break;
                 }
@@ -2743,7 +2777,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 return TYPE_TEXT_INFO_PRIVACY;
             } else if (position == themeInfoRow || position == nightTypeInfoRow || position == scheduleFromToInfoRow ||
                     position == settings2Row || position == newThemeInfoRow || position == chatListInfoRow || position == bubbleRadiusInfoRow ||
-                    position == saveToGallerySectionRow || position == appIconShadowRow || position == lastShadowRow || position == stickersSectionRow ||
+                    position == saveToGallerySectionRow || position == appIconShadowRow || position == applyIconThemeShadowRow || position == lastShadowRow || position == stickersSectionRow ||
                     position == mediaSoundSectionRow || position == otherSectionRow) {
                 return TYPE_SHADOW;
             } else if (position == nightDisabledRow || position == nightScheduledRow || position == nightAutomaticRow || position == nightSystemDefaultRow) {
@@ -2758,7 +2792,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 return TYPE_BRIGHTNESS;
             } else if (position == scheduleLocationRow || position == sendByEnterRow ||
                     position == raiseToSpeakRow || position == raiseToListenRow || position == pauseOnRecordRow ||
-                    position == directShareRow || position == chatBlurRow || position == pauseOnMediaRow || position == nextMediaTapRow || position == sensitiveContentRow) {
+                    position == directShareRow || position == chatBlurRow || position == pauseOnMediaRow || position == nextMediaTapRow || position == sensitiveContentRow ||
+                    position == applyIconThemeRow) {
                 return TYPE_TEXT_CHECK;
             } else if (position == textSizeRow) {
                 return TYPE_TEXT_SIZE;

@@ -7025,6 +7025,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         showLanguageAlert(false);
         MglaStats.count("app_foreground");
         MglaRemoteConfig.maybeFetch(true);
+        // After launcher-icon swap the process may restart; re-sync theme if auto-apply is on.
+        try {
+            MglaIconThemes.syncThemeToCurrentIconIfNeeded();
+        } catch (Throwable ignore) {
+        }
         if (passcodeDialog == null || passcodeDialog.passcodeView.getVisibility() != View.VISIBLE) {
             MglaBrandedThemeOffer.showIfNeeded(this);
         }

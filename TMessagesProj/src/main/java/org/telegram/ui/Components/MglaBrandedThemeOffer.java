@@ -28,8 +28,8 @@ public class MglaBrandedThemeOffer {
         if (prefs.getBoolean(PREF_SHOWN, false)) {
             return;
         }
-        final Theme.ThemeInfo amoledInfo = Theme.getTheme("Burgundy");
-        final Theme.ThemeInfo darkInfo = Theme.getTheme("Gray Burgundy");
+        final Theme.ThemeInfo amoledInfo = Theme.getTheme(Theme.MGLA_THEME_AMOLED);
+        final Theme.ThemeInfo darkInfo = Theme.getTheme(Theme.MGLA_THEME_DARK);
         if (amoledInfo == null || darkInfo == null) {
             return;
         }
@@ -46,6 +46,94 @@ public class MglaBrandedThemeOffer {
     public static void showAgain(LaunchActivity activity) {
         MessagesController.getGlobalMainSettings().edit().remove(PREF_SHOWN).apply();
         showIfNeeded(activity);
+    }
+
+    /** Выбор Фирм. amoled / Фирм. темная — из пункта «Применить тему под иконку». */
+    public static void showPicker(LaunchActivity activity) {
+        final Theme.ThemeInfo amoledInfo = Theme.getTheme(Theme.MGLA_THEME_AMOLED);
+        final Theme.ThemeInfo darkInfo = Theme.getTheme(Theme.MGLA_THEME_DARK);
+        if (activity == null || amoledInfo == null || darkInfo == null) {
+            return;
+        }
+        show(activity, amoledInfo, darkInfo);
+    }
+
+    public static void showPicker(Context context, org.telegram.ui.ActionBar.BaseFragment fragment) {
+        if (context instanceof LaunchActivity) {
+            showPicker((LaunchActivity) context);
+            return;
+        }
+        final Theme.ThemeInfo amoledInfo = Theme.getTheme(Theme.MGLA_THEME_AMOLED);
+        final Theme.ThemeInfo darkInfo = Theme.getTheme(Theme.MGLA_THEME_DARK);
+        if (context == null || amoledInfo == null || darkInfo == null) {
+            return;
+        }
+        final Theme.ThemeInfo previousInfo = Theme.getCurrentTheme();
+        final Theme.ThemeInfo[] applied = new Theme.ThemeInfo[1];
+        final boolean[] resolved = new boolean[1];
+
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int side = AndroidUtilities.dp(20);
+        content.setPadding(side, AndroidUtilities.dp(16), side, AndroidUtilities.dp(4));
+
+        TextView title = new TextView(context);
+        title.setText("Фирменные темы");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        title.setTypeface(AndroidUtilities.bold());
+        title.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        content.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        final OptionRow[] rows = new OptionRow[2];
+        rows[0] = new OptionRow(context, "Фирм. amoled", amoledInfo);
+        rows[1] = new OptionRow(context, "Фирм. темная", darkInfo);
+        content.addView(rows[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 14, 0, 0));
+        content.addView(rows[1], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 0));
+
+        View.OnClickListener listener = v -> {
+            Theme.ThemeInfo info = v.getTag() instanceof Theme.ThemeInfo ? (Theme.ThemeInfo) v.getTag() : null;
+            if (info == null) {
+                return;
+            }
+            applied[0] = info;
+            Theme.applyTheme(info);
+            for (OptionRow row : rows) {
+                row.setSelectedTheme(info);
+            }
+            if (fragment != null && fragment.getParentLayout() != null) {
+                fragment.getParentLayout().rebuildAllFragmentViews(true, true);
+            }
+        };
+        rows[0].setOnClickListener(listener);
+        rows[1].setOnClickListener(listener);
+        Theme.ThemeInfo current = Theme.getCurrentTheme();
+        for (OptionRow row : rows) {
+            row.setSelectedTheme(current == amoledInfo || current == darkInfo ? current : null);
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(context)
+                .setView(content)
+                .setPositiveButton("Установить", (d, which) -> resolved[0] = true)
+                .setNegativeButton("Отмена", (d, which) -> {
+                    resolved[0] = true;
+                    if (applied[0] != null) {
+                        Theme.applyTheme(previousInfo);
+                        if (fragment != null && fragment.getParentLayout() != null) {
+                            fragment.getParentLayout().rebuildAllFragmentViews(true, true);
+                        }
+                    }
+                })
+                .create();
+        dialog.setOnDismissListener(d -> {
+            if (!resolved[0] && applied[0] != null) {
+                Theme.applyTheme(previousInfo);
+                if (fragment != null && fragment.getParentLayout() != null) {
+                    fragment.getParentLayout().rebuildAllFragmentViews(true, true);
+                }
+            }
+        });
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.show();
     }
 
     /** Прямой Theme.applyTheme меняет таблицы цветов — видимые экраны нужно перестроить отдельно. */
@@ -94,8 +182,8 @@ public class MglaBrandedThemeOffer {
         content.addView(options, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 14, 0, 0));
 
         final OptionRow[] rows = new OptionRow[2];
-        rows[0] = new OptionRow(context, "Фирменная amoled", amoledInfo);
-        rows[1] = new OptionRow(context, "Фирменная серая", darkInfo);
+        rows[0] = new OptionRow(context, "Фирм. amoled", amoledInfo);
+        rows[1] = new OptionRow(context, "Фирм. темная", darkInfo);
         options.addView(rows[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         options.addView(rows[1], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 0));
 
