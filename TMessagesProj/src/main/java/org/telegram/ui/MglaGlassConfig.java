@@ -297,32 +297,14 @@ public class MglaGlassConfig {
         return clampPredictiveBackStyle(style) != PREDICTIVE_BACK_DEFAULT;
     }
 
-    /** Fill gaps between layers with the theme surface instead of black. */
+    /** Fill gaps between layers with the theme surface — no opaque black dim. */
     public static boolean usesThemedPredictiveStage(int style) {
-        switch (clampPredictiveBackStyle(style)) {
-            case PREDICTIVE_BACK_PAGES:
-            case PREDICTIVE_BACK_PUSH:
-            case PREDICTIVE_BACK_COVER:
-            case PREDICTIVE_BACK_AXIS_X:
-                return true;
-            default:
-                return false;
-        }
+        return isPredictiveBackSpatial(style);
     }
 
-    /** Soft floating-card shadow under the active layer. */
+    /** Soft floating-card shadow under the active layer — disabled (looks abrupt on exit). */
     public static boolean usesPredictiveFrontShadow(int style) {
-        switch (clampPredictiveBackStyle(style)) {
-            case PREDICTIVE_BACK_MD3:
-            case PREDICTIVE_BACK_SURFACE:
-            case PREDICTIVE_BACK_SHARED:
-            case PREDICTIVE_BACK_DEPTH:
-            case PREDICTIVE_BACK_CARDS:
-            case PREDICTIVE_BACK_ZOOM:
-                return true;
-            default:
-                return false;
-        }
+        return false;
     }
 
     /** Target corner radius (dp) for the active card during spatial back; 0 = square/page. */
@@ -375,7 +357,7 @@ public class MglaGlassConfig {
             case PREDICTIVE_BACK_CARDS:
                 return "Карточки";
             case PREDICTIVE_BACK_FADE:
-                return "Затемнение";
+                return "Исчезновение";
             default:
                 return "Обычная";
         }

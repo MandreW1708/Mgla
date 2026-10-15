@@ -31,12 +31,19 @@ public final class MglaWsBypass {
 
     private static final long MONITOR_INTERVAL_MS = 5_000L;
     /** Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB. */
-    private static final long WS_STALL_MS = 45_000L;
+    private static final long WS_STALL_MS = 90_000L;
     /** Сколько WEB может висеть в Connecting, прежде чем вернуться на WS. */
-    private static final long WEB_STALL_MS = 60_000L;
-    /** Как часто из WEB пробовать вернуться на WS. */
-    private static final long WEB_RETRY_WS_MS = 8 * 60_000L;
-    private static final long WS_PROBE_TIMEOUT_MS = 10_000L;
+    private static final long WEB_STALL_MS = 90_000L;
+    /**
+     * После срыва WEB — как часто пробовать вернуть WS, пока ещё не Connected.
+     * Пока маршрут Connected/Updating, переключений нет (иначе лишний reconnect Telegram).
+     */
+    private static final long WEB_RETRY_WS_MS = 12 * 60_000L;
+    private static final long WS_PROBE_TIMEOUT_MS = 8_000L;
+    /** Минимальная пауза между любыми сменами маршрута. */
+    private static final long ROUTE_SWITCH_COOLDOWN_MS = 2 * 60_000L;
+    /** Сколько подряд тиков монитора должны видеть stall после порога. */
+    private static final int STALL_CONFIRM_TICKS = 2;
 
     private static final MglaWsBypass instance = new MglaWsBypass();
 
@@ -59,6 +66,8 @@ public final class MglaWsBypass {
     private volatile long routeSinceElapsed;
     private volatile long lastConnectedElapsed;
     private volatile long lastWsProbeElapsed;
+    private volatile long lastSwitchElapsed;
+    private int stallConfirmTicks;
     private DispatchQueue monitorQueue;
     private boolean monitorScheduled;
     private final Runnable monitorRunnable = this::monitorTick;
@@ -252,18 +261,27 @@ public final class MglaWsBypass {
         routeSinceElapsed = now;
         lastConnectedElapsed = now;
         lastWsProbeElapsed = now;
+        lastSwitchElapsed = now;
+        stallConfirmTicks = 0;
     }
 
     private synchronized void switchRoute(Route target, String reason) {
         if (!proxyApplied || route == target || !MglaWsConfig.isEnabled()) {
             return;
         }
-        FileLog.d("MglaWsBypass: route " + route + " -> " + target + " (" + reason + ")");
         long now = SystemClock.elapsedRealtime();
+        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < ROUTE_SWITCH_COOLDOWN_MS) {
+            FileLog.d("MglaWsBypass: skip route " + route + " -> " + target
+                + " (cooldown, " + reason + ")");
+            return;
+        }
+        FileLog.d("MglaWsBypass: route " + route + " -> " + target + " (" + reason + ")");
         route = target;
         routeSinceElapsed = now;
         lastConnectedElapsed = now;
         lastWsProbeElapsed = now;
+        lastSwitchElapsed = now;
+        stallConfirmTicks = 0;
         if (target == Route.WS && !isServerRunning()) {
             String err = startEngine();
             if (err != null) {
@@ -310,37 +328,59 @@ public final class MglaWsBypass {
         if (state < 0) {
             return;
         }
+        // Пока Telegram реально на связи — маршрут не трогаем. Раньше на WEB каждые
+        // ~8 мин делался probe WS и setProxySettings → внезапный reconnect среди дня.
         if (state == ConnectionsManager.ConnectionStateConnected
             || state == ConnectionsManager.ConnectionStateUpdating) {
             lastConnectedElapsed = now;
-            if (route == Route.WS) {
-                return;
-            }
+            stallConfirmTicks = 0;
+            return;
         }
+        if (state == ConnectionsManager.ConnectionStateWaitingForNetwork) {
+            stallConfirmTicks = 0;
+            return;
+        }
+        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < ROUTE_SWITCH_COOLDOWN_MS) {
+            return;
+        }
+
         boolean connecting = state == ConnectionsManager.ConnectionStateConnecting
             || state == ConnectionsManager.ConnectionStateConnectingToProxy;
         long stalledFor = now - Math.max(lastConnectedElapsed, routeSinceElapsed);
+        long stallLimit = route == Route.WS ? WS_STALL_MS : WEB_STALL_MS;
+
+        if (connecting && stalledFor >= stallLimit) {
+            stallConfirmTicks++;
+        } else {
+            stallConfirmTicks = 0;
+        }
 
         if (route == Route.WS) {
-            if (!connecting || stalledFor < WS_STALL_MS || !isWebFallbackAvailable()) {
+            if (stallConfirmTicks < STALL_CONFIRM_TICKS || !isWebFallbackAvailable()) {
                 return;
             }
             long lastOk = WsBypassCore.getInstance().getLastUpstreamOkAtMs();
             if (lastOk > 0 && System.currentTimeMillis() - lastOk < WS_STALL_MS) {
+                stallConfirmTicks = 0;
                 return;
             }
             switchRoute(Route.WEB, "ws stalled " + (stalledFor / 1000) + "s");
             return;
         }
 
-        if (connecting && stalledFor >= WEB_STALL_MS) {
+        // WEB: уходим на WS только если WEB сам завис в Connecting, либо давно
+        // нет связи и релей снова отвечает (не трогаем рабочий Connected WEB).
+        if (stallConfirmTicks >= STALL_CONFIRM_TICKS) {
             switchRoute(Route.WS, "web stalled " + (stalledFor / 1000) + "s");
+            return;
+        }
+        if (connecting) {
             return;
         }
         if (now - routeSinceElapsed >= WEB_RETRY_WS_MS && now - lastWsProbeElapsed >= WEB_RETRY_WS_MS) {
             lastWsProbeElapsed = now;
             if (WsBypassCore.getInstance().probeRelay(WS_PROBE_TIMEOUT_MS)) {
-                switchRoute(Route.WS, "ws relay reachable again");
+                switchRoute(Route.WS, "ws relay reachable while web idle");
             }
         }
     }

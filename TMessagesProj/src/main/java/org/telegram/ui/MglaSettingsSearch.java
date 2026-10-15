@@ -246,7 +246,7 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1143, "3D страницы", hub, animCommon, appearanceIcon, animCommonScreen, "3D страницы", "appearance/animation/common/cube"));
         l.add(new Entry(1145, "Укрытие", hub, animCommon, appearanceIcon, animCommonScreen, "Укрытие", "appearance/animation/common/cover"));
         l.add(new Entry(1147, "Карточки", hub, animCommon, appearanceIcon, animCommonScreen, "Карточки", "appearance/animation/common/cards"));
-        l.add(new Entry(1149, "Затемнение", hub, animCommon, appearanceIcon, animCommonScreen, "Затемнение", "appearance/animation/common/fade"));
+        l.add(new Entry(1149, "Исчезновение", hub, animCommon, appearanceIcon, animCommonScreen, "Исчезновение", "appearance/animation/common/fade"));
         l.add(new Entry(1118, "Открытие экранов как назад", hub, animCommon, appearanceIcon, animCommonScreen, "Открытие экранов как назад", "appearance/animation/common/reverse-open"));
         l.add(new Entry(1122, "Вырастание фото", hub, animCommon, appearanceIcon, animCommonScreen, "Вырастание фото", "appearance/animation/common/media-grow"));
         l.add(new Entry(1123, "Пружина при тапе", hub, animCommon, appearanceIcon, animCommonScreen, "Пружина при тапе", "appearance/animation/common/press-spring"));

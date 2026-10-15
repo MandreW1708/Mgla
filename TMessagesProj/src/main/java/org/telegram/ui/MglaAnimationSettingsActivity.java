@@ -1,11 +1,14 @@
 package org.telegram.ui;
 
 import android.content.Context;
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
@@ -103,7 +106,25 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
         });
         block.addView(reverseOpenCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 16));
+        rootLayout.addView(block, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 6));
+
+        LinearLayout warnRow = new LinearLayout(context);
+        warnRow.setOrientation(LinearLayout.HORIZONTAL);
+        warnRow.setGravity(Gravity.TOP);
+        TextView warnMark = new TextView(context);
+        warnMark.setText("!");
+        warnMark.setTypeface(Typeface.DEFAULT_BOLD);
+        warnMark.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        warnMark.setTextColor(Theme.getColor(Theme.key_text_RedBold));
+        warnMark.setPadding(0, AndroidUtilities.dp(1), AndroidUtilities.dp(6), 0);
+        warnRow.addView(warnMark, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        TextView warnText = new TextView(context);
+        warnText.setText("Анимация может работать некорректно на Android ниже 13 версии");
+        warnText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        warnText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        warnText.setLineSpacing(AndroidUtilities.dp(2), 1f);
+        warnRow.addView(warnText, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+        rootLayout.addView(warnRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 32, 0, 32, 16));
 
         LinearLayout profileBlock = MglaUi.createBlock(context, "Профиль");
         TextCheckCell mediaGrowCell = new TextCheckCell(context);

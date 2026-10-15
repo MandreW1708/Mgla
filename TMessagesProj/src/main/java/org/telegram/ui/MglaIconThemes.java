@@ -57,18 +57,19 @@ public final class MglaIconThemes {
 
     private static Boolean autoApplyCached;
 
+    // Firm amoled stays pure black; icon themes use night.attheme (dark gray), like «Фирм. темная».
     private static final Palette FIRM = new Palette(
             Theme.MGLA_ACCENT_COLOR, 0, Theme.MGLA_ACCENT_COLOR, 0, true);
-    private static final Palette DYMKA = new Palette(DARK_RED, 0, DARK_RED, 0, true);
-    private static final Palette GRADIENT = new Palette(DARK_RED, 0, DARK_RED, 0, true);
-    private static final Palette ZHIDKOST = new Palette(DARK_RED, 0, DARK_RED, 0, true);
-    private static final Palette UFC = new Palette(RED, 0, RED, 0, true);
-    private static final Palette ABSTRACTION = new Palette(GRAY, 0, GRAY, 0, true);
-    private static final Palette IT = new Palette(GREEN, 0, GREEN, 0, true);
-    private static final Palette RACE = new Palette(RED, 0, RED, 0, true);
+    private static final Palette DYMKA = new Palette(DARK_RED, 0, DARK_RED, 0, false);
+    private static final Palette GRADIENT = new Palette(DARK_RED, 0, DARK_RED, 0, false);
+    private static final Palette ZHIDKOST = new Palette(DARK_RED, 0, DARK_RED, 0, false);
+    private static final Palette UFC = new Palette(RED, 0, RED, 0, false);
+    private static final Palette ABSTRACTION = new Palette(GRAY, 0, GRAY, 0, false);
+    private static final Palette IT = new Palette(GREEN, 0, GREEN, 0, false);
+    private static final Palette RACE = new Palette(RED, 0, RED, 0, false);
     private static final Palette SUMMER = new Palette(SKY, ORANGE, ORANGE, SKY, false);
-    private static final Palette WINTER = new Palette(WINTER_DEEP, WINTER_ICE, WINTER_DEEP, WINTER_ICE, true);
-    private static final Palette GIRLS = new Palette(PINK, PURPLE, PINK, PURPLE, true);
+    private static final Palette WINTER = new Palette(WINTER_DEEP, WINTER_ICE, WINTER_DEEP, WINTER_ICE, false);
+    private static final Palette GIRLS = new Palette(PINK, PURPLE, PINK, PURPLE, false);
 
     private MglaIconThemes() {
     }

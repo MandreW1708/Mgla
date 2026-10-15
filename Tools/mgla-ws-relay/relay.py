@@ -60,7 +60,10 @@ DC_MEDIA: Dict[int, list] = {
 }
 
 _silent_until: Dict[tuple, float] = {}
-CONNECT_TIMEOUT = 4.0
+CONNECT_TIMEOUT = 6.0
+# Keepalive: slightly longer pong wait so brief mobile radio blips don't tear the bridge.
+WS_PING_INTERVAL = 25.0
+WS_PING_TIMEOUT = 45.0
 TCP_BUF = 512 * 1024
 MAX_WS_SIZE = 32 * 1024 * 1024
 _PROTO_TAGS = (b"\xef" * 4, b"\xee" * 4, b"\xdd" * 4)
@@ -408,9 +411,9 @@ async def race_kws(dc: int, media: bool):
             f"wss://{host}/apiws",
             subprotocols=["binary"],
             origin="https://web.telegram.org",
-            open_timeout=5,
-            ping_interval=20,
-            ping_timeout=20,
+            open_timeout=6,
+            ping_interval=WS_PING_INTERVAL,
+            ping_timeout=WS_PING_TIMEOUT,
             max_size=MAX_WS_SIZE,
             compression=None,
         )
@@ -560,8 +563,8 @@ async def main() -> None:
         LISTEN_PORT,
         subprotocols=["binary"],
         max_size=MAX_WS_SIZE,
-        ping_interval=20,
-        ping_timeout=20,
+        ping_interval=WS_PING_INTERVAL,
+        ping_timeout=WS_PING_TIMEOUT,
         compression=None,
         max_queue=64,
     ):

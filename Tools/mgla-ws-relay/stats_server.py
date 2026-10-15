@@ -531,7 +531,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._reply(404)
 
-    def _check_basic_auth(self):
+    def _check_basic_auth(self, *, realm: str = "Mgla Hub"):
         if not REPORT_PASSWORD:
             self._reply(404)
             return False
@@ -540,10 +540,24 @@ class Handler(BaseHTTPRequestHandler):
         if not auth.startswith("Basic ") or not hmac.compare_digest(
             auth[6:].strip().encode(), expected.encode()
         ):
+            body = (
+                "<!doctype html><meta charset=utf-8><title>401</title>"
+                "<body style='font:15px system-ui;padding:2rem'>"
+                "<h1>401 — нужен логин</h1>"
+                "<p>Страница закрыта Basic Auth. Обновите страницу и введите пароль.</p>"
+                "</body>"
+            ).encode("utf-8")
             self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="Mgla Hub", charset="UTF-8"')
-            self.send_header("Content-Length", "0")
+            self.send_header(
+                "WWW-Authenticate",
+                f'Basic realm="{realm}", charset="UTF-8"',
+            )
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
             self.end_headers()
+            self.wfile.write(body)
             return False
         return True
 
@@ -590,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
         self._html_reply(body)
 
     def _admin_get(self, query):
-        if not self._check_basic_auth():
+        if not self._check_basic_auth(realm="Mgla Hub Admin"):
             return
         flash_ok = unquote(query.get("ok", [""])[0] or "")
         flash_err = unquote(query.get("err", [""])[0] or "")
@@ -625,7 +639,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def _admin_post(self):
-        if not self._check_basic_auth():
+        if not self._check_basic_auth(realm="Mgla Hub Admin"):
             return
         form = self._read_form_body()
         if form is None:
@@ -801,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(500, b'{"error":"token failed"}')
 
     def _admin_updates_get(self, query):
-        if not self._check_basic_auth():
+        if not self._check_basic_auth(realm="Mgla Hub Admin"):
             return
         flash_ok = unquote(query.get("ok", [""])[0] or "")
         flash_err = unquote(query.get("err", [""])[0] or "")
@@ -815,7 +829,7 @@ class Handler(BaseHTTPRequestHandler):
         self._html_reply(body)
 
     def _admin_updates_post(self):
-        if not self._check_basic_auth():
+        if not self._check_basic_auth(realm="Mgla Hub Admin"):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
