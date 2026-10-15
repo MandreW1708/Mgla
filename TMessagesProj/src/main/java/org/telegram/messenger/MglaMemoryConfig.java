@@ -40,6 +40,8 @@ public class MglaMemoryConfig {
     public static final int DEFAULT_INTERVAL_MIN = 240;
     public static final int DEFAULT_BATCH_SIZE = 60;
     public static final int DEFAULT_MAX_CHARS = 12000;
+    /** Максимум чатов-источников на аккаунт. */
+    public static final int MAX_WATCHED = 7;
 
     private MglaMemoryConfig() {
     }
@@ -118,10 +120,21 @@ public class MglaMemoryConfig {
     }
 
     public static void addWatched(int account, long uid) {
+        if (isWatched(account, uid)) {
+            return;
+        }
+        if (watchedForAccount(account).size() >= MAX_WATCHED) {
+            return;
+        }
         Set<String> set = watchedSet();
         if (set.add(account + ":" + uid)) {
             saveWatched(set);
         }
+    }
+
+    /** Сколько ещё можно добавить источников для аккаунта. */
+    public static int remainingWatchSlots(int account) {
+        return Math.max(0, MAX_WATCHED - watchedForAccount(account).size());
     }
 
     public static void removeWatched(int account, long uid) {

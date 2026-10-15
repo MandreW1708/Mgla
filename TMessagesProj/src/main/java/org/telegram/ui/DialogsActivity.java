@@ -664,6 +664,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private boolean searchWas;
     private boolean onlySelect;
     private boolean canSelectTopics;
+    /** Выбор чатов для источников Живой памяти: клик отмечает, «Готово» в шапке, папки. */
+    private boolean mglaMemorySources;
+    private int maxSelectedDialogs;
     private String searchString;
     private String initialSearchString;
     private MessagesStorage.TopicKey openedDialogId = new MessagesStorage.TopicKey();
@@ -2862,6 +2865,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         if (arguments != null) {
             onlySelect = arguments.getBoolean("onlySelect", false);
             canSelectTopics = arguments.getBoolean("canSelectTopics", false);
+            mglaMemorySources = arguments.getBoolean("mgla_memory_sources", false);
+            maxSelectedDialogs = arguments.getInt("maxSelectedDialogs", 0);
             cantSendToChannels = arguments.getBoolean("cantSendToChannels", false);
             initialDialogsType = arguments.getInt("dialogsType", DIALOGS_TYPE_DEFAULT);
             isQuote = arguments.getBoolean("quote", false);
@@ -2899,6 +2904,12 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             closeFragment = arguments.getBoolean("closeFragment", true);
             allowGlobalSearch = arguments.getBoolean("allowGlobalSearch", true);
             hasMainTabs = arguments.getBoolean("hasMainTabs", false);
+            if (mglaMemorySources) {
+                onlySelect = true;
+                checkCanWrite = false;
+                allowGlobalSearch = false;
+                initialDialogsType = DIALOGS_TYPE_WIDGET;
+            }
 
             byte[] requestPeerTypeBytes = arguments.getByteArray("requestPeerType");
             if (requestPeerTypeBytes != null) {
@@ -3283,6 +3294,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
         searchItem.setVisibility(View.GONE);
 
+        if (mglaMemorySources) {
+            ActionBarMenuItem memoryDone = menu.addItem(201, LocaleController.getString(R.string.Done).toUpperCase());
+            memoryDone.setContentDescription(LocaleController.getString(R.string.Done));
+        }
+
         if (!onlySelect && searchString == null && folderId == 0 && communityId == 0) {
             doneItem = new ActionBarMenuItem(context, null, getThemedColor(Theme.key_actionBarDefaultSelector), getThemedColor(Theme.key_actionBarDefaultIcon), true);
             doneItem.setText(LocaleController.getString(R.string.Done).toUpperCase());
@@ -3535,6 +3551,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 actionBar.setTitle(LocaleController.getString(R.string.ReplyToDialog));
             } else if (isQuote) {
                 actionBar.setTitle(getString(R.string.QuoteTo));
+            } else if (mglaMemorySources) {
+                actionBar.setTitle("Источники памяти");
             } else if (initialDialogsType == DIALOGS_TYPE_FORWARD && selectAlertString == null) {
                 actionBar.setTitle(getString(R.string.ForwardTo));
             } else if (initialDialogsType == DIALOGS_TYPE_WIDGET) {
@@ -3615,7 +3633,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         });
 
         if (
-            (initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect || initialDialogsType == DIALOGS_TYPE_FORWARD) &&
+            (initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect || initialDialogsType == DIALOGS_TYPE_FORWARD || mglaMemorySources) &&
             folderId == 0 && communityId == 0 && TextUtils.isEmpty(searchString)
         ) {
             filterTabsView = new FilterTabsView(context, resourceProvider) {
@@ -3942,6 +3960,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     searchViewPager.onActionBarItemClick(id);
                     return;
                 }
+                if (id == 201 && mglaMemorySources) {
+                    confirmMglaMemorySources();
+                    return;
+                }
                 if (id == -1) {
                     if (rightSlidingDialogContainer != null && rightSlidingDialogContainer.hasFragment()) {
                         if (actionBar.isActionModeShowed()) {
@@ -4124,7 +4146,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             }
         };
 
-        int pagesCount = folderId == 0 && communityId == 0 && (initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect || initialDialogsType == DIALOGS_TYPE_FORWARD) ? 2 : 1;
+        int pagesCount = folderId == 0 && communityId == 0 && (initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect || initialDialogsType == DIALOGS_TYPE_FORWARD || mglaMemorySources) ? 2 : 1;
         viewPages = new ViewPage[pagesCount];
         for (int a = 0; a < pagesCount; a++) {
             final ViewPage viewPage = new ViewPage(context);
@@ -4964,7 +4986,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 topPanelLayout.addView(communityPendingRequests);
                 checkCommunityPendingRequestsVisible(false);
             }
-        } else if (initialDialogsType == DIALOGS_TYPE_FORWARD || clickSelectsDialog()) {
+        } else if ((initialDialogsType == DIALOGS_TYPE_FORWARD || clickSelectsDialog()) && !mglaMemorySources) {
             chatInputViewsContainer = new ChatInputViewsContainer(context);
             chatInputViewsContainer.setClipChildren(false);
             chatInputViewsContainer.setWindowInsetsProvider(windowInsetsStateHolder);
@@ -7546,6 +7568,12 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             }
             return false;
         } else {
+            if (maxSelectedDialogs > 0 && selectedDialogs.size() >= maxSelectedDialogs) {
+                if (mglaMemorySources) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.info, "Можно выбрать до " + maxSelectedDialogs + " чатов").show();
+                }
+                return false;
+            }
             selectedDialogs.add(did);
             if (cell instanceof DialogCell) {
                 ((DialogCell) cell).setChecked(true, true);
@@ -9003,7 +9031,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             return;
         }
 
-        if (initialDialogsType == DIALOGS_TYPE_WIDGET) {
+        if (mglaMemorySources) {
+            hideFloatingButton(true);
+        } else if (initialDialogsType == DIALOGS_TYPE_WIDGET) {
             floatingButton3.setImageResource(R.drawable.floating_check);
             floatingButton3.setContentDescription(LocaleController.getString(R.string.Done));
         } else {
@@ -10628,6 +10658,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             wasSelectedDialogsEmpty = selectedDialogs.isEmpty();
         } else if (initialDialogsType == DIALOGS_TYPE_WIDGET) {
             hideFloatingButton(selectedDialogs.isEmpty());
+        } else if (mglaMemorySources) {
+            hideFloatingButton(true);
+            if (selectedDialogs.isEmpty()) {
+                actionBar.setTitle("Источники памяти");
+            } else {
+                actionBar.setTitle("Выбрано: " + selectedDialogs.size());
+            }
         }
     }
 
@@ -13662,7 +13699,19 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     }
 
     public boolean clickSelectsDialog() {
-        return initialDialogsType == DIALOGS_TYPE_WIDGET;
+        return initialDialogsType == DIALOGS_TYPE_WIDGET || mglaMemorySources;
+    }
+
+    private void confirmMglaMemorySources() {
+        if (delegate == null || selectedDialogs.isEmpty()) {
+            finishFragment();
+            return;
+        }
+        ArrayList<MessagesStorage.TopicKey> topicKeys = new ArrayList<>();
+        for (int i = 0; i < selectedDialogs.size(); i++) {
+            topicKeys.add(MessagesStorage.TopicKey.of(selectedDialogs.get(i), 0));
+        }
+        delegate.didSelectDialogs(DialogsActivity.this, topicKeys, null, false, notify, scheduleDate, scheduleRepeatPeriod, null);
     }
 
     private ImageUpdater imageUpdater;

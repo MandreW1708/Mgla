@@ -6,13 +6,19 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 
+import org.telegram.messenger.ImageReceiver;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaMemoryStorage;
+import org.telegram.messenger.UserConfig;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.AvatarDrawable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,7 +35,7 @@ public class MglaMemoryGraphView extends View {
         void onNodeClicked(MglaMemoryStorage.MemoryGraph.Node node);
     }
 
-    private static final int LAYOUT_ITERATIONS = 90;
+    private static final int LAYOUT_ITERATIONS = 36;
     private static final int MAX_LABEL_CHARS = 18;
 
     private static class Pos {
@@ -39,6 +45,8 @@ public class MglaMemoryGraphView extends View {
         boolean showLabel = true;
         float labelW;
         float labelH;
+        ImageReceiver avatar;
+        AvatarDrawable avatarDrawable;
 
         Pos(MglaMemoryStorage.MemoryGraph.Node n) {
             node = n;
@@ -59,13 +67,16 @@ public class MglaMemoryGraphView extends View {
     private final RectF plate = new RectF();
     private final RectF tmpLabel = new RectF();
     private final RectF tmpOther = new RectF();
+    private final Path avatarClip = new Path();
 
     private final ScaleGestureDetector scaler;
 
     private NodeClickListener listener;
+    private int currentAccount = UserConfig.selectedAccount;
     private String selectedKey;
     private float reveal = 1f;
     private ValueAnimator revealAnim;
+    private boolean attached;
 
     private float scale = 1f;
     private float panX;
@@ -99,7 +110,12 @@ public class MglaMemoryGraphView extends View {
         listener = l;
     }
 
+    public void setAccount(int account) {
+        currentAccount = account;
+    }
+
     public void setGraph(MglaMemoryStorage.MemoryGraph graph) {
+        clearAvatars();
         positions.clear();
         posByKey.clear();
         edges.clear();
@@ -109,7 +125,11 @@ public class MglaMemoryGraphView extends View {
         if (graph != null) {
             for (MglaMemoryStorage.MemoryGraph.Node n : graph.nodes) {
                 Pos p = new Pos(n);
-                p.radius = dp(8) + Math.min(dp(7), n.weight);
+                boolean person = "person".equals(n.type);
+                p.radius = person ? dp(16) : (dp(8) + Math.min(dp(7), n.weight));
+                if (person) {
+                    bindPersonAvatar(p);
+                }
                 positions.add(p);
                 posByKey.put(n.key, p);
             }
@@ -118,6 +138,78 @@ public class MglaMemoryGraphView extends View {
         }
         playReveal();
         invalidate();
+    }
+
+    private void clearAvatars() {
+        for (Pos p : positions) {
+            if (p.avatar != null) {
+                if (attached) {
+                    p.avatar.onDetachedFromWindow();
+                }
+                p.avatar = null;
+                p.avatarDrawable = null;
+            }
+        }
+    }
+
+    private void bindPersonAvatar(Pos p) {
+        p.avatarDrawable = new AvatarDrawable();
+        p.avatar = new ImageReceiver(this);
+        p.avatar.setRoundRadius(p.radius);
+        if (attached) {
+            p.avatar.onAttachedToWindow();
+        }
+        MessagesController mc = MessagesController.getInstance(currentAccount);
+        String key = p.node.key;
+        if ("person:self".equals(key)) {
+            TLRPC.User self = UserConfig.getInstance(currentAccount).getCurrentUser();
+            p.avatarDrawable.setInfo(currentAccount, self);
+            p.avatar.setForUserOrChat(self, p.avatarDrawable);
+            return;
+        }
+        if (key != null && key.startsWith("person:")) {
+            try {
+                long peerId = Long.parseLong(key.substring("person:".length()));
+                if (peerId > 0) {
+                    TLRPC.User user = mc.getUser(peerId);
+                    p.avatarDrawable.setInfo(currentAccount, user);
+                    p.avatar.setForUserOrChat(user, p.avatarDrawable);
+                } else if (peerId < 0) {
+                    TLRPC.Chat chat = mc.getChat(-peerId);
+                    p.avatarDrawable.setInfo(currentAccount, chat);
+                    p.avatar.setForUserOrChat(chat, p.avatarDrawable);
+                } else {
+                    p.avatarDrawable.setInfo(0, p.node.label != null ? p.node.label : "?", "");
+                    p.avatar.setImageBitmap(p.avatarDrawable);
+                }
+                return;
+            } catch (Exception ignore) {
+            }
+        }
+        p.avatarDrawable.setInfo(0, p.node.label != null ? p.node.label : "?", "");
+        p.avatar.setImageBitmap(p.avatarDrawable);
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        attached = true;
+        for (Pos p : positions) {
+            if (p.avatar != null) {
+                p.avatar.onAttachedToWindow();
+            }
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        attached = false;
+        for (Pos p : positions) {
+            if (p.avatar != null) {
+                p.avatar.onDetachedFromWindow();
+            }
+        }
     }
 
     public void focusLabel(String label) {
@@ -505,11 +597,23 @@ public class MglaMemoryGraphView extends View {
             boolean selected = p.node.key.equals(selectedKey);
             boolean near = related(p.node.key);
             int alpha = (int) ((near ? 255 : 48) * reveal);
-            nodePaint.setColor(selected ? accent : colorForType(p.node.type));
-            nodePaint.setAlpha(alpha);
             float r = p.radius * (selected ? 1.3f : 1f);
-            canvas.drawCircle(p.x, p.y, r, nodePaint);
-            ringPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            if (p.avatar != null) {
+                p.avatar.setAlpha(alpha / 255f);
+                p.avatar.setImageCoords(p.x - r, p.y - r, r * 2f, r * 2f);
+                p.avatar.setRoundRadius((int) r);
+                canvas.save();
+                avatarClip.reset();
+                avatarClip.addCircle(p.x, p.y, r, Path.Direction.CW);
+                canvas.clipPath(avatarClip);
+                p.avatar.draw(canvas);
+                canvas.restore();
+            } else {
+                nodePaint.setColor(selected ? accent : colorForType(p.node.type));
+                nodePaint.setAlpha(alpha);
+                canvas.drawCircle(p.x, p.y, r, nodePaint);
+            }
+            ringPaint.setColor(selected ? accent : Theme.getColor(Theme.key_windowBackgroundWhite));
             ringPaint.setAlpha(alpha);
             ringPaint.setStrokeWidth((selected ? dp(1.8f) : dp(1.1f)) / scale);
             canvas.drawCircle(p.x, p.y, r, ringPaint);

@@ -19,20 +19,25 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaMemoryEngine;
 import org.telegram.messenger.MglaMemoryExtractor;
 import org.telegram.messenger.MglaMemoryStorage;
 import org.telegram.messenger.R;
+import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.AvatarDrawable;
+import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -97,6 +102,8 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
     private String graphNodeType;
     private boolean graphMonthOnly;
     private String pendingFocus;
+    private boolean memoryPageBuilt;
+    private boolean linksPageBuilt;
 
     public MglaMemoryActivity() {
         super();
@@ -135,7 +142,8 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
     @Override
     public void onResume() {
         super.onResume();
-        reloadAll();
+        // Сначала отдаём кадр интерфейса, тяжёлую подгрузку — следом.
+        AndroidUtilities.runOnUIThread(this::reloadVisible, 16);
     }
 
     private View wrapScroll(View child) {
@@ -182,11 +190,12 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         rootLayout.addView(createTabs(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 10, 16, 0));
         pages = new FrameLayout(context);
         overviewPage = createOverviewPage(context);
-        memoryPage = createMemoryPage(context);
-        linksPage = createLinksPage(context);
         pages.addView(overviewPage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        pages.addView(memoryPage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        pages.addView(linksPage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Память и связи собираем лениво — иначе открытие раздела заметно тормозит.
+        memoryPage = null;
+        linksPage = null;
+        memoryPageBuilt = false;
+        linksPageBuilt = false;
         rootLayout.addView(pages, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
         showSection(0);
     }
@@ -216,9 +225,14 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
 
     private void showSection(int index) {
         section = index;
+        ensureSectionBuilt(index);
         if (overviewPage != null) {
             overviewPage.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        }
+        if (memoryPage != null) {
             memoryPage.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        }
+        if (linksPage != null) {
             linksPage.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
         }
         if (rootLayout != null && rootLayout.getChildCount() > 0 && rootLayout.getChildAt(0) instanceof LinearLayout) {
@@ -233,8 +247,28 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
                 tab.setBackground(chip);
             }
         }
-        if (index == 2) {
+        if (index == 1) {
+            reloadFacts();
+        } else if (index == 2) {
             reloadGraph();
+        }
+    }
+
+    private void ensureSectionBuilt(int index) {
+        if (pages == null || context == null) {
+            return;
+        }
+        if (index == 1 && !memoryPageBuilt) {
+            memoryPage = createMemoryPage(context);
+            pages.addView(memoryPage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+            memoryPageBuilt = true;
+        } else if (index == 2 && !linksPageBuilt) {
+            linksPage = createLinksPage(context);
+            pages.addView(linksPage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+            linksPageBuilt = true;
+            if (graphView != null) {
+                graphView.setAccount(currentAccount);
+            }
         }
     }
 
@@ -470,15 +504,10 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
     private View createCompactFact(MglaMemoryStorage.MemoryFact fact) {
         LinearLayout card = card(context);
         card.setOnClickListener(v -> showSection(1));
-        LinearLayout head = new LinearLayout(context);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        TextView kind = miniLabel(context, MglaMemoryEngine.typeRu(fact.type));
+        String day = relativeDay(fact.lastSeenAt);
+        TextView kind = miniLabel(context, joinDot(MglaMemoryEngine.typeRu(fact.type), day));
         kind.setTextColor(isHot(fact.type) ? accent() : Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        head.addView(kind);
-        TextView when = label(context, relativeDay(fact.lastSeenAt));
-        head.addView(when, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.END));
-        card.addView(head, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 14, 12, 14, 0));
+        card.addView(kind, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 14, 12, 14, 0));
         TextView text = body(context, fact.text == null ? "" : fact.text, 15, false);
         text.setMaxLines(3);
         text.setEllipsize(TextUtils.TruncateAt.END);
@@ -588,15 +617,9 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         if (isHot(fact.type)) {
             card.addView(hairline(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 2));
         }
-        LinearLayout head = new LinearLayout(context);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        TextView kind = miniLabel(context, MglaMemoryEngine.typeRu(fact.type));
+        TextView kind = miniLabel(context, joinDot(MglaMemoryEngine.typeRu(fact.type), MglaMemoryEngine.statusRu(fact.status)));
         kind.setTextColor(isHot(fact.type) ? accent() : Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        head.addView(kind);
-        TextView status = label(context, MglaMemoryEngine.statusRu(fact.status));
-        head.addView(status, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.END));
-        card.addView(head, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 14, 12, 14, 0));
+        card.addView(kind, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 14, 12, 14, 0));
 
         TextView text = body(context, fact.text == null ? "" : fact.text, 16, false);
         text.setLineSpacing(dp(2), 1f);
@@ -963,9 +986,15 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
             LinearLayout row = card(context);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
+            BackupImageView avatar = new BackupImageView(context);
+            avatar.setRoundRadius(dp(18));
+            bindDialogAvatar(avatar, uid);
+            row.addView(avatar, LayoutHelper.createLinear(36, 36, Gravity.CENTER_VERTICAL, 12, 10, 0, 10));
             String title = MglaMemoryEngine.dialogTitle(currentAccount, uid);
             TextView name = body(context, TextUtils.isEmpty(title) ? "Чат" : title, 15, false);
-            row.addView(name, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 14, 12, 8, 12));
+            name.setMaxLines(1);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            row.addView(name, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 10, 12, 8, 12));
             TextView remove = new TextView(context);
             remove.setText("Убрать");
             remove.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
@@ -981,45 +1010,85 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         }
     }
 
+    private void bindDialogAvatar(BackupImageView avatar, long uid) {
+        AvatarDrawable drawable = new AvatarDrawable();
+        MessagesController mc = MessagesController.getInstance(currentAccount);
+        if (DialogObject.isUserDialog(uid)) {
+            TLRPC.User user = uid == UserConfig.getInstance(currentAccount).getClientUserId()
+                ? UserConfig.getInstance(currentAccount).getCurrentUser()
+                : mc.getUser(uid);
+            drawable.setInfo(currentAccount, user);
+            avatar.setForUserOrChat(user, drawable);
+        } else {
+            TLRPC.Chat chat = mc.getChat(-uid);
+            drawable.setInfo(currentAccount, chat);
+            avatar.setForUserOrChat(chat, drawable);
+        }
+    }
+
     private void showAddChatDialog() {
-        if (getParentActivity() == null) {
+        int remaining = MglaMemoryConfig.remainingWatchSlots(currentAccount);
+        if (remaining <= 0) {
+            if (getParentActivity() != null) {
+                Toast.makeText(getParentActivity(), "Уже выбрано максимум " + MglaMemoryConfig.MAX_WATCHED + " чатов", Toast.LENGTH_SHORT).show();
+            }
             return;
         }
-        ArrayList<TLRPC.Dialog> dialogs = MessagesController.getInstance(currentAccount).getAllDialogs();
-        ArrayList<String> titles = new ArrayList<>();
-        ArrayList<Long> ids = new ArrayList<>();
-        for (TLRPC.Dialog dialog : dialogs) {
-            long uid = dialog.id;
-            if (DialogObject.isEncryptedDialog(uid) || MglaMemoryConfig.isWatched(currentAccount, uid)) {
-                continue;
+        Bundle args = new Bundle();
+        args.putBoolean("onlySelect", true);
+        args.putBoolean("mgla_memory_sources", true);
+        args.putBoolean("checkCanWrite", false);
+        args.putBoolean("allowGlobalSearch", false);
+        args.putInt("dialogsType", DialogsActivity.DIALOGS_TYPE_WIDGET);
+        args.putInt("maxSelectedDialogs", remaining);
+        DialogsActivity picker = new DialogsActivity(args);
+        picker.setDelegate((fragment, dids, message, param, notify, scheduleDate, scheduleRepeatPeriod, topicsFragment) -> {
+            if (dids == null || dids.isEmpty()) {
+                return true;
             }
-            String title = MglaMemoryEngine.dialogTitle(currentAccount, uid);
-            titles.add(TextUtils.isEmpty(title) ? "Чат" : title);
-            ids.add(uid);
-        }
-        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-        builder.setTitle("Добавить источник");
-        if (titles.isEmpty()) {
-            builder.setMessage("Новых диалогов для памяти нет.");
-            builder.setPositiveButton("Закрыть", null);
-        } else {
-            builder.setItems(titles.toArray(new String[0]), (dialog, which) -> {
-                MglaMemoryConfig.addWatched(currentAccount, ids.get(which));
+            int added = 0;
+            for (MessagesStorage.TopicKey key : dids) {
+                long uid = key.dialogId;
+                if (DialogObject.isEncryptedDialog(uid) || MglaMemoryConfig.isWatched(currentAccount, uid)) {
+                    continue;
+                }
+                if (MglaMemoryConfig.remainingWatchSlots(currentAccount) <= 0) {
+                    break;
+                }
+                MglaMemoryConfig.addWatched(currentAccount, uid);
+                added++;
+            }
+            if (added > 0) {
                 MglaMemoryExtractor.kick();
                 rebuildSources();
                 reloadOverview();
-            });
-            builder.setNegativeButton("Отмена", null);
-        }
-        showDialog(builder.create());
+            }
+            fragment.finishFragment();
+            return true;
+        });
+        presentFragment(picker);
     }
 
     // endregion
 
+    private void reloadVisible() {
+        reloadOverview();
+        rebuildSources();
+        if (section == 1) {
+            reloadFacts();
+        } else if (section == 2) {
+            reloadGraph();
+        }
+    }
+
     private void reloadAll() {
         reloadOverview();
-        reloadFacts();
-        reloadGraph();
+        if (memoryPageBuilt) {
+            reloadFacts();
+        }
+        if (linksPageBuilt) {
+            reloadGraph();
+        }
         rebuildSources();
     }
 
@@ -1175,6 +1244,17 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         return MglaMemoryStorage.TYPE_DECISION.equals(type)
             || MglaMemoryStorage.TYPE_PROMISE.equals(type)
             || MglaMemoryStorage.TYPE_EVENT.equals(type);
+    }
+
+    /** «ОБЕЩАНИЕ · Сегодня» — mid-dot, чтобы слова не слипались. */
+    private static String joinDot(String left, String right) {
+        if (TextUtils.isEmpty(left)) {
+            return right == null ? "" : right;
+        }
+        if (TextUtils.isEmpty(right)) {
+            return left;
+        }
+        return left + " · " + right;
     }
 
     private static String relativeDay(long sec) {
