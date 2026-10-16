@@ -2947,6 +2947,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     }
 
     public void playNextMessage() {
+        if (playingMessageObject != null && MglaYandexMusicPlayback.isYandexMessage(playingMessageObject)) {
+            MglaYandexMusicPlayer.getInstance().next();
+            return;
+        }
         playNextMessageWithoutOrder(false);
     }
 
@@ -2974,6 +2978,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     }
 
     private void playNextMessageWithoutOrder(boolean byStop) {
+        if (byStop && playingMessageObject != null && MglaYandexMusicPlayback.isYandexMessage(playingMessageObject)) {
+            MglaYandexMusicPlayer.getInstance().next();
+            return;
+        }
         ArrayList<MessageObject> currentPlayList = SharedConfig.shuffleMusic ? shuffledPlaylist : playlist;
 
         if (byStop && (SharedConfig.repeatMode == 2 || SharedConfig.repeatMode == 1 && currentPlayList.size() == 1) && !forceLoopCurrentPlaylist) {
@@ -3039,6 +3047,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     }
 
     public void playPreviousMessage() {
+        if (playingMessageObject != null && MglaYandexMusicPlayback.isYandexMessage(playingMessageObject)) {
+            MglaYandexMusicPlayer.getInstance().prev();
+            return;
+        }
         ArrayList<MessageObject> currentPlayList = SharedConfig.shuffleMusic ? shuffledPlaylist : playlist;
         if (currentPlayList.isEmpty() || currentPlaylistNum < 0 || currentPlaylistNum >= currentPlayList.size()) {
             return;
@@ -3770,6 +3782,25 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             if (!exists) {
                 file = null;
             }
+        }
+        // Yandex Music synthetic messages: download locally, then replay via MediaController.
+        if (!exists && MglaYandexMusicPlayback.isYandexMessage(messageObject)) {
+            downloadingCurrentMessage = true;
+            isPaused = false;
+            lastProgress = 0;
+            audioInfo = null;
+            playingMessageObject = messageObject;
+            if (canStartMusicPlayerService()) {
+                Intent yandexIntent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
+                try {
+                    ApplicationLoader.applicationContext.startService(yandexIntent);
+                } catch (Throwable e) {
+                    FileLog.e(e);
+                }
+            }
+            NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
+            MglaYandexMusicPlayback.ensureDownloadedThenPlay(messageObject);
+            return true;
         }
         final File cacheFile = file != null ? file : FileLoader.getInstance(messageObject.currentAccount).getPathToMessage(messageObject.messageOwner);
         boolean canStream = SharedConfig.streamMedia && (messageObject.isMusic() || messageObject.isRoundVideo() || messageObject.isVideo() && messageObject.canStreamVideo()) && !messageObject.shouldEncryptPhotoOrVideo() && !DialogObject.isEncryptedDialog(messageObject.getDialogId());

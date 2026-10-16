@@ -9,6 +9,7 @@ import android.animation.Animator;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
@@ -59,6 +60,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
+import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.MglaMainTabsIslandEditor;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
@@ -143,6 +145,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     private ImageView searchButtonIcon;
     private BlurredBackgroundDrawable searchButtonBackground;
     private View fadeView;
+    private MglaGlobalMusicBar globalMusicBar;
     private boolean pendingOpenSearch;
 
     public MainTabsActivity() {
@@ -301,8 +304,11 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         blur3_updateColors();
         checkContactsTabBadge();
         checkUnreadCount(true);
-
+        if (globalMusicBar != null) {
+            globalMusicBar.onResume();
+        }
         showAccountChangeHint();
+        applySystemNavigationBar();
     }
 
     private void checkContactsTabBadge() {
@@ -323,6 +329,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     @Override
     public void onPause() {
         super.onPause();
+        if (globalMusicBar != null) {
+            globalMusicBar.onPause();
+        }
         if (accountSwitchHint != null) {
             accountSwitchHint.hide();
         }
@@ -332,6 +341,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     public View createView(Context context) {
         super.createView(context);
         tabletLayout = false;
+
+        // Do NOT set contentView clipChildren=false — that was added for music underglow and
+        // let the theme fade / page backgrounds paint into the system navigation bar.
 
         tabsView = new MainTabsLayout(context, resourceProvider);
         tabsView.setClipChildren(false);
@@ -399,6 +411,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                 DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS,
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         contentView.addView(tabsViewWrapper, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
+
+        globalMusicBar = new MglaGlobalMusicBar(context, resourceProvider);
+        globalMusicBar.attachGlass(iBlur3FactoryGlass, resourceProvider);
+        // Outer height includes GLOW_OUTSET; bottom margin pulls the glass body back to the old seat.
+        contentView.addView(globalMusicBar, LayoutHelper.createFrame(
+                LayoutHelper.MATCH_PARENT,
+                DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.GLOW_OUTSET_DP * 2,
+                Gravity.BOTTOM,
+                12 - MglaGlobalMusicBar.GLOW_OUTSET_DP, 0, 12 - MglaGlobalMusicBar.GLOW_OUTSET_DP,
+                DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + 4 - MglaGlobalMusicBar.GLOW_OUTSET_DP));
 
         applySearchButtonVisibility(false);
         updateTabsIslandMaxWidth();
@@ -1006,8 +1028,11 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                 return new MglaPlaceholderTabActivity("Задачи", "Раздел задач скоро появится");
             case AI:
                 return new MglaPlaceholderTabActivity("ИИ", "Раздел ИИ скоро появится");
-            case MUSIC:
-                return new MglaPlaceholderTabActivity("Музыка", "Раздел музыки скоро появится");
+            case MUSIC: {
+                Bundle args = new Bundle();
+                args.putBoolean("hasMainTabs", true);
+                return new MglaMusicActivity(args);
+            }
             default:
                 return null;
         }
@@ -1095,10 +1120,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         ViewGroup.MarginLayoutParams lp;
         {
+            // Fade from the physical bottom of the screen up (under island + system nav inset).
             final int height = navigationBarHeight + updateLayoutHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS);
             lp = (ViewGroup.MarginLayoutParams) fadeView.getLayoutParams();
-            if (lp.height != height) {
+            if (lp.height != height || lp.bottomMargin != 0) {
                 lp.height = height;
+                lp.bottomMargin = 0;
                 fadeView.setLayoutParams(lp);
             }
         }
@@ -1118,6 +1145,26 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         tabsViewWrapper.setPadding(systemInsets.left, 0, systemInsets.right, navigationBarHeight);
         updateTabsIslandMaxWidth();
+        if (globalMusicBar != null) {
+            ViewGroup.MarginLayoutParams musicLp = (ViewGroup.MarginLayoutParams) globalMusicBar.getLayoutParams();
+            if (musicLp != null) {
+                final int glow = dp(MglaGlobalMusicBar.GLOW_OUTSET_DP);
+                int musicBottom = navigationBarHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) + dp(4) - glow;
+                if (isUpdateLayoutVisible) {
+                    musicBottom += dp(UpdateLayoutWrapper.HEIGHT);
+                }
+                final int side = systemInsets.left + dp(12) - glow;
+                final int sideR = systemInsets.right + dp(12) - glow;
+                final int h = dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.GLOW_OUTSET_DP * 2);
+                if (musicLp.height != h || musicLp.bottomMargin != musicBottom || musicLp.leftMargin != side || musicLp.rightMargin != sideR) {
+                    musicLp.height = h;
+                    musicLp.bottomMargin = musicBottom;
+                    musicLp.leftMargin = side;
+                    musicLp.rightMargin = sideR;
+                    globalMusicBar.setLayoutParams(musicLp);
+                }
+            }
+        }
 
         final WindowInsetsCompat consumed = isUpdateLayoutVisible ?
             insets.inset(0, 0, 0, navigationBarHeight) : insets;
@@ -1287,6 +1334,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             // only because child GlassTabViews handle their own clicks.
             searchButton.setEnabled(interactive);
             searchButton.setClickable(interactive);
+        }
+        if (globalMusicBar != null) {
+            globalMusicBar.setTranslationY(lerp(hiddenY, normalY, factor));
+            globalMusicBar.setAlpha(factor);
         }
     }
 
@@ -1553,5 +1604,35 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     @Override
     public EdgeToEdgeSupportMode getEdgeToEdgeSupportMode() {
         return EdgeToEdgeSupportMode.FULL;
+    }
+
+    @Override
+    public boolean drawEdgeNavigationBar() {
+        return false;
+    }
+
+    @Override
+    public int getNavigationBarColor() {
+        return Color.TRANSPARENT;
+    }
+
+    @Override
+    public void onBecomeFullyVisible() {
+        super.onBecomeFullyVisible();
+        applySystemNavigationBar();
+    }
+
+    private void applySystemNavigationBar() {
+        if (getParentActivity() == null || getParentActivity().getWindow() == null) {
+            return;
+        }
+        // Window nav bar must stay transparent (edge-to-edge). Do not paint theme into it.
+        if (getParentLayout() != null) {
+            getParentLayout().setNavigationBarColor(Color.TRANSPARENT);
+        }
+        AndroidUtilities.setNavigationBarColor(getParentActivity(), Color.TRANSPARENT, false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getParentActivity().getWindow().setNavigationBarContrastEnforced(false);
+        }
     }
 }

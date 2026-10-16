@@ -1823,6 +1823,12 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             return;
         }
         MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
+        // With main tabs, music/voice chrome lives in MglaGlobalMusicBar above the island — don't duplicate on Dialogs top panel.
+        if (messageObject != null && (messageObject.isMusic() || messageObject.isVoice())
+                && fragment instanceof org.telegram.ui.DialogsActivity
+                && ((org.telegram.ui.DialogsActivity) fragment).hasMainTabs) {
+            messageObject = null;
+        }
         View fragmentView = fragment.getFragmentView();
         if (!create && fragmentView != null) {
             if (fragmentView.getParent() == null || ((View) fragmentView.getParent()).getVisibility() != VISIBLE) {

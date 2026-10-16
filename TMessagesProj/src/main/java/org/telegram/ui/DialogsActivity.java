@@ -3012,8 +3012,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         BirthdayController.getInstance(currentAccount).check();
         getMediaDataController().buildShortcuts();
-        additionNavigationBarHeight = hasMainTabs ? dp(MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
-        additionFloatingButtonOffset = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
+        // Island + optional global music bar above it (always reserved so list doesn't jump)
+        // Music bar outer height matches tabs island (MAIN_TABS_HEIGHT_WITH_MARGINS).
+        additionNavigationBarHeight = hasMainTabs ? dp(MAIN_TABS_HEIGHT_WITH_MARGINS + MAIN_TABS_HEIGHT_WITH_MARGINS + 12) : 0;
+        additionFloatingButtonOffset = hasMainTabs ? dp(MAIN_TABS_HEIGHT_WITH_MARGINS + MAIN_TABS_HEIGHT_WITH_MARGINS + 12) : 0;
 
         return true;
     }

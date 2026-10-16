@@ -45,9 +45,9 @@ public final class MglaIconThemes {
     // Near-black crimson (forced verbatim in Theme.applyMglaAccent — no hue wash to pink).
     private static final int DARK_RED = 0xFF2A0006;
     /** Dymka: switches / buttons. */
-    public static final int DYMKA_SWITCH = 0xFF3E0F05;
+    public static final int DYMKA_SWITCH = 0xFF411008;
     /** Dymka: section headers (e.g. «Смахивание влево…»). */
-    public static final int DYMKA_HEADER = 0xFF411008;
+    public static final int DYMKA_HEADER = 0xFF3E0F05;
     private static final int RED = 0xFFE53935;
     private static final int GRAY = 0xFF9AA0A6;
     // Darker forest green — was too neon at Material green.

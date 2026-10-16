@@ -9358,9 +9358,17 @@ public class MessagesStorage extends BaseController {
                             }
                             cursor.dispose();
                             cursor = null;
+                            // SQLite MAX/MIN over an empty set still returns a row with NULL → 0; treat as missing.
+                            if (startMid <= 0) {
+                                startMid = -1;
+                            }
+                            if (endMid <= 0) {
+                                endMid = -1;
+                            }
                             if (startMid != -1 && endMid != -1) {
                                 if (startMid == endMid) {
-                                    max_id_query = startMid;
+                                    max_id_override = startMid;
+                                    messageMaxId = max_id_query = startMid;
                                 } else {
                                     if (threadMessageId != 0) {
                                         cursor = database.queryFinalized(String.format(Locale.US, "SELECT start FROM messages_holes_topics WHERE uid = %d AND topic_id = %d AND start <= %d AND end > %d", dialogId, threadMessageId, startMid, startMid));
@@ -9930,10 +9938,12 @@ public class MessagesStorage extends BaseController {
                             usersToLoad.clear();
                             chatsToLoad.clear();
                             res.messages.clear();
+                            messagesCount = 0;
                         }
                     }
                     if ((load_type == 4 || load_type == 3) && res.messages.size() == 1) {
                         res.messages.clear();
+                        messagesCount = 0;
                     }
                 }
                 if (mentions_unread != 0) {

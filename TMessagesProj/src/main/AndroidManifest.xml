@@ -731,6 +731,12 @@
             android:foregroundServiceType="mediaPlayback"
         />
         <service
+            android:name=".MglaYandexMusicService"
+            android:exported="false"
+            android:enabled="true"
+            android:foregroundServiceType="mediaPlayback"
+        />
+        <service
             android:name=".MusicBrowserService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback"
@@ -759,6 +765,15 @@
                 <action android:name="org.telegram.android.musicplayer.previous" />
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
                 <action android:name="android.media.AUDIO_BECOMING_NOISY" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".MglaYandexMusicReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="org.telegram.messenger.mgla.ym.close" />
+                <action android:name="org.telegram.messenger.mgla.ym.pause" />
+                <action android:name="org.telegram.messenger.mgla.ym.next" />
+                <action android:name="org.telegram.messenger.mgla.ym.play" />
+                <action android:name="org.telegram.messenger.mgla.ym.previous" />
             </intent-filter>
         </receiver>
         <receiver android:name=".voip.VoIPMediaButtonReceiver" android:exported="false">

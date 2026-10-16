@@ -1091,6 +1091,7 @@ public class ChatActivity extends BaseFragment implements
     private int postponedScrollMinMessageId;
     private int postponedScrollToLastMessageQueryIndex;
     private int postponedScrollMessageId;
+    private int postponedScrollMessageDate;
     private boolean fakePostponedScroll;
     private boolean postponedScrollIsCanceled;
     private ChatActivityTextSelectionHelper textSelectionHelper;
@@ -1315,6 +1316,7 @@ public class ChatActivity extends BaseFragment implements
     private final DialogInterface.OnCancelListener postponedScrollCancelListener = dialog -> {
         postponedScrollIsCanceled = true;
         postponedScrollMessageId = 0;
+        postponedScrollMessageDate = 0;
         nextScrollToMessageId = 0;
         forceNextPinnedMessageId = 0;
         invalidateMessagesVisiblePart();
@@ -12764,6 +12766,7 @@ public class ChatActivity extends BaseFragment implements
             fakePostponedScroll = false;
             waitingForLoad.add(lastLoadIndex);
             postponedScrollMessageId = 0;
+            postponedScrollMessageDate = date;
             postponedScrollIsCanceled = false;
             getMessagesController().loadMessages(dialog_id, mergeDialogId, false, 30, 0, date, true, 0, classGuid, 4, 0, chatMode, threadMessageId, replyMaxReadId, lastLoadIndex++, isTopic);
             floatingDateView.setAlpha(0.0f);
@@ -17337,6 +17340,7 @@ public class ChatActivity extends BaseFragment implements
             fakePostponedScroll = false;
             postponedScrollMinMessageId = minMessageId[0];
             postponedScrollMessageId = id;
+            postponedScrollMessageDate = 0;
             getMessagesController().loadMessages(loadIndex == 0 ? dialog_id : mergeDialogId, 0, false, ((isThreadChat() && !isTopic) || AndroidUtilities.isTablet()) ? 30 : 20, startLoadFromMessageId, 0, true, 0, classGuid, 3, 0, chatMode, threadMessageId, replyMaxReadId, lastLoadIndex++, isTopic);
         } else {
             View child = chatListView.getChildAt(0);
@@ -21137,6 +21141,16 @@ public class ChatActivity extends BaseFragment implements
                     break;
                 }
             }
+            // Cache may return a window without max_id_override; recover target from date.
+            if (startLoadFromMessageId == 0 && postponedScrollMessageDate != 0 && !messArr.isEmpty()) {
+                for (int a = messArr.size() - 1; a >= 0; a--) {
+                    MessageObject message = messArr.get(a);
+                    if (message != null && message.messageOwner != null && message.messageOwner.date >= postponedScrollMessageDate && message.getId() != 0) {
+                        startLoadFromMessageId = message.getId();
+                        break;
+                    }
+                }
+            }
         }
 
         if (postponedScroll) {
@@ -21151,17 +21165,32 @@ public class ChatActivity extends BaseFragment implements
                 postponedScrollMessageId = startLoadFromMessageId;
             }
 
+            if (postponedScrollIsCanceled) {
+                if (progressDialog != null) {
+                    progressDialog.dismiss();
+                }
+                resetProgressDialogLoading();
+                showPinnedProgress(false);
+                postponedScrollMessageDate = 0;
+                return;
+            }
+            // Incomplete local cache for a date jump: retry from server instead of scrolling to end.
+            if (load_type == 4 && postponedScrollMessageId == 0 && isCache && postponedScrollMessageDate != 0) {
+                postponedScrollToLastMessageQueryIndex = lastLoadIndex;
+                waitingForLoad.add(lastLoadIndex);
+                getMessagesController().loadMessages(dialog_id, mergeDialogId, false, count, 0, postponedScrollMessageDate, false, 0, classGuid, 4, 0, chatMode, threadMessageId, replyMaxReadId, lastLoadIndex++, isTopic);
+                return;
+            }
             if (progressDialog != null) {
                 progressDialog.dismiss();
             }
             resetProgressDialogLoading();
             showPinnedProgress(false);
-            if (postponedScrollIsCanceled) {
-                return;
-            }
             if (postponedScrollMessageId == 0) {
+                postponedScrollMessageDate = 0;
                 clearChatData(true);
             } else {
+                postponedScrollMessageDate = 0;
                 if (showScrollToMessageError) {
                     boolean found = false;
                     for (int k = 0; k < messArr.size(); k++) {
