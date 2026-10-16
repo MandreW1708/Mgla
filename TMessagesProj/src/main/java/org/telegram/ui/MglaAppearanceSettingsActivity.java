@@ -176,6 +176,52 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
         foldersBlock.addView(folderOutlineCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         rootLayout.addView(foldersBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
+        LinearLayout mainTabsBlock = createBlock(context, "Нижний островок");
+        final org.telegram.ui.Components.MglaMainTabsIslandEditor[] tabsEditorRef = new org.telegram.ui.Components.MglaMainTabsIslandEditor[1];
+        tabsEditorRef[0] = new org.telegram.ui.Components.MglaMainTabsIslandEditor(
+                context,
+                getResourceProvider(),
+                getCurrentAccount(),
+                order -> org.telegram.messenger.MglaMainTabsConfig.setEnabledTabs(order)
+        );
+        tabsEditorRef[0].setPadding(dp(12), dp(4), dp(12), dp(4));
+        mainTabsBlock.addView(tabsEditorRef[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextSettingsCell resetTabsCell = new TextSettingsCell(context);
+        resetTabsCell.setBackground(null);
+        resetTabsCell.setText("Сбросить по умолчанию", false);
+
+        TextCheckCell searchButtonCell = new TextCheckCell(context);
+        searchButtonCell.setBackground(null);
+        searchButtonCell.setTextAndCheck("Кнопка поиска", org.telegram.messenger.MglaMainTabsConfig.isSearchButtonEnabled(), false);
+        searchButtonCell.setOnClickListener(v -> {
+            boolean newVal = !org.telegram.messenger.MglaMainTabsConfig.isSearchButtonEnabled();
+            org.telegram.messenger.MglaMainTabsConfig.setSearchButtonEnabled(newVal);
+            searchButtonCell.setChecked(newVal);
+            if (tabsEditorRef[0] != null) {
+                tabsEditorRef[0].setSearchButtonEnabled(newVal);
+            }
+        });
+
+        resetTabsCell.setOnClickListener(v -> {
+            org.telegram.messenger.MglaMainTabsConfig.resetToDefault();
+            searchButtonCell.setChecked(false);
+            int editorIndex = mainTabsBlock.indexOfChild(tabsEditorRef[0]);
+            mainTabsBlock.removeView(tabsEditorRef[0]);
+            tabsEditorRef[0] = new org.telegram.ui.Components.MglaMainTabsIslandEditor(
+                    context,
+                    getResourceProvider(),
+                    getCurrentAccount(),
+                    order -> org.telegram.messenger.MglaMainTabsConfig.setEnabledTabs(order)
+            );
+            tabsEditorRef[0].setPadding(dp(12), dp(4), dp(12), dp(4));
+            mainTabsBlock.addView(tabsEditorRef[0], Math.max(0, editorIndex), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        });
+        mainTabsBlock.addView(resetTabsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        mainTabsBlock.addView(MglaUi.createDivider(context));
+        mainTabsBlock.addView(searchButtonCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(mainTabsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         LinearLayout sideMenuBlock = createBlock(context, "Боковое меню");
 
         TextSettingsCell configureCell = new TextSettingsCell(context);

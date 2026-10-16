@@ -224,6 +224,9 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1133, "Значок уведомлений", hub, appearance, appearanceIcon, appearanceScreen, "Значок уведомлений", "appearance/notification-icon"));
         l.add(new Entry(1124, "Папки", hub, appearance, appearanceIcon, appearanceScreen, "Папки", "appearance/folders"));
         l.add(new Entry(1125, "Обводка активной папки", hub, appearance, appearanceIcon, appearanceScreen, "Обводка активной папки", "appearance/folders/active-outline"));
+        l.add(new Entry(1150, "Нижний островок", hub, appearance, appearanceIcon, appearanceScreen, "Нижний островок", "appearance/main-tabs"));
+        l.add(new Entry(1151, "Вкладки", hub, appearance, appearanceIcon, appearanceScreen, "Вкладки", "appearance/main-tabs/tabs"));
+        l.add(new Entry(1152, "Кнопка поиска", hub, appearance, appearanceIcon, appearanceScreen, "Кнопка поиска", "appearance/main-tabs/search"));
         l.add(new Entry(1069, sideMenu, hub, appearance, appearanceIcon, sideMenuScreen, null, "appearance/side-menu"));
         l.add(new Entry(1070, "Включить боковое меню", hub, sideMenu, appearanceIcon, sideMenuScreen, "Включить боковое меню", "appearance/side-menu/enable"));
         l.add(new Entry(1071, "Настроить элементы", hub, sideMenu, appearanceIcon, sideMenuScreen, "Настроить элементы", "appearance/side-menu/elements"));

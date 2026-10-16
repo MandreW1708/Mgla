@@ -385,6 +385,7 @@ public class NotificationCenter {
     public static final int webBrowserSettingsUpdate = totalEvents++;
     public static final int ghostModeChanged = totalEvents++;
     public static final int mglaHeaderSettingsChanged = totalEvents++;
+    public static final int mglaMainTabsChanged = totalEvents++;
     public static final int communityPendingRequestsUpdate = totalEvents++;
     public static final int communitySwitchedCollapsed = totalEvents++;
     public static final int mglaExportProgressChanged = totalEvents++;

@@ -18,8 +18,6 @@ import androidx.dynamicanimation.animation.FloatPropertyCompat;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
 
-import android.util.Log;
-
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedLinearLayout;
@@ -43,8 +41,9 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         this.resourcesProvider = resourcesProvider;
     }
 
-    private static final float[] PASS_TEXT_SIZES_DP = {12f, 12f, 10f};
-    private static final int[] PASS_PADDINGS_DP = {16, 8, 4};
+    // Progressive density: full labels → tighter → compact → icon-only (0 = hide labels).
+    private static final float[] PASS_TEXT_SIZES_DP = {12f, 11f, 10f, 0f};
+    private static final int[] PASS_PADDINGS_DP = {16, 10, 6, 4};
 
     private int maxWidthPx;
 
@@ -66,7 +65,16 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         }
 
         final int maxTotalWidthForTabs = width - getPaddingLeft() - getPaddingRight();
-        final int minTotalWidthForTabs = Math.min(dp(320), maxTotalWidthForTabs);
+        // With many tabs, don't force a wide island — keep it compact and balanced.
+        int visibleGuess = 0;
+        for (int a = 0, N = getChildCount(); a < N; a++) {
+            if (isViewVisible(getChildAt(a))) {
+                visibleGuess++;
+            }
+        }
+        visibleGuess = Math.max(1, visibleGuess);
+        final int minIslandDp = visibleGuess >= 6 ? 240 : (visibleGuess >= 5 ? 280 : 320);
+        final int minTotalWidthForTabs = Math.min(dp(minIslandDp), maxTotalWidthForTabs);
 
         int chosenPass = PASS_TEXT_SIZES_DP.length - 1;
         float lastMeasuredTextSize = -1;
@@ -118,13 +126,16 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             totalWeight = visibleChildCount;
         }
 
+        final boolean fillExact = MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY;
+        final float growTarget = fillExact ? maxTotalWidthForTabs : minTotalWidthForTabs;
+
         if (totalWidth > maxTotalWidthForTabs) {
             final float m = maxTotalWidthForTabs / totalWidth;
             for (int a = 0, N = getChildCount(); a < N; a++) {
                 tabsTextWidthWithMargin[a] *= m;
             }
-        } else if (totalWidth < minTotalWidthForTabs) {
-            final float growW = minTotalWidthForTabs - totalWidth;
+        } else if (totalWidth < growTarget && totalWeight > 0) {
+            final float growW = growTarget - totalWidth;
             final float growP = growW / totalWeight;
 
             for (int a = 0, N = getChildCount(); a < N; a++) {
@@ -142,7 +153,11 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             tabsLeftPos[a] = l;
             l += tabsWidth[a];
         }
-        setMeasuredDimension(l + getPaddingLeft() + getPaddingRight(), height);
+        int measuredW = l + getPaddingLeft() + getPaddingRight();
+        if (fillExact) {
+            measuredW = MeasureSpec.getSize(widthMeasureSpec);
+        }
+        setMeasuredDimension(measuredW, height);
         for (int a = 0, N = getChildCount(); a < N; a++) {
             final View child = getChildAt(a);
             child.measure(
@@ -437,6 +452,11 @@ public class MainTabsLayout extends AnimatedLinearLayout {
 
     public void addTabToIgnoreLongPressNavigation(View v) {
         tabsWithIgnoreLongPressNavigation.add(v);
+    }
+
+    public void clearTabInteractionOverrides() {
+        tabsWithIgnoreClick.clear();
+        tabsWithIgnoreLongPressNavigation.clear();
     }
 
     private final BoolAnimator animatorIsScaled = new BoolAnimator(0, (a, factor, c, g) -> {

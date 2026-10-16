@@ -398,10 +398,14 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     }
 
     public static GlassTabView createMainTab(Context context, Theme.ResourcesProvider resourcesProvider, TabAnimation tabAnimation, @StringRes int stringRes) {
+        return createMainTab(context, resourcesProvider, tabAnimation, LocaleController.getString(stringRes));
+    }
+
+    public static GlassTabView createMainTab(Context context, Theme.ResourcesProvider resourcesProvider, TabAnimation tabAnimation, CharSequence title) {
         GlassTabView tab = new GlassTabView(context);
         tab.resourcesProvider = resourcesProvider;
         tab.tabAnimation = tabAnimation;
-        tab.textView.setText(LocaleController.getString(stringRes));
+        tab.textView.setText(title);
         tab.checkPlayAnimation(false);
         tab.imageView.setLayoutParams(LayoutHelper.createFrame(24, 24, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 4, 0, 0));
         tab.colorDefault = Theme.getColor(Theme.key_glass_tabUnselected, resourcesProvider);
@@ -409,6 +413,15 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         tab.colorSelectedText = Theme.getColor(Theme.key_glass_tabSelectedText, resourcesProvider);
         tab.updateColors();
         return tab;
+    }
+
+    /** Hide label for dense islands (many tabs). */
+    public void setLabelVisible(boolean visible) {
+        textView.setVisibility(visible ? VISIBLE : GONE);
+    }
+
+    public boolean isLabelVisible() {
+        return textView.getVisibility() == VISIBLE;
     }
 
     public static GlassTabView createAvatar(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, @StringRes int stringRes) {
@@ -514,6 +527,9 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     @Override
     public float measureTextWidth() {
+        if (textView.getVisibility() != VISIBLE) {
+            return dp(24);
+        }
         return defaultTextPaint.measureText(textView.getText().toString());
     }
 
@@ -521,6 +537,9 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     @Override
     public float measureTextWidth(float textSizeDp) {
+        if (textSizeDp <= 0f) {
+            return dp(24);
+        }
         if (scaledTextPaint == null) {
             scaledTextPaint = new TextPaint(defaultTextPaint);
         }
@@ -530,6 +549,11 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     @Override
     public void setTextSizeDp(float textSizeDp) {
+        if (textSizeDp <= 0f) {
+            setLabelVisible(false);
+            return;
+        }
+        setLabelVisible(true);
         final float px = dp(textSizeDp);
         if (textView.getTextSize() != px) {
             textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, textSizeDp);

@@ -130,6 +130,13 @@ public abstract class ViewPagerActivity extends BaseFragment {
         fragmentsArr.put(position, new FragmentState(fragment));
     }
 
+    /** Reattach an already-created fragment (e.g. DialogsActivity) after tab order changes. */
+    protected void putPreservedFragmentAtPosition(int position, BaseFragment fragment) {
+        FragmentState state = new FragmentState(fragment);
+        state.onCreateCalled = true;
+        fragmentsArr.put(position, state);
+    }
+
     protected boolean canScrollBackward(MotionEvent ev) {
         return true;
     }
