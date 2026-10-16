@@ -3012,12 +3012,50 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         BirthdayController.getInstance(currentAccount).check();
         getMediaDataController().buildShortcuts();
-        // Island + optional global music bar above it (always reserved so list doesn't jump)
-        // Music bar outer height matches tabs island (MAIN_TABS_HEIGHT_WITH_MARGINS).
-        additionNavigationBarHeight = hasMainTabs ? dp(MAIN_TABS_HEIGHT_WITH_MARGINS + MAIN_TABS_HEIGHT_WITH_MARGINS + 12) : 0;
-        additionFloatingButtonOffset = hasMainTabs ? dp(MAIN_TABS_HEIGHT_WITH_MARGINS + MAIN_TABS_HEIGHT_WITH_MARGINS + 12) : 0;
+        // Tabs island always; music bar height only while the mini-player is visible.
+        musicBarVisible = false;
+        applyMainTabsBottomOffsets();
 
         return true;
+    }
+
+    private boolean musicBarVisible;
+
+    public void setMusicBarVisible(boolean visible) {
+        if (!hasMainTabs || musicBarVisible == visible) {
+            return;
+        }
+        musicBarVisible = visible;
+        applyMainTabsBottomOffsets();
+        updateFloatingButtonOffset();
+        if (undoView != null) {
+            for (UndoView view : undoView) {
+                if (view == null) {
+                    continue;
+                }
+                ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
+                if (lp == null) {
+                    continue;
+                }
+                final int bottomMargin = navigationBarHeight + additionNavigationBarHeight;
+                if (lp.bottomMargin != bottomMargin) {
+                    lp.bottomMargin = bottomMargin;
+                    view.setLayoutParams(lp);
+                }
+            }
+        }
+    }
+
+    private void applyMainTabsBottomOffsets() {
+        if (!hasMainTabs) {
+            additionNavigationBarHeight = 0;
+            additionFloatingButtonOffset = 0;
+            return;
+        }
+        final int tabs = MAIN_TABS_HEIGHT_WITH_MARGINS;
+        final int music = musicBarVisible ? MAIN_TABS_HEIGHT_WITH_MARGINS + 8 : 0;
+        additionNavigationBarHeight = dp(tabs + music);
+        additionFloatingButtonOffset = dp(tabs + music);
     }
 
     public static void loadDialogs(AccountInstance accountInstance) {

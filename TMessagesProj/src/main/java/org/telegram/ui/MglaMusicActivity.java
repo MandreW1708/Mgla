@@ -184,12 +184,9 @@ public class MglaMusicActivity extends BaseFragment implements
         rootLayout = new FrameLayout(context);
         rootLayout.setBackgroundColor(0xFF000000); // Pure dark background
 
-        // Reserve space for main-tabs island + global glass music bar above it
-        int bottomPad = AndroidUtilities.navigationBarHeight
-                + (hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.BAR_HEIGHT + 12) : dp(16));
-
         mainContainer = new FrameLayout(context);
-        mainContainer.setPadding(0, AndroidUtilities.statusBarHeight, 0, bottomPad);
+        // Background fills to the physical bottom; scrollables reserve space for islands via their own padding.
+        mainContainer.setPadding(0, AndroidUtilities.statusBarHeight, 0, 0);
 
         // 1. Main "Коллекция" Page
         collectionScrollView = createCollectionPage(context);
@@ -222,14 +219,23 @@ public class MglaMusicActivity extends BaseFragment implements
     // MAIN COLLECTION PAGE
     // ==========================================
 
+    private int islandBottomInset() {
+        return AndroidUtilities.navigationBarHeight
+                + (hasMainTabs
+                ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.BAR_HEIGHT + 12)
+                : dp(16));
+    }
+
     private ScrollView createCollectionPage(Context context) {
         ScrollView scroll = new ScrollView(context);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, islandBottomInset());
 
         LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(0, 0, 0, dp(64));
+        content.setPadding(0, 0, 0, dp(24));
 
         // Top Action Bar ("Коллекция" + Profile, Sliders, Search)
         LinearLayout topBar = new LinearLayout(context);
@@ -850,6 +856,8 @@ public class MglaMusicActivity extends BaseFragment implements
 
         fullFavoritesListView = new RecyclerListView(context);
         fullFavoritesListView.setLayoutManager(new LinearLayoutManager(context));
+        fullFavoritesListView.setClipToPadding(false);
+        fullFavoritesListView.setPadding(0, 0, 0, islandBottomInset());
         fullFavoritesAdapter = new FullTrackAdapter(detailTracks, null);
         fullFavoritesListView.setAdapter(fullFavoritesAdapter);
         fullFavoritesListView.setOnItemClickListener((view, position) -> {
@@ -978,6 +986,8 @@ public class MglaMusicActivity extends BaseFragment implements
 
         searchListView = new RecyclerListView(context);
         searchListView.setLayoutManager(new LinearLayoutManager(context));
+        searchListView.setClipToPadding(false);
+        searchListView.setPadding(0, 0, 0, islandBottomInset());
         searchAdapter = new FullTrackAdapter(searchResults, null);
         searchListView.setAdapter(searchAdapter);
         searchListView.setOnItemClickListener((view, position) -> {
@@ -1059,6 +1069,8 @@ public class MglaMusicActivity extends BaseFragment implements
         ScrollView scroll = new ScrollView(context);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(0xFF000000);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, islandBottomInset());
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);

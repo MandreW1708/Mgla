@@ -9,9 +9,11 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -131,24 +133,33 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         header.addView(queueBtn, LayoutHelper.createLinear(40, 40));
         content.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
 
-        // Compact square cover so seek/controls stay on screen
+        // Compact rounded-square cover so seek/controls stay on screen
+        final float coverRadius = dp(22);
         int coverSize = Math.min(dp(148), (int) (AndroidUtilities.displaySize.x * 0.38f));
-        FrameLayout coverWrap = new FrameLayout(context);
+        FrameLayout coverWrap = new FrameLayout(context) {
+            private final Path clipPath = new Path();
+            private final RectF clipRect = new RectF();
+
+            @Override
+            protected void dispatchDraw(Canvas canvas) {
+                clipRect.set(0, 0, getWidth(), getHeight());
+                clipPath.reset();
+                clipPath.addRoundRect(clipRect, coverRadius, coverRadius, Path.Direction.CW);
+                canvas.save();
+                canvas.clipPath(clipPath);
+                super.dispatchDraw(canvas);
+                canvas.restore();
+            }
+        };
         coverImage = new ImageView(context);
         coverImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
         coverImage.setAdjustViewBounds(false);
         GradientDrawable coverBg = new GradientDrawable();
-        coverBg.setCornerRadius(dp(18));
+        coverBg.setCornerRadius(coverRadius);
         coverBg.setColor(0xFF2A2A2A);
         coverImage.setBackground(coverBg);
-        coverImage.setClipToOutline(true);
-        coverImage.setOutlineProvider(new android.view.ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, android.graphics.Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(18));
-            }
-        });
-        coverWrap.addView(coverImage, LayoutHelper.createFrame(coverSize, coverSize, Gravity.CENTER));
+        coverWrap.setBackground(coverBg);
+        coverWrap.addView(coverImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         content.addView(coverWrap, LayoutHelper.createLinear(coverSize, coverSize, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
 
         // Track info row
@@ -406,7 +417,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         sourceTitle.setText(source);
 
         String coverUrl = track.getCoverUrl(400);
-        MglaMusicImageHelper.bindCover(coverImage, coverUrl, 18, R.drawable.bot_music);
+        // Load square bitmap; rounded corners come from coverWrap clipPath.
+        MglaMusicImageHelper.bindCover(coverImage, coverUrl, 0, R.drawable.bot_music);
         MglaMusicImageHelper.bindCircleCover(artistAvatar, track.getCoverUrl(100), R.drawable.bot_music);
         extractAmbientColors(coverUrl);
 

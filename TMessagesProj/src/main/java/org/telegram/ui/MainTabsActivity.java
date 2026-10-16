@@ -414,13 +414,19 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         globalMusicBar = new MglaGlobalMusicBar(context, resourceProvider);
         globalMusicBar.attachGlass(iBlur3FactoryGlass, resourceProvider);
-        // Outer height includes GLOW_OUTSET; bottom margin pulls the glass body back to the old seat.
+        // Outer height includes GLOW_OUTSET; seat just above the visible tabs glass
+        // (not above the tabs row's empty top margin).
         contentView.addView(globalMusicBar, LayoutHelper.createFrame(
                 LayoutHelper.MATCH_PARENT,
                 DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.GLOW_OUTSET_DP * 2,
                 Gravity.BOTTOM,
                 12 - MglaGlobalMusicBar.GLOW_OUTSET_DP, 0, 12 - MglaGlobalMusicBar.GLOW_OUTSET_DP,
-                DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + 4 - MglaGlobalMusicBar.GLOW_OUTSET_DP));
+                DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN + 2 - MglaGlobalMusicBar.GLOW_OUTSET_DP));
+        globalMusicBar.setVisibilityListener(visible -> {
+            if (dialogsActivity != null) {
+                dialogsActivity.setMusicBarVisible(visible);
+            }
+        });
 
         applySearchButtonVisibility(false);
         updateTabsIslandMaxWidth();
@@ -1149,7 +1155,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             ViewGroup.MarginLayoutParams musicLp = (ViewGroup.MarginLayoutParams) globalMusicBar.getLayoutParams();
             if (musicLp != null) {
                 final int glow = dp(MglaGlobalMusicBar.GLOW_OUTSET_DP);
-                int musicBottom = navigationBarHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) + dp(4) - glow;
+                // Align to the top of the tabs glass (+2dp), ignoring the island's empty top margin.
+                int musicBottom = navigationBarHeight
+                        + dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN + 2)
+                        - glow;
                 if (isUpdateLayoutVisible) {
                     musicBottom += dp(UpdateLayoutWrapper.HEIGHT);
                 }
@@ -1583,6 +1592,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
         if (searchButtonBackground != null) {
             searchButtonBackground.updateColors();
+        }
+        if (globalMusicBar != null) {
+            globalMusicBar.updateGlassColors();
         }
         if (searchButtonIcon != null) {
             searchButtonIcon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_tabUnselected), PorterDuff.Mode.SRC_IN));

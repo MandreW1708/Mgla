@@ -24,6 +24,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.core.graphics.ColorUtils;
+
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
@@ -51,10 +53,10 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     public static final int BAR_HEIGHT = DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS;
     /** Extra space so underglow stays inside this view (no contentView clipChildren=false). */
     public static final int GLOW_OUTSET_DP = 18;
-    private static final int ACCENT = 0xFFFF7043;
 
     private final Theme.ResourcesProvider resourcesProvider;
     private BlurredBackgroundDrawable glassBackground;
+    private FrameLayout glassHost;
 
     private ImageView coverView;
     private TextView titleView;
@@ -75,6 +77,24 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     private float glowPulse = 1f;
     private ValueAnimator pulseAnimator;
     private boolean observersRegistered;
+    private VisibilityListener visibilityListener;
+
+    public interface VisibilityListener {
+        void onMusicBarVisibilityChanged(boolean visible);
+    }
+
+    public void setVisibilityListener(VisibilityListener listener) {
+        visibilityListener = listener;
+    }
+
+    @Override
+    public void setVisibility(int visibility) {
+        final int was = getVisibility();
+        super.setVisibility(visibility);
+        if (was != visibility && visibilityListener != null) {
+            visibilityListener.onMusicBarVisibilityChanged(visibility == VISIBLE);
+        }
+    }
 
     public MglaGlobalMusicBar(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context);
@@ -93,12 +113,11 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         progressPaint.setStrokeWidth(dp(2f));
         progressPaint.setStrokeCap(Paint.Cap.ROUND);
         progressPaint.setStrokeJoin(Paint.Join.ROUND);
-        progressPaint.setColor(ACCENT);
 
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(10), 0, dp(6), 0);
+        row.setPadding(dp(16), 0, dp(6), 0);
 
         coverView = new ImageView(context);
         coverView.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -113,7 +132,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
                 outline.setOval(0, 0, view.getWidth(), view.getHeight());
             }
         });
-        row.addView(coverView, LayoutHelper.createLinear(40, 40, 0, 0, 10, 0));
+        row.addView(coverView, LayoutHelper.createLinear(40, 40, 4, 0, 10, 0));
 
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
@@ -178,7 +197,11 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             stopPulse();
         }), LayoutHelper.createLinear(32, 32, 0, 0, 2, 0));
 
-        addView(row, LayoutHelper.createFrame(
+        // Inner host gets liquid glass as View background (same path as tabs island).
+        glassHost = new FrameLayout(context);
+        glassHost.setClipChildren(false);
+        glassHost.addView(row, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        addView(glassHost, LayoutHelper.createFrame(
                 LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL,
                 GLOW_OUTSET_DP, GLOW_OUTSET_DP, GLOW_OUTSET_DP, GLOW_OUTSET_DP));
 
@@ -204,15 +227,24 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     }
 
     public void attachGlass(BlurredBackgroundDrawableViewFactory factory, Theme.ResourcesProvider provider) {
-        if (factory == null) {
+        if (factory == null || glassHost == null) {
             return;
         }
-        glassBackground = factory.create(this, BlurredBackgroundProviderImpl.mainTabs(provider));
+        // Same factory/provider as tabs island — includes liquid glass when LiteMode allows it.
+        glassBackground = factory.create(glassHost, BlurredBackgroundProviderImpl.mainTabs(provider));
         glassBackground.setRadius(cornerRadius);
         glassBackground.setPadding(dp(DialogsActivity.MAIN_TABS_MARGIN - 0.334f));
-        // Drawn manually in draw() inset by GLOW_OUTSET so underglow can sit in the outer ring
-        // without requiring MainTabs contentView.setClipChildren(false).
-        setBackground(null);
+        glassHost.setBackground(glassBackground);
+    }
+
+    public void updateGlassColors() {
+        if (glassBackground != null) {
+            glassBackground.updateColors();
+        }
+        if (glassHost != null) {
+            glassHost.invalidate();
+        }
+        invalidate();
     }
 
     public void onResume() {
@@ -371,13 +403,13 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     public void draw(Canvas canvas) {
         syncGlassRect();
         drawSoftUnderglow(canvas);
-        if (glassBackground != null) {
-            final int glow = dp(GLOW_OUTSET_DP);
-            glassBackground.setBounds(glow, glow, getWidth() - glow, getHeight() - glow);
-            glassBackground.draw(canvas);
-        }
+        // Liquid glass is drawn as glassHost's background (like tabsView).
         super.draw(canvas);
         drawProgressRim(canvas);
+    }
+
+    private int themeAccent() {
+        return Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider);
     }
 
     private void drawSoftUnderglow(Canvas canvas) {
@@ -385,17 +417,21 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             return;
         }
         float r = Math.min(cornerRadius, Math.min(glassRect.width(), glassRect.height()) / 2f);
+        final int accent = themeAccent();
+        final int ar = Color.red(accent);
+        final int ag = Color.green(accent);
+        final int ab = Color.blue(accent);
 
-        // Layered expanding rounded rects = soft falloff, like light under the pill.
+        // Soft outer bloom — muted theme accent
         final int layers = 8;
         float maxSpread = dp(18) * glowPulse;
         for (int i = layers; i >= 1; i--) {
             float t = i / (float) layers;
             float spread = maxSpread * t;
-            float alpha = (0.22f * (1f - t) * (1f - t)) * (0.55f + 0.45f * Math.min(1f, progress + 0.35f));
+            float alpha = (0.12f * (1f - t) * (1f - t)) * (0.55f + 0.45f * Math.min(1f, progress + 0.35f));
             underglowPaint.setColor(Color.argb(
                     Math.max(0, Math.min(255, (int) (alpha * 255))),
-                    255, 255, 255
+                    ar, ag, ab
             ));
             glowRect.set(glassRect);
             glowRect.inset(-spread, -spread);
@@ -403,14 +439,14 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             canvas.drawRoundRect(glowRect, rr, rr, underglowPaint);
         }
 
-        // Warm accent underglow closer to the rim
+        // Closer accent underglow — still muted vs timeline
         for (int i = 4; i >= 1; i--) {
             float t = i / 4f;
             float spread = dp(10) * t * glowPulse;
-            float alpha = 0.16f * (1f - t) * (0.4f + 0.6f * progress);
+            float alpha = 0.10f * (1f - t) * (0.4f + 0.6f * progress);
             underglowPaint.setColor(Color.argb(
                     Math.max(0, Math.min(255, (int) (alpha * 255))),
-                    255, 112, 67
+                    ar, ag, ab
             ));
             glowRect.set(glassRect);
             glowRect.inset(-spread, -spread);
@@ -442,7 +478,9 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         if (length <= 0f) return;
         progressPath.reset();
         pathMeasure.getSegment(0, length * progress, progressPath, true);
-        progressPaint.setAlpha(210);
+        // Timeline: theme accent, brightened
+        progressPaint.setColor(ColorUtils.blendARGB(themeAccent(), Color.WHITE, 0.28f));
+        progressPaint.setAlpha(255);
         canvas.drawPath(progressPath, progressPaint);
     }
 
