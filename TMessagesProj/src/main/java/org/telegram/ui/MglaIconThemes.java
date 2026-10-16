@@ -44,6 +44,10 @@ public final class MglaIconThemes {
 
     // Near-black crimson (forced verbatim in Theme.applyMglaAccent — no hue wash to pink).
     private static final int DARK_RED = 0xFF2A0006;
+    /** Dymka: switches / buttons. */
+    public static final int DYMKA_SWITCH = 0xFF3E0F05;
+    /** Dymka: section headers (e.g. «Смахивание влево…»). */
+    public static final int DYMKA_HEADER = 0xFF411008;
     private static final int RED = 0xFFE53935;
     private static final int GRAY = 0xFF9AA0A6;
     // Darker forest green — was too neon at Material green.
@@ -60,7 +64,8 @@ public final class MglaIconThemes {
     // Firm amoled stays pure black; icon themes use night.attheme (dark gray), like «Фирм. темная».
     private static final Palette FIRM = new Palette(
             Theme.MGLA_ACCENT_COLOR, 0, Theme.MGLA_ACCENT_COLOR, 0, true);
-    private static final Palette DYMKA = new Palette(DARK_RED, 0, DARK_RED, 0, false);
+    // Accent = switch color; bubble stays deep red; header forced in Theme.applyMglaAccent.
+    private static final Palette DYMKA = new Palette(DYMKA_SWITCH, 0, DYMKA_SWITCH, 0, false);
     private static final Palette GRADIENT = new Palette(DARK_RED, 0, DARK_RED, 0, false);
     private static final Palette ZHIDKOST = new Palette(DARK_RED, 0, DARK_RED, 0, false);
     private static final Palette UFC = new Palette(RED, 0, RED, 0, false);

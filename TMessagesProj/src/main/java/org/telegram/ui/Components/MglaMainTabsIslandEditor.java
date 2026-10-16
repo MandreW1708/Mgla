@@ -3,6 +3,7 @@ package org.telegram.ui.Components;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
@@ -77,7 +78,7 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         TextView hintView = new TextView(context);
         hintView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         hintView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
-        hintView.setText("Удерживайте и перетаскивайте, чтобы менять порядок. Нажмите, чтобы убрать (Чаты и Настройки нельзя удалить).");
+        hintView.setText("Удерживайте и перетаскивайте, чтобы менять порядок. Нажмите, чтобы убрать. Максимум 7 вкладок.");
         hintView.setPadding(dp(4), 0, dp(4), dp(10));
         addView(hintView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -247,6 +248,11 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
             if (MglaMainTabsConfig.isLocked(id)) {
                 previewSelected = position;
                 adapter.notifyDataSetChanged();
+                if (id == TabId.CHATS) {
+                    showHint("А как ты тогда попадешь в чаты?");
+                } else if (id == TabId.SETTINGS) {
+                    showHint("А как ты тогда попадешь в настройки?");
+                }
                 return;
             }
             order.remove(position);
@@ -362,6 +368,7 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
             final TabId addId = id;
             chip.setOnClickListener(v -> {
                 if (order.size() >= MglaMainTabsConfig.MAX_TABS) {
+                    showHint("Можно добавить не больше " + MglaMainTabsConfig.MAX_TABS + " вкладок");
                     return;
                 }
                 order.add(addId);
@@ -377,6 +384,21 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         if (listener != null) {
             listener.onTabsChanged(new ArrayList<>(order));
         }
+    }
+
+    private void showHint(String text) {
+        Context ctx = getContext();
+        Activity activity = ctx instanceof Activity ? (Activity) ctx : AndroidUtilities.findActivity(ctx);
+        if (activity != null) {
+            View content = activity.findViewById(android.R.id.content);
+            if (content instanceof FrameLayout) {
+                BulletinFactory.of((FrameLayout) content, resourcesProvider)
+                        .createSimpleBulletin(R.raw.error, text)
+                        .show();
+                return;
+            }
+        }
+        android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_SHORT).show();
     }
 
     public static GlassTabView createTabView(Context context, Theme.ResourcesProvider rp, int account, TabId id) {
@@ -395,6 +417,8 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
                 return GlassTabView.createMainTab(context, rp, GlassTabView.TabAnimation.CHECKLIST, MglaMainTabsConfig.titleFor(id));
             case AI:
                 return GlassTabView.createMainTab(context, rp, GlassTabView.TabAnimation.MODELS, MglaMainTabsConfig.titleFor(id));
+            case MUSIC:
+                return GlassTabView.createMainTab(context, rp, GlassTabView.TabAnimation.MUSIC, MglaMainTabsConfig.titleFor(id));
             default:
                 return GlassTabView.createMainTab(context, rp, GlassTabView.TabAnimation.CHATS, MglaMainTabsConfig.titleFor(id));
         }

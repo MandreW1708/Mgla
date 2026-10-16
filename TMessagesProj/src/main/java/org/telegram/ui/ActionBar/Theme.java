@@ -6390,6 +6390,11 @@ public class Theme {
         currentColors.put(key_switchTrackChecked, palette.accent);
         currentColors.put(key_checkbox, palette.accent);
         currentColors.put(key_checkboxCheck, 0xFFFFFFFF);
+        // Dymka: exact switch / header colors (avoid hue-wash pink).
+        if (themeInfo != null && MGLA_THEME_DYMKA.equals(themeInfo.name)) {
+            currentColors.put(key_switchTrackChecked, org.telegram.ui.MglaIconThemes.DYMKA_SWITCH);
+            currentColors.put(key_windowBackgroundWhiteBlueHeader, org.telegram.ui.MglaIconThemes.DYMKA_HEADER);
+        }
         // Firm amoled/dark keep accent loaders/links; icon themes need contrast on colored bubbles.
         final boolean firmTheme = MGLA_THEME_AMOLED.equals(themeInfo.name)
                 || MGLA_THEME_DARK.equals(themeInfo.name);

@@ -65,16 +65,9 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         }
 
         final int maxTotalWidthForTabs = width - getPaddingLeft() - getPaddingRight();
-        // With many tabs, don't force a wide island — keep it compact and balanced.
-        int visibleGuess = 0;
-        for (int a = 0, N = getChildCount(); a < N; a++) {
-            if (isViewVisible(getChildAt(a))) {
-                visibleGuess++;
-            }
-        }
-        visibleGuess = Math.max(1, visibleGuess);
-        final int minIslandDp = visibleGuess >= 6 ? 240 : (visibleGuess >= 5 ? 280 : 320);
-        final int minTotalWidthForTabs = Math.min(dp(minIslandDp), maxTotalWidthForTabs);
+        // Floor so few tabs don't look tiny; never shrink this when tab count grows —
+        // denser labels handle overflow, island width stays at maxWidth.
+        final int minTotalWidthForTabs = Math.min(dp(320), maxTotalWidthForTabs);
 
         int chosenPass = PASS_TEXT_SIZES_DP.length - 1;
         float lastMeasuredTextSize = -1;
@@ -127,7 +120,12 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         }
 
         final boolean fillExact = MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY;
-        final float growTarget = fillExact ? maxTotalWidthForTabs : minTotalWidthForTabs;
+        // Always fill available max width (set by MainTabsActivity, already accounts for search).
+        // Previously WRAP grew only to a tab-count-based minimum (240/280), so 7 icon tabs
+        // became shorter than 4 labeled tabs when the search button reduced maxWidth.
+        final float growTarget = maxWidthPx > 0 || fillExact
+                ? maxTotalWidthForTabs
+                : minTotalWidthForTabs;
 
         if (totalWidth > maxTotalWidthForTabs) {
             final float m = maxTotalWidthForTabs / totalWidth;

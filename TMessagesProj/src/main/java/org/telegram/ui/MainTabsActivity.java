@@ -1006,6 +1006,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                 return new MglaPlaceholderTabActivity("Задачи", "Раздел задач скоро появится");
             case AI:
                 return new MglaPlaceholderTabActivity("ИИ", "Раздел ИИ скоро появится");
+            case MUSIC:
+                return new MglaPlaceholderTabActivity("Музыка", "Раздел музыки скоро появится");
             default:
                 return null;
         }

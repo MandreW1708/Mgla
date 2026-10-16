@@ -76,6 +76,8 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     private TLRPC.TL_attachMenuBot tabAnimationBot;
 
     private final TextPaint defaultTextPaint;
+    private boolean iconOnlyMode;
+    private int iconSizeDp = 24;
 
     public GlassTabView(@NonNull Context context) {
         super(context);
@@ -323,7 +325,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
             boolean update = lastIsSelected != isSelected;
             if (lastIconAnimationRaw != animationToSet) {
                 lastIconAnimationRaw = animationToSet;
-                imageView.setAnimation(animationToSet, 24, 24);
+                imageView.setAnimation(animationToSet, iconSizeDp, iconSizeDp);
                 update = true;
             }
 
@@ -361,7 +363,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
             if (lastIconAnimationRaw != animationToSet) {
                 lastIconAnimationRaw = animationToSet;
 
-                imageView.setAnimation(animationToSet, 24, 24);
+                imageView.setAnimation(animationToSet, iconSizeDp, iconSizeDp);
                 imageView.getAnimatedDrawable().setPlayInDirectionOfCustomEndFrame(false);
                 if (animated) {
                     imageView.getAnimatedDrawable().setCurrentFrame(0);
@@ -374,7 +376,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         }
 
         if (imageView.getAnimatedDrawable() == null) {
-            imageView.setAnimation(tabAnimation.iconToFilled, 24, 24);
+            imageView.setAnimation(tabAnimation.iconToFilled, iconSizeDp, iconSizeDp);
         }
 
         final RLottieDrawable drawable = imageView.getAnimatedDrawable();
@@ -417,11 +419,49 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     /** Hide label for dense islands (many tabs). */
     public void setLabelVisible(boolean visible) {
-        textView.setVisibility(visible ? VISIBLE : GONE);
+        setIconOnly(!visible);
     }
 
     public boolean isLabelVisible() {
         return textView.getVisibility() == VISIBLE;
+    }
+
+    /** Icon-only mode: larger glyphs, vertically centered in the island. */
+    private void setIconOnly(boolean iconOnly) {
+        if (iconOnlyMode == iconOnly && textView.getVisibility() == (iconOnly ? GONE : VISIBLE)) {
+            return;
+        }
+        iconOnlyMode = iconOnly;
+        textView.setVisibility(iconOnly ? GONE : VISIBLE);
+        applyIconLayout();
+    }
+
+    private void applyIconLayout() {
+        final int size = iconOnlyMode ? 30 : 24;
+        final boolean sizeChanged = iconSizeDp != size;
+        iconSizeDp = size;
+        if (imageView.getVisibility() != GONE) {
+            if (iconOnlyMode) {
+                imageView.setLayoutParams(LayoutHelper.createFrame(size, size, Gravity.CENTER));
+            } else {
+                imageView.setLayoutParams(LayoutHelper.createFrame(size, size, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 4, 0, 0));
+            }
+            if (sizeChanged && tabAnimation != null && tabAnimation.iconStatic == -1) {
+                // Recreate lottie at the new pixel size so it stays sharp when enlarged.
+                lastIconAnimationRaw = -1;
+                checkPlayAnimation(false);
+            }
+        }
+        if (backupImageView != null) {
+            if (iconOnlyMode) {
+                backupImageView.setRoundRadius(dp(size / 2f));
+                backupImageView.setLayoutParams(LayoutHelper.createFrame(size, size, Gravity.CENTER));
+            } else {
+                backupImageView.setRoundRadius(dp(11));
+                backupImageView.setLayoutParams(LayoutHelper.createFrame(22, 22, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 5, 0, 0));
+            }
+        }
+        requestLayout();
     }
 
     public static GlassTabView createAvatar(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, @StringRes int stringRes) {
@@ -528,7 +568,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     @Override
     public float measureTextWidth() {
         if (textView.getVisibility() != VISIBLE) {
-            return dp(24);
+            return dp(30);
         }
         return defaultTextPaint.measureText(textView.getText().toString());
     }
@@ -538,7 +578,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     @Override
     public float measureTextWidth(float textSizeDp) {
         if (textSizeDp <= 0f) {
-            return dp(24);
+            return dp(30);
         }
         if (scaledTextPaint == null) {
             scaledTextPaint = new TextPaint(defaultTextPaint);
@@ -550,10 +590,10 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     @Override
     public void setTextSizeDp(float textSizeDp) {
         if (textSizeDp <= 0f) {
-            setLabelVisible(false);
+            setIconOnly(true);
             return;
         }
-        setLabelVisible(true);
+        setIconOnly(false);
         final float px = dp(textSizeDp);
         if (textView.getTextSize() != px) {
             textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, textSizeDp);

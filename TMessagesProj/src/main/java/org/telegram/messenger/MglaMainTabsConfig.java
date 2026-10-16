@@ -36,7 +36,8 @@ public final class MglaMainTabsConfig {
         CALLS("calls"),
         PROFILE("profile"),
         TASKS("tasks"),
-        AI("ai");
+        AI("ai"),
+        MUSIC("music");
 
         public final String key;
 
@@ -154,6 +155,8 @@ public final class MglaMainTabsConfig {
                 return "Задачи";
             case AI:
                 return "ИИ";
+            case MUSIC:
+                return "Музыка";
             default:
                 return id.key;
         }
