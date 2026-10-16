@@ -363,6 +363,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         searchButtonIcon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_tabUnselected), PorterDuff.Mode.SRC_IN));
         searchButtonIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         searchButton.addView(searchButtonIcon, LayoutHelper.createFrame(24, 24, Gravity.CENTER));
+        searchButton.setClickable(true);
+        searchButton.setEnabled(true);
         searchButton.setOnClickListener(v -> openDialogsSearch());
 
         BlurredBackgroundDrawableViewFactory iBlur3FactoryFade = new BlurredBackgroundDrawableViewFactory(iBlur3SourceColor);
@@ -888,8 +890,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             }
             if (pendingOpenSearch && chatsPos >= 0 && currentPosition == chatsPos) {
                 pendingOpenSearch = false;
-                if (dialogsActivity != null) {
-                    dialogsActivity.search("", true);
+                final DialogsActivity dialogs = resolveDialogsActivity();
+                if (dialogs != null) {
+                    dialogs.search("", true);
                 }
             }
         }
@@ -1275,10 +1278,13 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsView.setAlpha(factor);
         tabsView.setVisibility(factor > 0 ? View.VISIBLE : View.GONE);
         if (searchButton != null && MglaMainTabsConfig.isSearchButtonEnabled()) {
+            final boolean interactive = factor > 0.99f;
             searchButton.setAlpha(factor);
             searchButton.setVisibility(factor > 0 ? View.VISIBLE : View.GONE);
-            searchButton.setEnabled(factor > 1);
-            searchButton.setClickable(factor > 1);
+            // Must stay clickable when fully shown (factor == 1). Parent tabsView uses factor > 1
+            // only because child GlassTabViews handle their own clicks.
+            searchButton.setEnabled(interactive);
+            searchButton.setClickable(interactive);
         }
     }
 
@@ -1347,6 +1353,22 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsBottomRow.requestLayout();
     }
 
+    private DialogsActivity resolveDialogsActivity() {
+        if (dialogsActivity != null) {
+            return dialogsActivity;
+        }
+        final int chatsPos = positionOf(TabId.CHATS);
+        if (chatsPos < 0) {
+            return null;
+        }
+        final FragmentState state = fragmentsArr.get(chatsPos);
+        if (state != null && state.fragment instanceof DialogsActivity) {
+            dialogsActivity = (DialogsActivity) state.fragment;
+            return dialogsActivity;
+        }
+        return null;
+    }
+
     private void openDialogsSearch() {
         final int chatsPos = positionOf(TabId.CHATS);
         if (chatsPos < 0) {
@@ -1358,8 +1380,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             viewPager.scrollToPosition(chatsPos);
             return;
         }
-        if (dialogsActivity != null) {
-            dialogsActivity.search("", true);
+        final DialogsActivity dialogs = resolveDialogsActivity();
+        if (dialogs != null) {
+            dialogs.search("", true);
         }
     }
 

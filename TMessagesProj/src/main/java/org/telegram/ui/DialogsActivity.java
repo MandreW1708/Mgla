@@ -7559,9 +7559,21 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     public void search(String query, boolean animated) {
         showSearch(true, false, animated);
+        if (fragmentSearchFieldWatcher != null) {
+            fragmentSearchFieldWatcher.toggleSearch(true);
+        }
         if (fragmentSearchField != null) {
-            fragmentSearchField.editText.setText(query);
-            fragmentSearchField.editText.setSelection(query.length());
+            if (query != null) {
+                fragmentSearchField.editText.setText(query);
+                fragmentSearchField.editText.setSelection(query.length());
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                if (fragmentSearchField == null || fragmentSearchField.editText == null) {
+                    return;
+                }
+                fragmentSearchField.editText.requestFocus();
+                AndroidUtilities.showKeyboard(fragmentSearchField.editText);
+            }, 100);
         }
     }
 
