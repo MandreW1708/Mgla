@@ -6386,20 +6386,23 @@ public class Theme {
         currentColors.put(key_windowBackgroundWhiteBlueText5, palette.accent);
         currentColors.put(key_windowBackgroundWhiteBlueText6, palette.accent);
         currentColors.put(key_windowBackgroundWhiteBlueText7, palette.accent);
-        currentColors.put(key_chat_messageLinkIn, palette.accent);
-        currentColors.put(key_chat_messageLinkOut, palette.accent);
         currentColors.put(key_featuredStickers_addButton, palette.accent);
         currentColors.put(key_switchTrackChecked, palette.accent);
         currentColors.put(key_checkbox, palette.accent);
         currentColors.put(key_checkboxCheck, 0xFFFFFFFF);
-        // File/download buttons: circle = outLoader, glyph = outMediaIcon.
-        // Icon themes need white circle + accent glyph (firm amoled/dark keep stock remap).
+        // Firm amoled/dark keep accent loaders/links; icon themes need contrast on colored bubbles.
         final boolean firmTheme = MGLA_THEME_AMOLED.equals(themeInfo.name)
                 || MGLA_THEME_DARK.equals(themeInfo.name);
         if (firmTheme) {
+            currentColors.put(key_chat_messageLinkIn, palette.accent);
+            currentColors.put(key_chat_messageLinkOut, palette.accent);
             currentColors.put(key_chat_inLoader, palette.accent);
             currentColors.put(key_chat_outLoader, palette.accent);
         } else {
+            // Outgoing: white on colored bubble (same idea as white file-button circle).
+            // Incoming: accent on neutral in-bubble.
+            currentColors.put(key_chat_messageLinkOut, 0xFFFFFFFF);
+            currentColors.put(key_chat_messageLinkIn, palette.accent);
             currentColors.put(key_chat_outLoader, 0xFFFFFFFF);
             currentColors.put(key_chat_outLoaderSelected, 0xFFFFFFFF);
             currentColors.put(key_chat_outMediaIcon, palette.accent);

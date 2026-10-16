@@ -21,6 +21,7 @@ import org.telegram.messenger.MglaChatDna;
 import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaMemoryExtractor;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -35,7 +36,7 @@ import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
-public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
+public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private static final int ROW_AI_ENABLED = 0;
     private static final int ROW_SHADOW_1 = 1;
@@ -77,6 +78,25 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
 
     public MglaAiSettingsActivity(android.os.Bundle args) {
         super(args);
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.mglaHeaderSettingsChanged && listView != null && listView.getAdapter() != null) {
+            listView.getAdapter().notifyDataSetChanged();
+        }
     }
 
     @Override
@@ -311,12 +331,17 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
         super.onResume();
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyItemChanged(ROW_AI_EDITOR_LIMIT);
-            listView.getAdapter().notifyItemChanged(ROW_MEMORY_LIMIT);
+            if (MglaMemoryConfig.isActive()) {
+                listView.getAdapter().notifyItemChanged(ROW_MEMORY_LIMIT);
+            }
         }
     }
 
     /** Прокрутка к переключателю живой памяти и подсветка строки. */
     public void highlightMemoryToggle() {
+        if (!MglaMemoryConfig.isActive()) {
+            return;
+        }
         AndroidUtilities.runOnUIThread(() -> {
             if (listView == null) {
                 return;
@@ -360,7 +385,8 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity {
 
         @Override
         public int getItemCount() {
-            return ROW_COUNT;
+            // Hide Живая память section entirely when hub kill-switch is on.
+            return MglaMemoryConfig.isActive() ? ROW_COUNT : ROW_SHADOW_5;
         }
 
         @Override

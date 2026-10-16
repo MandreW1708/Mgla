@@ -191,17 +191,18 @@ public final class MglaFeatureFlags {
         HashSet<String> toStop = new HashSet<>();
 
         for (String feature : BOOLEAN_PREF_FEATURES) {
+            String prefKey = localPrefKey(feature);
             boolean wasBlocked = prev.contains(feature);
             boolean nowBlocked = next.contains(feature);
             if (!wasBlocked && nowBlocked) {
-                boolean on = config.getBoolean(feature, defaultOn(feature));
+                boolean on = config.getBoolean(prefKey, defaultOn(feature));
                 if (on) {
                     try {
                         restore.put(feature, true);
                         restoreChanged = true;
                     } catch (Throwable ignored) {
                     }
-                    editor.putBoolean(feature, false);
+                    editor.putBoolean(prefKey, false);
                     configChanged = true;
                     toStop.add(feature);
                 }
@@ -209,7 +210,7 @@ public final class MglaFeatureFlags {
                 // Remembered toggle, or AI defaults wiped by older force-off without restore map.
                 boolean shouldRestore = restore.optBoolean(feature, false) || defaultOn(feature);
                 if (shouldRestore) {
-                    editor.putBoolean(feature, true);
+                    editor.putBoolean(prefKey, true);
                     configChanged = true;
                     toRestart.add(feature);
                 }
@@ -242,8 +243,9 @@ public final class MglaFeatureFlags {
                 if (next.contains(feature) || !defaultOn(feature)) {
                     continue;
                 }
-                if (!config.getBoolean(feature, true)) {
-                    editor.putBoolean(feature, true);
+                String prefKey = localPrefKey(feature);
+                if (!config.getBoolean(prefKey, true)) {
+                    editor.putBoolean(prefKey, true);
                     configChanged = true;
                     toRestart.add(feature);
                 }
@@ -272,6 +274,14 @@ public final class MglaFeatureFlags {
                 }
             }
         });
+    }
+
+    /** Local SharedPreferences key for a feature id (most map 1:1). */
+    private static String localPrefKey(String feature) {
+        if ("ai_memory".equals(feature)) {
+            return "memory_enabled";
+        }
+        return feature;
     }
 
     /** Features that default to ON in settings UI — restore them when re-allowed. */

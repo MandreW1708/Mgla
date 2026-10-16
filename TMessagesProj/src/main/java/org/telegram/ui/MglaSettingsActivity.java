@@ -48,6 +48,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
     private SettingCell dpiBypassCell;
     private SettingCell memoryCell;
+    private View memoryDivider;
 
     public MglaSettingsActivity() {
         this(null);
@@ -60,12 +61,14 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     @Override
     public boolean onFragmentCreate() {
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.dpiBypassChanged);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
         return super.onFragmentCreate();
     }
 
     @Override
     public void onFragmentDestroy() {
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.dpiBypassChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
         super.onFragmentDestroy();
     }
 
@@ -80,6 +83,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.dpiBypassChanged) {
             updateDpiBypassCell();
+        } else if (id == NotificationCenter.mglaHeaderSettingsChanged) {
+            updateMemoryCell();
         }
     }
 
@@ -94,6 +99,9 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     }
 
     private void openMemory() {
+        if (!MglaMemoryConfig.isActive()) {
+            return;
+        }
         if (!MglaMemoryConfig.isEnabled()) {
             BulletinFactory.of(this).createSimpleBulletin(R.raw.info,
                 "Сначала включите живую память в разделе «Искусственный интеллект»").show();
@@ -106,7 +114,16 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     }
 
     private void updateMemoryCell() {
+        boolean allowed = MglaMemoryConfig.isActive();
+        int visibility = allowed ? View.VISIBLE : View.GONE;
+        if (memoryDivider != null) {
+            memoryDivider.setVisibility(visibility);
+        }
         if (memoryCell == null) {
+            return;
+        }
+        memoryCell.setVisibility(visibility);
+        if (!allowed) {
             return;
         }
         boolean on = MglaMemoryConfig.isEnabled();
@@ -180,7 +197,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
             IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект");
-        mainBlock.addView(MglaUi.createDivider(context));
+        memoryDivider = MglaUi.createDivider(context);
+        mainBlock.addView(memoryDivider);
         memoryCell = addMenuItem(mainBlock, this::openMemory,
             IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.msg_saved, "Живая память",
             memoryStatusLabel(), "alpha");
