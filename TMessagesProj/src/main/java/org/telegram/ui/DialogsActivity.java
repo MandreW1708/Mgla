@@ -240,6 +240,7 @@ import org.telegram.ui.Components.ForegroundColorSpanThemable;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.Components.FragmentContextView;
 import org.telegram.ui.Components.MglaExportContextView;
+import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.JoinGroupAlert;
 import org.telegram.ui.Components.LayoutHelper;
@@ -14619,7 +14620,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         final int additionalList = dp(48);
         final int mainTabBottom = fragmentView.getMeasuredHeight() - navigationBarHeight - dp(DialogsActivity.MAIN_TABS_MARGIN);
-        final int mainTabTop = mainTabBottom - dp(DialogsActivity.MAIN_TABS_HEIGHT);
+        // Exclude tabs glass + mini-player island from blur capture (otherwise the player
+        // samples itself and looks like a flat gray pill with no liquid glass).
+        final int mainTabTop = mainTabBottom - dp(DialogsActivity.MAIN_TABS_HEIGHT)
+                - dp(MglaGlobalMusicBar.blurExclusionExtraDp());
 
         final int actionBarHeight = actionBar.getMeasuredHeight()
             + dp(DialogsActivity.SEARCH_FIELD_HEIGHT)

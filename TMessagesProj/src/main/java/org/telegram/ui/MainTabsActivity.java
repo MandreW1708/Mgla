@@ -358,6 +358,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         BlurredBackgroundDrawableViewFactory iBlur3FactoryGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceTabGlass != null ? iBlur3SourceTabGlass : iBlur3SourceColor);
         iBlur3FactoryGlass.setSourceRootView(viewPositionWatcher, contentView);
+        iBlur3FactoryGlass.setGlassEngine(glassEngine);
         iBlur3FactoryGlass.setLiquidGlassEffectAllowed(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS));
 
         tabsViewBackground = iBlur3FactoryGlass.create(tabsView, BlurredBackgroundProviderImpl.mainTabs(resourceProvider));
@@ -413,7 +414,6 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         contentView.addView(tabsViewWrapper, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
 
         globalMusicBar = new MglaGlobalMusicBar(context, resourceProvider);
-        globalMusicBar.attachGlass(iBlur3FactoryGlass, resourceProvider);
         // Outer height includes GLOW_OUTSET; seat just above the visible tabs glass
         // (not above the tabs row's empty top margin).
         contentView.addView(globalMusicBar, LayoutHelper.createFrame(
@@ -422,6 +422,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                 Gravity.BOTTOM,
                 12 - MglaGlobalMusicBar.GLOW_OUTSET_DP, 0, 12 - MglaGlobalMusicBar.GLOW_OUTSET_DP,
                 DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN + 2 - MglaGlobalMusicBar.GLOW_OUTSET_DP));
+        // Attach after addView so ViewPositionWatcher can resolve offsets vs contentView
+        // (same factory/liquid-glass flag as tabsView / searchButton).
+        globalMusicBar.attachGlass(iBlur3FactoryGlass, resourceProvider);
         globalMusicBar.setVisibilityListener(visible -> {
             if (dialogsActivity != null) {
                 dialogsActivity.setMusicBarVisible(visible);

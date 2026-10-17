@@ -139,6 +139,13 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     public long getCurrentPosition() {
         MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
         if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+            long durationMs = getDuration();
+            if (durationMs > 0 && playing.audioProgress > 0f) {
+                return Math.max(0L, Math.min(durationMs, (long) (playing.audioProgress * durationMs)));
+            }
+            if (playing.audioProgressMs > 0) {
+                return Math.max(0, playing.audioProgressMs);
+            }
             return Math.max(0, (long) (playing.audioProgressSec * 1000L));
         }
         return 0;
