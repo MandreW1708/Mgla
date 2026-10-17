@@ -5,7 +5,6 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
@@ -39,6 +38,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -62,7 +62,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Yandex Music collection tab — Material Design 3 dark surfaces.
+ * Yandex Music collection tab — calm theme-tinted surfaces.
  * Keeps: favorites playlist preview, playlists carousel, favorite artists.
  */
 public class MglaMusicActivity extends BaseFragment implements
@@ -70,18 +70,20 @@ public class MglaMusicActivity extends BaseFragment implements
         MglaYandexMusicPlayer.PlayerListener,
         MglaYandexMusicStore.AuthListener {
 
-    // MD3 dark color tokens
-    private static final int MD3_SURFACE = 0xFF121212;
-    private static final int MD3_SURFACE_CONTAINER = 0xFF211F26;
-    private static final int MD3_SURFACE_CONTAINER_HIGH = 0xFF2B2930;
-    private static final int MD3_ON_SURFACE = 0xFFE6E1E5;
-    private static final int MD3_ON_SURFACE_VARIANT = 0xFFCAC4D0;
-    private static final int MD3_PRIMARY = 0xFFD0BCFF;
-    private static final int MD3_PRIMARY_CONTAINER = 0xFF4F378B;
-    private static final int MD3_ON_PRIMARY_CONTAINER = 0xFFEADDFF;
-    private static final int MD3_SECONDARY_CONTAINER = 0xFF4A4458;
-    private static final int MD3_TERTIARY = 0xFFEFB8C8;
-    private static final int MD3_OUTLINE_VARIANT = 0xFF49454F;
+    /** Theme-derived palette (soft accent, not neon). */
+    private int MD3_SURFACE;
+    private int MD3_SURFACE_CONTAINER;
+    private int MD3_SURFACE_CONTAINER_HIGH;
+    private int MD3_ON_SURFACE;
+    private int MD3_ON_SURFACE_VARIANT;
+    private int MD3_PRIMARY;
+    private int MD3_PRIMARY_CONTAINER;
+    private int MD3_PRIMARY_CONTAINER_MID;
+    private int MD3_PRIMARY_CONTAINER_DEEP;
+    private int MD3_ON_PRIMARY_CONTAINER;
+    private int MD3_SECONDARY_CONTAINER;
+    private int MD3_OUTLINE_VARIANT;
+    private int MD3_ROW_SCRIM;
 
     private boolean hasMainTabs;
 
@@ -142,6 +144,14 @@ public class MglaMusicActivity extends BaseFragment implements
     private final List<MglaYandexMusicModel.Track> detailTracks = new ArrayList<>();
     private String detailSourceTitle = "Мне нравится";
 
+    // Full playlists list page
+    private LinearLayout fullPlaylistsView;
+    private TextView fullPlaylistsCountText;
+    private RecyclerListView fullPlaylistsListView;
+    private FullPlaylistAdapter fullPlaylistsAdapter;
+    private ProgressBar fullPlaylistsLoading;
+    private boolean openedPlaylistFromFullList;
+
     // Search Page
     private EditText searchInput;
     private ImageView searchClearBtn;
@@ -184,9 +194,33 @@ public class MglaMusicActivity extends BaseFragment implements
         super.onFragmentDestroy();
     }
 
+    /** Soft palette from the active Telegram theme — muted accent, quiet surfaces. */
+    private void resolveThemeColors() {
+        final int bg = getThemedColor(Theme.key_windowBackgroundGray);
+        final int card = getThemedColor(Theme.key_windowBackgroundWhite);
+        final int text = getThemedColor(Theme.key_windowBackgroundWhiteBlackText);
+        final int text2 = getThemedColor(Theme.key_windowBackgroundWhiteGrayText2);
+        final int accent = getThemedColor(Theme.key_featuredStickers_addButton);
+
+        MD3_SURFACE = bg;
+        MD3_SURFACE_CONTAINER = card;
+        MD3_SURFACE_CONTAINER_HIGH = ColorUtils.blendARGB(card, text, 0.06f);
+        MD3_ON_SURFACE = text;
+        MD3_ON_SURFACE_VARIANT = text2;
+        MD3_PRIMARY = ColorUtils.blendARGB(accent, text, 0.18f);
+        MD3_PRIMARY_CONTAINER = ColorUtils.blendARGB(card, accent, 0.20f);
+        MD3_PRIMARY_CONTAINER_MID = ColorUtils.blendARGB(card, accent, 0.30f);
+        MD3_PRIMARY_CONTAINER_DEEP = ColorUtils.blendARGB(card, accent, 0.14f);
+        MD3_ON_PRIMARY_CONTAINER = ColorUtils.blendARGB(text, accent, 0.28f);
+        MD3_SECONDARY_CONTAINER = ColorUtils.blendARGB(card, text, 0.08f);
+        MD3_OUTLINE_VARIANT = Theme.multAlpha(text, 0.12f);
+        MD3_ROW_SCRIM = Theme.multAlpha(text, 0.05f);
+    }
+
     @Override
     public View createView(Context context) {
         actionBar.setAddToContainer(false);
+        resolveThemeColors();
 
         rootLayout = new FrameLayout(context);
         rootLayout.setBackgroundColor(MD3_SURFACE);
@@ -199,17 +233,22 @@ public class MglaMusicActivity extends BaseFragment implements
         collectionScrollView = createCollectionPage(context);
         mainContainer.addView(collectionScrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 2. Full Favorites Page
+        // 2. Full Favorites / playlist tracks Page
         fullFavoritesView = createFullFavoritesPage(context);
         fullFavoritesView.setVisibility(View.GONE);
         mainContainer.addView(fullFavoritesView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 3. Search Page
+        // 3. Full playlists list
+        fullPlaylistsView = createFullPlaylistsPage(context);
+        fullPlaylistsView.setVisibility(View.GONE);
+        mainContainer.addView(fullPlaylistsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // 4. Search Page
         searchView = createSearchPage(context);
         searchView.setVisibility(View.GONE);
         mainContainer.addView(searchView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 4. Auth Promo Page (shown when unauthorized)
+        // 5. Auth Promo Page (shown when unauthorized)
         authPromoView = createAuthPromoPage(context);
         authPromoView.setVisibility(View.GONE);
         mainContainer.addView(authPromoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -262,11 +301,11 @@ public class MglaMusicActivity extends BaseFragment implements
         collectionTitleView.setTextColor(MD3_ON_SURFACE);
         topBar.addView(collectionTitleView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
-        profileActionBtn = createMd3IconButton(context, R.drawable.outline_profile_photo, v -> onProfileClicked());
+        profileActionBtn = createMd3IconButton(context, R.drawable.settings_account, v -> onProfileClicked());
         topBar.addView(profileActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 6, 0));
 
         equalizerActionBtn = createMd3IconButton(context, null, v -> onEqualizerClicked());
-        equalizerActionBtn.setImageDrawable(new SlidersDrawable(MD3_ON_SURFACE));
+        equalizerActionBtn.setImageDrawable(new SlidersDrawable(MD3_ON_SURFACE, MD3_SURFACE));
         topBar.addView(equalizerActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 6, 0));
 
         searchActionBtn = createMd3IconButton(context, R.drawable.outline_header_search, v -> openSearch());
@@ -281,7 +320,7 @@ public class MglaMusicActivity extends BaseFragment implements
         collectionWaveCard = new FrameLayout(context);
         GradientDrawable waveGradient = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{MD3_PRIMARY_CONTAINER, 0xFF6750A4, 0xFF7D5260}
+                new int[]{MD3_PRIMARY_CONTAINER_MID, MD3_PRIMARY_CONTAINER, MD3_PRIMARY_CONTAINER_DEEP}
         );
         waveGradient.setCornerRadius(dp(28));
         collectionWaveCard.setBackground(waveGradient);
@@ -461,7 +500,7 @@ public class MglaMusicActivity extends BaseFragment implements
         styleMd3SectionTitle(playlistsSectionTitle, "Мои плейлисты");
         row.addView(playlistsSectionTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
         row.addView(createMd3Chevron(context), LayoutHelper.createLinear(32, 32));
-        row.setOnClickListener(v -> loadPlaylists());
+        row.setOnClickListener(v -> showFullPlaylists());
         return row;
     }
 
@@ -631,6 +670,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void openPlaylist(MglaYandexMusicModel.Playlist playlist) {
         if (playlist == null) return;
+        openedPlaylistFromFullList = fullPlaylistsView != null && fullPlaylistsView.getVisibility() == View.VISIBLE;
         detailSourceTitle = playlist.title;
         if (fullFavoritesTitleText != null) {
             fullFavoritesTitleText.setText(playlist.title);
@@ -880,21 +920,16 @@ public class MglaMusicActivity extends BaseFragment implements
         fullFavoritesListView.setLayoutManager(new LinearLayoutManager(context));
         fullFavoritesListView.setClipToPadding(false);
         fullFavoritesListView.setPadding(0, 0, 0, islandBottomInset());
-        fullFavoritesAdapter = new FullTrackAdapter(detailTracks, null);
+        fullFavoritesAdapter = new FullTrackAdapter(detailTracks, (track, position) ->
+                MglaYandexMusicPlayer.getInstance().playTrack(track, new ArrayList<>(detailTracks), detailSourceTitle));
         fullFavoritesListView.setAdapter(fullFavoritesAdapter);
-        fullFavoritesListView.setOnItemClickListener((view, position) -> {
-            if (position < 0 || position >= detailTracks.size()) {
-                return;
-            }
-            MglaYandexMusicModel.Track t = detailTracks.get(position);
-            MglaYandexMusicPlayer.getInstance().playTrack(t, new ArrayList<>(detailTracks), detailSourceTitle);
-        });
         layout.addView(fullFavoritesListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
     }
 
     private void showFullFavorites() {
+        openedPlaylistFromFullList = false;
         detailSourceTitle = "Мне нравится";
         detailTracks.clear();
         detailTracks.addAll(favoritesList);
@@ -913,6 +948,7 @@ public class MglaMusicActivity extends BaseFragment implements
     private void showTrackDetailPage() {
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (searchView != null) searchView.setVisibility(View.GONE);
+        if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
         if (fullFavoritesView != null) {
             fullFavoritesView.setVisibility(View.VISIBLE);
         }
@@ -920,7 +956,115 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void closeFullFavorites() {
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (openedPlaylistFromFullList) {
+            openedPlaylistFromFullList = false;
+            if (fullPlaylistsView != null) {
+                fullPlaylistsView.setVisibility(View.VISIBLE);
+                return;
+            }
+        }
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+    }
+
+    // ==========================================
+    // FULL PLAYLISTS LIST PAGE
+    // ==========================================
+
+    private LinearLayout createFullPlaylistsPage(Context context) {
+        LinearLayout layout = new LinearLayout(context);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(16), dp(10), dp(16), 0);
+
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView backBtn = createMd3IconButton(context, R.drawable.ic_ab_back, v -> closeFullPlaylists());
+        header.addView(backBtn, LayoutHelper.createLinear(40, 40, 0, 0, 12, 0));
+
+        LinearLayout textCol = new LinearLayout(context);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+
+        TextView title = new TextView(context);
+        title.setText("Мои плейлисты");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
+        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        title.setTextColor(MD3_ON_SURFACE);
+        textCol.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        fullPlaylistsCountText = new TextView(context);
+        fullPlaylistsCountText.setText("0 плейлистов");
+        fullPlaylistsCountText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        fullPlaylistsCountText.setTextColor(MD3_ON_SURFACE_VARIANT);
+        textCol.addView(fullPlaylistsCountText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+
+        header.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+        layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
+
+        fullPlaylistsLoading = new ProgressBar(context);
+        fullPlaylistsLoading.setVisibility(View.GONE);
+        layout.addView(fullPlaylistsLoading, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 20, 0, 20));
+
+        fullPlaylistsListView = new RecyclerListView(context);
+        fullPlaylistsListView.setLayoutManager(new LinearLayoutManager(context));
+        fullPlaylistsListView.setClipToPadding(false);
+        fullPlaylistsListView.setPadding(0, 0, 0, islandBottomInset());
+        fullPlaylistsAdapter = new FullPlaylistAdapter();
+        fullPlaylistsListView.setAdapter(fullPlaylistsAdapter);
+        fullPlaylistsListView.setOnItemClickListener((view, position) -> {
+            if (position < 0 || position >= playlistsList.size()) {
+                return;
+            }
+            openPlaylist(playlistsList.get(position));
+        });
+        layout.addView(fullPlaylistsListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
+
+        return layout;
+    }
+
+    private void showFullPlaylists() {
+        if (searchView != null) searchView.setVisibility(View.GONE);
+        if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
+        if (fullPlaylistsView != null) {
+            fullPlaylistsView.setVisibility(View.VISIBLE);
+        }
+        refreshFullPlaylistsUi();
+        if (playlistsList.isEmpty()) {
+            if (fullPlaylistsLoading != null) {
+                fullPlaylistsLoading.setVisibility(View.VISIBLE);
+            }
+        }
+        loadPlaylists();
+    }
+
+    private void closeFullPlaylists() {
+        if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshFullPlaylistsUi() {
+        if (fullPlaylistsCountText != null) {
+            fullPlaylistsCountText.setText(formatPlaylistCount(playlistsList.size()));
+        }
+        if (fullPlaylistsAdapter != null) {
+            fullPlaylistsAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private static String formatPlaylistCount(int count) {
+        int mod100 = count % 100;
+        int mod10 = count % 10;
+        if (mod100 >= 11 && mod100 <= 19) {
+            return count + " плейлистов";
+        }
+        if (mod10 == 1) {
+            return count + " плейлист";
+        }
+        if (mod10 >= 2 && mod10 <= 4) {
+            return count + " плейлиста";
+        }
+        return count + " плейлистов";
     }
 
     // ==========================================
@@ -1006,15 +1150,9 @@ public class MglaMusicActivity extends BaseFragment implements
         searchListView.setLayoutManager(new LinearLayoutManager(context));
         searchListView.setClipToPadding(false);
         searchListView.setPadding(0, 0, 0, islandBottomInset());
-        searchAdapter = new FullTrackAdapter(searchResults, null);
+        searchAdapter = new FullTrackAdapter(searchResults, (track, position) ->
+                MglaYandexMusicPlayer.getInstance().playTrack(track, new ArrayList<>(searchResults), "Поиск"));
         searchListView.setAdapter(searchAdapter);
-        searchListView.setOnItemClickListener((view, position) -> {
-            if (position < 0 || position >= searchResults.size()) {
-                return;
-            }
-            MglaYandexMusicModel.Track track = searchResults.get(position);
-            MglaYandexMusicPlayer.getInstance().playTrack(track, new ArrayList<>(searchResults), "Поиск");
-        });
         layout.addView(searchListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
@@ -1023,6 +1161,8 @@ public class MglaMusicActivity extends BaseFragment implements
     private void openSearch() {
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        openedPlaylistFromFullList = false;
         if (searchView != null) {
             searchView.setVisibility(View.VISIBLE);
             if (searchInput != null) {
@@ -1098,7 +1238,7 @@ public class MglaMusicActivity extends BaseFragment implements
         FrameLayout badge = new FrameLayout(context);
         GradientDrawable badgeBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{MD3_PRIMARY_CONTAINER, 0xFF6750A4}
+                new int[]{MD3_PRIMARY_CONTAINER_MID, MD3_PRIMARY_CONTAINER}
         );
         badgeBg.setCornerRadius(dp(36));
         badge.setBackground(badgeBg);
@@ -1132,7 +1272,7 @@ public class MglaMusicActivity extends BaseFragment implements
         loginBtn.setGravity(Gravity.CENTER);
         GradientDrawable btnBg = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{MD3_PRIMARY_CONTAINER, 0xFF6750A4}
+                new int[]{MD3_PRIMARY_CONTAINER_MID, MD3_PRIMARY_CONTAINER}
         );
         btnBg.setCornerRadius(dp(28));
         loginBtn.setBackground(btnBg);
@@ -1229,8 +1369,17 @@ public class MglaMusicActivity extends BaseFragment implements
         if (authPromoView != null) {
             authPromoView.setVisibility(auth ? View.GONE : View.VISIBLE);
         }
+        if (!auth) {
+            if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+            if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+            if (searchView != null) searchView.setVisibility(View.GONE);
+        }
         if (collectionScrollView != null) {
-            collectionScrollView.setVisibility(auth ? View.VISIBLE : View.GONE);
+            boolean showCollection = auth
+                    && (fullPlaylistsView == null || fullPlaylistsView.getVisibility() != View.VISIBLE)
+                    && (fullFavoritesView == null || fullFavoritesView.getVisibility() != View.VISIBLE)
+                    && (searchView == null || searchView.getVisibility() != View.VISIBLE);
+            collectionScrollView.setVisibility(showCollection ? View.VISIBLE : View.GONE);
         }
 
         if (auth) {
@@ -1250,14 +1399,25 @@ public class MglaMusicActivity extends BaseFragment implements
                 }
             }
             updatePlaylistsCarousel();
-        } else if (playlistsLoading != null) {
-            playlistsLoading.setVisibility(View.VISIBLE);
+            refreshFullPlaylistsUi();
+            if (fullPlaylistsLoading != null && !playlistsList.isEmpty()) {
+                fullPlaylistsLoading.setVisibility(View.GONE);
+            }
+        } else {
+            if (playlistsLoading != null) {
+                playlistsLoading.setVisibility(View.VISIBLE);
+            }
+            if (fullPlaylistsView != null && fullPlaylistsView.getVisibility() == View.VISIBLE
+                    && fullPlaylistsLoading != null) {
+                fullPlaylistsLoading.setVisibility(View.VISIBLE);
+            }
         }
 
         MglaYandexMusicApi.fetchPlaylists(new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Playlist>>() {
             @Override
             public void onSuccess(List<MglaYandexMusicModel.Playlist> playlists) {
                 if (playlistsLoading != null) playlistsLoading.setVisibility(View.GONE);
+                if (fullPlaylistsLoading != null) fullPlaylistsLoading.setVisibility(View.GONE);
                 playlistsList.clear();
                 if (playlists != null) {
                     for (MglaYandexMusicModel.Playlist p : playlists) {
@@ -1266,11 +1426,13 @@ public class MglaMusicActivity extends BaseFragment implements
                     }
                 }
                 updatePlaylistsCarousel();
+                refreshFullPlaylistsUi();
             }
 
             @Override
             public void onError(Exception error) {
                 if (playlistsLoading != null) playlistsLoading.setVisibility(View.GONE);
+                if (fullPlaylistsLoading != null) fullPlaylistsLoading.setVisibility(View.GONE);
             }
         });
     }
@@ -1375,6 +1537,10 @@ public class MglaMusicActivity extends BaseFragment implements
             closeFullFavorites();
             return false;
         }
+        if (fullPlaylistsView != null && fullPlaylistsView.getVisibility() == View.VISIBLE) {
+            closeFullPlaylists();
+            return false;
+        }
         return super.onBackPressed(invoked);
     }
 
@@ -1425,6 +1591,96 @@ public class MglaMusicActivity extends BaseFragment implements
         void onTrackClick(MglaYandexMusicModel.Track track, int position);
     }
 
+    private class FullPlaylistAdapter extends RecyclerView.Adapter<FullPlaylistAdapter.Holder> {
+        @NonNull
+        @Override
+        public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            Context ctx = parent.getContext();
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(10), dp(8), dp(10));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(16));
+            bg.setColor(MD3_SURFACE_CONTAINER);
+            row.setBackground(bg);
+
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = dp(8);
+            row.setLayoutParams(lp);
+
+            ImageView cover = new ImageView(ctx);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            GradientDrawable coverBg = new GradientDrawable();
+            coverBg.setCornerRadius(dp(12));
+            coverBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+            cover.setBackground(coverBg);
+            cover.setClipToOutline(true);
+            cover.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(12));
+                }
+            });
+            row.addView(cover, LayoutHelper.createLinear(56, 56, 0, 0, 12, 0));
+
+            LinearLayout col = new LinearLayout(ctx);
+            col.setOrientation(LinearLayout.VERTICAL);
+
+            TextView title = new TextView(ctx);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+            title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+            title.setTextColor(MD3_ON_SURFACE);
+            title.setSingleLine(true);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            TextView subtitle = new TextView(ctx);
+            subtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            subtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
+            subtitle.setSingleLine(true);
+            subtitle.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+
+            row.addView(col, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 8, 0));
+
+            ImageView chevron = new ImageView(ctx);
+            chevron.setImageResource(R.drawable.msg_arrowright);
+            chevron.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+            row.addView(chevron, LayoutHelper.createLinear(24, 24));
+
+            return new Holder(row, cover, title, subtitle);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull Holder holder, int position) {
+            MglaYandexMusicModel.Playlist p = playlistsList.get(position);
+            holder.title.setText(p.title);
+            String owner = !TextUtils.isEmpty(p.ownerName) ? p.ownerName + " · " : "";
+            holder.subtitle.setText(owner + formatTrackCount(p.trackCount));
+            MglaMusicImageHelper.bindCover(holder.cover, p.getCoverUrl(100), 12, R.drawable.bot_music);
+        }
+
+        @Override
+        public int getItemCount() {
+            return playlistsList.size();
+        }
+
+        class Holder extends RecyclerView.ViewHolder {
+            final ImageView cover;
+            final TextView title;
+            final TextView subtitle;
+
+            Holder(View itemView, ImageView cover, TextView title, TextView subtitle) {
+                super(itemView);
+                this.cover = cover;
+                this.title = title;
+                this.subtitle = subtitle;
+            }
+        }
+    }
+
     private class FullTrackAdapter extends RecyclerView.Adapter<FullTrackAdapter.Holder> {
         private final List<MglaYandexMusicModel.Track> items;
         private final OnTrackClickListener listener;
@@ -1438,13 +1694,16 @@ public class MglaMusicActivity extends BaseFragment implements
         @Override
         public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             Context ctx = parent.getContext();
+            // Root stays non-clickable so Telegram RecyclerListView doesn't swallow touches.
             LinearLayout row = new LinearLayout(ctx);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(8), dp(8), dp(8), dp(8));
+            row.setClickable(false);
+            row.setFocusable(false);
             GradientDrawable bg = new GradientDrawable();
             bg.setCornerRadius(dp(12));
-            bg.setColor(0x1AFFFFFF);
+            bg.setColor(MD3_ROW_SCRIM);
             row.setBackground(bg);
 
             RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
@@ -1452,16 +1711,26 @@ public class MglaMusicActivity extends BaseFragment implements
             lp.bottomMargin = dp(6);
             row.setLayoutParams(lp);
 
+            // Click target is a direct child — RecyclerListView forwards taps to clickable children.
+            LinearLayout playArea = new LinearLayout(ctx);
+            playArea.setOrientation(LinearLayout.HORIZONTAL);
+            playArea.setGravity(Gravity.CENTER_VERTICAL);
+            playArea.setClickable(true);
+            playArea.setFocusable(true);
+
             ImageView cover = new ImageView(ctx);
             cover.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            row.addView(cover, LayoutHelper.createLinear(48, 48, 0, 0, 12, 0));
+            cover.setClickable(false);
+            playArea.addView(cover, LayoutHelper.createLinear(48, 48, 0, 0, 12, 0));
 
             LinearLayout col = new LinearLayout(ctx);
             col.setOrientation(LinearLayout.VERTICAL);
+            col.setClickable(false);
 
             LinearLayout titleRow = new LinearLayout(ctx);
             titleRow.setOrientation(LinearLayout.HORIZONTAL);
             titleRow.setGravity(Gravity.CENTER_VERTICAL);
+            titleRow.setClickable(false);
 
             TextView title = new TextView(ctx);
             title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
@@ -1469,6 +1738,7 @@ public class MglaMusicActivity extends BaseFragment implements
             title.setTextColor(MD3_ON_SURFACE);
             title.setSingleLine(true);
             title.setEllipsize(TextUtils.TruncateAt.END);
+            title.setClickable(false);
             titleRow.addView(title, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
             TextView explicitTag = new TextView(ctx);
@@ -1477,6 +1747,7 @@ public class MglaMusicActivity extends BaseFragment implements
             explicitTag.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
             explicitTag.setTextColor(MD3_ON_SURFACE);
             explicitTag.setGravity(Gravity.CENTER);
+            explicitTag.setClickable(false);
             GradientDrawable eBg = new GradientDrawable();
             eBg.setCornerRadius(dp(4));
             eBg.setColor(MD3_SECONDARY_CONTAINER);
@@ -1490,20 +1761,24 @@ public class MglaMusicActivity extends BaseFragment implements
             subtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
             subtitle.setSingleLine(true);
             subtitle.setEllipsize(TextUtils.TruncateAt.END);
+            subtitle.setClickable(false);
             col.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
 
-            row.addView(col, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 8, 0));
+            playArea.addView(col, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 8, 0));
 
             TextView duration = new TextView(ctx);
             duration.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
             duration.setTextColor(MD3_ON_SURFACE_VARIANT);
-            row.addView(duration, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
+            duration.setClickable(false);
+            playArea.addView(duration, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
+
+            row.addView(playArea, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
             ImageView like = new ImageView(ctx);
             like.setPadding(dp(6), dp(6), dp(6), dp(6));
             row.addView(like, LayoutHelper.createLinear(36, 36));
 
-            return new Holder(row, cover, title, explicitTag, subtitle, duration, like);
+            return new Holder(row, playArea, cover, title, explicitTag, subtitle, duration, like);
         }
 
         @Override
@@ -1517,7 +1792,7 @@ public class MglaMusicActivity extends BaseFragment implements
             MglaMusicImageHelper.bindCover(holder.cover, t.getCoverUrl(100), 8, R.drawable.bot_music);
 
             MglaYandexMusicModel.Track current = MglaYandexMusicPlayer.getInstance().getCurrentTrack();
-            boolean isThisPlaying = (current != null && current.id.equals(t.id));
+            boolean isThisPlaying = (current != null && current.id != null && current.id.equals(t.id));
 
             if (isThisPlaying) {
                 holder.title.setTextColor(MD3_PRIMARY);
@@ -1533,6 +1808,12 @@ public class MglaMusicActivity extends BaseFragment implements
                 holder.like.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
             }
 
+            holder.playArea.setOnClickListener(v -> {
+                if (listener != null) {
+                    listener.onTrackClick(t, position);
+                }
+            });
+
             holder.like.setOnClickListener(v -> {
                 boolean nextLiked = !t.isLiked;
                 t.isLiked = nextLiked;
@@ -1540,13 +1821,6 @@ public class MglaMusicActivity extends BaseFragment implements
                 notifyItemChanged(position);
                 MglaYandexMusicApi.toggleLike(t.id, nextLiked, null);
             });
-
-            if (listener != null) {
-                holder.itemView.setOnClickListener(v -> listener.onTrackClick(t, position));
-            } else {
-                holder.itemView.setOnClickListener(null);
-                holder.itemView.setClickable(true);
-            }
         }
 
         @Override
@@ -1555,6 +1829,7 @@ public class MglaMusicActivity extends BaseFragment implements
         }
 
         class Holder extends RecyclerView.ViewHolder {
+            final View playArea;
             final ImageView cover;
             final TextView title;
             final TextView explicitTag;
@@ -1562,8 +1837,9 @@ public class MglaMusicActivity extends BaseFragment implements
             final TextView duration;
             final ImageView like;
 
-            Holder(View itemView, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView like) {
+            Holder(View itemView, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView like) {
                 super(itemView);
+                this.playArea = playArea;
                 this.cover = cover;
                 this.title = title;
                 this.explicitTag = explicitTag;
@@ -1654,7 +1930,7 @@ public class MglaMusicActivity extends BaseFragment implements
         private final Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint innerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        SlidersDrawable(int color) {
+        SlidersDrawable(int color, int surfaceFill) {
             linePaint.setColor(color);
             linePaint.setStrokeWidth(dp(2));
             linePaint.setStyle(Paint.Style.STROKE);
@@ -1664,7 +1940,7 @@ public class MglaMusicActivity extends BaseFragment implements
             circlePaint.setStyle(Paint.Style.STROKE);
             circlePaint.setStrokeWidth(dp(2));
 
-            innerPaint.setColor(MD3_SURFACE);
+            innerPaint.setColor(surfaceFill);
             innerPaint.setStyle(Paint.Style.FILL);
         }
 
