@@ -28,6 +28,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+
 import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -73,6 +75,32 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     /** Whether the global mini-player island is currently shown (for blur exclusion holes). */
     public static boolean isGloballyVisible() {
         return globallyVisible;
+    }
+
+    private static final ArrayList<VisibilityListener> globalVisibilityListeners = new ArrayList<>();
+
+    public static void addGlobalVisibilityListener(VisibilityListener listener) {
+        synchronized (globalVisibilityListeners) {
+            if (!globalVisibilityListeners.contains(listener)) {
+                globalVisibilityListeners.add(listener);
+            }
+        }
+    }
+
+    public static void removeGlobalVisibilityListener(VisibilityListener listener) {
+        synchronized (globalVisibilityListeners) {
+            globalVisibilityListeners.remove(listener);
+        }
+    }
+
+    private static void notifyGlobalVisibilityChanged(boolean visible) {
+        ArrayList<VisibilityListener> copy;
+        synchronized (globalVisibilityListeners) {
+            copy = new ArrayList<>(globalVisibilityListeners);
+        }
+        for (VisibilityListener listener : copy) {
+            listener.onMusicBarVisibilityChanged(visible);
+        }
     }
 
     /** How much to extend the bottom blur exclusion upward while the mini-player is visible. */
@@ -158,6 +186,9 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         globallyVisible = visibility == VISIBLE;
         if (was != visibility && visibilityListener != null) {
             visibilityListener.onMusicBarVisibilityChanged(visibility == VISIBLE);
+        }
+        if (was != visibility) {
+            notifyGlobalVisibilityChanged(visibility == VISIBLE);
         }
         if (visibility == VISIBLE) {
             invalidateGlass();

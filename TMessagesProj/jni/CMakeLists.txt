@@ -349,3 +349,4 @@ android_ndk_import_module_cpufeatures()
 
 # Local Whisper (CPU) for Mgla AI transcription — separate .so
 include(${CMAKE_CURRENT_SOURCE_DIR}/mgla_whisper.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/mgla_llama.cmake)

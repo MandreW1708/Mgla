@@ -65,17 +65,22 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
     private boolean hasMainTabs;
     private boolean showDone = true;
-    private long selectedGroupId;
+    private long selectedGroupId = -1; // -1 = все, 0 = без группы, >0 = группа
     private int selectedTab; // 0 = list, 1 = calendar
 
     private FrameLayout rootLayout;
     private SegmentedControl segmentedControl;
-    private LinearLayout chipsLayout;
+    private HorizontalScrollView tabsScroll;
+    private LinearLayout tabsRow;
+    private final ArrayList<TextView> tabViews = new ArrayList<>();
     private FrameLayout pagesLayout;
+    private FrameLayout fab;
+    private ValueAnimator fabMarginAnimator;
 
     private RecyclerListView listView;
     private TasksAdapter listAdapter;
     private LinearLayout emptyView;
+    private TextView emptyTitle;
 
     private MglaTasksCalendarView calendarView;
     private TextView dayHeaderView;
@@ -112,8 +117,41 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     }
 
     private int islandBottomInset() {
-        return AndroidUtilities.navigationBarHeight
-                + (hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.BAR_HEIGHT + 12) : dp(16));
+        int inset = AndroidUtilities.navigationBarHeight;
+        if (hasMainTabs) {
+            inset += dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + 12);
+            if (MglaGlobalMusicBar.isGloballyVisible()) {
+                inset += dp(MglaGlobalMusicBar.BAR_HEIGHT + 8);
+            }
+        } else {
+            inset += dp(16);
+        }
+        return inset;
+    }
+
+    private final MglaGlobalMusicBar.VisibilityListener musicBarVisibilityListener = visible -> updateInsets();
+
+    private void updateInsets() {
+        if (rootLayout == null || fab == null) {
+            return;
+        }
+        int inset = islandBottomInset();
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) fab.getLayoutParams();
+        if (lp.bottomMargin != inset) {
+            if (fabMarginAnimator != null) {
+                fabMarginAnimator.cancel();
+            }
+            fabMarginAnimator = ValueAnimator.ofInt(lp.bottomMargin, inset);
+            fabMarginAnimator.setDuration(200);
+            fabMarginAnimator.addUpdateListener(a -> {
+                lp.bottomMargin = (int) a.getAnimatedValue();
+                fab.setLayoutParams(lp);
+            });
+            fabMarginAnimator.start();
+        }
+        int listPadding = inset + dp(72);
+        listView.setPadding(0, 0, 0, listPadding);
+        dayListView.setPadding(0, 0, 0, listPadding);
     }
 
     @Override
@@ -156,22 +194,29 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
         LinearLayout contentLayout = new LinearLayout(context);
         contentLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.addView(contentLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        FrameLayout.LayoutParams contentLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT);
+        if (hasMainTabs) {
+            contentLp.topMargin = ActionBar.getCurrentActionBarHeight() + (actionBar.getOccupyStatusBar() ? AndroidUtilities.statusBarHeight : 0);
+        }
+        rootLayout.addView(contentLayout, contentLp);
 
         segmentedControl = new SegmentedControl(context);
         segmentedControl.setOnTabChangedListener(index -> {
             selectedTab = index;
             updatePagesVisibility();
         });
-        contentLayout.addView(segmentedControl, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 36, 16, 6, 16, 6));
+        contentLayout.addView(segmentedControl, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 40, 16, 8, 16, 8));
 
-        HorizontalScrollView chipsScroll = new HorizontalScrollView(context);
-        chipsScroll.setHorizontalScrollBarEnabled(false);
-        chipsLayout = new LinearLayout(context);
-        chipsLayout.setOrientation(LinearLayout.HORIZONTAL);
-        chipsLayout.setGravity(Gravity.CENTER_VERTICAL);
-        chipsScroll.addView(chipsLayout, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
-        contentLayout.addView(chipsScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 40, 16, 2, 16, 4));
+        tabsScroll = new HorizontalScrollView(context);
+        tabsScroll.setHorizontalScrollBarEnabled(false);
+        tabsRow = new LinearLayout(context);
+        tabsRow.setOrientation(LinearLayout.HORIZONTAL);
+        tabsRow.setGravity(Gravity.CENTER_VERTICAL);
+        tabsScroll.addView(tabsRow, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
+        contentLayout.addView(tabsScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 40, 8, 0, 8, 2));
+        View tabsDivider = new View(context);
+        tabsDivider.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        contentLayout.addView(tabsDivider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1));
 
         pagesLayout = new FrameLayout(context);
         contentLayout.addView(pagesLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
@@ -189,7 +234,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         emptyView = new LinearLayout(context);
         emptyView.setOrientation(LinearLayout.VERTICAL);
         emptyView.setGravity(Gravity.CENTER);
-        TextView emptyTitle = new TextView(context);
+        emptyTitle = new TextView(context);
         emptyTitle.setText("Задач пока нет");
         emptyTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         emptyTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
@@ -241,7 +286,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         pagesLayout.addView(calendarPage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         // FAB
-        FrameLayout fab = new FrameLayout(context);
+        fab = new FrameLayout(context);
         fab.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(16),
                 Theme.getColor(Theme.key_chat_messagePanelSend),
                 ColorUtils.blendARGB(Theme.getColor(Theme.key_chat_messagePanelSend), 0xFF000000, 0.12f)));
@@ -258,6 +303,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
         MglaTasksStorage.getInstance().addListener(this);
         MglaTasksStorage.getInstance().ensureLoaded(this::reloadData);
+        MglaGlobalMusicBar.addGlobalVisibilityListener(musicBarVisibilityListener);
 
         fragmentView = rootLayout;
         return fragmentView;
@@ -266,6 +312,11 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     @Override
     public void onFragmentDestroy() {
         MglaTasksStorage.getInstance().removeListener(this);
+        MglaGlobalMusicBar.removeGlobalVisibilityListener(musicBarVisibilityListener);
+        if (fabMarginAnimator != null) {
+            fabMarginAnimator.cancel();
+            fabMarginAnimator = null;
+        }
         super.onFragmentDestroy();
     }
 
@@ -317,7 +368,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             pendingReminderTask = null;
         }
 
-        rebuildChips();
+        rebuildGroupTabs();
         applyGroupFilter();
         rebuildRows();
         listAdapter.notifyDataSetChanged();
@@ -329,14 +380,14 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private void applyGroupFilter() {
         filteredTasks.clear();
         for (MglaTask task : allTasks) {
-            if (selectedGroupId == 0 || task.groupId == selectedGroupId) {
+            if (selectedGroupId == -1 || task.groupId == selectedGroupId) {
                 filteredTasks.add(task);
             }
         }
     }
 
-    private void rebuildChips() {
-        boolean groupExists = selectedGroupId == 0;
+    private void rebuildGroupTabs() {
+        boolean groupExists = selectedGroupId <= 0;
         for (MglaTask.Group group : groups) {
             if (group.id == selectedGroupId) {
                 groupExists = true;
@@ -344,30 +395,32 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             }
         }
         if (!groupExists) {
-            selectedGroupId = 0;
+            selectedGroupId = -1;
         }
 
-        chipsLayout.removeAllViews();
-        addChip("Все", 0, 0, true);
+        tabsRow.removeAllViews();
+        tabViews.clear();
+        addGroupTab("Все", -1, 0);
+        addGroupTab("Без группы", 0, 0);
         for (int a = 0; a < groups.size(); a++) {
             MglaTask.Group group = groups.get(a);
-            addChip(group.name, group.id, group.color, false);
+            addGroupTab(group.name, group.id, group.color);
         }
     }
 
-    private void addChip(String name, long groupId, int color, boolean isAll) {
-        Context context = chipsLayout.getContext();
-        TextView chip = new TextView(context);
-        chip.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        chip.setSingleLine(true);
-        chip.setGravity(Gravity.CENTER);
-        chip.setPadding(dp(14), 0, dp(14), 0);
-        boolean selected = selectedGroupId == groupId;
-        styleChip(chip, name, color, selected);
-        chip.setOnClickListener(v -> {
+    private void addGroupTab(String name, long groupId, int color) {
+        Context context = tabsRow.getContext();
+        TextView tab = new TextView(context);
+        tab.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        tab.setSingleLine(true);
+        tab.setGravity(Gravity.CENTER);
+        tab.setPadding(dp(16), 0, dp(16), 0);
+        styleGroupTab(tab, name, color, selectedGroupId == groupId);
+        tab.setOnClickListener(v -> {
             if (selectedGroupId != groupId) {
                 selectedGroupId = groupId;
-                rebuildChips();
+                rebuildGroupTabs();
+                tabsRow.post(this::scrollSelectedTabIntoView);
                 applyGroupFilter();
                 rebuildRows();
                 listAdapter.notifyDataSetChanged();
@@ -376,30 +429,53 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                 updateDayTasks();
             }
         });
-        chipsLayout.addView(chip, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 32, Gravity.CENTER_VERTICAL, isAll ? 0 : 8, 0, 0, 0));
+        tabViews.add(tab);
+        tabsRow.addView(tab, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 32, Gravity.CENTER_VERTICAL, tabViews.size() > 1 ? 8 : 0, 0, 0, 0));
     }
 
-    private void styleChip(TextView chip, String name, int color, boolean selected) {
+    private void styleGroupTab(TextView tab, String name, int color, boolean selected) {
         int accent = Theme.getColor(Theme.key_chat_messagePanelSend);
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(16));
+        tab.setTypeface(selected ? AndroidUtilities.getTypeface("fonts/rmedium.ttf") : null);
         if (selected) {
             bg.setColor(accent);
-            chip.setTextColor(0xFFFFFFFF);
-            chip.setText(name);
+            tab.setTextColor(0xFFFFFFFF);
         } else {
-            bg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-            bg.setStroke(dp(1), Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-            chip.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-            if (color != 0) {
-                SpannableString ss = new SpannableString("●  " + name);
-                ss.setSpan(new ForegroundColorSpan(color), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                chip.setText(ss);
-            } else {
-                chip.setText(name);
+            bg.setColor(ColorUtils.setAlphaComponent(accent, 26));
+            tab.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        }
+        tab.setBackground(bg);
+        if (color != 0) {
+            SpannableString ss = new SpannableString("●  " + name);
+            ss.setSpan(new ForegroundColorSpan(selected ? 0xFFFFFFFF : color), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            tab.setText(ss);
+        } else {
+            tab.setText(name);
+        }
+    }
+
+    private int selectedGroupTabIndex() {
+        if (selectedGroupId == -1) {
+            return 0;
+        }
+        if (selectedGroupId == 0) {
+            return 1;
+        }
+        for (int a = 0; a < groups.size(); a++) {
+            if (groups.get(a).id == selectedGroupId) {
+                return a + 2;
             }
         }
-        chip.setBackground(bg);
+        return 0;
+    }
+
+    private void scrollSelectedTabIntoView() {
+        int index = selectedGroupTabIndex();
+        if (index < tabViews.size()) {
+            TextView tab = tabViews.get(index);
+            tabsScroll.smoothScrollTo(Math.max(0, tab.getLeft() - dp(48)), 0);
+        }
     }
 
     private void rebuildRows() {
@@ -492,6 +568,15 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
     private void updateEmptyState() {
         boolean empty = rows.isEmpty();
+        String emptyText;
+        if (selectedGroupId > 0) {
+            emptyText = "В этой группе задач нет";
+        } else if (selectedGroupId == 0) {
+            emptyText = "Задач без группы нет";
+        } else {
+            emptyText = "Задач пока нет";
+        }
+        emptyTitle.setText(emptyText);
         emptyView.setVisibility(empty ? View.VISIBLE : View.GONE);
         listView.setVisibility(empty ? View.GONE : View.VISIBLE);
     }
@@ -810,7 +895,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             currentIndex = index;
             updateTabColors();
             int segmentWidth = (getWidth() - getPaddingLeft() - getPaddingRight()) / 2;
-            float target = getPaddingLeft() + segmentWidth * index;
+            float target = segmentWidth * index;
             if (slideAnimator != null) {
                 slideAnimator.cancel();
             }
@@ -845,8 +930,8 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                     lp.height = getHeight() - getPaddingTop() - getPaddingBottom();
                     indicator.setLayoutParams(lp);
                 }
-                indicator.setTranslationX(getPaddingLeft() + segmentWidth * currentIndex);
-                indicator.setTranslationY(getPaddingTop());
+                indicator.setTranslationX(segmentWidth * currentIndex);
+                indicator.setTranslationY(0);
             }
         }
     }

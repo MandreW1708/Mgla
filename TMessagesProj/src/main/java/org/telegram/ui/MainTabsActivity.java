@@ -1043,10 +1043,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                 args.putBoolean("hasMainTabs", true);
                 return new ProfileActivity(args);
             }
-            case TASKS:
-                return new MglaPlaceholderTabActivity("Задачи", "Раздел задач скоро появится");
-            case AI:
-                return new MglaPlaceholderTabActivity("ИИ", "Раздел ИИ скоро появится");
+            case TASKS: {
+                Bundle args = new Bundle();
+                args.putBoolean("hasMainTabs", true);
+                return new MglaTasksActivity(args);
+            }
+            case AI: {
+                Bundle args = new Bundle();
+                args.putBoolean("hasMainTabs", true);
+                return new MglaAiChatActivity(args);
+            }
             case MUSIC: {
                 Bundle args = new Bundle();
                 args.putBoolean("hasMainTabs", true);

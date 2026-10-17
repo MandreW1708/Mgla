@@ -98,7 +98,9 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
 
     private static final Pattern WEIGHT_PATTERN = Pattern.compile("(?i)(\\d+(?:\\.\\d+)?)\\s?([mb])(?![a-z])");
     /** Модели тяжелее этого веса в поиске скрываются — не поместятся в память. */
-    private static final long MAX_MODEL_BYTES = 2L * 1024 * 1024 * 1024;
+    /** 4 GiB is the largest model the on-device runtime accepts.  It is still
+     * checked against the currently available RAM before it is mapped. */
+    private static final long MAX_MODEL_BYTES = 4L * 1024 * 1024 * 1024;
 
     public MglaLocalModelsActivity() {
         this(null);
@@ -562,7 +564,7 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
                     break;
                 case ROW_NOTE:
                     TextInfoPrivacyCell note = new TextInfoPrivacyCell(context);
-                    note.setText("В выдаче скрываются модели тяжелее 2 ГБ — они не поместятся в память устройства.");
+                    note.setText("В выдаче скрываются модели тяжелее 4 ГБ. Перед запуском приложение дополнительно проверит свободную память устройства.");
                     view = note;
                     break;
                 case ROW_SEARCH:

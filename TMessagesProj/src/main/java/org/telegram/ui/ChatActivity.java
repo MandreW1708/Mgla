@@ -144,6 +144,9 @@ import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.MglaPhotoClipboard;
 import org.telegram.messenger.MglaStats;
+import org.telegram.messenger.MglaTask;
+import org.telegram.messenger.MglaTasksReminderScheduler;
+import org.telegram.messenger.MglaTasksStorage;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BotForumHelper;
@@ -1271,6 +1274,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_AI_TRANSLATE = 203;
     public final static int OPTION_AI_TASKS = 204;
     public final static int OPTION_COPY_PHOTO = 205;
+    public final static int OPTION_REMIND = 206;
     public final static int OPTION_EDIT_SCHEDULE_TIME = 102;
     public final static int OPTION_SPEED_PROMO = 103;
     public final static int OPTION_OPEN_PROFILE = 104;
@@ -34332,6 +34336,56 @@ public class ChatActivity extends BaseFragment implements
                 });
                 break;
             }
+            case OPTION_REMIND: {
+                if (selectedObject == null || selectedObject.messageOwner == null || getContext() == null) {
+                    break;
+                }
+                final MessageObject remindMessage = selectedObject;
+                AlertsCreator.createScheduleDatePickerDialog(getContext(), "Напомнить о сообщении", getUserConfig().getClientUserId(), 0, true, (notify, scheduleDate, scheduleRepeatPeriod) -> {
+                    if (scheduleDate <= 0 || scheduleDate == 0x7ffffffe) {
+                        return;
+                    }
+                    CharSequence remindCaption = getMessageCaption(remindMessage, selectedObjectGroup);
+                    String text = remindCaption != null ? remindCaption.toString() : remindMessage.messageOwner.message;
+                    if (text != null) {
+                        text = text.replace('\n', ' ').trim();
+                        if (text.length() > 100) {
+                            text = text.substring(0, 100);
+                        }
+                    }
+                    MglaTask task = new MglaTask();
+                    task.account = UserConfig.selectedAccount;
+                    task.title = TextUtils.isEmpty(text) ? "Сообщение" : text;
+                    if (currentChat != null) {
+                        task.note = currentChat.title;
+                    } else if (currentUser != null) {
+                        task.note = ContactsController.formatName(currentUser.first_name, currentUser.last_name);
+                    }
+                    task.dialogId = remindMessage.getDialogId();
+                    task.messageId = remindMessage.getId();
+                    task.dueAt = scheduleDate * 1000L;
+                    task.remindAt = task.dueAt;
+                    task.createdAt = System.currentTimeMillis();
+                    MglaTasksStorage storage = MglaTasksStorage.getInstance();
+                    storage.saveTask(task);
+                    if (task.id != 0) {
+                        MglaTasksReminderScheduler.schedule(task);
+                    } else {
+                        MglaTasksStorage.Listener listener = new MglaTasksStorage.Listener() {
+                            @Override
+                            public void onTasksChanged() {
+                                if (task.id != 0) {
+                                    storage.removeListener(this);
+                                    MglaTasksReminderScheduler.schedule(task);
+                                }
+                            }
+                        };
+                        storage.addListener(listener);
+                    }
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Напоминание создано").show();
+                }, null);
+                break;
+            }
             case OPTION_SAVE_TO_GALLERY: {
                 if (Build.VERSION.SDK_INT >= 23 && (Build.VERSION.SDK_INT <= 28 || BuildVars.NO_SCOPED_STORAGE) && getParentActivity().checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                     getParentActivity().requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 4);
@@ -47580,6 +47634,11 @@ public class ChatActivity extends BaseFragment implements
                     icons.add(R.drawable.menu_proofread);
                 }
             }
+        }
+        if (selectedObject != null && !selectedObject.isSending() && selectedObject.messageOwner != null && !options.contains(OPTION_REMIND)) {
+            items.add("Напомнить…");
+            options.add(OPTION_REMIND);
+            icons.add(R.drawable.outline_message_time_24);
         }
         if (selectedObject != null && selectedObject.isPhoto() && !noforwardsOrPaidMedia && !selectedObject.hasRevealedExtendedMedia() && !selectedObject.needDrawBluredPreview() && !options.contains(OPTION_COPY_PHOTO)) {
             items.add("Копировать фото");

@@ -144,48 +144,79 @@ public class MglaTasksStorage {
         if (task == null) {
             return;
         }
+        if (!loaded) {
+            ensureLoaded(() -> saveTask(task));
+            return;
+        }
         if (task.createdAt == 0) {
             task.createdAt = System.currentTimeMillis();
         }
-        MglaTask existing = getTask(task.id);
-        if (existing != null) {
-            existing.account = task.account;
-            existing.title = task.title;
-            existing.note = task.note;
-            existing.groupId = task.groupId;
-            existing.dueAt = task.dueAt;
-            existing.remindAt = task.remindAt;
-            existing.done = task.done;
-            existing.doneAt = task.doneAt;
-            existing.createdAt = task.createdAt;
-            existing.sortOrder = task.sortOrder;
-            existing.dialogId = task.dialogId;
-            existing.messageId = task.messageId;
-            existing.subItems = task.subItems;
-        } else if (task.id != 0) {
+        if (task.id == 0) {
             synchronized (tasks) {
+                long maxId = 0;
+                for (MglaTask t : tasks) {
+                    maxId = Math.max(maxId, t.id);
+                }
+                task.id = maxId + 1;
                 tasks.add(task);
+            }
+        } else {
+            MglaTask existing = getTask(task.id);
+            if (existing != null) {
+                existing.account = task.account;
+                existing.title = task.title;
+                existing.note = task.note;
+                existing.groupId = task.groupId;
+                existing.dueAt = task.dueAt;
+                existing.remindAt = task.remindAt;
+                existing.done = task.done;
+                existing.doneAt = task.doneAt;
+                existing.createdAt = task.createdAt;
+                existing.sortOrder = task.sortOrder;
+                existing.dialogId = task.dialogId;
+                existing.messageId = task.messageId;
+                existing.subItems = task.subItems;
+            } else {
+                synchronized (tasks) {
+                    tasks.add(task);
+                }
+            }
+        }
+        synchronized (tasks) {
+            long maxSubId = 0;
+            for (MglaTask t : tasks) {
+                for (MglaTask.SubItem s : t.subItems) {
+                    maxSubId = Math.max(maxSubId, s.id);
+                }
+            }
+            for (MglaTask.SubItem item : task.subItems) {
+                if (item.id == 0) {
+                    item.id = ++maxSubId;
+                }
+                item.taskId = task.id;
             }
         }
         notifyChanged();
         storageQueue.postRunnable(() -> {
             try {
                 ensureOpen();
-                if (task.id == 0) {
-                    SQLitePreparedStatement state = database.executeFast("INSERT INTO tasks(account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                    state.requery();
-                    bindTask(state, task, false);
-                    state.stepThis().dispose();
-                    task.id = database.executeInt("SELECT last_insert_rowid()");
-                    synchronized (tasks) {
-                        tasks.add(task);
+                SQLitePreparedStatement state = database.executeFast("INSERT OR REPLACE INTO tasks(account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                state.requery();
+                bindTask(state, task, true);
+                state.stepThis().dispose();
+                database.executeFast("DELETE FROM task_items WHERE task_id = " + task.id).stepThis().dispose();
+                if (!task.subItems.isEmpty()) {
+                    SQLitePreparedStatement itemState = database.executeFast("INSERT OR REPLACE INTO task_items(task_id, title, done, sort_order, id) VALUES(?, ?, ?, ?, ?)");
+                    for (MglaTask.SubItem item : task.subItems) {
+                        itemState.requery();
+                        itemState.bindLong(1, task.id);
+                        itemState.bindString(2, item.title != null ? item.title : "");
+                        itemState.bindInteger(3, item.done ? 1 : 0);
+                        itemState.bindInteger(4, item.sortOrder);
+                        itemState.bindLong(5, item.id);
+                        itemState.stepThis();
                     }
-                    AndroidUtilities.runOnUIThread(this::notifyChanged);
-                } else {
-                    SQLitePreparedStatement state = database.executeFast("UPDATE tasks SET account = ?, title = ?, note = ?, group_id = ?, due_at = ?, remind_at = ?, done = ?, done_at = ?, created_at = ?, sort_order = ?, dialog_id = ?, message_id = ? WHERE id = ?");
-                    state.requery();
-                    bindTask(state, task, true);
-                    state.stepThis().dispose();
+                    itemState.dispose();
                 }
             } catch (Exception e) {
                 FileLog.e(e);
@@ -235,52 +266,50 @@ public class MglaTasksStorage {
         if (group == null) {
             return;
         }
-        MglaTask.Group existing = null;
-        synchronized (tasks) {
-            for (MglaTask.Group g : groups) {
-                if (g.id == group.id) {
-                    existing = g;
-                    break;
-                }
-            }
+        if (!loaded) {
+            ensureLoaded(() -> saveGroup(group));
+            return;
         }
-        if (existing != null) {
-            existing.account = group.account;
-            existing.name = group.name;
-            existing.color = group.color;
-            existing.sortOrder = group.sortOrder;
-        } else if (group.id != 0) {
+        if (group.id == 0) {
             synchronized (tasks) {
+                long maxId = 0;
+                for (MglaTask.Group g : groups) {
+                    maxId = Math.max(maxId, g.id);
+                }
+                group.id = maxId + 1;
                 groups.add(group);
+            }
+        } else {
+            MglaTask.Group existing = null;
+            synchronized (tasks) {
+                for (MglaTask.Group g : groups) {
+                    if (g.id == group.id) {
+                        existing = g;
+                        break;
+                    }
+                }
+                if (existing != null) {
+                    existing.account = group.account;
+                    existing.name = group.name;
+                    existing.color = group.color;
+                    existing.sortOrder = group.sortOrder;
+                } else {
+                    groups.add(group);
+                }
             }
         }
         notifyChanged();
         storageQueue.postRunnable(() -> {
             try {
                 ensureOpen();
-                if (group.id == 0) {
-                    SQLitePreparedStatement state = database.executeFast("INSERT INTO task_groups(account, name, color, sort_order) VALUES(?, ?, ?, ?)");
-                    state.requery();
-                    state.bindInteger(1, group.account);
-                    state.bindString(2, group.name != null ? group.name : "");
-                    state.bindInteger(3, group.color);
-                    state.bindInteger(4, group.sortOrder);
-                    state.stepThis().dispose();
-                    group.id = database.executeInt("SELECT last_insert_rowid()");
-                    synchronized (tasks) {
-                        groups.add(group);
-                    }
-                    AndroidUtilities.runOnUIThread(this::notifyChanged);
-                } else {
-                    SQLitePreparedStatement state = database.executeFast("UPDATE task_groups SET account = ?, name = ?, color = ?, sort_order = ? WHERE id = ?");
-                    state.requery();
-                    state.bindInteger(1, group.account);
-                    state.bindString(2, group.name != null ? group.name : "");
-                    state.bindInteger(3, group.color);
-                    state.bindInteger(4, group.sortOrder);
-                    state.bindLong(5, group.id);
-                    state.stepThis().dispose();
-                }
+                SQLitePreparedStatement state = database.executeFast("INSERT OR REPLACE INTO task_groups(account, name, color, sort_order, id) VALUES(?, ?, ?, ?, ?)");
+                state.requery();
+                state.bindInteger(1, group.account);
+                state.bindString(2, group.name != null ? group.name : "");
+                state.bindInteger(3, group.color);
+                state.bindInteger(4, group.sortOrder);
+                state.bindLong(5, group.id);
+                state.stepThis().dispose();
             } catch (Exception e) {
                 FileLog.e(e);
             }
@@ -317,9 +346,27 @@ public class MglaTasksStorage {
         if (item == null) {
             return;
         }
+        if (!loaded) {
+            ensureLoaded(() -> saveSubItem(taskId, item));
+            return;
+        }
         MglaTask task = getTask(taskId);
-        MglaTask.SubItem existing = null;
-        if (task != null) {
+        if (item.id == 0) {
+            synchronized (tasks) {
+                long maxId = 0;
+                for (MglaTask t : tasks) {
+                    for (MglaTask.SubItem s : t.subItems) {
+                        maxId = Math.max(maxId, s.id);
+                    }
+                }
+                item.id = maxId + 1;
+            }
+            item.taskId = taskId;
+            if (task != null) {
+                task.subItems.add(item);
+            }
+        } else if (task != null) {
+            MglaTask.SubItem existing = null;
             for (MglaTask.SubItem subItem : task.subItems) {
                 if (subItem.id == item.id) {
                     existing = subItem;
@@ -331,7 +378,7 @@ public class MglaTasksStorage {
                 existing.title = item.title;
                 existing.done = item.done;
                 existing.sortOrder = item.sortOrder;
-            } else if (item.id != 0) {
+            } else {
                 item.taskId = taskId;
                 task.subItems.add(item);
             }
@@ -340,30 +387,14 @@ public class MglaTasksStorage {
         storageQueue.postRunnable(() -> {
             try {
                 ensureOpen();
-                if (item.id == 0) {
-                    SQLitePreparedStatement state = database.executeFast("INSERT INTO task_items(task_id, title, done, sort_order) VALUES(?, ?, ?, ?)");
-                    state.requery();
-                    state.bindLong(1, taskId);
-                    state.bindString(2, item.title != null ? item.title : "");
-                    state.bindInteger(3, item.done ? 1 : 0);
-                    state.bindInteger(4, item.sortOrder);
-                    state.stepThis().dispose();
-                    item.id = database.executeInt("SELECT last_insert_rowid()");
-                    item.taskId = taskId;
-                    if (task != null) {
-                        task.subItems.add(item);
-                    }
-                    AndroidUtilities.runOnUIThread(this::notifyChanged);
-                } else {
-                    SQLitePreparedStatement state = database.executeFast("UPDATE task_items SET task_id = ?, title = ?, done = ?, sort_order = ? WHERE id = ?");
-                    state.requery();
-                    state.bindLong(1, taskId);
-                    state.bindString(2, item.title != null ? item.title : "");
-                    state.bindInteger(3, item.done ? 1 : 0);
-                    state.bindInteger(4, item.sortOrder);
-                    state.bindLong(5, item.id);
-                    state.stepThis().dispose();
-                }
+                SQLitePreparedStatement state = database.executeFast("INSERT OR REPLACE INTO task_items(task_id, title, done, sort_order, id) VALUES(?, ?, ?, ?, ?)");
+                state.requery();
+                state.bindLong(1, taskId);
+                state.bindString(2, item.title != null ? item.title : "");
+                state.bindInteger(3, item.done ? 1 : 0);
+                state.bindInteger(4, item.sortOrder);
+                state.bindLong(5, item.id);
+                state.stepThis().dispose();
             } catch (Exception e) {
                 FileLog.e(e);
             }
