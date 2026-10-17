@@ -2,8 +2,11 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.Manifest;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -19,6 +22,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.content.DialogInterface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -33,11 +38,19 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.gms.cast.framework.CastContext;
+
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.DialogObject;
+import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.FileLog;
+import org.telegram.messenger.FileRefController;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
@@ -45,6 +58,7 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaMusicImageHelper;
+import org.telegram.messenger.audioinfo.AudioInfo;
 import org.telegram.messenger.MglaYandexMusicModel;
 import org.telegram.messenger.MglaYandexMusicPlayback;
 import org.telegram.messenger.MglaYandexMusicPlayer;
@@ -52,9 +66,14 @@ import org.telegram.messenger.MglaYandexMusicStore;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.chromecast.ChromecastController;
+import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
@@ -62,11 +81,14 @@ import org.telegram.ui.Cells.AudioPlayerCell;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.CastMediaRouteButton;
+import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.Stories.recorder.DominantColors;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Locale;
 
@@ -112,6 +134,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private ImageView shareBtn;
     private ImageView moreBtn;
     private ImageView queueBtn;
+    private FrameLayout telegramRepeatBtn;
+    private ImageView telegramRepeatIcon;
+    private TextView addToProfileBtn;
+    private CastMediaRouteButton castRouteButton;
+    private boolean castAvailable;
 
     private int coverSize;
     private float coverRadius;
@@ -277,7 +304,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
 
         shareBtn = iconButton(context, R.drawable.msg_share, v -> openForward());
         infoRow.addView(shareBtn, LayoutHelper.createLinear(36, 36));
-        moreBtn = iconButton(context, R.drawable.ic_ab_other, v -> {});
+        moreBtn = iconButton(context, R.drawable.ic_ab_other, v -> showTelegramMusicOptions());
         infoRow.addView(moreBtn, LayoutHelper.createLinear(36, 36));
         content.addView(infoRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 10));
 
@@ -375,6 +402,21 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         controls.addView(likeButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER));
         content.addView(controls, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
 
+        castRouteButton = new CastMediaRouteButton(context) {
+            @Override
+            public void stateUpdated(boolean connected) {
+            }
+        };
+        castAvailable = true;
+        try {
+            castRouteButton.setRouteSelector(CastContext.getSharedInstance(context).getMergedSelector());
+        } catch (Throwable e) {
+            FileLog.e(e);
+            castAvailable = false;
+        }
+        castRouteButton.setVisibility(View.INVISIBLE);
+        root.addView(castRouteButton, LayoutHelper.createFrame(1, 1, Gravity.LEFT | Gravity.TOP));
+
         // Pill row (Yandex only — hidden for Telegram media)
         LinearLayout pills = new LinearLayout(context);
         pillsRow = pills;
@@ -417,7 +459,32 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
 
         content.addView(new View(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
-        // Bottom wave island
+        // Telegram music: full-width repeat at bottom; Add to profile sits under it when shown.
+        telegramRepeatBtn = makePill(context);
+        telegramRepeatBtn.setVisibility(View.GONE);
+        telegramRepeatIcon = new ImageView(context);
+        telegramRepeatIcon.setImageResource(R.drawable.player_new_repeatall);
+        telegramRepeatIcon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+        telegramRepeatBtn.addView(telegramRepeatIcon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
+        telegramRepeatBtn.setOnClickListener(v -> showTelegramRepeatMenu());
+        content.addView(telegramRepeatBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 8));
+
+        addToProfileBtn = new TextView(context);
+        addToProfileBtn.setVisibility(View.GONE);
+        addToProfileBtn.setText(LocaleController.getString(R.string.AudioAddToProfile));
+        addToProfileBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        addToProfileBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        addToProfileBtn.setTextColor(Color.WHITE);
+        addToProfileBtn.setGravity(Gravity.CENTER);
+        GradientDrawable addBg = new GradientDrawable();
+        addBg.setCornerRadius(dp(24));
+        addBg.setColor(Theme.getColor(Theme.key_featuredStickers_addButton));
+        addToProfileBtn.setBackground(addBg);
+        addToProfileBtn.setPadding(dp(16), 0, dp(16), 0);
+        addToProfileBtn.setOnClickListener(v -> savePlayingToProfile(true));
+        content.addView(addToProfileBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 0));
+
+        // Bottom wave island (Yandex)
         waveIsland = new FrameLayout(context);
         GradientDrawable waveBg = new GradientDrawable();
         waveBg.setCornerRadius(dp(28));
@@ -490,6 +557,12 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
 
     private void applyModeChrome() {
         boolean yandex = isYandexMode();
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        boolean telegramMusic = !yandex && playing != null && playing.isMusic()
+                && !playing.isVoice() && !playing.isRoundVideo()
+                && !MglaYandexMusicPlayback.isYandexMessage(playing);
+        boolean voiceOrRound = !yandex && playing != null
+                && (playing.isVoice() || playing.isRoundVideo());
         int yandexVis = yandex ? View.VISIBLE : View.GONE;
         if (likeButton != null) {
             likeButton.setVisibility(yandexVis);
@@ -514,12 +587,49 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         }
         if (telegramControlsSpacer != null) {
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) telegramControlsSpacer.getLayoutParams();
-            // Push play/prev/next lower when Yandex pills are hidden.
-            lp.height = yandex ? 0 : dp(56);
+            // Push play/prev/next lower for voice; music has its own chrome below.
+            lp.height = (yandex || telegramMusic) ? 0 : dp(56);
             telegramControlsSpacer.setLayoutParams(lp);
         }
         if (shareBtn != null) {
             shareBtn.setVisibility(yandex ? View.GONE : View.VISIBLE);
+        }
+        if (moreBtn != null) {
+            moreBtn.setVisibility(telegramMusic ? View.VISIBLE : View.GONE);
+        }
+        if (queueBtn != null) {
+            boolean queueEnabled = telegramMusic || voiceOrRound;
+            queueBtn.setEnabled(queueEnabled);
+            queueBtn.setAlpha(queueEnabled ? 1f : 0.35f);
+        }
+        if (telegramRepeatBtn != null) {
+            telegramRepeatBtn.setVisibility(telegramMusic ? View.VISIBLE : View.GONE);
+            if (telegramMusic) {
+                updateTelegramRepeatIcon();
+            }
+        }
+        if (addToProfileBtn != null) {
+            // Wait until SavedMusicIds finish loading so we don't flash "Add" for tracks already in profile.
+            ensureSavedMusicIdsLoading();
+            boolean showAdd = telegramMusic && !isMySavedMusicList() && !isNoforwards(playing)
+                    && isSavedMusicIdsReady() && !isSavedToProfile(playing);
+            addToProfileBtn.setVisibility(showAdd ? View.VISIBLE : View.GONE);
+            if (showAdd) {
+                GradientDrawable addBg = new GradientDrawable();
+                addBg.setCornerRadius(dp(24));
+                addBg.setColor(Theme.getColor(Theme.key_featuredStickers_addButton));
+                addToProfileBtn.setBackground(addBg);
+            }
+        }
+        if (telegramRepeatBtn != null && telegramRepeatBtn.getLayoutParams() instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) telegramRepeatBtn.getLayoutParams();
+            // Keep repeat above Add-to-profile when that button is shown; otherwise pin to bottom.
+            boolean showAdd = addToProfileBtn != null && addToProfileBtn.getVisibility() == View.VISIBLE;
+            lp.bottomMargin = dp(showAdd ? 8 : 0);
+            telegramRepeatBtn.setLayoutParams(lp);
+        }
+        if (artistAvatar != null && (telegramMusic || voiceOrRound)) {
+            artistAvatar.setVisibility(View.GONE);
         }
     }
 
@@ -605,9 +715,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 ambientBg.setColors(0xFF2A3340, 0xFF1A2230, 0xFF121820, 0xFF0C1018);
             }
         } else {
-            showMusicCover();
             if (artistAvatar != null) {
-                artistAvatar.setVisibility(View.VISIBLE);
+                artistAvatar.setVisibility(View.GONE);
             }
             if (moreBtn != null) {
                 moreBtn.setVisibility(View.VISIBLE);
@@ -615,15 +724,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             titleView.setText(playing.getMusicTitle());
             artistView.setText(playing.getMusicAuthor());
             sourceTitle.setText(LocaleController.getString(R.string.AttachMusic));
-            String art = playing.getArtworkUrl(true);
-            if (!TextUtils.isEmpty(art)) {
-                MglaMusicImageHelper.bindCover(coverImage, art, 0, R.drawable.bot_music);
-                MglaMusicImageHelper.bindCircleCover(artistAvatar, art, R.drawable.bot_music);
-                extractAmbientColors(art);
-            } else {
-                coverImage.setImageResource(R.drawable.bot_music);
-                artistAvatar.setImageResource(R.drawable.bot_music);
-            }
+            bindTelegramMusicCover(playing);
         }
         long dur = resolveTelegramDurationMs(playing);
         timeTotalView.setText(formatTime(dur));
@@ -724,7 +825,98 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         }
         if (playing.isVoice() || playing.isRoundVideo()) {
             showVoiceQueueSheet();
+            return;
         }
+        if (playing.isMusic()) {
+            showMusicQueueSheet();
+        }
+    }
+
+    private boolean isMySavedMusicList() {
+        MessagesController.SavedMusicList list = MediaController.getInstance().currentSavedMusicList;
+        final int account = UserConfig.selectedAccount;
+        return list != null && list.dialogId == UserConfig.getInstance(account).getClientUserId();
+    }
+
+    private boolean isNoforwards(MessageObject messageObject) {
+        return messageObject != null && messageObject.messageOwner != null && messageObject.messageOwner.noforwards;
+    }
+
+    private boolean isSavedToProfile(MessageObject messageObject) {
+        if (messageObject == null || messageObject.getDocument() == null) {
+            return false;
+        }
+        final int account = messageObject.currentAccount;
+        final long documentId = messageObject.getDocument().id;
+        if (MessagesController.getInstance(account).getSavedMusicIds().ids.contains(documentId)) {
+            return true;
+        }
+        // Fast local hint before SavedMusicIds network load finishes (featured profile track).
+        final long selfId = UserConfig.getInstance(account).getClientUserId();
+        final TLRPC.UserFull userInfo = MessagesController.getInstance(account).getUserFull(selfId);
+        return userInfo != null && userInfo.saved_music != null && userInfo.saved_music.id == documentId;
+    }
+
+    private boolean isSavedMusicIdsReady() {
+        MessagesController.SavedMusicIds musicIds = MessagesController.getInstance(UserConfig.selectedAccount).getSavedMusicIds();
+        return musicIds != null && musicIds.loaded;
+    }
+
+    private void ensureSavedMusicIdsLoading() {
+        MessagesController.SavedMusicIds musicIds = MessagesController.getInstance(UserConfig.selectedAccount).getSavedMusicIds();
+        if (musicIds != null) {
+            musicIds.load();
+        }
+    }
+
+    private void bindTelegramMusicCover(MessageObject messageObject) {
+        // Reuse BackupImageView path (same rounded-square cover as voice avatars).
+        if (coverImage != null) {
+            coverImage.setVisibility(View.GONE);
+        }
+        if (avatarCoverView == null) {
+            return;
+        }
+        avatarCoverView.setVisibility(View.VISIBLE);
+        avatarCoverView.setRoundRadius((int) coverRadius);
+        final AudioInfo audioInfo = MediaController.getInstance().getAudioInfo();
+        if (audioInfo != null && audioInfo.getCover() != null) {
+            avatarCoverView.setImageBitmap(audioInfo.getCover());
+            lastCoverUrl = null;
+            return;
+        }
+        final String artworkUrl = messageObject.getArtworkUrl(false);
+        final ImageLocation thumb = getArtworkThumbImageLocation(messageObject);
+        if (!TextUtils.isEmpty(artworkUrl)) {
+            avatarCoverView.setImage(ImageLocation.getForPath(artworkUrl), null, thumb, null, null, null, null, 0, messageObject);
+            extractAmbientColors(artworkUrl);
+            lastCoverUrl = artworkUrl;
+        } else if (thumb != null) {
+            avatarCoverView.setImage(thumb, null, null, null, null, null, null, 0, messageObject);
+            lastCoverUrl = null;
+            if (ambientBg != null) {
+                ambientBg.setColors(0xFF2A3340, 0xFF1A2230, 0xFF121820, 0xFF0C1018);
+            }
+        } else {
+            avatarCoverView.setImageResource(R.drawable.bot_music);
+            lastCoverUrl = null;
+        }
+    }
+
+    private ImageLocation getArtworkThumbImageLocation(MessageObject messageObject) {
+        final TLRPC.Document document = messageObject.getDocument();
+        TLRPC.PhotoSize thumb = document != null ? FileLoader.getClosestPhotoSizeWithSize(document.thumbs, 360) : null;
+        if (!(thumb instanceof TLRPC.TL_photoSize) && !(thumb instanceof TLRPC.TL_photoSizeProgressive)) {
+            thumb = null;
+        }
+        if (thumb != null) {
+            return ImageLocation.getForDocument(thumb, document);
+        }
+        final String smallArtworkUrl = messageObject.getArtworkUrl(true);
+        if (!TextUtils.isEmpty(smallArtworkUrl)) {
+            return ImageLocation.getForPath(smallArtworkUrl);
+        }
+        return null;
     }
 
     private void showVoiceQueueSheet() {
@@ -739,7 +931,43 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             }
             items.add(playing);
         }
+        showPlaylistQueueSheet(LocaleController.getString(R.string.AttachAudio), items);
+    }
 
+    private void showMusicQueueSheet() {
+        ArrayList<MessageObject> playlist = MediaController.getInstance().getPlaylist();
+        final ArrayList<MessageObject> items = new ArrayList<>();
+        if (playlist != null && !playlist.isEmpty()) {
+            items.addAll(playlist);
+        } else {
+            MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+            if (playing == null) {
+                return;
+            }
+            items.add(playing);
+        }
+        CharSequence title;
+        if (isMySavedMusicList()) {
+            title = LocaleController.getString(R.string.ProfilePlaylistTitleMine);
+        } else {
+            MessagesController.SavedMusicList savedList = MediaController.getInstance().currentSavedMusicList;
+            if (savedList != null) {
+                title = LocaleController.formatString(R.string.ProfilePlaylistTitle, DialogObject.getShortName(savedList.dialogId));
+            } else {
+                MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                title = playing != null ? DialogObject.getName(playing.getDialogId()) : LocaleController.getString(R.string.AttachMusic);
+            }
+            if (TextUtils.isEmpty(title)) {
+                title = LocaleController.getString(R.string.AttachMusic);
+            }
+        }
+        showPlaylistQueueSheet(title, items);
+    }
+
+    private void showPlaylistQueueSheet(CharSequence titleText, ArrayList<MessageObject> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
         final Context context = getContext();
         final BottomSheet sheet = new BottomSheet(context, false);
         sheet.setApplyTopPadding(false);
@@ -749,7 +977,6 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         final int maxListPx = (int) (AndroidUtilities.displaySize.y * 0.55f);
         final int maxVisible = Math.max(1, maxListPx / dp(cellDp));
         final int visibleCount = Math.min(items.size(), maxVisible);
-        // LayoutHelper heights are in dp — do not pass pre-dp pixel values.
         final int listHeightDp = visibleCount * cellDp;
         final boolean canScroll = items.size() > maxVisible;
         final int cellBg = Theme.getColor(Theme.key_dialogBackground);
@@ -759,11 +986,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         content.setPadding(0, dp(4), 0, dp(4) + AndroidUtilities.navigationBarHeight);
 
         TextView title = new TextView(context);
-        title.setText(LocaleController.getString(R.string.AttachAudio));
+        title.setText(titleText);
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
         title.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
         title.setPadding(dp(20), dp(8), dp(20), dp(6));
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
         content.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         RecyclerListView listView = new RecyclerListView(context);
@@ -815,10 +1044,408 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             sheet.dismiss();
             AndroidUtilities.runOnUIThread(this::refreshUi, 50);
         });
+        if (canScroll) {
+            listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                    LinearLayoutManager lm = (LinearLayoutManager) recyclerView.getLayoutManager();
+                    if (lm == null || items.isEmpty()) {
+                        return;
+                    }
+                    int first = lm.findFirstVisibleItemPosition();
+                    int visible = Math.abs(lm.findLastVisibleItemPosition() - first) + 1;
+                    if (SharedConfig.playOrderReversed) {
+                        if (first < 10) {
+                            MediaController.getInstance().loadMoreMusic();
+                        }
+                    } else if (first + visible > items.size() - 10) {
+                        MediaController.getInstance().loadMoreMusic();
+                    }
+                }
+            });
+        }
 
         content.addView(listView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, listHeightDp));
         sheet.setCustomView(content);
         sheet.show();
+    }
+
+    private void updateTelegramRepeatIcon() {
+        if (telegramRepeatIcon == null) {
+            return;
+        }
+        int mode = SharedConfig.repeatMode;
+        int icon = R.drawable.player_new_repeatall;
+        int color = Color.WHITE;
+        if (mode == 2) {
+            icon = R.drawable.player_new_repeatone;
+            color = YELLOW;
+        } else if (SharedConfig.shuffleMusic) {
+            icon = mode == 1 ? R.drawable.player_new_repeat_shuffle : R.drawable.player_new_shuffle;
+            color = YELLOW;
+        } else if (SharedConfig.playOrderReversed) {
+            icon = mode == 1 ? R.drawable.player_new_repeat_reverse : R.drawable.player_new_order;
+            color = YELLOW;
+        } else if (mode == 1) {
+            icon = R.drawable.player_new_repeatall;
+            color = YELLOW;
+        }
+        telegramRepeatIcon.setImageResource(icon);
+        telegramRepeatIcon.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+    }
+
+    private void showTelegramRepeatMenu() {
+        if (telegramRepeatBtn == null || container == null) {
+            return;
+        }
+        ItemOptions o = ItemOptions.makeOptions(container, null, telegramRepeatBtn, true);
+        o.addChecked(SharedConfig.repeatMode == 2, R.drawable.player_new_repeatone, LocaleController.getString(R.string.RepeatSong), () -> {
+            SharedConfig.setRepeatMode(SharedConfig.repeatMode == 2 ? 0 : 2);
+            updateTelegramRepeatIcon();
+            o.dismiss();
+        });
+        o.addChecked(SharedConfig.repeatMode == 1, R.drawable.player_new_repeatall, LocaleController.getString(R.string.RepeatList), () -> {
+            SharedConfig.setRepeatMode(SharedConfig.repeatMode == 1 ? 0 : 1);
+            updateTelegramRepeatIcon();
+            o.dismiss();
+        });
+        o.addGap();
+        o.addChecked(SharedConfig.shuffleMusic, R.drawable.player_new_shuffle, LocaleController.getString(R.string.ShuffleList), () -> {
+            if (SharedConfig.shuffleMusic) {
+                MediaController.getInstance().setPlaybackOrderType(0);
+            } else {
+                MediaController.getInstance().setPlaybackOrderType(2);
+            }
+            updateTelegramRepeatIcon();
+            o.dismiss();
+        });
+        o.addGap();
+        o.addChecked(SharedConfig.playOrderReversed, R.drawable.player_new_order, LocaleController.getString(R.string.ReverseOrder), () -> {
+            if (SharedConfig.playOrderReversed) {
+                MediaController.getInstance().setPlaybackOrderType(0);
+            } else {
+                MediaController.getInstance().setPlaybackOrderType(1);
+            }
+            updateTelegramRepeatIcon();
+            o.dismiss();
+        });
+        o.setGravity(Gravity.CENTER_HORIZONTAL);
+        o.show();
+    }
+
+    private void showTelegramMusicOptions() {
+        final MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
+        if (messageObject == null || !messageObject.isMusic() || container == null || moreBtn == null) {
+            return;
+        }
+        final boolean noforwards = isNoforwards(messageObject);
+        final ItemOptions o = ItemOptions.makeOptions(container, null, moreBtn, true);
+        if (!isMySavedMusicList()) {
+            ItemOptions saveOptions = buildSaveOptions(o, messageObject);
+            o.addIf(!noforwards, R.drawable.msg_stories_save, LocaleController.getString(R.string.AudioSaveTo), () -> o.openSwipeback(saveOptions));
+            if (!noforwards && o.getLast() != null) {
+                o.getLast().setRightIcon(R.drawable.msg_arrowright);
+            }
+            o.addGap();
+        }
+        o.addIf(!noforwards, R.drawable.msg_forward, LocaleController.getString(R.string.Forward), () -> {
+            o.dismiss();
+            openForward();
+        });
+        o.addIf(!noforwards, R.drawable.msg_shareout, LocaleController.getString(R.string.ShareFile), () -> {
+            o.dismiss();
+            shareTelegramMusic(messageObject);
+        });
+        o.addIf(messageObject.getId() > 0, R.drawable.msg_message, LocaleController.getString(R.string.ShowInChat), () -> {
+            o.dismiss();
+            openPlayingInChat(messageObject);
+        });
+        if (castAvailable && castRouteButton != null) {
+            o.add(R.drawable.menu_video_chromecast, LocaleController.getString(R.string.VideoPlayerChromecast), () -> {
+                o.dismiss();
+                try {
+                    ChromecastController.getInstance().setCurrentMediaAndCastIfNeeded(MediaController.getInstance().getCurrentChromecastMedia());
+                    castRouteButton.performClick();
+                } catch (Throwable e) {
+                    FileLog.e(e);
+                }
+            });
+        }
+        o.addIf(isMySavedMusicList(), R.drawable.msg_delete, LocaleController.getString(R.string.ProfilePlaylistRemoveFromProfile), true, () -> {
+            o.dismiss();
+            savePlayingToProfile(false);
+        });
+        o.show();
+    }
+
+    private ItemOptions buildSaveOptions(ItemOptions o, MessageObject messageObject) {
+        final int currentAccount = messageObject.currentAccount;
+        final MessagesController.SavedMusicIds musicIds = MessagesController.getInstance(currentAccount).getSavedMusicIds();
+        final TLRPC.Document document = messageObject.getDocument();
+        final long documentId = document != null ? document.id : 0;
+
+        final ItemOptions o2 = o.makeSwipeback();
+        o2.add(R.drawable.ic_ab_back, LocaleController.getString(R.string.Back), o::closeSwipeback);
+        o2.addGap();
+        o2.addIf(!musicIds.ids.contains(documentId), R.drawable.left_status_profile, LocaleController.getString(R.string.AudioSaveToMyProfile), () -> {
+            saveToProfile(messageObject, true, () -> {
+                applyModeChrome();
+                BulletinFactory.of(container, null)
+                        .createSimpleBulletin(R.raw.saved_messages, LocaleController.getString(R.string.AudioSaveToMyProfileSaved))
+                        .show();
+                o.dismiss();
+            }, false);
+        });
+        o2.add(R.drawable.msg_saved, LocaleController.getString(R.string.AudioSaveToSavedMessages), () -> {
+            forwardToDialog(messageObject, UserConfig.getInstance(currentAccount).getClientUserId());
+            BulletinFactory.of(container, null)
+                    .createSimpleBulletin(R.raw.saved_messages, LocaleController.getString(R.string.AudioSaveToSavedMessagesSaved))
+                    .show();
+            o.dismiss();
+        });
+        o2.add(R.drawable.menu_download_round, LocaleController.getString(R.string.AudioSaveToMusicFolder), () -> {
+            saveToMusicFolder(messageObject);
+            o.dismiss();
+        });
+        o2.addGap();
+        o2.addText(LocaleController.getString(R.string.AudioSaveToInfo), 12, dp(200));
+        return o2;
+    }
+
+    private void savePlayingToProfile(boolean save) {
+        MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
+        if (messageObject == null) {
+            return;
+        }
+        saveToProfile(messageObject, save, () -> {
+            applyModeChrome();
+            BulletinFactory.of(container, null)
+                    .createSimpleBulletin(
+                            save ? R.raw.saved_messages : R.raw.ic_delete,
+                            LocaleController.getString(save ? R.string.AudioSaveToMyProfileSaved : R.string.AudioSaveToMyProfileUnsaved))
+                    .show();
+        }, false);
+    }
+
+    private void saveToProfile(MessageObject messageObject, boolean save, Runnable done, boolean triedFileRef) {
+        final TLRPC.Document document = messageObject.getDocument();
+        if (document == null) {
+            return;
+        }
+        final int currentAccount = messageObject.currentAccount;
+        final long documentId = document.id;
+        final TLRPC.TL_account_saveMusic req = new TLRPC.TL_account_saveMusic();
+        req.unsave = !save;
+        req.id = new TLRPC.TL_inputDocument();
+        req.id.id = documentId;
+        req.id.access_hash = document.access_hash;
+        req.id.file_reference = document.file_reference != null ? document.file_reference : new byte[0];
+        ConnectionsManager.getInstance(currentAccount).sendRequest(req, (res, err) -> {
+            if (err != null && FileRefController.isFileRefError(err.text)) {
+                if (triedFileRef || messageObject.getId() < 0) {
+                    AndroidUtilities.runOnUIThread(() -> {
+                        if (container != null) {
+                            BulletinFactory.of(container, null).showForError(err);
+                        }
+                    });
+                    return;
+                }
+                refreshFileRefAndRetrySave(messageObject, save, done);
+                return;
+            } else if (err != null) {
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (container != null) {
+                        BulletinFactory.of(container, null).showForError(err);
+                    }
+                });
+                return;
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                MessagesController.getInstance(currentAccount).getSavedMusicIds().update(documentId, save);
+                final long selfId = UserConfig.getInstance(currentAccount).getClientUserId();
+                final TLRPC.UserFull userInfo = MessagesController.getInstance(currentAccount).getUserFull(selfId);
+                if (userInfo != null) {
+                    if (save) {
+                        userInfo.flags2 |= TLObject.FLAG_21;
+                        userInfo.saved_music = document;
+                    } else if (userInfo.saved_music != null && userInfo.saved_music.id == documentId) {
+                        userInfo.flags2 &= ~TLObject.FLAG_21;
+                        userInfo.saved_music = null;
+                    }
+                    MessagesStorage.getInstance(currentAccount).updateUserInfo(userInfo, true);
+                    NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.profileMusicUpdated, selfId);
+                }
+                if (done != null) {
+                    done.run();
+                }
+            });
+        });
+    }
+
+    private void refreshFileRefAndRetrySave(MessageObject messageObject, boolean save, Runnable done) {
+        final int currentAccount = messageObject.currentAccount;
+        final int msgId = messageObject.getId();
+        if (messageObject.getDialogId() >= 0) {
+            TLRPC.TL_messages_getMessages fileRefReq = new TLRPC.TL_messages_getMessages();
+            fileRefReq.id.add(msgId);
+            ConnectionsManager.getInstance(currentAccount).sendRequest(fileRefReq, (res1, err1) -> {
+                if (res1 instanceof TLRPC.messages_Messages) {
+                    TLRPC.Message message = findMessageById((TLRPC.messages_Messages) res1, msgId);
+                    if (message != null) {
+                        saveToProfile(new MessageObject(currentAccount, message, false, true), save, done, true);
+                        return;
+                    }
+                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (container != null && err1 != null) {
+                        BulletinFactory.of(container, null).showForError(err1);
+                    }
+                });
+            });
+        } else {
+            TLRPC.TL_channels_getMessages fileRefReq = new TLRPC.TL_channels_getMessages();
+            fileRefReq.channel = MessagesController.getInstance(currentAccount).getInputChannel(-messageObject.getDialogId());
+            fileRefReq.id.add(msgId);
+            ConnectionsManager.getInstance(currentAccount).sendRequest(fileRefReq, (res1, err1) -> {
+                if (res1 instanceof TLRPC.messages_Messages) {
+                    TLRPC.Message message = findMessageById((TLRPC.messages_Messages) res1, msgId);
+                    if (message != null) {
+                        saveToProfile(new MessageObject(currentAccount, message, false, true), save, done, true);
+                        return;
+                    }
+                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (container != null && err1 != null) {
+                        BulletinFactory.of(container, null).showForError(err1);
+                    }
+                });
+            });
+        }
+    }
+
+    private static TLRPC.Message findMessageById(TLRPC.messages_Messages r, int msgId) {
+        for (int i = 0; i < r.messages.size(); i++) {
+            if (r.messages.get(i).id == msgId) {
+                return r.messages.get(i);
+            }
+        }
+        return null;
+    }
+
+    private void forwardToDialog(MessageObject messageObject, long dialogId) {
+        final int currentAccount = messageObject.currentAccount;
+        ArrayList<MessageObject> list = new ArrayList<>();
+        list.add(messageObject);
+        SendMessagesHelper.getInstance(currentAccount).sendMessage(list, dialogId, false, false, true, 0, 0);
+    }
+
+    private void saveToMusicFolder(MessageObject messageObject) {
+        LaunchActivity parentActivity = LaunchActivity.instance;
+        if (parentActivity == null) {
+            return;
+        }
+        final int currentAccount = messageObject.currentAccount;
+        if (Build.VERSION.SDK_INT >= 23 && (Build.VERSION.SDK_INT <= 28 || BuildVars.NO_SCOPED_STORAGE)
+                && parentActivity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            parentActivity.requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 4);
+            return;
+        }
+        String fileName = FileLoader.getDocumentFileName(messageObject.getDocument());
+        if (TextUtils.isEmpty(fileName)) {
+            fileName = messageObject.getFileName();
+        }
+        String path = messageObject.messageOwner.attachPath;
+        if (path != null && path.length() > 0) {
+            File temp = new File(path);
+            if (!temp.exists()) {
+                path = null;
+            }
+        }
+        if (path == null || path.length() == 0) {
+            path = FileLoader.getInstance(currentAccount).getPathToMessage(messageObject.messageOwner).toString();
+        }
+        MediaController.saveFile(path, parentActivity, 3, fileName,
+                messageObject.getDocument() != null ? messageObject.getDocument().mime_type : "",
+                uri -> BulletinFactory.of(container, null).createDownloadBulletin(BulletinFactory.FileType.AUDIO).show());
+    }
+
+    private void shareTelegramMusic(MessageObject messageObject) {
+        LaunchActivity parentActivity = LaunchActivity.instance;
+        if (parentActivity == null) {
+            return;
+        }
+        try {
+            final int currentAccount = messageObject.currentAccount;
+            File f = null;
+            if (!TextUtils.isEmpty(messageObject.messageOwner.attachPath)) {
+                f = new File(messageObject.messageOwner.attachPath);
+                if (!f.exists()) {
+                    f = null;
+                }
+            }
+            if (f == null) {
+                f = FileLoader.getInstance(currentAccount).getPathToMessage(messageObject.messageOwner);
+            }
+            if (f != null && f.exists()) {
+                Intent intent = new Intent(Intent.ACTION_SEND);
+                intent.setType(messageObject.getMimeType());
+                if (Build.VERSION.SDK_INT >= 24) {
+                    try {
+                        intent.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(ApplicationLoader.applicationContext, ApplicationLoader.getApplicationId() + ".provider", f));
+                        intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ignore) {
+                        intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(f));
+                    }
+                } else {
+                    intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(f));
+                }
+                parentActivity.startActivityForResult(Intent.createChooser(intent, LocaleController.getString(R.string.ShareFile)), 500);
+            } else {
+                AlertDialog.Builder builder = new AlertDialog.Builder(parentActivity);
+                builder.setTitle(LocaleController.getString(R.string.AppName));
+                builder.setPositiveButton(LocaleController.getString(R.string.OK), null);
+                builder.setMessage(LocaleController.getString(R.string.PleaseDownload));
+                builder.show();
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
+    private void openPlayingInChat(MessageObject messageObject) {
+        LaunchActivity parentActivity = LaunchActivity.instance;
+        if (parentActivity == null) {
+            return;
+        }
+        final int currentAccount = messageObject.currentAccount;
+        if (UserConfig.selectedAccount != currentAccount) {
+            parentActivity.switchToAccount(currentAccount, true);
+        }
+        Bundle args = new Bundle();
+        long did = messageObject.getDialogId();
+        if (DialogObject.isEncryptedDialog(did)) {
+            args.putInt("enc_id", DialogObject.getEncryptedChatId(did));
+        } else if (DialogObject.isUserDialog(did)) {
+            args.putLong("user_id", did);
+        } else {
+            TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-did);
+            if (chat != null && chat.migrated_to != null) {
+                args.putLong("migrated_to", did);
+                did = -chat.migrated_to.channel_id;
+            }
+            args.putLong("chat_id", -did);
+        }
+        args.putInt("message_id", messageObject.getId());
+        NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.closeChats);
+        pendingAfterDismiss = () -> parentActivity.presentFragment(new ChatActivity(args), false, false);
+        super.setOnDismissListener((DialogInterface dialog) -> {
+            Runnable r = pendingAfterDismiss;
+            pendingAfterDismiss = null;
+            if (r != null) {
+                AndroidUtilities.runOnUIThread(r, 40);
+            }
+        });
+        dismiss();
     }
 
     /** Collapse the sheet, then open the standard forward chat picker. */
@@ -1044,6 +1671,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingDidReset);
         NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.musicIdsLoaded);
+        ensureSavedMusicIdsLoading();
     }
 
     private void unregisterObservers() {
@@ -1056,6 +1685,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingDidReset);
         NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.musicIdsLoaded);
     }
 
     private void extractAmbientColors(String coverUrl) {
@@ -1115,6 +1745,9 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             boolean shuffle = MglaYandexMusicStore.getInstance().isShuffle();
             shufflePillIcon.setColorFilter(new PorterDuffColorFilter(shuffle ? YELLOW : Color.WHITE, PorterDuff.Mode.SRC_IN));
         }
+        if (!isYandexMode()) {
+            updateTelegramRepeatIcon();
+        }
     }
 
     private String formatTime(long ms) {
@@ -1134,6 +1767,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.musicIdsLoaded) {
+            applyModeChrome();
+            return;
+        }
         if (isUserSeeking) {
             return;
         }

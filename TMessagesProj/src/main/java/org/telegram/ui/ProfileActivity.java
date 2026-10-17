@@ -3879,7 +3879,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     MediaController.getInstance().getPlaylist().clear();
                     MediaController.getInstance().getPlaylist().addAll(savedMusicList.list);
                     if (!sameList) MediaController.getInstance().playMessage(savedMusicList.list.get(0));
-                    showDialog(new AudioPlayerAlert(getContext(), getResourceProvider()));
+                    final Activity activity = getParentActivity();
+                    final Context sheetContext = activity != null ? activity
+                            : (AndroidUtilities.isContextSafe(LaunchActivity.instance) ? LaunchActivity.instance : getContext());
+                    if (AndroidUtilities.isContextSafe(sheetContext)) {
+                        new MglaMusicPlayerSheet(sheetContext).show();
+                    }
                 }
             });
 
@@ -5490,7 +5495,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             avatarsViewPager.setChatInfo(chatInfo);
         }
         avatarContainer2.addView(avatarsViewPager);
-        avatarContainer2.addView(avatarsBlurView, LayoutHelper.createFrame(-1, 74 + 64));
+        avatarContainer2.addView(avatarsBlurView, LayoutHelper.createFrame(-1, 74 + ProfileMusicView.HEIGHT_DP));
         avatarContainer2.addView(overlaysView);
         if (actionsView != null) {
             avatarsBlurView.setActionsView(actionsView);
@@ -6042,7 +6047,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private int getActionsExtraHeight(boolean withMusic) {
         if (userId != 0 && imageUpdater != null && !myProfile)
             return 0;
-        return dp(74 + (withMusic && hasMusic ? 25 : 0));
+        return dp(74 + (withMusic && hasMusic ? ProfileMusicView.HEIGHT_DP : 0));
     }
 
     private int getHeaderExtraHeight() {
@@ -11215,7 +11220,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             actionsView.updatePosition(listView.getMeasuredWidth(), dp(74));
         } else {
             actionsView.clipHeight = -1;
-            float bottom = extraHeight + newTop - dp(hasMusic ? 25 : 0);
+            float bottom = extraHeight + newTop - dp(hasMusic ? ProfileMusicView.HEIGHT_DP : 0);
             float height = Math.min(dp(74), bottom - newTop);
             actionsView.updatePosition(bottom - height, height);
         }
