@@ -3180,6 +3180,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         }
     }
 
+    public ArrayList<MessageObject> getVoiceMessagesPlaylist() {
+        return voiceMessagesPlaylist;
+    }
+
     private long ignoreTransientAudioFocusLossUntil;
 
     private android.media.AudioAttributes buildPlaybackFocusAttributes(boolean voiceCallStream) {
