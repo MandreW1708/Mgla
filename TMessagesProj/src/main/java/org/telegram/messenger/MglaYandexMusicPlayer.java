@@ -439,6 +439,18 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         MglaYandexMusicApi.toggleLike(currentTrack.id, newLiked, null);
     }
 
+    /** Drop Yandex session state without touching MediaController (Telegram media took over). */
+    public void clearSessionWithoutStoppingPlayer() {
+        if (currentTrack == null && !isPlaying && !isBuffering) {
+            return;
+        }
+        isPlaying = false;
+        isBuffering = false;
+        currentTrack = null;
+        notifyPlaybackState(false, false);
+        notifyTrackChanged(null);
+    }
+
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.messagePlayingDidStart || id == NotificationCenter.messagePlayingPlayStateChanged) {
@@ -458,6 +470,9 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
                 isBuffering = MediaController.getInstance().isDownloadingCurrentMessage();
                 isPlaying = !MediaController.getInstance().isMessagePaused() && !isBuffering;
                 notifyPlaybackState(isPlaying, isBuffering);
+            } else if (playing != null) {
+                // Telegram voice / round / music replaced Yandex — release session state only.
+                clearSessionWithoutStoppingPlayer();
             }
         } else if (id == NotificationCenter.messagePlayingDidReset) {
             // Natural end is handled via MediaController.playNextMessageWithoutOrder → next()

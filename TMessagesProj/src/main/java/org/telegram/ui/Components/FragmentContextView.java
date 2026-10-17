@@ -762,34 +762,12 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 }
             } else if (currentStyle == STYLE_AUDIO_PLAYER) {
                 MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
-                if (fragment != null && messageObject != null) {
-                    if (messageObject.isMusic()) {
-                        final Activity activity = AndroidUtilities.findActivity(getContext());
-                        if (activity instanceof LaunchActivity) {
-                            new AudioPlayerAlert(activity, resourcesProvider).show();
-                        } else if (AndroidUtilities.isContextSafe(LaunchActivity.instance)) {
-                            new AudioPlayerAlert(LaunchActivity.instance, resourcesProvider).show();
-                        }
-                    } else {
-                        long dialogId = 0;
-                        if (chatActivity != null) {
-                            dialogId = chatActivity.getDialogId();
-                        }
-                        if (messageObject.getDialogId() == dialogId) {
-                            chatActivity.scrollToMessageId(messageObject.getId(), 0, false, 0, true, 0);
-                        } else {
-                            dialogId = messageObject.getDialogId();
-                            Bundle args = new Bundle();
-                            if (DialogObject.isEncryptedDialog(dialogId)) {
-                                args.putInt("enc_id", DialogObject.getEncryptedChatId(dialogId));
-                            } else if (DialogObject.isUserDialog(dialogId)) {
-                                args.putLong("user_id", dialogId);
-                            } else {
-                                args.putLong("chat_id", -dialogId);
-                            }
-                            args.putInt("message_id", messageObject.getId());
-                            fragment.presentFragment(new ChatActivity(args), fragment instanceof ChatActivity);
-                        }
+                if (messageObject != null) {
+                    final Activity activity = AndroidUtilities.findActivity(getContext());
+                    final Context sheetContext = activity != null ? activity
+                            : (AndroidUtilities.isContextSafe(LaunchActivity.instance) ? LaunchActivity.instance : getContext());
+                    if (AndroidUtilities.isContextSafe(sheetContext)) {
+                        new org.telegram.ui.MglaMusicPlayerSheet(sheetContext).show();
                     }
                 }
             } else if (currentStyle == STYLE_CONNECTING_GROUP_CALL) {
@@ -1823,8 +1801,9 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             return;
         }
         MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
-        // With main tabs, music/voice chrome lives in MglaGlobalMusicBar above the island — don't duplicate on Dialogs top panel.
-        if (messageObject != null && (messageObject.isMusic() || messageObject.isVoice())
+        // On main-tabs dialogs list the mini-player is MglaGlobalMusicBar — don't duplicate it here.
+        // Inside ChatActivity keep the stock top panel; its click opens MglaMusicPlayerSheet.
+        if (messageObject != null && (messageObject.isMusic() || messageObject.isVoice() || messageObject.isRoundVideo())
                 && fragment instanceof org.telegram.ui.DialogsActivity
                 && ((org.telegram.ui.DialogsActivity) fragment).hasMainTabs) {
             messageObject = null;

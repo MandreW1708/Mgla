@@ -15,6 +15,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -30,8 +31,11 @@ import android.widget.TextView;
 import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.DialogObject;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaMusicImageHelper;
 import org.telegram.messenger.MglaYandexMusicModel;
 import org.telegram.messenger.MglaYandexMusicPlayback;
@@ -39,8 +43,12 @@ import org.telegram.messenger.MglaYandexMusicPlayer;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
+import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ChatActivity;
 import org.telegram.ui.DialogsActivity;
+import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawableRenderNode;
@@ -48,9 +56,8 @@ import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundPro
 import org.telegram.ui.MglaMusicPlayerSheet;
 
 /**
- * Global glass music bar above the bottom island — Telegram + Yandex Music.
- * Glass lives on its own island view (same path as tabs); underglow/progress are siblings
- * so they never interfere with the liquid-glass RenderNode background.
+ * Global glass mini-player above the bottom island — Telegram music / voice / round video + Yandex.
+ * Replaces FragmentContextView audio chrome. Glass matches tabs; underglow/progress are siblings.
  */
 public class MglaGlobalMusicBar extends FrameLayout implements NotificationCenter.NotificationCenterDelegate, MglaYandexMusicPlayer.PlayerListener {
 
@@ -79,10 +86,15 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     private View underglowView;
     private View progressView;
 
+    private FrameLayout coverWrap;
     private ImageView coverView;
+    private BackupImageView avatarView;
+    private final AvatarDrawable avatarDrawable = new AvatarDrawable();
     private TextView titleView;
     private TextView artistView;
     private ImageView playPauseBtn;
+    private ImageView prevBtn;
+    private ImageView nextBtn;
 
     private final Paint underglowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -189,6 +201,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), 0, dp(6), 0);
 
+        coverWrap = new FrameLayout(context);
         coverView = new ImageView(context);
         coverView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable coverBg = new GradientDrawable();
@@ -202,7 +215,12 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
                 outline.setOval(0, 0, view.getWidth(), view.getHeight());
             }
         });
-        row.addView(coverView, LayoutHelper.createLinear(40, 40, 4, 0, 10, 0));
+        coverWrap.addView(coverView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        avatarView = new BackupImageView(context);
+        avatarView.setRoundRadius(dp(20));
+        avatarView.setVisibility(GONE);
+        coverWrap.addView(avatarView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        row.addView(coverWrap, LayoutHelper.createLinear(40, 40, 4, 0, 10, 0));
 
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
@@ -225,13 +243,14 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
 
         row.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.CENTER_VERTICAL, 0, 0, 4, 0));
 
-        row.addView(createControl(context, R.drawable.ic_action_previous, v -> {
+        prevBtn = createControl(context, R.drawable.ic_action_previous, v -> {
             if (isYandexActive()) {
                 MglaYandexMusicPlayer.getInstance().prev();
             } else {
                 MediaController.getInstance().playPreviousMessage();
             }
-        }), LayoutHelper.createLinear(34, 34));
+        });
+        row.addView(prevBtn, LayoutHelper.createLinear(34, 34));
 
         playPauseBtn = createControl(context, R.drawable.ic_action_play, v -> {
             if (isYandexActive()) {
@@ -249,13 +268,14 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         });
         row.addView(playPauseBtn, LayoutHelper.createLinear(38, 38));
 
-        row.addView(createControl(context, R.drawable.ic_action_next, v -> {
+        nextBtn = createControl(context, R.drawable.ic_action_next, v -> {
             if (isYandexActive()) {
                 MglaYandexMusicPlayer.getInstance().next();
             } else {
                 MediaController.getInstance().playNextMessage();
             }
-        }), LayoutHelper.createLinear(34, 34));
+        });
+        row.addView(nextBtn, LayoutHelper.createLinear(34, 34));
 
         row.addView(createControl(context, R.drawable.msg_close, v -> {
             if (isYandexActive()) {
@@ -289,16 +309,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         progressView.setFocusable(false);
         addView(progressView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        setOnClickListener(v -> {
-            if (isYandexActive()) {
-                new MglaMusicPlayerSheet(getContext()).show();
-            } else {
-                MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
-                if (playing != null && playing.isMusic()) {
-                    new AudioPlayerAlert(getContext(), resourcesProvider).show();
-                }
-            }
-        });
+        setOnClickListener(v -> openPlayingContent());
     }
 
     private ImageView createControl(Context context, int res, OnClickListener listener) {
@@ -381,6 +392,12 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         return playing != null && MglaYandexMusicPlayback.isYandexMessage(playing);
     }
 
+    private static boolean isSupportedMedia(MessageObject playing) {
+        return playing != null && playing.getId() != 0
+                && (playing.isMusic() || playing.isVoice() || playing.isRoundVideo()
+                || MglaYandexMusicPlayback.isYandexMessage(playing));
+    }
+
     private boolean isActivelyPlaying() {
         if (isYandexActive()) {
             return MglaYandexMusicPlayer.getInstance().isPlaying()
@@ -394,7 +411,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
 
     public void refresh() {
         MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
-        if (playing == null || playing.getId() == 0 || (!playing.isMusic() && !MglaYandexMusicPlayback.isYandexMessage(playing))) {
+        if (!isSupportedMedia(playing)) {
             MglaYandexMusicModel.Track yandex = MglaYandexMusicPlayer.getInstance().getCurrentTrack();
             if (yandex != null && (MglaYandexMusicPlayer.getInstance().isPlaying() || MglaYandexMusicPlayer.getInstance().isBuffering())) {
                 showYandex(yandex);
@@ -406,28 +423,40 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             return;
         }
 
-        setVisibility(VISIBLE);
-        titleView.setText(playing.getMusicTitle());
-        artistView.setText(playing.getMusicAuthor());
+        // Telegram voice/round/music took the player — drop stale Yandex session UI state.
+        if (!MglaYandexMusicPlayback.isYandexMessage(playing)) {
+            MglaYandexMusicPlayer.getInstance().clearSessionWithoutStoppingPlayer();
+        }
 
+        setVisibility(VISIBLE);
         boolean paused = MediaController.getInstance().isMessagePaused();
         boolean buffering = MediaController.getInstance().isDownloadingCurrentMessage();
         playPauseBtn.setImageResource(paused || buffering ? R.drawable.ic_action_play : R.drawable.ic_action_pause);
 
-        if (MglaYandexMusicPlayback.isYandexMessage(playing)) {
+        final boolean voiceOrRound = playing.isVoice() || playing.isRoundVideo();
+        prevBtn.setVisibility(VISIBLE);
+        nextBtn.setVisibility(VISIBLE);
+
+        if (voiceOrRound) {
+            titleView.setText(playing.getMusicAuthor());
+            artistView.setText(LocaleController.getString(
+                    playing.isRoundVideo() ? R.string.AttachRound : R.string.AttachAudio));
+            showAvatarForMessage(playing);
+        } else if (MglaYandexMusicPlayback.isYandexMessage(playing)) {
             MglaYandexMusicModel.Track track = MglaYandexMusicPlayback.getTrack(playing);
             if (track != null) {
-                MglaMusicImageHelper.bindCircleCover(coverView, track.getCoverUrl(100), R.drawable.nocover_small);
+                titleView.setText(track.title);
+                artistView.setText(track.artist);
+                showAlbumCover(track.getCoverUrl(100));
             } else {
-                coverView.setImageResource(R.drawable.nocover_small);
+                titleView.setText(playing.getMusicTitle());
+                artistView.setText(playing.getMusicAuthor());
+                showAlbumCover(playing.getArtworkUrl(true));
             }
         } else {
-            String art = playing.getArtworkUrl(true);
-            if (!TextUtils.isEmpty(art)) {
-                MglaMusicImageHelper.bindCircleCover(coverView, art, R.drawable.nocover_small);
-            } else {
-                coverView.setImageResource(R.drawable.nocover_small);
-            }
+            titleView.setText(playing.getMusicTitle());
+            artistView.setText(playing.getMusicAuthor());
+            showAlbumCover(playing.getArtworkUrl(true));
         }
 
         syncProgressFromPlayer(playing.audioProgress, resolveDurationMs(playing), !paused && !buffering, false);
@@ -445,7 +474,9 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         artistView.setText(track.artist);
         boolean playing = MglaYandexMusicPlayer.getInstance().isPlaying();
         playPauseBtn.setImageResource(playing ? R.drawable.ic_action_pause : R.drawable.ic_action_play);
-        MglaMusicImageHelper.bindCircleCover(coverView, track.getCoverUrl(100), R.drawable.nocover_small);
+        showAlbumCover(track.getCoverUrl(100));
+        prevBtn.setVisibility(VISIBLE);
+        nextBtn.setVisibility(VISIBLE);
         long durationMs = Math.max(0L, MglaYandexMusicPlayer.getInstance().getDuration());
         float progress = durationMs > 0
                 ? Math.max(0f, Math.min(1f, MglaYandexMusicPlayer.getInstance().getCurrentPosition() / (float) durationMs))
@@ -455,6 +486,94 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             startPulse();
         } else {
             stopPulse();
+        }
+    }
+
+    private void showAlbumCover(String url) {
+        avatarView.setVisibility(GONE);
+        coverView.setVisibility(VISIBLE);
+        if (!TextUtils.isEmpty(url)) {
+            MglaMusicImageHelper.bindCircleCover(coverView, url, R.drawable.nocover_small);
+        } else {
+            coverView.setImageResource(R.drawable.nocover_small);
+        }
+    }
+
+    private void showAvatarForMessage(MessageObject messageObject) {
+        coverView.setVisibility(GONE);
+        avatarView.setVisibility(VISIBLE);
+        TLRPC.User user = null;
+        TLRPC.Chat chat = null;
+        final int account = messageObject.currentAccount;
+        final MessagesController mc = MessagesController.getInstance(account);
+
+        if (messageObject.isOutOwner()
+                || (messageObject.messageOwner.fwd_from != null
+                && messageObject.messageOwner.fwd_from.from_id instanceof TLRPC.TL_peerUser
+                && messageObject.messageOwner.fwd_from.from_id.user_id == UserConfig.getInstance(account).getClientUserId())) {
+            user = UserConfig.getInstance(account).getCurrentUser();
+        } else if (messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.from_id instanceof TLRPC.TL_peerChannel) {
+            chat = mc.getChat(messageObject.messageOwner.fwd_from.from_id.channel_id);
+        } else if (messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.from_id instanceof TLRPC.TL_peerChat) {
+            chat = mc.getChat(messageObject.messageOwner.fwd_from.from_id.chat_id);
+        } else if (messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.from_id instanceof TLRPC.TL_peerUser) {
+            user = mc.getUser(messageObject.messageOwner.fwd_from.from_id.user_id);
+        } else if (messageObject.messageOwner.from_id instanceof TLRPC.TL_peerChat) {
+            chat = mc.getChat(messageObject.messageOwner.from_id.chat_id);
+        } else if (messageObject.messageOwner.from_id instanceof TLRPC.TL_peerChannel) {
+            chat = mc.getChat(messageObject.messageOwner.from_id.channel_id);
+        } else if (messageObject.messageOwner.from_id == null && messageObject.messageOwner.peer_id != null && messageObject.messageOwner.peer_id.channel_id != 0) {
+            chat = mc.getChat(messageObject.messageOwner.peer_id.channel_id);
+        } else {
+            long senderId = messageObject.getSenderId();
+            if (senderId > 0) {
+                user = mc.getUser(senderId);
+            } else if (senderId < 0) {
+                chat = mc.getChat(-senderId);
+            }
+        }
+
+        if (user != null) {
+            avatarDrawable.setInfo(user);
+            avatarView.setForUserOrChat(user, avatarDrawable);
+        } else if (chat != null) {
+            avatarDrawable.setInfo(chat);
+            avatarView.setForUserOrChat(chat, avatarDrawable);
+        } else {
+            avatarDrawable.setInfo(0, messageObject.getMusicAuthor(), null);
+            avatarView.setImageDrawable(avatarDrawable);
+        }
+    }
+
+    private void openPlayingContent() {
+        if (isYandexActive()) {
+            new MglaMusicPlayerSheet(getContext()).show();
+            return;
+        }
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        if (playing == null) {
+            return;
+        }
+        if (playing.isMusic() && !playing.isVoice() && !playing.isRoundVideo()) {
+            new AudioPlayerAlert(getContext(), resourcesProvider).show();
+            return;
+        }
+        // Voice / round — open the chat at the message (same as old FragmentContextView).
+        long dialogId = playing.getDialogId();
+        Bundle args = new Bundle();
+        if (DialogObject.isEncryptedDialog(dialogId)) {
+            args.putInt("enc_id", DialogObject.getEncryptedChatId(dialogId));
+        } else if (DialogObject.isUserDialog(dialogId)) {
+            args.putLong("user_id", dialogId);
+        } else {
+            args.putLong("chat_id", -dialogId);
+        }
+        args.putInt("message_id", playing.getId());
+        BaseFragment fragment = LaunchActivity.getSafeLastFragment();
+        if (fragment != null) {
+            fragment.presentFragment(new ChatActivity(args));
+        } else if (AndroidUtilities.isContextSafe(LaunchActivity.instance)) {
+            LaunchActivity.instance.presentFragment(new ChatActivity(args));
         }
     }
 
