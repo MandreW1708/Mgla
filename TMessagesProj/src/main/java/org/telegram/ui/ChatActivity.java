@@ -37792,7 +37792,7 @@ public class ChatActivity extends BaseFragment implements
                     cell.resetPressedLink(-1);
                 }
                 if (!messageObject.isVoice()) {
-                    showDialog(new AudioPlayerAlert(getContext(), themeDelegate));
+                    new MglaMusicPlayerSheet(getContext()).show();
                 }
             } else if (str.startsWith("tonaddress:")) {
                 didPressTonAddress(cell, url, str.substring(11));

@@ -179,7 +179,6 @@ import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.AppIconBulletinLayout;
 import org.telegram.ui.Components.AttachBotIntroTopView;
-import org.telegram.ui.Components.AudioPlayerAlert;
 import org.telegram.ui.Components.BatteryDrawable;
 import org.telegram.ui.Components.BlockingUpdateView;
 import org.telegram.ui.Components.Bulletin;
@@ -3096,9 +3095,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 pushOpened = false;
                 isNew = false;
             } else if (showPlayer) {
-                if (!actionBarLayout.getFragmentStack().isEmpty()) {
-                    BaseFragment fragment = actionBarLayout.getFragmentStack().get(0);
-                    fragment.showDialog(new AudioPlayerAlert(this, null));
+                if (AndroidUtilities.isContextSafe(this)) {
+                    new MglaMusicPlayerSheet(this).show();
                 }
                 pushOpened = false;
             } else if (showLocations) {

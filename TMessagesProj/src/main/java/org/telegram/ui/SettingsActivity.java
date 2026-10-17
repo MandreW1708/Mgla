@@ -856,10 +856,10 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 break;
 
             case 100:
-                presentFragment(new MglaSettingsActivity());
+                presentSettingFragment(new MglaSettingsActivity());
                 break;
             case 101:
-                presentFragment(new MglaPremiumActivity());
+                presentSettingFragment(new MglaPremiumActivity());
                 break;
 
             case 11:

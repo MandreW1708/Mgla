@@ -555,7 +555,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             return;
         }
         if (playing.isMusic() && !playing.isVoice() && !playing.isRoundVideo()) {
-            new AudioPlayerAlert(getContext(), resourcesProvider).show();
+            new MglaMusicPlayerSheet(getContext()).show();
             return;
         }
         // Voice / round — open the chat at the message (same as old FragmentContextView).
