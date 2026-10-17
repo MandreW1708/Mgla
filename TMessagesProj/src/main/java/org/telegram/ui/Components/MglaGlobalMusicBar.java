@@ -187,7 +187,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), 0, dp(6), 0);
+        row.setPadding(dp(12), 0, dp(6), 0);
 
         coverView = new ImageView(context);
         coverView.setScaleType(ImageView.ScaleType.CENTER_CROP);

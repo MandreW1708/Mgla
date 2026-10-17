@@ -414,13 +414,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         contentView.addView(tabsViewWrapper, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
 
         globalMusicBar = new MglaGlobalMusicBar(context, resourceProvider);
-        // Outer height includes GLOW_OUTSET; seat just above the visible tabs glass
-        // (not above the tabs row's empty top margin).
+        // Width/X follow tabsBottomRow (island ± search); outer height includes GLOW_OUTSET.
         contentView.addView(globalMusicBar, LayoutHelper.createFrame(
-                LayoutHelper.MATCH_PARENT,
+                LayoutHelper.WRAP_CONTENT,
                 DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.GLOW_OUTSET_DP * 2,
-                Gravity.BOTTOM,
-                12 - MglaGlobalMusicBar.GLOW_OUTSET_DP, 0, 12 - MglaGlobalMusicBar.GLOW_OUTSET_DP,
+                Gravity.BOTTOM | Gravity.LEFT,
+                0, 0, 0,
                 DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN + 2 - MglaGlobalMusicBar.GLOW_OUTSET_DP));
         // Attach after addView so ViewPositionWatcher can resolve offsets vs contentView
         // (same factory/liquid-glass flag as tabsView / searchButton).
@@ -429,11 +428,20 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             if (dialogsActivity != null) {
                 dialogsActivity.setMusicBarVisible(visible);
             }
+            if (visible) {
+                AndroidUtilities.runOnUIThread(this::updateMusicBarLayout);
+            }
+        });
+        tabsBottomRow.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (left != oldLeft || right != oldRight) {
+                updateMusicBarLayout();
+            }
         });
 
         applySearchButtonVisibility(false);
         updateTabsIslandMaxWidth();
         syncSearchButtonSideMargins();
+        updateMusicBarLayout();
 
         updateLayoutWrapper = new UpdateLayoutWrapper(context);
         contentView.addView(updateLayoutWrapper, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
@@ -1154,29 +1162,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         tabsViewWrapper.setPadding(systemInsets.left, 0, systemInsets.right, navigationBarHeight);
         updateTabsIslandMaxWidth();
-        if (globalMusicBar != null) {
-            ViewGroup.MarginLayoutParams musicLp = (ViewGroup.MarginLayoutParams) globalMusicBar.getLayoutParams();
-            if (musicLp != null) {
-                final int glow = dp(MglaGlobalMusicBar.GLOW_OUTSET_DP);
-                // Align to the top of the tabs glass (+2dp), ignoring the island's empty top margin.
-                int musicBottom = navigationBarHeight
-                        + dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN + 2)
-                        - glow;
-                if (isUpdateLayoutVisible) {
-                    musicBottom += dp(UpdateLayoutWrapper.HEIGHT);
-                }
-                final int side = systemInsets.left + dp(12) - glow;
-                final int sideR = systemInsets.right + dp(12) - glow;
-                final int h = dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.GLOW_OUTSET_DP * 2);
-                if (musicLp.height != h || musicLp.bottomMargin != musicBottom || musicLp.leftMargin != side || musicLp.rightMargin != sideR) {
-                    musicLp.height = h;
-                    musicLp.bottomMargin = musicBottom;
-                    musicLp.leftMargin = side;
-                    musicLp.rightMargin = sideR;
-                    globalMusicBar.setLayoutParams(musicLp);
-                }
-            }
-        }
+        updateMusicBarLayout();
 
         final WindowInsetsCompat consumed = isUpdateLayoutVisible ?
             insets.inset(0, 0, 0, navigationBarHeight) : insets;
@@ -1401,6 +1387,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
         tabsView.setMaxWidth(Math.max(dp(180), avail));
         syncSearchButtonSideMargins();
+        updateMusicBarLayout();
     }
 
     private void applySearchButtonVisibility(boolean animated) {
@@ -1416,6 +1403,49 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             tabsView.requestLayout();
         }
         tabsBottomRow.requestLayout();
+        AndroidUtilities.runOnUIThread(this::updateMusicBarLayout);
+    }
+
+    /**
+     * Match mini-player outer box to {@link #tabsBottomRow}:
+     * tabs island alone, or island + gap + search when the search pill is enabled.
+     * Glow outset is added around that width so the visible glass aligns with the group.
+     */
+    private void updateMusicBarLayout() {
+        if (globalMusicBar == null || tabsBottomRow == null || contentView == null) {
+            return;
+        }
+        ViewGroup.MarginLayoutParams musicLp = (ViewGroup.MarginLayoutParams) globalMusicBar.getLayoutParams();
+        if (musicLp == null) {
+            return;
+        }
+        final int glow = dp(MglaGlobalMusicBar.GLOW_OUTSET_DP);
+        final int h = dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.GLOW_OUTSET_DP * 2);
+        int musicBottom = navigationBarHeight
+                + dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN + MglaGlobalMusicBar.TABS_GAP_DP)
+                - glow;
+        if (updateLayoutWrapper != null && updateLayoutWrapper.isUpdateLayoutVisible()) {
+            musicBottom += dp(UpdateLayoutWrapper.HEIGHT);
+        }
+
+        int width = musicLp.width;
+        int left = musicLp.leftMargin;
+        if (tabsBottomRow.getWidth() > 0
+                && ViewPositionWatcher.computeRectInParent(tabsBottomRow, contentView, fragmentPosition)) {
+            width = Math.round(fragmentPosition.width()) + glow * 2;
+            left = Math.round(fragmentPosition.left) - glow;
+        }
+
+        if (musicLp.width != width || musicLp.height != h
+                || musicLp.leftMargin != left || musicLp.bottomMargin != musicBottom
+                || musicLp.rightMargin != 0) {
+            musicLp.width = width;
+            musicLp.height = h;
+            musicLp.leftMargin = left;
+            musicLp.rightMargin = 0;
+            musicLp.bottomMargin = musicBottom;
+            globalMusicBar.setLayoutParams(musicLp);
+        }
     }
 
     private DialogsActivity resolveDialogsActivity() {
