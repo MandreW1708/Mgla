@@ -62,20 +62,26 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Redesigned Yandex Music Collection screen matching the official dark aesthetics.
- * Features:
- * - "Коллекция" header with Profile, Equalizer/Settings, and Search action icons
- * - "Моя волна по коллекции" vibrant glowing wave banner with "У вашей музыки есть цвет" tagline
- * - "Мне нравится ›" card with 3D heart badge, dynamic count, top 3 preview tracks with [E] badge,
- *   download button, and options menu. Clicking header opens the full favorites list.
- * - "Любимые исполнители ›" horizontal carousel with circular artist photos fetched from the account.
- * - "₽ Отправить донат для вдохновения" pill button.
- * - Floating mini-player above the bottom navigation island.
+ * Yandex Music collection tab — Material Design 3 dark surfaces.
+ * Keeps: favorites playlist preview, playlists carousel, favorite artists.
  */
 public class MglaMusicActivity extends BaseFragment implements
         MainTabsActivity.TabFragmentDelegate,
         MglaYandexMusicPlayer.PlayerListener,
         MglaYandexMusicStore.AuthListener {
+
+    // MD3 dark color tokens
+    private static final int MD3_SURFACE = 0xFF121212;
+    private static final int MD3_SURFACE_CONTAINER = 0xFF211F26;
+    private static final int MD3_SURFACE_CONTAINER_HIGH = 0xFF2B2930;
+    private static final int MD3_ON_SURFACE = 0xFFE6E1E5;
+    private static final int MD3_ON_SURFACE_VARIANT = 0xFFCAC4D0;
+    private static final int MD3_PRIMARY = 0xFFD0BCFF;
+    private static final int MD3_PRIMARY_CONTAINER = 0xFF4F378B;
+    private static final int MD3_ON_PRIMARY_CONTAINER = 0xFFEADDFF;
+    private static final int MD3_SECONDARY_CONTAINER = 0xFF4A4458;
+    private static final int MD3_TERTIARY = 0xFFEFB8C8;
+    private static final int MD3_OUTLINE_VARIANT = 0xFF49454F;
 
     private boolean hasMainTabs;
 
@@ -103,6 +109,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
     // Favorites Section
     private View favoritesHeaderRow;
+    private LinearLayout favoritesCard;
     private HeartBadgeView heartBadgeView;
     private TextView favoritesSectionTitle;
     private TextView favoritesSectionCount;
@@ -182,7 +189,7 @@ public class MglaMusicActivity extends BaseFragment implements
         actionBar.setAddToContainer(false);
 
         rootLayout = new FrameLayout(context);
-        rootLayout.setBackgroundColor(0xFF000000); // Pure dark background
+        rootLayout.setBackgroundColor(MD3_SURFACE);
 
         mainContainer = new FrameLayout(context);
         // Background fills to the physical bottom; scrollables reserve space for islands via their own padding.
@@ -237,65 +244,51 @@ public class MglaMusicActivity extends BaseFragment implements
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(0, 0, 0, dp(24));
 
-        // Top Action Bar ("Коллекция" + Profile, Sliders, Search)
+        // Top app bar
         LinearLayout topBar = new LinearLayout(context);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(dp(16), dp(12), dp(16), dp(12));
+        topBar.setPadding(dp(16), dp(10), dp(12), dp(8));
 
         if (!hasMainTabs) {
-            ImageView backBtn = new ImageView(context);
-            backBtn.setImageResource(R.drawable.ic_ab_back);
-            backBtn.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-            backBtn.setPadding(dp(6), dp(6), dp(6), dp(6));
-            backBtn.setOnClickListener(v -> finishFragment());
-            topBar.addView(backBtn, LayoutHelper.createLinear(36, 36, 0, 0, 8, 0));
+            topBar.addView(createMd3IconButton(context, R.drawable.ic_ab_back, v -> finishFragment()),
+                    LayoutHelper.createLinear(40, 40, 0, 0, 8, 0));
         }
 
         collectionTitleView = new TextView(context);
         collectionTitleView.setText("Коллекция");
-        collectionTitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 26);
+        collectionTitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
         collectionTitleView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        collectionTitleView.setTextColor(Color.WHITE);
+        collectionTitleView.setTextColor(MD3_ON_SURFACE);
         topBar.addView(collectionTitleView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
-        // Profile icon
-        profileActionBtn = new ImageView(context);
-        profileActionBtn.setImageResource(R.drawable.outline_profile_photo);
-        profileActionBtn.setColorFilter(new PorterDuffColorFilter(0xFFEDEDED, PorterDuff.Mode.SRC_IN));
-        profileActionBtn.setPadding(dp(4), dp(4), dp(4), dp(4));
-        profileActionBtn.setOnClickListener(v -> onProfileClicked());
-        topBar.addView(profileActionBtn, LayoutHelper.createLinear(32, 32, 0, 0, 16, 0));
+        profileActionBtn = createMd3IconButton(context, R.drawable.outline_profile_photo, v -> onProfileClicked());
+        topBar.addView(profileActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 6, 0));
 
-        // Equalizer / Sliders icon
-        equalizerActionBtn = new ImageView(context);
-        equalizerActionBtn.setImageDrawable(new SlidersDrawable(0xFFEDEDED));
-        equalizerActionBtn.setPadding(dp(4), dp(4), dp(4), dp(4));
-        equalizerActionBtn.setOnClickListener(v -> onEqualizerClicked());
-        topBar.addView(equalizerActionBtn, LayoutHelper.createLinear(32, 32, 0, 0, 16, 0));
+        equalizerActionBtn = createMd3IconButton(context, null, v -> onEqualizerClicked());
+        equalizerActionBtn.setImageDrawable(new SlidersDrawable(MD3_ON_SURFACE));
+        topBar.addView(equalizerActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 6, 0));
 
-        // Search icon
-        searchActionBtn = new ImageView(context);
-        searchActionBtn.setImageResource(R.drawable.outline_header_search);
-        searchActionBtn.setColorFilter(new PorterDuffColorFilter(0xFFEDEDED, PorterDuff.Mode.SRC_IN));
-        searchActionBtn.setPadding(dp(4), dp(4), dp(4), dp(4));
-        searchActionBtn.setOnClickListener(v -> openSearch());
-        topBar.addView(searchActionBtn, LayoutHelper.createLinear(32, 32));
+        searchActionBtn = createMd3IconButton(context, R.drawable.outline_header_search, v -> openSearch());
+        topBar.addView(searchActionBtn, LayoutHelper.createLinear(40, 40));
 
         content.addView(topBar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // "Моя волна по коллекции" Wave Card
+        // Hero: My Wave (primary container)
         FrameLayout waveCardWrapper = new FrameLayout(context);
-        waveCardWrapper.setPadding(dp(16), dp(4), dp(16), dp(6));
+        waveCardWrapper.setPadding(dp(16), dp(8), dp(16), dp(4));
 
         collectionWaveCard = new FrameLayout(context);
         GradientDrawable waveGradient = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xFFFF4500, 0xFFFF6A00, 0xFFFF8A00, 0xFFFF3D00}
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{MD3_PRIMARY_CONTAINER, 0xFF6750A4, 0xFF7D5260}
         );
-        waveGradient.setCornerRadius(dp(24));
+        waveGradient.setCornerRadius(dp(28));
         collectionWaveCard.setBackground(waveGradient);
-        collectionWaveCard.setPadding(dp(20), dp(18), dp(20), dp(18));
+        collectionWaveCard.setPadding(dp(22), dp(20), dp(22), dp(20));
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            collectionWaveCard.setElevation(dp(2));
+        }
 
         LinearLayout waveInner = new LinearLayout(context);
         waveInner.setOrientation(LinearLayout.VERTICAL);
@@ -303,57 +296,57 @@ public class MglaMusicActivity extends BaseFragment implements
 
         collectionWaveStatus = new TextView(context);
         collectionWaveStatus.setText("Моя волна по коллекции");
-        collectionWaveStatus.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        collectionWaveStatus.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        collectionWaveStatus.setLetterSpacing(0.02f);
         collectionWaveStatus.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
-        collectionWaveStatus.setTextColor(0xD9FFFFFF);
+        collectionWaveStatus.setTextColor(MD3_ON_PRIMARY_CONTAINER);
         waveInner.addView(collectionWaveStatus, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
         collectionWaveTitle = new TextView(context);
-        collectionWaveTitle.setText("▶ Коллекция");
-        collectionWaveTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
+        collectionWaveTitle.setText("▶  Слушать");
+        collectionWaveTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
         collectionWaveTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        collectionWaveTitle.setTextColor(Color.WHITE);
-        waveInner.addView(collectionWaveTitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 0));
+        collectionWaveTitle.setTextColor(MD3_ON_PRIMARY_CONTAINER);
+        waveInner.addView(collectionWaveTitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 6, 0, 0));
 
         collectionWaveCard.addView(waveInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-        collectionWaveCard.setOnClickListener(v -> {
-            MglaYandexMusicPlayer.getInstance().playCollectionWave();
-        });
+        collectionWaveCard.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playCollectionWave());
 
-        waveCardWrapper.addView(collectionWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 84));
+        waveCardWrapper.addView(collectionWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 96));
         content.addView(waveCardWrapper, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // Subtitle: "У вашей музыки есть цвет"
         collectionWaveSubtitle = new TextView(context);
         SpannableStringBuilder span = new SpannableStringBuilder("У вашей музыки есть цвет");
-        span.setSpan(new ForegroundColorSpan(0xFF8E8E93), 0, 20, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        span.setSpan(new ForegroundColorSpan(0xFFFF7043), 20, 24, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        span.setSpan(new ForegroundColorSpan(MD3_ON_SURFACE_VARIANT), 0, 20, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        span.setSpan(new ForegroundColorSpan(MD3_PRIMARY), 20, 24, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         collectionWaveSubtitle.setText(span);
         collectionWaveSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         collectionWaveSubtitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
         collectionWaveSubtitle.setGravity(Gravity.CENTER);
-        content.addView(collectionWaveSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 20));
+        content.addView(collectionWaveSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 16));
 
-        // ==========================================
-        // SECTION "Мне нравится ›"
-        // ==========================================
+        // Favorites playlist preview — surface card
+        favoritesCard = new LinearLayout(context);
+        favoritesCard.setOrientation(LinearLayout.VERTICAL);
+        favoritesCard.setBackground(md3SurfaceDrawable(MD3_SURFACE_CONTAINER, 28));
+        favoritesCard.setPadding(dp(16), dp(14), dp(12), dp(12));
+
         favoritesHeaderRow = createFavoritesHeader(context);
-        content.addView(favoritesHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 6));
+        favoritesCard.addView(favoritesHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
 
         favoritesPreviewLoading = new ProgressBar(context);
         favoritesPreviewLoading.setVisibility(View.GONE);
-        content.addView(favoritesPreviewLoading, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 10, 0, 10));
+        favoritesCard.addView(favoritesPreviewLoading, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 10, 0, 10));
 
         favoritesPreviewContainer = new LinearLayout(context);
         favoritesPreviewContainer.setOrientation(LinearLayout.VERTICAL);
-        favoritesPreviewContainer.setPadding(dp(16), 0, dp(16), 0);
-        content.addView(favoritesPreviewContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        favoritesCard.addView(favoritesPreviewContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // ==========================================
-        // SECTION "Мои плейлисты ›"
-        // ==========================================
+        content.addView(favoritesCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
+
+        // Playlists
         playlistsHeaderRow = createPlaylistsHeader(context);
-        content.addView(playlistsHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 24, 16, 12));
+        content.addView(playlistsHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 28, 16, 12));
 
         playlistsLoading = new ProgressBar(context);
         playlistsLoading.setVisibility(View.GONE);
@@ -368,14 +361,11 @@ public class MglaMusicActivity extends BaseFragment implements
         playlistsContainer = new LinearLayout(context);
         playlistsContainer.setOrientation(LinearLayout.HORIZONTAL);
         playlistsScrollView.addView(playlistsContainer, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
-
         content.addView(playlistsScrollView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // ==========================================
-        // SECTION "Любимые исполнители ›"
-        // ==========================================
+        // Favorite artists
         artistsHeaderRow = createArtistsHeader(context);
-        content.addView(artistsHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 24, 16, 12));
+        content.addView(artistsHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 28, 16, 12));
 
         artistsLoading = new ProgressBar(context);
         artistsLoading.setVisibility(View.GONE);
@@ -390,92 +380,131 @@ public class MglaMusicActivity extends BaseFragment implements
         artistsContainer = new LinearLayout(context);
         artistsContainer.setOrientation(LinearLayout.HORIZONTAL);
         artistsScrollView.addView(artistsContainer, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
-
         content.addView(artistsScrollView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // ==========================================
-        // DONATE PILL BUTTON
-        // ==========================================
         donateButton = createDonateButton(context);
-        content.addView(donateButton, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 32, 24, 20));
+        content.addView(donateButton, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 28, 16, 20));
 
         scroll.addView(content);
         return scroll;
+    }
+
+    private static GradientDrawable md3SurfaceDrawable(int color, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radiusDp));
+        return d;
+    }
+
+    private ImageView createMd3IconButton(Context context, Integer iconRes, View.OnClickListener listener) {
+        ImageView iv = new ImageView(context);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        iv.setBackground(bg);
+        iv.setPadding(dp(8), dp(8), dp(8), dp(8));
+        iv.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        if (iconRes != null) {
+            iv.setImageResource(iconRes);
+            iv.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE, PorterDuff.Mode.SRC_IN));
+        }
+        iv.setOnClickListener(listener);
+        return iv;
     }
 
     private View createFavoritesHeader(Context context) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(4), 0, dp(4));
+        row.setPadding(0, dp(2), 0, dp(2));
 
+        FrameLayout badgeWrap = new FrameLayout(context);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setShape(GradientDrawable.OVAL);
+        badgeBg.setColor(MD3_SECONDARY_CONTAINER);
+        badgeWrap.setBackground(badgeBg);
         heartBadgeView = new HeartBadgeView(context);
-        row.addView(heartBadgeView, LayoutHelper.createLinear(54, 54, 0, 0, 14, 0));
+        badgeWrap.addView(heartBadgeView, LayoutHelper.createFrame(40, 40, Gravity.CENTER));
+        row.addView(badgeWrap, LayoutHelper.createLinear(52, 52, 0, 0, 14, 0));
 
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
 
         favoritesSectionTitle = new TextView(context);
-        favoritesSectionTitle.setText("Мне нравится ›");
-        favoritesSectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        favoritesSectionTitle.setText("Мне нравится");
+        favoritesSectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         favoritesSectionTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        favoritesSectionTitle.setTextColor(Color.WHITE);
+        favoritesSectionTitle.setTextColor(MD3_ON_SURFACE);
         textCol.addView(favoritesSectionTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         favoritesSectionCount = new TextView(context);
         favoritesSectionCount.setText("Загрузка...");
         favoritesSectionCount.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        favoritesSectionCount.setTextColor(0xFF8E8E93);
+        favoritesSectionCount.setTextColor(MD3_ON_SURFACE_VARIANT);
         textCol.addView(favoritesSectionCount, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
 
         row.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        ImageView chevron = new ImageView(context);
+        chevron.setImageResource(R.drawable.msg_arrowright);
+        chevron.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+        chevron.setPadding(dp(8), dp(8), dp(4), dp(8));
+        row.addView(chevron, LayoutHelper.createLinear(36, 36));
 
         row.setOnClickListener(v -> showFullFavorites());
         return row;
     }
 
     private View createPlaylistsHeader(Context context) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-
+        LinearLayout row = createMd3SectionHeaderRow(context);
         playlistsSectionTitle = new TextView(context);
-        playlistsSectionTitle.setText("Мои плейлисты ›");
-        playlistsSectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-        playlistsSectionTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        playlistsSectionTitle.setTextColor(Color.WHITE);
+        styleMd3SectionTitle(playlistsSectionTitle, "Мои плейлисты");
         row.addView(playlistsSectionTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
-
+        row.addView(createMd3Chevron(context), LayoutHelper.createLinear(32, 32));
         row.setOnClickListener(v -> loadPlaylists());
         return row;
     }
 
     private View createArtistsHeader(Context context) {
+        LinearLayout row = createMd3SectionHeaderRow(context);
+        artistsSectionTitle = new TextView(context);
+        styleMd3SectionTitle(artistsSectionTitle, "Любимые исполнители");
+        row.addView(artistsSectionTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+        row.addView(createMd3Chevron(context), LayoutHelper.createLinear(32, 32));
+        row.setOnClickListener(v -> loadArtists());
+        return row;
+    }
+
+    private LinearLayout createMd3SectionHeaderRow(Context context) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-
-        artistsSectionTitle = new TextView(context);
-        artistsSectionTitle.setText("Любимые исполнители ›");
-        artistsSectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-        artistsSectionTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        artistsSectionTitle.setTextColor(Color.WHITE);
-        row.addView(artistsSectionTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
-
-        row.setOnClickListener(v -> {
-            loadArtists();
-        });
         return row;
+    }
+
+    private void styleMd3SectionTitle(TextView title, String text) {
+        title.setText(text);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        title.setTextColor(MD3_ON_SURFACE);
+    }
+
+    private ImageView createMd3Chevron(Context context) {
+        ImageView chevron = new ImageView(context);
+        chevron.setImageResource(R.drawable.msg_arrowright);
+        chevron.setColorFilter(new PorterDuffColorFilter(MD3_PRIMARY, PorterDuff.Mode.SRC_IN));
+        chevron.setPadding(dp(6), dp(6), dp(2), dp(6));
+        return chevron;
     }
 
     private FrameLayout createDonateButton(Context context) {
         FrameLayout container = new FrameLayout(context);
         GradientDrawable pillBg = new GradientDrawable();
-        pillBg.setCornerRadius(dp(24));
-        pillBg.setColor(0x1AFFFFFF);
-        pillBg.setStroke(dp(1), 0x33FFFFFF);
+        pillBg.setCornerRadius(dp(28));
+        pillBg.setColor(MD3_SURFACE_CONTAINER);
+        pillBg.setStroke(dp(1), MD3_OUTLINE_VARIANT);
         container.setBackground(pillBg);
-        container.setPadding(dp(20), dp(12), dp(20), dp(12));
+        container.setPadding(dp(20), dp(14), dp(20), dp(14));
 
         LinearLayout inner = new LinearLayout(context);
         inner.setOrientation(LinearLayout.HORIZONTAL);
@@ -483,29 +512,25 @@ public class MglaMusicActivity extends BaseFragment implements
 
         TextView rubleIcon = new TextView(context);
         rubleIcon.setText("₽");
-        rubleIcon.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        rubleIcon.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         rubleIcon.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        rubleIcon.setTextColor(0xFF8E8E93);
+        rubleIcon.setTextColor(MD3_PRIMARY);
         GradientDrawable circleBg = new GradientDrawable();
         circleBg.setShape(GradientDrawable.OVAL);
-        circleBg.setStroke(dp(1), 0xFF8E8E93);
+        circleBg.setColor(MD3_PRIMARY_CONTAINER);
         rubleIcon.setBackground(circleBg);
         rubleIcon.setGravity(Gravity.CENTER);
-        inner.addView(rubleIcon, LayoutHelper.createLinear(20, 20, 0, 0, 8, 0));
+        inner.addView(rubleIcon, LayoutHelper.createLinear(24, 24, 0, 0, 10, 0));
 
         TextView text = new TextView(context);
         text.setText("Отправить донат для вдохновения");
         text.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         text.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
-        text.setTextColor(0xFFD6D6D6);
+        text.setTextColor(MD3_ON_SURFACE);
         inner.addView(text, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
         container.addView(inner, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-
-        container.setOnClickListener(v -> {
-            Toast.makeText(context, "Спасибо за поддержку проекта Mgla! 🎵", Toast.LENGTH_SHORT).show();
-        });
-
+        container.setOnClickListener(v -> Toast.makeText(context, "Спасибо за поддержку проекта Mgla! 🎵", Toast.LENGTH_SHORT).show());
         return container;
     }
 
@@ -526,7 +551,7 @@ public class MglaMusicActivity extends BaseFragment implements
             TextView empty = new TextView(getContext());
             empty.setText("В вашей медиатеке пока нет любимых треков");
             empty.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            empty.setTextColor(0xFF8E8E93);
+            empty.setTextColor(MD3_ON_SURFACE_VARIANT);
             empty.setPadding(0, dp(10), 0, dp(10));
             favoritesPreviewContainer.addView(empty);
             return;
@@ -535,7 +560,7 @@ public class MglaMusicActivity extends BaseFragment implements
         for (int i = 0; i < previewCount; i++) {
             final MglaYandexMusicModel.Track t = favoritesList.get(i);
             View row = createPreviewTrackRow(getContext(), t);
-            favoritesPreviewContainer.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
+            favoritesPreviewContainer.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, i < previewCount - 1 ? 4 : 0));
         }
     }
 
@@ -549,7 +574,7 @@ public class MglaMusicActivity extends BaseFragment implements
             TextView empty = new TextView(context);
             empty.setText("Нет плейлистов");
             empty.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            empty.setTextColor(0xFF8E8E93);
+            empty.setTextColor(MD3_ON_SURFACE_VARIANT);
             empty.setPadding(0, dp(10), 0, dp(10));
             playlistsContainer.addView(empty);
             return;
@@ -559,43 +584,48 @@ public class MglaMusicActivity extends BaseFragment implements
             final MglaYandexMusicModel.Playlist playlist = playlistsList.get(i);
             LinearLayout card = new LinearLayout(context);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(0, 0, dp(12), 0);
+            card.setPadding(dp(10), dp(10), dp(10), dp(12));
+            card.setBackground(md3SurfaceDrawable(MD3_SURFACE_CONTAINER, 20));
+            LinearLayout.LayoutParams cardLp = LayoutHelper.createLinear(148, LayoutHelper.WRAP_CONTENT);
+            if (i < playlistsList.size() - 1) {
+                cardLp.rightMargin = dp(10);
+            }
 
             ImageView cover = new ImageView(context);
             cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
             GradientDrawable coverBg = new GradientDrawable();
-            coverBg.setCornerRadius(dp(12));
-            coverBg.setColor(0xFF2A2A2A);
+            coverBg.setCornerRadius(dp(16));
+            coverBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
             cover.setBackground(coverBg);
             cover.setClipToOutline(true);
             cover.setOutlineProvider(new android.view.ViewOutlineProvider() {
                 @Override
                 public void getOutline(View view, android.graphics.Outline outline) {
-                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(12));
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(16));
                 }
             });
-            MglaMusicImageHelper.bindCover(cover, playlist.getCoverUrl(200), 12, R.drawable.bot_music);
-            card.addView(cover, LayoutHelper.createLinear(120, 120));
+            MglaMusicImageHelper.bindCover(cover, playlist.getCoverUrl(200), 16, R.drawable.bot_music);
+            card.addView(cover, LayoutHelper.createLinear(128, 128, Gravity.CENTER_HORIZONTAL));
 
             TextView title = new TextView(context);
             title.setText(playlist.title);
             title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
             title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-            title.setTextColor(Color.WHITE);
+            title.setTextColor(MD3_ON_SURFACE);
             title.setSingleLine(true);
             title.setEllipsize(TextUtils.TruncateAt.END);
-            title.setPadding(0, dp(8), 0, 0);
-            card.addView(title, LayoutHelper.createLinear(120, LayoutHelper.WRAP_CONTENT));
+            title.setPadding(0, dp(10), 0, 0);
+            card.addView(title, LayoutHelper.createLinear(128, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
             TextView count = new TextView(context);
             count.setText(formatTrackCount(playlist.trackCount));
             count.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            count.setTextColor(0xFF8E8E93);
+            count.setTextColor(MD3_ON_SURFACE_VARIANT);
             count.setSingleLine(true);
-            card.addView(count, LayoutHelper.createLinear(120, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+            card.addView(count, LayoutHelper.createLinear(128, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 2, 0, 0));
 
             card.setOnClickListener(v -> openPlaylist(playlist));
-            playlistsContainer.addView(card);
+            playlistsContainer.addView(card, cardLp);
         }
     }
 
@@ -645,15 +675,14 @@ public class MglaMusicActivity extends BaseFragment implements
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(6), 0, dp(6));
+        row.setPadding(dp(8), dp(8), dp(4), dp(8));
+        row.setBackground(md3SurfaceDrawable(MD3_SURFACE_CONTAINER_HIGH, 16));
 
-        // Cover (48x48dp, 8dp radius)
         ImageView cover = new ImageView(context);
-        cover.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        MglaMusicImageHelper.bindCover(cover, track.getCoverUrl(100), 8, R.drawable.bot_music);
+        cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        MglaMusicImageHelper.bindCover(cover, track.getCoverUrl(100), 12, R.drawable.bot_music);
         row.addView(cover, LayoutHelper.createLinear(48, 48, 0, 0, 12, 0));
 
-        // Title + Explicit + Artist
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
 
@@ -665,7 +694,7 @@ public class MglaMusicActivity extends BaseFragment implements
         title.setText(track.title);
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(MD3_ON_SURFACE);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         titleRow.addView(title, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
@@ -675,13 +704,13 @@ public class MglaMusicActivity extends BaseFragment implements
             explicitBadge.setText("E");
             explicitBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
             explicitBadge.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-            explicitBadge.setTextColor(0xFFEDEDED);
+            explicitBadge.setTextColor(MD3_ON_SURFACE);
             explicitBadge.setGravity(Gravity.CENTER);
             GradientDrawable eBg = new GradientDrawable();
-            eBg.setCornerRadius(dp(3));
-            eBg.setColor(0x33FFFFFF);
+            eBg.setCornerRadius(dp(4));
+            eBg.setColor(MD3_SECONDARY_CONTAINER);
             explicitBadge.setBackground(eBg);
-            titleRow.addView(explicitBadge, LayoutHelper.createLinear(14, 14, 6, 0, 0, 0));
+            titleRow.addView(explicitBadge, LayoutHelper.createLinear(16, 16, 6, 0, 0, 0));
         }
 
         textCol.addView(titleRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -689,34 +718,27 @@ public class MglaMusicActivity extends BaseFragment implements
         TextView artist = new TextView(context);
         artist.setText(track.artist);
         artist.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        artist.setTextColor(0xFF8E8E93);
+        artist.setTextColor(MD3_ON_SURFACE_VARIANT);
         artist.setSingleLine(true);
         artist.setEllipsize(TextUtils.TruncateAt.END);
         textCol.addView(artist, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 3, 0, 0));
 
-        row.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 10, 0));
+        row.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 6, 0));
 
-        // Download Action Icon (green arrow down into tray)
         ImageView downloadBtn = new ImageView(context);
-        downloadBtn.setImageDrawable(new DownloadDrawable(0xFF4CAF50));
-        downloadBtn.setPadding(dp(6), dp(6), dp(6), dp(6));
-        downloadBtn.setOnClickListener(v -> {
-            Toast.makeText(context, "Трек сохранен: " + track.title, Toast.LENGTH_SHORT).show();
-        });
-        row.addView(downloadBtn, LayoutHelper.createLinear(34, 34, 0, 0, 6, 0));
+        downloadBtn.setImageDrawable(new DownloadDrawable(MD3_PRIMARY));
+        downloadBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
+        downloadBtn.setOnClickListener(v -> Toast.makeText(context, "Трек сохранен: " + track.title, Toast.LENGTH_SHORT).show());
+        row.addView(downloadBtn, LayoutHelper.createLinear(36, 36, 0, 0, 2, 0));
 
-        // 3 Dots Menu
         ImageView moreBtn = new ImageView(context);
         moreBtn.setImageResource(R.drawable.ic_ab_other);
-        moreBtn.setColorFilter(new PorterDuffColorFilter(0xFF8E8E93, PorterDuff.Mode.SRC_IN));
-        moreBtn.setPadding(dp(6), dp(6), dp(6), dp(6));
+        moreBtn.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+        moreBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
         moreBtn.setOnClickListener(v -> showTrackOptionsMenu(track));
-        row.addView(moreBtn, LayoutHelper.createLinear(34, 34));
+        row.addView(moreBtn, LayoutHelper.createLinear(36, 36));
 
-        row.setOnClickListener(v -> {
-            MglaYandexMusicPlayer.getInstance().playTrack(track, favoritesList, "Мне нравится");
-        });
-
+        row.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playTrack(track, favoritesList, "Мне нравится"));
         return row;
     }
 
@@ -728,45 +750,48 @@ public class MglaMusicActivity extends BaseFragment implements
             TextView empty = new TextView(getContext());
             empty.setText("Нет любимых исполнителей");
             empty.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            empty.setTextColor(0xFF8E8E93);
+            empty.setTextColor(MD3_ON_SURFACE_VARIANT);
             empty.setPadding(0, dp(10), 0, dp(10));
             artistsContainer.addView(empty);
             return;
         }
 
-        for (MglaYandexMusicModel.Artist artist : artistsList) {
+        for (int i = 0; i < artistsList.size(); i++) {
+            final MglaYandexMusicModel.Artist artist = artistsList.get(i);
             LinearLayout item = new LinearLayout(getContext());
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER_HORIZONTAL);
-            item.setPadding(0, 0, dp(16), 0);
+            item.setPadding(dp(8), dp(8), dp(8), dp(10));
+            item.setBackground(md3SurfaceDrawable(MD3_SURFACE_CONTAINER, 20));
+            LinearLayout.LayoutParams lp = LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT);
+            if (i < artistsList.size() - 1) {
+                lp.rightMargin = dp(10);
+            }
 
-            // Circular photo (100x100dp)
             ImageView photo = new ImageView(getContext());
-            photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
             MglaMusicImageHelper.bindCircleCover(photo, artist.getCoverUrl(300), R.drawable.bot_music);
-            item.addView(photo, LayoutHelper.createLinear(100, 100));
+            item.addView(photo, LayoutHelper.createLinear(96, 96));
 
-            // Artist name below
             TextView name = new TextView(getContext());
             name.setText(artist.name);
             name.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
             name.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-            name.setTextColor(Color.WHITE);
+            name.setTextColor(MD3_ON_SURFACE);
             name.setGravity(Gravity.CENTER);
             name.setMaxLines(2);
             name.setEllipsize(TextUtils.TruncateAt.END);
-            name.setWidth(dp(100));
-            item.addView(name, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 0));
+            name.setWidth(dp(96));
+            item.addView(name, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 10, 0, 0));
 
             item.setOnClickListener(v -> {
-                // Open search for this artist
                 openSearch();
                 if (searchInput != null) {
                     searchInput.setText(artist.name);
                 }
             });
 
-            artistsContainer.addView(item);
+            artistsContainer.addView(item, lp);
         }
     }
 
@@ -784,27 +809,23 @@ public class MglaMusicActivity extends BaseFragment implements
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
-        ImageView backBtn = new ImageView(context);
-        backBtn.setImageResource(R.drawable.ic_ab_back);
-        backBtn.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-        backBtn.setPadding(dp(6), dp(6), dp(6), dp(6));
-        backBtn.setOnClickListener(v -> closeFullFavorites());
-        header.addView(backBtn, LayoutHelper.createLinear(36, 36, 0, 0, 10, 0));
+        ImageView backBtn = createMd3IconButton(context, R.drawable.ic_ab_back, v -> closeFullFavorites());
+        header.addView(backBtn, LayoutHelper.createLinear(40, 40, 0, 0, 12, 0));
 
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
 
         fullFavoritesTitleText = new TextView(context);
         fullFavoritesTitleText.setText("Мне нравится");
-        fullFavoritesTitleText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        fullFavoritesTitleText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
         fullFavoritesTitleText.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        fullFavoritesTitleText.setTextColor(Color.WHITE);
+        fullFavoritesTitleText.setTextColor(MD3_ON_SURFACE);
         textCol.addView(fullFavoritesTitleText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         fullFavoritesCountText = new TextView(context);
         fullFavoritesCountText.setText("0 треков");
         fullFavoritesCountText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        fullFavoritesCountText.setTextColor(0xFF8E8E93);
+        fullFavoritesCountText.setTextColor(MD3_ON_SURFACE_VARIANT);
         textCol.addView(fullFavoritesCountText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
 
         header.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
@@ -815,15 +836,15 @@ public class MglaMusicActivity extends BaseFragment implements
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
 
         TextView playAllBtn = new TextView(context);
-        playAllBtn.setText("▶ Слушать всё");
+        playAllBtn.setText("▶  Слушать всё");
         playAllBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         playAllBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        playAllBtn.setTextColor(Color.WHITE);
+        playAllBtn.setTextColor(MD3_ON_PRIMARY_CONTAINER);
         GradientDrawable playAllBg = new GradientDrawable();
-        playAllBg.setCornerRadius(dp(18));
-        playAllBg.setColor(0xFFFF4500);
+        playAllBg.setCornerRadius(dp(20));
+        playAllBg.setColor(MD3_PRIMARY_CONTAINER);
         playAllBtn.setBackground(playAllBg);
-        playAllBtn.setPadding(dp(18), dp(10), dp(18), dp(10));
+        playAllBtn.setPadding(dp(18), dp(12), dp(18), dp(12));
         playAllBtn.setOnClickListener(v -> {
             if (!detailTracks.isEmpty()) {
                 MglaYandexMusicPlayer.getInstance().playTrack(detailTracks.get(0), new ArrayList<>(detailTracks), detailSourceTitle);
@@ -832,14 +853,15 @@ public class MglaMusicActivity extends BaseFragment implements
         actionRow.addView(playAllBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 10, 0));
 
         TextView shuffleBtn = new TextView(context);
-        shuffleBtn.setText("🔀 Перемешать");
+        shuffleBtn.setText("Перемешать");
         shuffleBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        shuffleBtn.setTextColor(Color.WHITE);
+        shuffleBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        shuffleBtn.setTextColor(MD3_ON_SURFACE);
         GradientDrawable shuffBg = new GradientDrawable();
-        shuffBg.setCornerRadius(dp(18));
-        shuffBg.setColor(0x22FFFFFF);
+        shuffBg.setCornerRadius(dp(20));
+        shuffBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
         shuffleBtn.setBackground(shuffBg);
-        shuffleBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
+        shuffleBtn.setPadding(dp(16), dp(12), dp(16), dp(12));
         shuffleBtn.setOnClickListener(v -> {
             if (!detailTracks.isEmpty()) {
                 MglaYandexMusicStore.getInstance().setShuffle(true);
@@ -915,31 +937,27 @@ public class MglaMusicActivity extends BaseFragment implements
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
 
-        ImageView backBtn = new ImageView(context);
-        backBtn.setImageResource(R.drawable.ic_ab_back);
-        backBtn.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-        backBtn.setPadding(dp(6), dp(6), dp(6), dp(6));
-        backBtn.setOnClickListener(v -> closeSearch());
-        bar.addView(backBtn, LayoutHelper.createLinear(36, 36, 0, 0, 8, 0));
+        ImageView backBtn = createMd3IconButton(context, R.drawable.ic_ab_back, v -> closeSearch());
+        bar.addView(backBtn, LayoutHelper.createLinear(40, 40, 0, 0, 10, 0));
 
         LinearLayout searchPill = new LinearLayout(context);
         searchPill.setOrientation(LinearLayout.HORIZONTAL);
         searchPill.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable pillBg = new GradientDrawable();
-        pillBg.setCornerRadius(dp(20));
-        pillBg.setColor(0x26FFFFFF);
+        pillBg.setCornerRadius(dp(28));
+        pillBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
         searchPill.setBackground(pillBg);
         searchPill.setPadding(dp(14), 0, dp(10), 0);
 
         ImageView searchIcon = new ImageView(context);
         searchIcon.setImageResource(R.drawable.outline_header_search);
-        searchIcon.setColorFilter(new PorterDuffColorFilter(0xFF8E8E93, PorterDuff.Mode.SRC_IN));
+        searchIcon.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
         searchPill.addView(searchIcon, LayoutHelper.createLinear(18, 18, 0, 0, 8, 0));
 
         searchInput = new EditText(context);
         searchInput.setHint("Трек или исполнитель");
-        searchInput.setHintTextColor(0xFF8E8E93);
-        searchInput.setTextColor(Color.WHITE);
+        searchInput.setHintTextColor(MD3_ON_SURFACE_VARIANT);
+        searchInput.setTextColor(MD3_ON_SURFACE);
         searchInput.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         searchInput.setBackground(null);
         searchInput.setSingleLine(true);
@@ -963,7 +981,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
         searchClearBtn = new ImageView(context);
         searchClearBtn.setImageResource(R.drawable.msg_close);
-        searchClearBtn.setColorFilter(new PorterDuffColorFilter(0xFF8E8E93, PorterDuff.Mode.SRC_IN));
+        searchClearBtn.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
         searchClearBtn.setVisibility(View.GONE);
         searchClearBtn.setPadding(dp(4), dp(4), dp(4), dp(4));
         searchClearBtn.setOnClickListener(v -> searchInput.setText(""));
@@ -979,7 +997,7 @@ public class MglaMusicActivity extends BaseFragment implements
         searchEmptyView = new TextView(context);
         searchEmptyView.setText("Введите название трека или артиста");
         searchEmptyView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        searchEmptyView.setTextColor(0xFF8E8E93);
+        searchEmptyView.setTextColor(MD3_ON_SURFACE_VARIANT);
         searchEmptyView.setGravity(Gravity.CENTER);
         searchEmptyView.setPadding(dp(32), dp(40), dp(32), dp(40));
         layout.addView(searchEmptyView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -1068,7 +1086,7 @@ public class MglaMusicActivity extends BaseFragment implements
     private View createAuthPromoPage(Context context) {
         ScrollView scroll = new ScrollView(context);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(0xFF000000);
+        scroll.setBackgroundColor(MD3_SURFACE);
         scroll.setClipToPadding(false);
         scroll.setPadding(0, 0, 0, islandBottomInset());
 
@@ -1080,14 +1098,14 @@ public class MglaMusicActivity extends BaseFragment implements
         FrameLayout badge = new FrameLayout(context);
         GradientDrawable badgeBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{0xFFFF334B, 0xFFFF6A00}
+                new int[]{MD3_PRIMARY_CONTAINER, 0xFF6750A4}
         );
         badgeBg.setCornerRadius(dp(36));
         badge.setBackground(badgeBg);
 
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.bot_music);
-        icon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+        icon.setColorFilter(new PorterDuffColorFilter(MD3_ON_PRIMARY_CONTAINER, PorterDuff.Mode.SRC_IN));
         badge.addView(icon, LayoutHelper.createFrame(42, 42, Gravity.CENTER));
         layout.addView(badge, LayoutHelper.createLinear(72, 72, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 22));
 
@@ -1095,14 +1113,14 @@ public class MglaMusicActivity extends BaseFragment implements
         title.setText("Яндекс Музыка в Mgla");
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
         title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(MD3_ON_SURFACE);
         title.setGravity(Gravity.CENTER);
         layout.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
 
         TextView subtitle = new TextView(context);
         subtitle.setText("Слушайте персональную Мою Волну, любимые треки и личную коллекцию прямо в Telegram");
         subtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        subtitle.setTextColor(0xFF8E8E93);
+        subtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
         subtitle.setGravity(Gravity.CENTER);
         layout.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 24));
 
@@ -1110,22 +1128,22 @@ public class MglaMusicActivity extends BaseFragment implements
         loginBtn.setText("Войти через Яндекс ID");
         loginBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         loginBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        loginBtn.setTextColor(Color.WHITE);
+        loginBtn.setTextColor(MD3_ON_PRIMARY_CONTAINER);
         loginBtn.setGravity(Gravity.CENTER);
         GradientDrawable btnBg = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xFFFF334B, 0xFFFF6A00}
+                new int[]{MD3_PRIMARY_CONTAINER, 0xFF6750A4}
         );
-        btnBg.setCornerRadius(dp(25));
+        btnBg.setCornerRadius(dp(28));
         loginBtn.setBackground(btnBg);
         loginBtn.setPadding(dp(24), dp(14), dp(24), dp(14));
         loginBtn.setOnClickListener(v -> openAuthSheet(false));
-        layout.addView(loginBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 50, 0, 0, 0, 12));
+        layout.addView(loginBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 52, 0, 0, 0, 12));
 
         TextView manualTokenBtn = new TextView(context);
         manualTokenBtn.setText("Ввести токен вручную");
         manualTokenBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        manualTokenBtn.setTextColor(0xFFFF7043);
+        manualTokenBtn.setTextColor(MD3_PRIMARY);
         manualTokenBtn.setGravity(Gravity.CENTER);
         manualTokenBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
         manualTokenBtn.setOnClickListener(v -> openAuthSheet(true));
@@ -1448,7 +1466,7 @@ public class MglaMusicActivity extends BaseFragment implements
             TextView title = new TextView(ctx);
             title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
             title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-            title.setTextColor(Color.WHITE);
+            title.setTextColor(MD3_ON_SURFACE);
             title.setSingleLine(true);
             title.setEllipsize(TextUtils.TruncateAt.END);
             titleRow.addView(title, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
@@ -1457,19 +1475,19 @@ public class MglaMusicActivity extends BaseFragment implements
             explicitTag.setText("E");
             explicitTag.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
             explicitTag.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-            explicitTag.setTextColor(0xFFEDEDED);
+            explicitTag.setTextColor(MD3_ON_SURFACE);
             explicitTag.setGravity(Gravity.CENTER);
             GradientDrawable eBg = new GradientDrawable();
-            eBg.setCornerRadius(dp(3));
-            eBg.setColor(0x33FFFFFF);
+            eBg.setCornerRadius(dp(4));
+            eBg.setColor(MD3_SECONDARY_CONTAINER);
             explicitTag.setBackground(eBg);
-            titleRow.addView(explicitTag, LayoutHelper.createLinear(14, 14, 6, 0, 0, 0));
+            titleRow.addView(explicitTag, LayoutHelper.createLinear(16, 16, 6, 0, 0, 0));
 
             col.addView(titleRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
             TextView subtitle = new TextView(ctx);
             subtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            subtitle.setTextColor(0xFF8E8E93);
+            subtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
             subtitle.setSingleLine(true);
             subtitle.setEllipsize(TextUtils.TruncateAt.END);
             col.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
@@ -1478,7 +1496,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
             TextView duration = new TextView(ctx);
             duration.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            duration.setTextColor(0xFF8E8E93);
+            duration.setTextColor(MD3_ON_SURFACE_VARIANT);
             row.addView(duration, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
 
             ImageView like = new ImageView(ctx);
@@ -1502,9 +1520,9 @@ public class MglaMusicActivity extends BaseFragment implements
             boolean isThisPlaying = (current != null && current.id.equals(t.id));
 
             if (isThisPlaying) {
-                holder.title.setTextColor(0xFFFF5722);
+                holder.title.setTextColor(MD3_PRIMARY);
             } else {
-                holder.title.setTextColor(Color.WHITE);
+                holder.title.setTextColor(MD3_ON_SURFACE);
             }
 
             if (t.isLiked) {
@@ -1512,7 +1530,7 @@ public class MglaMusicActivity extends BaseFragment implements
                 holder.like.setColorFilter(new PorterDuffColorFilter(0xFFFF334B, PorterDuff.Mode.SRC_IN));
             } else {
                 holder.like.setImageResource(R.drawable.media_like);
-                holder.like.setColorFilter(new PorterDuffColorFilter(0xFF8E8E93, PorterDuff.Mode.SRC_IN));
+                holder.like.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
             }
 
             holder.like.setOnClickListener(v -> {
@@ -1646,7 +1664,7 @@ public class MglaMusicActivity extends BaseFragment implements
             circlePaint.setStyle(Paint.Style.STROKE);
             circlePaint.setStrokeWidth(dp(2));
 
-            innerPaint.setColor(0xFF000000);
+            innerPaint.setColor(MD3_SURFACE);
             innerPaint.setStyle(Paint.Style.FILL);
         }
 

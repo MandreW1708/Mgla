@@ -132,6 +132,7 @@ public final class MglaSettingsSearch {
         final int chatsIcon = R.drawable.filled_chatlist2;
         final int notifIcon = R.drawable.settings_sounds;
         final int appearanceIcon = R.drawable.msg_palette;
+        final int playerIcon = R.drawable.files_music;
         final int cameraIcon = R.drawable.filled_premium_camera;
         final int connectionIcon = R.drawable.mgla_dpi_shield;
         final int aiIcon = R.drawable.input_ai;
@@ -142,6 +143,7 @@ public final class MglaSettingsSearch {
         final String appearance = "Внешний вид";
         final String cleanHeader = "Настройки чистой шапки";
         final String sideMenu = "Боковое меню";
+        final String player = "Плеер";
         final String camera = "Камера";
         final String connection = "Подключение без VPN";
         final String ai = "Искусственный интеллект";
@@ -158,6 +160,7 @@ public final class MglaSettingsSearch {
         final Utilities.Callback0Return<BaseFragment> animCommonScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON);
         final Utilities.Callback0Return<BaseFragment> animChatsScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_CHATS);
         final Utilities.Callback0Return<BaseFragment> animDialogsScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_DIALOGS);
+        final Utilities.Callback0Return<BaseFragment> playerScreen = MglaPlayerSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> cameraScreen = MglaCameraSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> connectionScreen = MglaDpiBypassActivity::new;
         final Utilities.Callback0Return<BaseFragment> aiScreen = MglaAiSettingsActivity::new;
@@ -172,7 +175,17 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1002, chats, hub, null, chatsIcon, chatsScreen, null, "chats"));
         l.add(new Entry(1003, notif, hub, null, notifIcon, notifScreen, null, "notifications"));
         l.add(new Entry(1004, appearance, hub, null, appearanceIcon, appearanceScreen, null, "appearance"));
+        l.add(new Entry(1160, player, hub, null, playerIcon, playerScreen, null, "player"));
         l.add(new Entry(1005, camera, hub, null, cameraIcon, cameraScreen, null, "camera"));
+        l.add(new Entry(1161, "Большая обложка", hub, player, playerIcon, playerScreen, "Большая обложка", "player/large-cover"));
+        l.add(new Entry(1162, "Динамические цвета из обложки", hub, player, playerIcon, playerScreen, "Динамические цвета из обложки", "player/dynamic-colors"));
+        l.add(new Entry(1163, "Анимация появления", hub, player, playerIcon, playerScreen, "Анимация появления", "player/anim/open"));
+        l.add(new Entry(1164, "Смена трека", hub, player, playerIcon, playerScreen, "Смена трека", "player/anim/track"));
+        l.add(new Entry(1165, "Пульсация обложки", hub, player, playerIcon, playerScreen, "Пульсация обложки", "player/anim/pulse"));
+        l.add(new Entry(1166, "Анимация кнопок", hub, player, playerIcon, playerScreen, "Анимация кнопок", "player/anim/buttons"));
+        l.add(new Entry(1167, "Движение фона", hub, player, playerIcon, playerScreen, "Движение фона", "player/anim/ambient"));
+        l.add(new Entry(1168, "Анимированный таймлайн", hub, player, playerIcon, playerScreen, "Анимированный таймлайн", "player/anim/seekbar"));
+        l.add(new Entry(1169, "Скорость анимаций", hub, player, playerIcon, playerScreen, "Скорость анимаций", "player/anim/speed"));
         l.add(new Entry(1006, connection, hub, null, connectionIcon, connectionScreen, null, "connection"));
         l.add(new Entry(1007, ai, hub, null, aiIcon, aiScreen, null, "ai"));
 

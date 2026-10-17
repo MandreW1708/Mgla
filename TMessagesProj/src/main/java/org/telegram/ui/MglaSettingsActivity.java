@@ -188,6 +188,9 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         addMenuItem(mainBlock, () -> presentFragment(new MglaAppearanceSettingsActivity()),
             IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.msg_palette, "Внешний вид");
         mainBlock.addView(MglaUi.createDivider(context));
+        addMenuItem(mainBlock, () -> presentFragment(new MglaPlayerSettingsActivity()),
+            IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.files_music, "Плеер");
+        mainBlock.addView(MglaUi.createDivider(context));
         addMenuItem(mainBlock, () -> presentFragment(new MglaCameraSettingsActivity()),
             IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
         mainBlock.addView(MglaUi.createDivider(context));

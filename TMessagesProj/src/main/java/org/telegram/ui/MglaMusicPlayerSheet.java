@@ -3,6 +3,7 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.Manifest;
+import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
@@ -31,11 +32,11 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
+import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.SeekBar;
 import android.widget.TextView;
 
 import androidx.core.content.FileProvider;
@@ -82,8 +83,10 @@ import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CastMediaRouteButton;
+import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MglaMd3SeekBar;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.Stories.recorder.DominantColors;
@@ -93,13 +96,15 @@ import java.util.ArrayList;
 import java.util.Locale;
 
 /**
- * Fullscreen Yandex Music–style player sheet with dynamic ambient background.
- * Also used for Telegram music / voice / round video from the in-chat top panel.
+ * Fullscreen Material Design 3 player sheet with dynamic ambient background.
+ * Used for Yandex Music, Telegram music, voice and round video.
  */
 public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusicPlayer.PlayerListener, NotificationCenter.NotificationCenterDelegate {
 
-    private static final int YELLOW = 0xFFFFCC00;
-    private static final int PILL_BG = 0x33FFFFFF;
+    private static final int ACCENT_FALLBACK = 0xFFE8DEF8; // MD3 primary-container-ish
+    private static final int ON_ACCENT = 0xFF1D1B20;
+    private static final int PILL_BG = 0x28FFFFFF;
+    private static final int SURFACE_CONTAINER = 0x22FFFFFF;
 
     private final MglaYandexMusicPlayer player;
     private final AvatarDrawable avatarDrawable = new AvatarDrawable();
@@ -115,14 +120,16 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private TextView sourceTitle;
     private ImageView likeButton;
     private ImageView dislikeButton;
-    private SeekBar seekBar;
+    private MglaMd3SeekBar seekBar;
     private TextView timeCurrentView;
     private TextView timeTotalView;
     private FrameLayout playPauseFab;
+    private GradientDrawable playPauseFabBg;
     private ImageView playPauseIcon;
     private ImageView shufflePillIcon;
     private TextView waveIslandText;
     private FrameLayout root;
+    private LinearLayout contentLayout;
     private View shufflePill;
     private View lyricsPill;
     private View checkPill;
@@ -146,6 +153,12 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private String lastCoverUrl;
     private boolean observersRegistered;
     private Runnable pendingAfterDismiss;
+    private ValueAnimator coverPulseAnimator;
+    private ValueAnimator fabColorAnimator;
+    private int currentAccent = ACCENT_FALLBACK;
+    private boolean openAnimationPlayed;
+    private CharSequence lastTitleShown;
+    private CharSequence lastArtistShown;
 
     public MglaMusicPlayerSheet(Context context) {
         super(context, false);
@@ -202,9 +215,9 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
-        LinearLayout content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(padH, AndroidUtilities.statusBarHeight + dp(6), padH, bottomPad);
+        contentLayout = new LinearLayout(context);
+        contentLayout.setOrientation(LinearLayout.VERTICAL);
+        contentLayout.setPadding(padH, AndroidUtilities.statusBarHeight + dp(10), padH, bottomPad);
 
         // Header
         LinearLayout header = new LinearLayout(context);
@@ -212,40 +225,54 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView collapseBtn = iconButton(context, R.drawable.ic_arrow_drop_down, v -> dismiss());
-        header.addView(collapseBtn, LayoutHelper.createLinear(40, 40));
+        header.addView(collapseBtn, LayoutHelper.createLinear(44, 44));
 
         sourceTitle = new TextView(context);
         sourceTitle.setText("Моя волна");
-        sourceTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        sourceTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         sourceTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        sourceTitle.setTextColor(Color.WHITE);
+        sourceTitle.setTextColor(0xE6FFFFFF);
         sourceTitle.setGravity(Gravity.CENTER);
         sourceTitle.setSingleLine(true);
+        sourceTitle.setLetterSpacing(0.02f);
         sourceTitle.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(sourceTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
         queueBtn = iconButton(context, R.drawable.msg_list, v -> openQueue());
-        header.addView(queueBtn, LayoutHelper.createLinear(40, 40));
-        content.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
+        header.addView(queueBtn, LayoutHelper.createLinear(44, 44));
+        contentLayout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
-        // Compact cover: rounded square for music, circle avatar for Telegram voice/round
-        coverRadius = dp(22);
-        coverSize = Math.min(dp(148), (int) (AndroidUtilities.displaySize.x * 0.38f));
+        // Compact rounded 1:1 square; optional slightly larger via «Большая обложка»
+        boolean largeCover = MglaPlayerConfig.isLargeCoverEnabled();
+        coverSize = largeCover
+                ? Math.min(dp(200), (int) (AndroidUtilities.displaySize.x * 0.52f))
+                : Math.min(dp(148), (int) (AndroidUtilities.displaySize.x * 0.38f));
+        coverRadius = dp(largeCover ? 22 : 18);
         coverWrap = new FrameLayout(context) {
             private final Path clipPath = new Path();
             private final RectF clipRect = new RectF();
 
             @Override
-            public void draw(Canvas canvas) {
+            protected void dispatchDraw(Canvas canvas) {
                 clipRect.set(0, 0, getWidth(), getHeight());
                 clipPath.reset();
                 clipPath.addRoundRect(clipRect, coverRadius, coverRadius, Path.Direction.CW);
                 canvas.save();
                 canvas.clipPath(clipPath);
-                super.draw(canvas);
+                super.dispatchDraw(canvas);
                 canvas.restore();
             }
         };
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            coverWrap.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), coverRadius);
+                }
+            });
+            coverWrap.setClipToOutline(true);
+            coverWrap.setElevation(dp(4));
+        }
         coverImage = new ImageView(context);
         coverImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
         coverImage.setAdjustViewBounds(false);
@@ -260,7 +287,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         avatarCoverView.setVisibility(View.GONE);
         avatarCoverView.setRoundRadius((int) coverRadius);
         coverWrap.addView(avatarCoverView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        content.addView(coverWrap, LayoutHelper.createLinear(coverSize, coverSize, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+        contentLayout.addView(coverWrap, LayoutHelper.createLinear(coverSize, coverSize, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 16));
 
         // Track info row
         LinearLayout infoRow = new LinearLayout(context);
@@ -271,7 +298,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         artistAvatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable avBg = new GradientDrawable();
         avBg.setShape(GradientDrawable.OVAL);
-        avBg.setColor(0x33FFFFFF);
+        avBg.setColor(SURFACE_CONTAINER);
         artistAvatar.setBackground(avBg);
         artistAvatar.setClipToOutline(true);
         artistAvatar.setOutlineProvider(new android.view.ViewOutlineProvider() {
@@ -280,13 +307,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 outline.setOval(0, 0, view.getWidth(), view.getHeight());
             }
         });
-        infoRow.addView(artistAvatar, LayoutHelper.createLinear(36, 36, 0, 0, 10, 0));
+        infoRow.addView(artistAvatar, LayoutHelper.createLinear(40, 40, 0, 0, 12, 0));
 
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
 
         titleView = new TextView(context);
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
         titleView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
         titleView.setTextColor(Color.WHITE);
         titleView.setSingleLine(true);
@@ -294,50 +321,43 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         textCol.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         artistView = new TextView(context);
-        artistView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        artistView.setTextColor(0xB3FFFFFF);
+        artistView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        artistView.setTextColor(0xCCFFFFFF);
         artistView.setSingleLine(true);
         artistView.setEllipsize(TextUtils.TruncateAt.END);
-        textCol.addView(artistView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        textCol.addView(artistView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 0));
 
-        infoRow.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
+        infoRow.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
 
         shareBtn = iconButton(context, R.drawable.msg_share, v -> openForward());
-        infoRow.addView(shareBtn, LayoutHelper.createLinear(36, 36));
+        infoRow.addView(shareBtn, LayoutHelper.createLinear(40, 40));
         moreBtn = iconButton(context, R.drawable.ic_ab_other, v -> showTelegramMusicOptions());
-        infoRow.addView(moreBtn, LayoutHelper.createLinear(36, 36));
-        content.addView(infoRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 10));
+        infoRow.addView(moreBtn, LayoutHelper.createLinear(40, 40));
+        contentLayout.addView(infoRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
 
-        // Seekbar
-        seekBar = new SeekBar(context);
-        seekBar.setMax(1000);
-        try {
-            seekBar.getProgressDrawable().setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-            if (seekBar.getThumb() != null) {
-                seekBar.getThumb().setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-            }
-        } catch (Throwable ignored) {
-        }
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        // MD3 animated timeline
+        seekBar = new MglaMd3SeekBar(context);
+        seekBar.setColors(Color.WHITE, 0x47FFFFFF);
+        seekBar.setListener(new MglaMd3SeekBar.Listener() {
             @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+            public void onProgressChanged(float progress, boolean fromUser) {
                 if (fromUser) {
-                    timeCurrentView.setText(formatTime((getActiveDurationMs() * progress) / 1000));
+                    timeCurrentView.setText(formatTime((long) (getActiveDurationMs() * progress)));
                 }
             }
 
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
+            public void onStartTracking() {
                 isUserSeeking = true;
             }
 
             @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
+            public void onStopTracking(float progress) {
                 isUserSeeking = false;
-                seekActiveTo((getActiveDurationMs() * seekBar.getProgress()) / 1000);
+                seekActiveTo((long) (getActiveDurationMs() * progress));
             }
         });
-        content.addView(seekBar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 28, 0, 0, 0, 0));
+        contentLayout.addView(seekBar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 40, 0, 0, 0, 0));
 
         LinearLayout timeRow = new LinearLayout(context);
         timeRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -346,11 +366,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         timeRow.addView(timeCurrentView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
         timeRow.addView(new View(context), LayoutHelper.createLinear(0, 0, 1f));
         timeRow.addView(timeTotalView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
-        content.addView(timeRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 2, 0, 2, 12));
+        contentLayout.addView(timeRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 2, 0, 2, 18));
 
         // Extra space above controls only in Telegram mode (pills row is hidden there).
         telegramControlsSpacer = new View(context);
-        content.addView(telegramControlsSpacer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0));
+        contentLayout.addView(telegramControlsSpacer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0));
 
         // Main controls
         LinearLayout controls = new LinearLayout(context);
@@ -358,36 +378,57 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         controls.setGravity(Gravity.CENTER_VERTICAL);
 
         dislikeButton = iconButton(context, R.drawable.msg_voice_muted, v -> skipNext());
-        controls.addView(dislikeButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER));
+        controls.addView(dislikeButton, LayoutHelper.createLinear(48, 48, Gravity.CENTER));
 
-        prevBtn = iconButton(context, R.drawable.ic_action_previous, v -> skipPrevious());
-        controls.addView(prevBtn, LayoutHelper.createLinear(48, 48, Gravity.CENTER, 8, 0, 10, 0));
+        prevBtn = iconButton(context, R.drawable.ic_action_previous, v -> {
+            bouncePress(prevBtn);
+            skipPrevious();
+        });
+        controls.addView(prevBtn, LayoutHelper.createLinear(52, 52, Gravity.CENTER, 4, 0, 10, 0));
 
-        // Spacer to keep yellow FAB centered between side controls
         controls.addView(new View(context), LayoutHelper.createLinear(0, 1, 1f));
 
         playPauseFab = new FrameLayout(context);
-        GradientDrawable fabBg = new GradientDrawable();
-        fabBg.setShape(GradientDrawable.OVAL);
-        fabBg.setColor(YELLOW);
-        playPauseFab.setBackground(fabBg);
+        playPauseFabBg = new GradientDrawable();
+        playPauseFabBg.setShape(GradientDrawable.OVAL);
+        playPauseFabBg.setColor(currentAccent);
+        playPauseFab.setBackground(playPauseFabBg);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            playPauseFab.setElevation(dp(6));
+            playPauseFab.setStateListAnimator(null);
+        }
         playPauseIcon = new ImageView(context);
         playPauseIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        playPauseIcon.setColorFilter(new PorterDuffColorFilter(0xFF1A1A1A, PorterDuff.Mode.SRC_IN));
-        playPauseFab.addView(playPauseIcon, LayoutHelper.createFrame(36, 36, Gravity.CENTER));
+        playPauseIcon.setColorFilter(new PorterDuffColorFilter(ON_ACCENT, PorterDuff.Mode.SRC_IN));
+        playPauseFab.addView(playPauseIcon, LayoutHelper.createFrame(40, 40, Gravity.CENTER));
         playPauseFab.setOnClickListener(v -> {
-            playPauseFab.animate().scaleX(0.92f).scaleY(0.92f).setDuration(70)
-                    .withEndAction(() -> {
-                        togglePlayPause();
-                        playPauseFab.animate().scaleX(1f).scaleY(1f).setDuration(140).start();
-                    }).start();
+            if (MglaPlayerConfig.isButtonAnimationsEnabled()) {
+                playPauseFab.animate().cancel();
+                playPauseFab.animate()
+                        .scaleX(0.88f).scaleY(0.88f)
+                        .setDuration(MglaPlayerConfig.scaleDuration(90))
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                        .withEndAction(() -> {
+                            togglePlayPause();
+                            playPauseFab.animate()
+                                    .scaleX(1f).scaleY(1f)
+                                    .setDuration(MglaPlayerConfig.scaleDuration(220))
+                                    .setInterpolator(new OvershootInterpolator(1.6f))
+                                    .start();
+                        }).start();
+            } else {
+                togglePlayPause();
+            }
         });
-        controls.addView(playPauseFab, LayoutHelper.createLinear(72, 72, Gravity.CENTER));
+        controls.addView(playPauseFab, LayoutHelper.createLinear(84, 84, Gravity.CENTER));
 
         controls.addView(new View(context), LayoutHelper.createLinear(0, 1, 1f));
 
-        nextBtn = iconButton(context, R.drawable.ic_action_next, v -> skipNext());
-        controls.addView(nextBtn, LayoutHelper.createLinear(48, 48, Gravity.CENTER, 10, 0, 8, 0));
+        nextBtn = iconButton(context, R.drawable.ic_action_next, v -> {
+            bouncePress(nextBtn);
+            skipNext();
+        });
+        controls.addView(nextBtn, LayoutHelper.createLinear(52, 52, Gravity.CENTER, 10, 0, 4, 0));
 
         likeButton = iconButton(context, R.drawable.media_like, v -> {
             if (!isYandexMode()) {
@@ -395,12 +436,20 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             }
             player.toggleLikeCurrentTrack();
             updateLikeButton();
-            likeButton.animate().scaleX(1.2f).scaleY(1.2f).setDuration(100)
-                    .withEndAction(() -> likeButton.animate().scaleX(1f).scaleY(1f).setDuration(120).start())
-                    .start();
+            if (MglaPlayerConfig.isButtonAnimationsEnabled()) {
+                likeButton.animate().cancel();
+                likeButton.animate().scaleX(1.25f).scaleY(1.25f)
+                        .setDuration(MglaPlayerConfig.scaleDuration(120))
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                        .withEndAction(() -> likeButton.animate().scaleX(1f).scaleY(1f)
+                                .setDuration(MglaPlayerConfig.scaleDuration(180))
+                                .setInterpolator(new OvershootInterpolator(2f))
+                                .start())
+                        .start();
+            }
         });
-        controls.addView(likeButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER));
-        content.addView(controls, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+        controls.addView(likeButton, LayoutHelper.createLinear(48, 48, Gravity.CENTER));
+        contentLayout.addView(controls, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
 
         castRouteButton = new CastMediaRouteButton(context) {
             @Override
@@ -436,7 +485,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             player.toggleShuffle();
             updateControlsState();
         });
-        pills.addView(shufflePillFrame, LayoutHelper.createLinear(0, 44, 1f, 0, 0, 8, 0));
+        pills.addView(shufflePillFrame, LayoutHelper.createLinear(0, 48, 1f, 0, 0, 8, 0));
 
         FrameLayout lyricsPillFrame = makePill(context);
         lyricsPill = lyricsPillFrame;
@@ -446,7 +495,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         lyricsText.setTextColor(Color.WHITE);
         lyricsText.setGravity(Gravity.CENTER);
         lyricsPillFrame.addView(lyricsText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
-        pills.addView(lyricsPillFrame, LayoutHelper.createLinear(0, 44, 1f, 0, 0, 8, 0));
+        pills.addView(lyricsPillFrame, LayoutHelper.createLinear(0, 48, 1f, 0, 0, 8, 0));
 
         FrameLayout checkPillFrame = makePill(context);
         checkPill = checkPillFrame;
@@ -454,10 +503,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         checkIcon.setImageResource(R.drawable.msg_mini_checks);
         checkIcon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
         checkPillFrame.addView(checkIcon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
-        pills.addView(checkPillFrame, LayoutHelper.createLinear(0, 44, 1f));
-        content.addView(pills, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+        pills.addView(checkPillFrame, LayoutHelper.createLinear(0, 48, 1f));
+        contentLayout.addView(pills, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
-        content.addView(new View(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
+        contentLayout.addView(new View(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         // Telegram music: full-width repeat at bottom; Add to profile sits under it when shown.
         telegramRepeatBtn = makePill(context);
@@ -467,29 +516,28 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         telegramRepeatIcon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
         telegramRepeatBtn.addView(telegramRepeatIcon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
         telegramRepeatBtn.setOnClickListener(v -> showTelegramRepeatMenu());
-        content.addView(telegramRepeatBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 8));
+        contentLayout.addView(telegramRepeatBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 52, 0, 0, 0, 8));
 
         addToProfileBtn = new TextView(context);
         addToProfileBtn.setVisibility(View.GONE);
         addToProfileBtn.setText(LocaleController.getString(R.string.AudioAddToProfile));
         addToProfileBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         addToProfileBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-        addToProfileBtn.setTextColor(Color.WHITE);
+        addToProfileBtn.setTextColor(ON_ACCENT);
         addToProfileBtn.setGravity(Gravity.CENTER);
         GradientDrawable addBg = new GradientDrawable();
-        addBg.setCornerRadius(dp(24));
-        addBg.setColor(Theme.getColor(Theme.key_featuredStickers_addButton));
+        addBg.setCornerRadius(dp(26));
+        addBg.setColor(currentAccent);
         addToProfileBtn.setBackground(addBg);
         addToProfileBtn.setPadding(dp(16), 0, dp(16), 0);
         addToProfileBtn.setOnClickListener(v -> savePlayingToProfile(true));
-        content.addView(addToProfileBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 0));
+        contentLayout.addView(addToProfileBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 52, 0, 0, 0, 0));
 
         // Bottom wave island (Yandex)
         waveIsland = new FrameLayout(context);
         GradientDrawable waveBg = new GradientDrawable();
         waveBg.setCornerRadius(dp(28));
-        waveBg.setColors(new int[]{0x55FFFFFF, 0x22FFFFFF});
-        waveBg.setOrientation(GradientDrawable.Orientation.TL_BR);
+        waveBg.setColor(SURFACE_CONTAINER);
         waveIsland.setBackground(waveBg);
         waveIsland.setPadding(dp(18), dp(14), dp(18), dp(14));
 
@@ -506,9 +554,9 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 player.playMyWave();
             }
         });
-        content.addView(waveIsland, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 52));
+        contentLayout.addView(waveIsland, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 56));
 
-        scroll.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        scroll.addView(contentLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
         root.addView(scroll, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         setCustomView(root);
     }
@@ -516,7 +564,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private FrameLayout makePill(Context context) {
         FrameLayout pill = new FrameLayout(context);
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(22));
+        bg.setCornerRadius(dp(24));
         bg.setColor(PILL_BG);
         pill.setBackground(bg);
         return pill;
@@ -526,7 +574,9 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         TextView tv = new TextView(context);
         tv.setText(text);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-        tv.setTextColor(0x99FFFFFF);
+        tv.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        tv.setTextColor(0xB3FFFFFF);
+        tv.setLetterSpacing(0.02f);
         return tv;
     }
 
@@ -534,9 +584,192 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         ImageView iv = new ImageView(context);
         iv.setImageResource(res);
         iv.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-        iv.setPadding(dp(8), dp(8), dp(8), dp(8));
+        iv.setPadding(dp(10), dp(10), dp(10), dp(10));
+        iv.setBackground(Theme.createSelectorDrawable(0x33FFFFFF, 1, dp(22)));
         iv.setOnClickListener(listener);
         return iv;
+    }
+
+    private void applySeekBarColors(int accent) {
+        if (seekBar != null) {
+            seekBar.setColors(accent, 0x47FFFFFF);
+        }
+    }
+
+    private void bouncePress(View view) {
+        if (view == null || !MglaPlayerConfig.isButtonAnimationsEnabled()) {
+            return;
+        }
+        view.animate().cancel();
+        view.animate().scaleX(0.86f).scaleY(0.86f)
+                .setDuration(MglaPlayerConfig.scaleDuration(80))
+                .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                .withEndAction(() -> view.animate().scaleX(1f).scaleY(1f)
+                        .setDuration(MglaPlayerConfig.scaleDuration(200))
+                        .setInterpolator(new OvershootInterpolator(1.8f))
+                        .start())
+                .start();
+    }
+
+    private void setTrackTexts(CharSequence title, CharSequence artist) {
+        final boolean animate = MglaPlayerConfig.isTrackChangeAnimationEnabled()
+                && lastTitleShown != null
+                && (!TextUtils.equals(lastTitleShown, title) || !TextUtils.equals(lastArtistShown, artist));
+        if (!animate) {
+            titleView.setText(title);
+            artistView.setText(artist);
+            lastTitleShown = title;
+            lastArtistShown = artist;
+            return;
+        }
+        long dur = MglaPlayerConfig.scaleDuration(180);
+        titleView.animate().cancel();
+        artistView.animate().cancel();
+        titleView.animate().alpha(0f).translationY(dp(6)).setDuration(dur / 2)
+                .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                .withEndAction(() -> {
+                    titleView.setText(title);
+                    artistView.setText(artist);
+                    lastTitleShown = title;
+                    lastArtistShown = artist;
+                    titleView.setTranslationY(-dp(6));
+                    artistView.setTranslationY(-dp(4));
+                    titleView.animate().alpha(1f).translationY(0).setDuration(dur)
+                            .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
+                    artistView.animate().alpha(1f).translationY(0).setDuration(dur)
+                            .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
+                }).start();
+        artistView.animate().alpha(0f).translationY(dp(4)).setDuration(dur / 2)
+                .setInterpolator(CubicBezierInterpolator.EASE_OUT).start();
+
+        if (coverWrap != null && MglaPlayerConfig.isTrackChangeAnimationEnabled()) {
+            coverWrap.animate().cancel();
+            coverWrap.animate().scaleX(0.94f).scaleY(0.94f).alpha(0.85f)
+                    .setDuration(MglaPlayerConfig.scaleDuration(160))
+                    .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                    .withEndAction(() -> coverWrap.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                            .setDuration(MglaPlayerConfig.scaleDuration(280))
+                            .setInterpolator(new OvershootInterpolator(1.2f))
+                            .start())
+                    .start();
+        }
+    }
+
+    private void applyAccentColor(int color) {
+        int accent = softenAccent(color);
+        if (accent == currentAccent) {
+            return;
+        }
+        final int from = currentAccent;
+        currentAccent = accent;
+        if (fabColorAnimator != null) {
+            fabColorAnimator.cancel();
+        }
+        if (!MglaPlayerConfig.isTrackChangeAnimationEnabled() || playPauseFabBg == null) {
+            if (playPauseFabBg != null) {
+                playPauseFabBg.setColor(accent);
+            }
+            applySeekBarColors(Color.WHITE);
+            refreshAddToProfileAccent();
+            return;
+        }
+        fabColorAnimator = ValueAnimator.ofObject(new ArgbEvaluator(), from, accent);
+        fabColorAnimator.setDuration(MglaPlayerConfig.scaleDuration(420));
+        fabColorAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        fabColorAnimator.addUpdateListener(a -> {
+            int c = (int) a.getAnimatedValue();
+            if (playPauseFabBg != null) {
+                playPauseFabBg.setColor(c);
+            }
+        });
+        fabColorAnimator.start();
+        applySeekBarColors(Color.WHITE);
+        refreshAddToProfileAccent();
+    }
+
+    private void refreshAddToProfileAccent() {
+        if (addToProfileBtn == null || addToProfileBtn.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        GradientDrawable addBg = new GradientDrawable();
+        addBg.setCornerRadius(dp(26));
+        addBg.setColor(currentAccent);
+        addToProfileBtn.setBackground(addBg);
+        addToProfileBtn.setTextColor(ON_ACCENT);
+    }
+
+    private static int softenAccent(int color) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(color | 0xFF000000, hsv);
+        hsv[1] = Math.min(0.45f, Math.max(0.18f, hsv[1] * 0.55f));
+        hsv[2] = Math.max(0.78f, Math.min(0.96f, hsv[2] * 1.15f));
+        return Color.HSVToColor(hsv);
+    }
+
+    private void updateCoverPulse(boolean playing) {
+        if (coverWrap == null) {
+            return;
+        }
+        if (!playing || !MglaPlayerConfig.isCoverPulseEnabled()) {
+            if (coverPulseAnimator != null) {
+                coverPulseAnimator.cancel();
+                coverPulseAnimator = null;
+            }
+            coverWrap.animate().scaleX(1f).scaleY(1f)
+                    .setDuration(MglaPlayerConfig.scaleDuration(220))
+                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
+                    .start();
+            return;
+        }
+        if (coverPulseAnimator != null && coverPulseAnimator.isRunning()) {
+            return;
+        }
+        coverPulseAnimator = ValueAnimator.ofFloat(1f, 1.025f);
+        coverPulseAnimator.setDuration(MglaPlayerConfig.scaleDuration(1600));
+        coverPulseAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        coverPulseAnimator.setRepeatMode(ValueAnimator.REVERSE);
+        coverPulseAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        coverPulseAnimator.addUpdateListener(a -> {
+            float s = (float) a.getAnimatedValue();
+            coverWrap.setScaleX(s);
+            coverWrap.setScaleY(s);
+        });
+        coverPulseAnimator.start();
+    }
+
+    private void playOpenAnimation() {
+        if (openAnimationPlayed || !MglaPlayerConfig.isOpenAnimationEnabled() || contentLayout == null) {
+            return;
+        }
+        openAnimationPlayed = true;
+        final View[] staged = new View[]{coverWrap, titleView, artistView, seekBar, playPauseFab, pillsRow, waveIsland};
+        long delay = 0;
+        for (View v : staged) {
+            if (v == null || v.getVisibility() != View.VISIBLE) {
+                continue;
+            }
+            v.setAlpha(0f);
+            v.setTranslationY(dp(18));
+            v.setScaleX(0.96f);
+            v.setScaleY(0.96f);
+            final long d = delay;
+            v.animate().alpha(1f).translationY(0).scaleX(1f).scaleY(1f)
+                    .setStartDelay(d)
+                    .setDuration(MglaPlayerConfig.scaleDuration(420))
+                    .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                    .start();
+            delay += MglaPlayerConfig.scaleDuration(45);
+        }
+        root.postDelayed(() -> {
+            boolean playing;
+            if (isYandexMode()) {
+                playing = player.isPlaying();
+            } else {
+                MessageObject m = MediaController.getInstance().getPlayingMessageObject();
+                playing = m != null && !MediaController.getInstance().isMessagePaused();
+            }
+            updateCoverPulse(playing);
+        }, delay + MglaPlayerConfig.scaleDuration(420));
     }
 
     private void refreshUi() {
@@ -615,10 +848,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                     && isSavedMusicIdsReady() && !isSavedToProfile(playing);
             addToProfileBtn.setVisibility(showAdd ? View.VISIBLE : View.GONE);
             if (showAdd) {
-                GradientDrawable addBg = new GradientDrawable();
-                addBg.setCornerRadius(dp(24));
-                addBg.setColor(Theme.getColor(Theme.key_featuredStickers_addButton));
-                addToProfileBtn.setBackground(addBg);
+                refreshAddToProfileAccent();
             }
         }
         if (telegramRepeatBtn != null && telegramRepeatBtn.getLayoutParams() instanceof LinearLayout.LayoutParams) {
@@ -663,15 +893,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             moreBtn.setVisibility(View.VISIBLE);
         }
         if (track == null) {
-            titleView.setText("Нет трека");
-            artistView.setText("");
+            setTrackTexts("Нет трека", "");
             coverImage.setImageResource(R.drawable.bot_music);
             artistAvatar.setImageResource(R.drawable.bot_music);
             waveIslandText.setText("Моя волна");
             return;
         }
-        titleView.setText(track.title);
-        artistView.setText(track.artist);
+        setTrackTexts(track.title, track.artist);
         timeTotalView.setText(track.getFormattedDuration());
 
         String source = player.getCurrentSourceTitle();
@@ -698,8 +926,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private void updateTelegramUi(MessageObject playing) {
         final boolean voiceOrRound = playing.isVoice() || playing.isRoundVideo();
         if (voiceOrRound) {
-            titleView.setText(playing.getMusicAuthor());
-            artistView.setText(LocaleController.getString(
+            setTrackTexts(playing.getMusicAuthor(), LocaleController.getString(
                     playing.isRoundVideo() ? R.string.AttachRound : R.string.AttachAudio));
             sourceTitle.setText(LocaleController.getString(R.string.AttachAudio));
             showAvatarCover();
@@ -714,6 +941,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             if (ambientBg != null) {
                 ambientBg.setColors(0xFF2A3340, 0xFF1A2230, 0xFF121820, 0xFF0C1018);
             }
+            applyAccentColor(ACCENT_FALLBACK);
         } else {
             if (artistAvatar != null) {
                 artistAvatar.setVisibility(View.GONE);
@@ -721,8 +949,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             if (moreBtn != null) {
                 moreBtn.setVisibility(View.VISIBLE);
             }
-            titleView.setText(playing.getMusicTitle());
-            artistView.setText(playing.getMusicAuthor());
+            setTrackTexts(playing.getMusicTitle(), playing.getMusicAuthor());
             sourceTitle.setText(LocaleController.getString(R.string.AttachMusic));
             bindTelegramMusicCover(playing);
         }
@@ -883,6 +1110,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (audioInfo != null && audioInfo.getCover() != null) {
             avatarCoverView.setImageBitmap(audioInfo.getCover());
             lastCoverUrl = null;
+            extractAmbientColorsFromBitmap(audioInfo.getCover());
             return;
         }
         final String artworkUrl = messageObject.getArtworkUrl(false);
@@ -897,10 +1125,43 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             if (ambientBg != null) {
                 ambientBg.setColors(0xFF2A3340, 0xFF1A2230, 0xFF121820, 0xFF0C1018);
             }
+            applyAccentColor(ACCENT_FALLBACK);
         } else {
             avatarCoverView.setImageResource(R.drawable.bot_music);
             lastCoverUrl = null;
+            applyAccentColor(ACCENT_FALLBACK);
         }
+    }
+
+    private void extractAmbientColorsFromBitmap(Bitmap bmp) {
+        if (bmp == null || bmp.isRecycled()) {
+            return;
+        }
+        if (!MglaPlayerConfig.isDynamicColorsEnabled()) {
+            if (ambientBg != null) {
+                ambientBg.setColors(0xFF2A1F3D, 0xFF1A2438, 0xFF142028, 0xFF0E0E12);
+            }
+            applyAccentColor(ACCENT_FALLBACK);
+            return;
+        }
+        final Bitmap copy = bmp.copy(bmp.getConfig() != null ? bmp.getConfig() : Bitmap.Config.ARGB_8888, false);
+        Utilities.globalQueue.postRunnable(() -> {
+            if (copy == null) {
+                return;
+            }
+            int[] colors = DominantColors.getColorsSync(false, copy, true);
+            if (!copy.isRecycled()) {
+                copy.recycle();
+            }
+            final int c1 = colors != null && colors.length > 0 ? colors[0] : 0xFF3A2A4A;
+            final int c2 = colors != null && colors.length > 1 ? colors[1] : 0xFF1A2A3A;
+            AndroidUtilities.runOnUIThread(() -> {
+                if (ambientBg != null) {
+                    ambientBg.setColors(c1, c2, darken(c1, 0.45f), darken(c2, 0.55f));
+                }
+                applyAccentColor(c1);
+            });
+        });
     }
 
     private ImageLocation getArtworkThumbImageLocation(MessageObject messageObject) {
@@ -1079,16 +1340,16 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         int color = Color.WHITE;
         if (mode == 2) {
             icon = R.drawable.player_new_repeatone;
-            color = YELLOW;
+            color = currentAccent;
         } else if (SharedConfig.shuffleMusic) {
             icon = mode == 1 ? R.drawable.player_new_repeat_shuffle : R.drawable.player_new_shuffle;
-            color = YELLOW;
+            color = currentAccent;
         } else if (SharedConfig.playOrderReversed) {
             icon = mode == 1 ? R.drawable.player_new_repeat_reverse : R.drawable.player_new_order;
-            color = YELLOW;
+            color = currentAccent;
         } else if (mode == 1) {
             icon = R.drawable.player_new_repeatall;
-            color = YELLOW;
+            color = currentAccent;
         }
         telegramRepeatIcon.setImageResource(icon);
         telegramRepeatIcon.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
@@ -1610,8 +1871,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private void updateProgressFromActive() {
         long pos = getActivePositionMs();
         long dur = getActiveDurationMs();
-        if (dur > 0) {
-            seekBar.setProgress((int) ((pos * 1000) / dur));
+        if (dur > 0 && seekBar != null) {
+            seekBar.setProgress(pos / (float) dur, true);
             timeCurrentView.setText(formatTime(pos));
             timeTotalView.setText(formatTime(dur));
         }
@@ -1693,6 +1954,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             return;
         }
         lastCoverUrl = coverUrl;
+        if (!MglaPlayerConfig.isDynamicColorsEnabled()) {
+            if (ambientBg != null) {
+                ambientBg.setColors(0xFF2A1F3D, 0xFF1A2438, 0xFF142028, 0xFF0E0E12);
+            }
+            applyAccentColor(ACCENT_FALLBACK);
+            return;
+        }
         Utilities.globalQueue.postRunnable(() -> {
             Bitmap bmp = MglaMusicImageHelper.loadBitmapSync(coverUrl, 64);
             if (bmp == null) {
@@ -1708,6 +1976,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 if (ambientBg != null) {
                     ambientBg.setColors(c1, c2, darken(c1, 0.45f), darken(c2, 0.55f));
                 }
+                applyAccentColor(c1);
             });
         });
     }
@@ -1741,12 +2010,18 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                     && !MediaController.getInstance().isDownloadingCurrentMessage();
         }
         playPauseIcon.setImageResource(isPlaying ? R.drawable.ic_action_pause : R.drawable.ic_action_play);
+        if (seekBar != null) {
+            seekBar.setPlaying(isPlaying);
+        }
         if (shufflePillIcon != null) {
             boolean shuffle = MglaYandexMusicStore.getInstance().isShuffle();
-            shufflePillIcon.setColorFilter(new PorterDuffColorFilter(shuffle ? YELLOW : Color.WHITE, PorterDuff.Mode.SRC_IN));
+            shufflePillIcon.setColorFilter(new PorterDuffColorFilter(shuffle ? currentAccent : Color.WHITE, PorterDuff.Mode.SRC_IN));
         }
         if (!isYandexMode()) {
             updateTelegramRepeatIcon();
+        }
+        if (openAnimationPlayed || !MglaPlayerConfig.isOpenAnimationEnabled()) {
+            updateCoverPulse(isPlaying);
         }
     }
 
@@ -1761,8 +2036,14 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         super.show();
         refreshUi();
         if (ambientBg != null) {
-            ambientBg.start();
+            if (MglaPlayerConfig.isAmbientMotionEnabled()) {
+                ambientBg.start();
+            } else {
+                ambientBg.stop();
+                ambientBg.invalidate();
+            }
         }
+        root.post(this::playOpenAnimation);
     }
 
     @Override
@@ -1795,8 +2076,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     public void onProgress(long positionMs, long durationMs) {
         if (isUserSeeking || !isYandexMode()) return;
         AndroidUtilities.runOnUIThread(() -> {
-            if (durationMs > 0) {
-                seekBar.setProgress((int) ((positionMs * 1000) / durationMs));
+            if (durationMs > 0 && seekBar != null) {
+                seekBar.setProgress(positionMs / (float) durationMs, true);
                 timeCurrentView.setText(formatTime(positionMs));
                 timeTotalView.setText(formatTime(durationMs));
             }
@@ -1812,6 +2093,14 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     public void dismiss() {
         if (ambientBg != null) {
             ambientBg.stop();
+        }
+        if (coverPulseAnimator != null) {
+            coverPulseAnimator.cancel();
+            coverPulseAnimator = null;
+        }
+        if (fabColorAnimator != null) {
+            fabColorAnimator.cancel();
+            fabColorAnimator = null;
         }
         unregisterObservers();
         player.removeListener(this);
@@ -1831,8 +2120,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private static class AmbientBackgroundView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final int[] colors = new int[]{0xFF2A1F3D, 0xFF1A2438, 0xFF142028, 0xFF0E0E12};
+        private final int[] fromColors = new int[4];
+        private final int[] toColors = new int[4];
         private float phase;
         private ValueAnimator animator;
+        private ValueAnimator colorAnimator;
 
         AmbientBackgroundView(Context context) {
             super(context);
@@ -1840,17 +2132,39 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         }
 
         void setColors(int c1, int c2, int c3, int c4) {
-            colors[0] = c1 | 0xFF000000;
-            colors[1] = c2 | 0xFF000000;
-            colors[2] = c3 | 0xFF000000;
-            colors[3] = c4 | 0xFF000000;
-            invalidate();
+            final int[] next = new int[]{c1 | 0xFF000000, c2 | 0xFF000000, c3 | 0xFF000000, c4 | 0xFF000000};
+            if (!MglaPlayerConfig.isTrackChangeAnimationEnabled()) {
+                System.arraycopy(next, 0, colors, 0, 4);
+                invalidate();
+                return;
+            }
+            System.arraycopy(colors, 0, fromColors, 0, 4);
+            System.arraycopy(next, 0, toColors, 0, 4);
+            if (colorAnimator != null) {
+                colorAnimator.cancel();
+            }
+            colorAnimator = ValueAnimator.ofFloat(0f, 1f);
+            colorAnimator.setDuration(MglaPlayerConfig.scaleDuration(520));
+            colorAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+            final ArgbEvaluator evaluator = new ArgbEvaluator();
+            colorAnimator.addUpdateListener(a -> {
+                float t = (float) a.getAnimatedValue();
+                for (int i = 0; i < 4; i++) {
+                    colors[i] = (int) evaluator.evaluate(t, fromColors[i], toColors[i]);
+                }
+                invalidate();
+            });
+            colorAnimator.start();
         }
 
         void start() {
+            if (!MglaPlayerConfig.isAmbientMotionEnabled()) {
+                stop();
+                return;
+            }
             if (animator != null && animator.isRunning()) return;
             animator = ValueAnimator.ofFloat(0f, (float) (Math.PI * 2));
-            animator.setDuration(14000);
+            animator.setDuration(MglaPlayerConfig.scaleDuration(14000));
             animator.setRepeatCount(ValueAnimator.INFINITE);
             animator.setInterpolator(new LinearInterpolator());
             animator.addUpdateListener(a -> {
@@ -1864,6 +2178,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             if (animator != null) {
                 animator.cancel();
                 animator = null;
+            }
+            if (colorAnimator != null) {
+                colorAnimator.cancel();
+                colorAnimator = null;
             }
         }
 
