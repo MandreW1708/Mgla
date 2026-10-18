@@ -65,6 +65,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaPremiumController;
 import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
@@ -120,7 +121,9 @@ import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.LinkSpanDrawable;
 import org.telegram.ui.Components.MglaBrandedThemeOffer;
+import org.telegram.ui.Components.MglaPremiumStarHelper;
 import org.telegram.ui.Components.Paint.PersistColorPalette;
+import org.telegram.ui.Components.Premium.StarParticlesView;
 import org.telegram.ui.Components.Premium.boosts.UserSelectorBottomSheet;
 import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.Components.RecyclerListView;
@@ -182,6 +185,8 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     private FrameLayout avatarContainer;
     private AvatarDrawable avatarDrawable;
     private BackupImageView avatarView;
+    private StarParticlesView mglaPremiumParticles;
+    private Paint[] mglaPremiumParticlePaints;
     private FrameLayout cameraButton;
     private FrameLayout cameraBackground;
     private ImageView cameraImageView;
@@ -397,8 +402,21 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         imageUpdater.setDelegate(this);
 
         topView = new FrameLayout(context);
+        topView.setClipChildren(false);
+        topView.setClipToPadding(false);
+
+        mglaPremiumParticlePaints = MglaPremiumStarHelper.createPaints();
+        int initialPlan = MglaPremiumController.getPlanForAccount(currentAccount);
+        mglaPremiumParticles = MglaPremiumStarHelper.create(context, 55, Math.max(initialPlan, MglaPremiumController.PLAN_PREMIUM), mglaPremiumParticlePaints);
+        mglaPremiumParticles.setClipWithGradient();
+        mglaPremiumParticles.drawable.excludeRadius = dp(46);
+        mglaPremiumParticles.setVisibility(initialPlan >= MglaPremiumController.PLAN_PREMIUM ? View.VISIBLE : View.GONE);
+        // Centered on avatar: avatarContainer top=11, avatar center ≈ 11+60
+        topView.addView(mglaPremiumParticles, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 160, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 0, 0, 0));
 
         avatarContainer = new FrameLayout(context);
+        avatarContainer.setClipChildren(false);
+        avatarContainer.setClipToPadding(false);
         topView.addView(avatarContainer, LayoutHelper.createFrame(120, 120, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 23 - 12, 0, 0));
         avatarContainer.setOnClickListener(v -> {
             TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(UserConfig.getInstance(currentAccount).getClientUserId());
@@ -504,6 +522,20 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        updateMglaPremiumGlow();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (mglaPremiumParticles != null) {
+            mglaPremiumParticles.setPaused(true);
+        }
+    }
+
+    @Override
     public void onFragmentDestroy() {
         super.onFragmentDestroy();
 
@@ -550,8 +582,23 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         subtitleView.setText(sb);
 
         versionView.setText(getVersionName());
+        updateMglaPremiumGlow();
     }
 
+    private void updateMglaPremiumGlow() {
+        if (mglaPremiumParticles == null) {
+            return;
+        }
+        int plan = MglaPremiumController.getPlanForAccount(currentAccount);
+        if (plan >= MglaPremiumController.PLAN_PREMIUM) {
+            MglaPremiumStarHelper.applyPlan(mglaPremiumParticles, mglaPremiumParticlePaints, plan);
+            mglaPremiumParticles.setVisibility(View.VISIBLE);
+            mglaPremiumParticles.setPaused(false);
+        } else {
+            mglaPremiumParticles.setVisibility(View.GONE);
+            mglaPremiumParticles.setPaused(true);
+        }
+    }
 
     public void updateColors() {
         actionBar.setTitleColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));

@@ -85,13 +85,32 @@ public final class MglaMainTabsConfig {
     /** Enabled tabs in display order. */
     public static ArrayList<TabId> getEnabledTabs(boolean showCallsFallback) {
         SharedPreferences p = prefs();
+        ArrayList<TabId> order;
         if (p != null && p.getBoolean(KEY_CUSTOMIZED, false)) {
             ArrayList<TabId> parsed = sanitize(parseOrder(p.getString(KEY_ORDER, null)));
-            if (parsed.size() >= MIN_TABS) {
-                return parsed;
+            order = parsed.size() >= MIN_TABS ? parsed : defaultOrder(showCallsFallback);
+        } else {
+            order = defaultOrder(showCallsFallback);
+        }
+        return filterEntitledTabs(order);
+    }
+
+    /** Free plan: AI tab is not available at all. */
+    public static boolean isTabAllowed(TabId id) {
+        return id != TabId.AI || MglaSubscription.canAccessAiSection();
+    }
+
+    private static ArrayList<TabId> filterEntitledTabs(ArrayList<TabId> order) {
+        if (order == null || order.isEmpty() || MglaSubscription.canAccessAiSection()) {
+            return order;
+        }
+        ArrayList<TabId> out = new ArrayList<>(order.size());
+        for (TabId id : order) {
+            if (isTabAllowed(id)) {
+                out.add(id);
             }
         }
-        return defaultOrder(showCallsFallback);
+        return out.size() >= MIN_TABS ? out : defaultOrder(false);
     }
 
     public static ArrayList<TabId> getHiddenTabs(boolean showCallsFallback) {
@@ -106,7 +125,7 @@ public final class MglaMainTabsConfig {
     }
 
     public static void setEnabledTabs(List<TabId> order) {
-        ArrayList<TabId> cleaned = sanitize(order);
+        ArrayList<TabId> cleaned = filterEntitledTabs(sanitize(order));
         if (cleaned.size() < MIN_TABS) {
             return;
         }
@@ -163,12 +182,47 @@ public final class MglaMainTabsConfig {
     }
 
     public static ArrayList<TabId> defaultOrder(boolean showCalls) {
-        ArrayList<TabId> list = new ArrayList<>(4);
+        ArrayList<TabId> list = new ArrayList<>(5);
         list.add(TabId.CHATS);
         list.add(TabId.CONTACTS);
         list.add(showCalls ? TabId.CALLS : TabId.SETTINGS);
+        if (MglaSubscription.canAccessAiSection()) {
+            list.add(TabId.AI);
+        }
         list.add(TabId.PROFILE);
         return list;
+    }
+
+    /** After a paid plan unlock, make sure ИИ is on the island (without dropping locked tabs). */
+    public static void ensureAiTabIncluded() {
+        if (!MglaSubscription.canAccessAiSection()) {
+            return;
+        }
+        ArrayList<TabId> order = getEnabledTabs(true);
+        if (order.contains(TabId.AI)) {
+            return;
+        }
+        // Prefer inserting before Profile / at the end of the interactive cluster.
+        int insertAt = order.indexOf(TabId.PROFILE);
+        if (insertAt < 0) {
+            insertAt = order.size();
+        }
+        order.add(insertAt, TabId.AI);
+        while (order.size() > MAX_TABS) {
+            boolean removed = false;
+            for (int i = order.size() - 1; i >= 0; i--) {
+                TabId id = order.get(i);
+                if (!isLocked(id) && id != TabId.AI) {
+                    order.remove(i);
+                    removed = true;
+                    break;
+                }
+            }
+            if (!removed) {
+                break;
+            }
+        }
+        setEnabledTabs(order);
     }
 
     /** Chats and Settings are always present in the island. */

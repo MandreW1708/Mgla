@@ -341,7 +341,7 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         chipsRow.removeAllViews();
         ArrayList<TabId> hidden = new ArrayList<>();
         for (TabId id : TabId.values()) {
-            if (!order.contains(id)) {
+            if (!order.contains(id) && MglaMainTabsConfig.isTabAllowed(id)) {
                 hidden.add(id);
             }
         }
@@ -367,6 +367,10 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
             chip.setBackground(bg);
             final TabId addId = id;
             chip.setOnClickListener(v -> {
+                if (!MglaMainTabsConfig.isTabAllowed(addId)) {
+                    showHint("Вкладка ИИ доступна с Mgla Premium");
+                    return;
+                }
                 if (order.size() >= MglaMainTabsConfig.MAX_TABS) {
                     showHint("Можно добавить не больше " + MglaMainTabsConfig.MAX_TABS + " вкладок");
                     return;

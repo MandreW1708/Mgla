@@ -176,6 +176,64 @@ public final class MglaYandexMusicModel {
         }
     }
 
+    public static class Album implements Serializable {
+        public String id;
+        public String title;
+        public String coverUri;
+        public int year;
+        public int trackCount;
+        public String artists;
+
+        public String getCoverUrl(int size) {
+            if (TextUtils.isEmpty(coverUri)) {
+                return null;
+            }
+            String s = size + "x" + size;
+            String url = coverUri.replace("%%", s);
+            if (url.startsWith("//")) {
+                url = "https:" + url;
+            } else if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://" + url;
+            }
+            return url;
+        }
+
+        public static Album fromApiJson(JSONObject obj) {
+            if (obj == null) return null;
+            Album a = new Album();
+            a.id = String.valueOf(obj.opt("id"));
+            a.title = obj.optString("title", "Альбом");
+            a.year = obj.optInt("year", 0);
+            a.trackCount = obj.optInt("trackCount", 0);
+            a.coverUri = obj.optString("coverUri", null);
+            JSONObject cover = obj.optJSONObject("cover");
+            if (TextUtils.isEmpty(a.coverUri) && cover != null) {
+                a.coverUri = cover.optString("uri", null);
+            }
+            JSONArray artistsArr = obj.optJSONArray("artists");
+            if (artistsArr != null && artistsArr.length() > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < artistsArr.length(); i++) {
+                    JSONObject artist = artistsArr.optJSONObject(i);
+                    if (artist == null) continue;
+                    String name = artist.optString("name", "");
+                    if (TextUtils.isEmpty(name)) continue;
+                    if (sb.length() > 0) sb.append(", ");
+                    sb.append(name);
+                }
+                a.artists = sb.toString();
+            }
+            return a;
+        }
+    }
+
+    /** Artist landing payload: popular tracks + albums. */
+    public static class ArtistBrief implements Serializable {
+        public Artist artist;
+        public final List<Track> popularTracks = new ArrayList<>();
+        public final List<Album> albums = new ArrayList<>();
+    }
+
     public static class Playlist implements Serializable {
         public String uid;
         public long kind;

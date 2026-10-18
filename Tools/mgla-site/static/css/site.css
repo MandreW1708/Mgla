@@ -257,6 +257,115 @@ a:hover { color: #bfdbfe; }
   font-weight: 700;
 }
 
+.premium-section {
+  padding-top: 1.5rem;
+}
+.premium-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+.premium-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(10, 14, 24, 0.88);
+  overflow: hidden;
+  min-width: 0;
+}
+.premium-card-top {
+  padding: 1.15rem 1.2rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.premium-name {
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+.premium-tag {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.premium-price {
+  margin-top: 0.85rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+.premium-price span {
+  font-size: 1.55rem;
+  font-weight: 750;
+  color: var(--text);
+  letter-spacing: -0.03em;
+}
+.premium-features {
+  list-style: none;
+  margin: 0;
+  padding: 0.85rem 1.1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  flex: 1;
+}
+.premium-features li {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 0.65rem;
+  align-items: start;
+}
+.premium-features strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin-bottom: 0.15rem;
+}
+.premium-features span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.premium-check {
+  width: 18px;
+  height: 18px;
+  margin-top: 0.15rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,.55), transparent 45%),
+    linear-gradient(145deg, var(--plan-a), var(--plan-b));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--plan-a) 35%, transparent);
+}
+.premium-card.accent-blue {
+  --plan-a: #7eb6ff;
+  --plan-b: #1e5eff;
+  border-color: rgba(59, 140, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(59, 140, 255, 0.08), 0 18px 40px rgba(10, 58, 158, 0.18);
+}
+.premium-card.accent-blue .premium-card-top {
+  background: linear-gradient(160deg, rgba(59, 140, 255, 0.22), transparent 70%);
+}
+.premium-card.accent-red {
+  --plan-a: #ff8a8a;
+  --plan-b: #e11d1d;
+  border-color: rgba(255, 59, 59, 0.35);
+  box-shadow: 0 0 0 1px rgba(255, 59, 59, 0.08), 0 18px 40px rgba(155, 15, 15, 0.16);
+}
+.premium-card.accent-red .premium-card-top {
+  background: linear-gradient(160deg, rgba(255, 59, 59, 0.2), transparent 70%);
+}
+.premium-card.accent-gold {
+  --plan-a: #f5d76e;
+  --plan-b: #b8860b;
+  border-color: rgba(212, 175, 55, 0.4);
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.1), 0 18px 40px rgba(138, 105, 20, 0.18);
+}
+.premium-card.accent-gold .premium-card-top {
+  background: linear-gradient(160deg, rgba(212, 175, 55, 0.22), transparent 70%);
+}
+
 .contact-strip {
   display: flex;
   align-items: center;
@@ -723,6 +832,7 @@ textarea { min-height: 280px; resize: vertical; font-family: ui-monospace, SFMon
 
   .section { padding: 1.5rem 0 2rem; }
   .grid { grid-template-columns: 1fr; gap: 0.75rem; }
+  .premium-grid { grid-template-columns: 1fr; gap: 0.75rem; }
   .card { padding: 1rem 1.05rem; }
 
   .contact-strip {

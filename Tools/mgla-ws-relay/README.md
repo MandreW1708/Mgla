@@ -3,11 +3,20 @@
 На **mglabot.mooo.com**:
 - `wss://…/apiws` — обход Telegram
 - `https://…/mgla-ai/…` — прокси OpenRouter/Gemini (без VPN у клиента)
-- `POST /mgla-ai/v1/admin/models` — приём списка моделей с mglahub (`X-Mgla-Sync-Token`)
+- `POST /mgla-ai/v1/admin/models` — приём списков моделей с mglahub (`X-Mgla-Sync-Token`)
+- `GET /mgla-ai/v1/models` — клиенту: free в `models` + все планы в `plans`
 
 **Статистика / панель / feature flags** — на `mglahub.mooo.com`
-(`stats_server.py`, `hub_admin.py`). Список OpenRouter-моделей правится там и
-пушится на mglabot; ключ `OPENROUTER_API_KEY` остаётся только на mglabot.
+(`stats_server.py`, `hub_admin.py`). Списки OpenRouter-моделей по планам
+(`free` / `premium_plus` / `premium_ultra`, без пересечений) правятся там и
+пушатся на mglabot. План `premium` своих моделей не имеет — те же, что Free.
+Ключи только на mglabot:
+
+```
+OPENROUTER_API_KEY=…                 # Free + Premium
+OPENROUTER_API_KEY_PREMIUM_PLUS=…    # Premium+
+OPENROUTER_API_KEY_PREMIUM_ULTRA=…   # Premium Ultra
+```
 
 Клиент (`local.properties`):
 

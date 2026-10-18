@@ -8,11 +8,23 @@ Runs next to relay.py. Clients call:
   POST /mgla-ai/v1/features          ??? feature flags (proxies to mglahub)
   POST /mgla-ai/v1/update-check      ??? in-app update check (proxies to mglahub)
   GET  /mgla-ai/v1/update-apk        ??? APK download (proxies to mglahub)
+  GET  /mgla-ai/v1/models            — model list + crowd status (up/degraded/down, no probes)
+  POST /mgla-ai/v1/models/report     — crowd success/failure (1→yellow, 2+→red)
   POST /mgla-ai/v1/stats-batch       ??? anonymous stats batch (proxies to mglahub)
 
-Admin (hub ??? bot sync, not for clients):
-  POST /mgla-ai/v1/admin/models      ??? replace OpenRouter fallback list
+Admin (hub → bot sync, not for clients):
+  POST /mgla-ai/v1/admin/models      — replace OpenRouter model lists per plan
+       body: {"models":[...free...], "plans":{"free":[...],"premium_plus":[...],"premium_ultra":[...]},
+              "aliases":{"premium":"free"}}
   Auth: X-Mgla-Sync-Token (MGLA_HUB_SYNC_TOKEN)
+
+Subscription plan ids (stable for future billing):
+  free | premium | premium_plus | premium_ultra
+  (premium has no own models — same list + key as free)
+API keys (mglabot env only):
+  OPENROUTER_API_KEY                 — free + premium
+  OPENROUTER_API_KEY_PREMIUM_PLUS    — Premium+
+  OPENROUTER_API_KEY_PREMIUM_ULTRA   — Premium Ultra
 
 Auth for client routes: same X-Mgla-Token as the WS relay (MGLA_WS_TOKEN).
 Stdlib only. Default listen 127.0.0.1:8768 (nginx terminates TLS).
@@ -28,6 +40,7 @@ import random
 import re
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,7 +54,11 @@ PORT = int(os.environ.get("MGLA_AI_PORT", "8768"))
 TOKEN = os.environ.get("MGLA_WS_TOKEN", "").strip()
 SYNC_TOKEN = os.environ.get("MGLA_HUB_SYNC_TOKEN", "").strip()
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
-# Client feature-flag poll while WS relay is active: mglabot ??? mglahub.
+OPENROUTER_API_KEY_PREMIUM_PLUS = os.environ.get("OPENROUTER_API_KEY_PREMIUM_PLUS", "").strip()
+OPENROUTER_API_KEY_PREMIUM_ULTRA = os.environ.get(
+    "OPENROUTER_API_KEY_PREMIUM_ULTRA", ""
+).strip()
+# Client feature-flag poll while WS relay is active: mglabot → mglahub.
 HUB_FEATURES_URL = os.environ.get(
     "MGLA_HUB_FEATURES_URL",
     "https://mglahub.mooo.com/mgla-config/v1/features",
@@ -73,14 +90,37 @@ HUB_AUTH_TOKEN_URL = os.environ.get(
 MODELS_PATH = Path(
     os.environ.get("MGLA_OPENROUTER_MODELS_FILE", "/opt/mgla-ws-relay/openrouter_models.json")
 )
+REPORTS_PATH = Path(
+    os.environ.get(
+        "MGLA_OPENROUTER_MODEL_REPORTS_FILE",
+        "/opt/mgla-ws-relay/openrouter_model_reports.json",
+    )
+)
 
-MAX_AI_BODY = 32 * 1024
+MAX_AI_BODY = 512 * 1024
 MAX_ADMIN_BODY = 16 * 1024
 MAX_FEATURES_BODY = 8 * 1024
 MAX_UPDATE_CHECK_BODY = 8 * 1024
 MAX_STATS_BATCH_BODY = 256 * 1024
 MAX_GEMINI_TRANSCRIBE_BODY = 22 * 1024 * 1024
-MAX_AI_MESSAGE = 12_000
+# Hard caps for OpenRouter — never exposed to clients as settings.
+# Oversized prompts are clipped silently (keep the tail = recent context).
+MAX_AI_MESSAGE = 200_000
+# Free / Plus defaults (chars ≈ tokens * 3).
+OPENROUTER_MAX_INPUT_CHARS = 6_000
+OPENROUTER_MAX_OUTPUT_TOKENS = 768
+CHARS_PER_TOKEN = 3
+# Premium Ultra: Mgla user caps (not native model windows).
+ULTRA_DAILY_REQUESTS = 20
+ULTRA_MODEL_LIMITS: dict[str, dict[str, int]] = {
+    "deepseek/deepseek-v4.1-flash": {"input": 32_000, "output": 4_000, "context": 32_000},
+    "z-ai/glm-5.3-flash": {"input": 32_000, "output": 4_000, "context": 32_000},
+    "xiaomi/mimo-v2.6-flash": {"input": 24_000, "output": 4_000, "context": 24_000},
+    "nex-agi/nex-n2.5-mini": {"input": 48_000, "output": 4_000, "context": 48_000},
+    "qwen/qwen3.7-flash": {"input": 48_000, "output": 4_000, "context": 48_000},
+    "google/gemma-3-4b-it": {"input": 16_000, "output": 2_000, "context": 16_000},
+}
+DEFAULT_ULTRA_MODELS = tuple(ULTRA_MODEL_LIMITS.keys())
 MAX_MODELS = 40
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -92,17 +132,234 @@ DEFAULT_AI_MODELS = (
     "nex-agi/nex-n2.5-pro:free",
     "google/gemma-4-31b-it:free",
 )
+
+# Stable plan ids — must match hub_admin.PLAN_* (future subscription entitlements).
+PLAN_FREE = "free"
+PLAN_PREMIUM = "premium"
+PLAN_PREMIUM_PLUS = "premium_plus"
+PLAN_PREMIUM_ULTRA = "premium_ultra"
+# Plans that store their own model list on disk / accept admin push.
+PLAN_IDS = (PLAN_FREE, PLAN_PREMIUM_PLUS, PLAN_PREMIUM_ULTRA)
+# All plans exposed to clients (includes aliases).
+PLAN_IDS_ALL = (PLAN_FREE, PLAN_PREMIUM, PLAN_PREMIUM_PLUS, PLAN_PREMIUM_ULTRA)
+PLAN_MODELS_ALIAS = {
+    PLAN_PREMIUM: PLAN_FREE,  # Premium → same models + key as Free
+}
+PLAN_LABELS = {
+    PLAN_FREE: "Free",
+    PLAN_PREMIUM: "Premium",
+    PLAN_PREMIUM_PLUS: "Premium+",
+    PLAN_PREMIUM_ULTRA: "Premium Ultra",
+}
+
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}$")
 CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 log = logging.getLogger("mgla-ai-proxy")
 
 _models_lock = threading.Lock()
-_runtime_models: list[str] = list(DEFAULT_AI_MODELS)
+_runtime_models_by_plan: dict[str, list[str]] = {
+    PLAN_FREE: list(DEFAULT_AI_MODELS),
+    PLAN_PREMIUM_PLUS: [],
+    PLAN_PREMIUM_ULTRA: list(DEFAULT_ULTRA_MODELS),
+}
+
+# Crowd reports: model_id -> error_kind -> install_id -> last_ts
+# Status is derived only from real client failures (fast, no live OpenRouter probes).
+#   0 reporters → up (green)
+#   1 reporter  → degraded (yellow) — works with interruptions
+#   2+ reporters → down (red)
+_reports_lock = threading.Lock()
+_reports: dict[str, dict[str, dict[str, float]]] = {}
+REPORT_WINDOW_SEC = 45 * 60
+REPORT_DEGRADED = 1
+REPORT_DOWN = 2
+# Known flaky free models: yellow until crowd proves them fully down.
+KNOWN_DEGRADED_MODELS = frozenset({
+    "nvidia/nemotron-3.5-lightning:free",
+})
+INSTALL_ID_RE = re.compile(r"^[a-fA-F0-9]{16,64}$")
+ERROR_KINDS = frozenset({"timeout", "no_endpoints", "unavailable"})
 
 
-def validate_models(raw) -> list[str]:
-    if not isinstance(raw, list) or not raw:
+def load_reports_from_disk() -> None:
+    global _reports
+    try:
+        raw = REPORTS_PATH.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return
+        cleaned: dict[str, dict[str, dict[str, float]]] = {}
+        now = time.time()
+        for model_id, kinds in data.items():
+            if not isinstance(model_id, str) or not isinstance(kinds, dict):
+                continue
+            kind_map: dict[str, dict[str, float]] = {}
+            for kind, installs in kinds.items():
+                if kind not in ERROR_KINDS or not isinstance(installs, dict):
+                    continue
+                keep = {
+                    iid: float(ts)
+                    for iid, ts in installs.items()
+                    if isinstance(iid, str)
+                    and INSTALL_ID_RE.match(iid)
+                    and isinstance(ts, (int, float))
+                    and now - float(ts) <= REPORT_WINDOW_SEC * 2
+                }
+                if keep:
+                    kind_map[kind] = keep
+            if kind_map:
+                cleaned[model_id] = kind_map
+        with _reports_lock:
+            _reports = cleaned
+        log.info("loaded model failure reports for %d models", len(cleaned))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log.warning("failed to load model reports: %s", e)
+
+
+def _persist_reports_unlocked() -> None:
+    try:
+        REPORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(_reports, ensure_ascii=False, indent=2) + "\n"
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(REPORTS_PATH.parent), prefix=".openrouter_reports.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, REPORTS_PATH)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+    except Exception as e:
+        log.warning("persist model reports failed: %s", e)
+
+
+def _prune_reports_unlocked(now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    dead_models = []
+    for model_id, kinds in _reports.items():
+        dead_kinds = []
+        for kind, installs in kinds.items():
+            for iid, ts in list(installs.items()):
+                if now - float(ts) > REPORT_WINDOW_SEC:
+                    del installs[iid]
+            if not installs:
+                dead_kinds.append(kind)
+        for kind in dead_kinds:
+            del kinds[kind]
+        if not kinds:
+            dead_models.append(model_id)
+    for model_id in dead_models:
+        del _reports[model_id]
+
+
+def crowd_unique_reporters(model_id: str) -> int:
+    """Unique installs that reported any failure for this model in the window."""
+    now = time.time()
+    with _reports_lock:
+        _prune_reports_unlocked(now)
+        kinds = _reports.get(model_id, {})
+        ids: set[str] = set()
+        for installs in kinds.values():
+            for iid, ts in installs.items():
+                if now - float(ts) <= REPORT_WINDOW_SEC:
+                    ids.add(iid)
+        return len(ids)
+
+
+def crowd_status(model_id: str) -> str:
+    n = crowd_unique_reporters(model_id)
+    if n >= REPORT_DOWN:
+        return "down"
+    if n >= REPORT_DEGRADED or model_id in KNOWN_DEGRADED_MODELS:
+        return "degraded"
+    return "up"
+
+
+def record_model_failure(model_id: str, install_id: str, kind: str) -> dict:
+    if not MODEL_RE.match(model_id):
+        raise ValueError("bad model id")
+    if not INSTALL_ID_RE.match(install_id):
+        raise ValueError("bad install id")
+    if kind not in ERROR_KINDS:
+        raise ValueError("bad error kind")
+    now = time.time()
+    with _reports_lock:
+        _prune_reports_unlocked(now)
+        kinds = _reports.setdefault(model_id, {})
+        installs = kinds.setdefault(kind, {})
+        installs[install_id] = now
+        _persist_reports_unlocked()
+    status = crowd_status(model_id)
+    return {
+        "ok": True,
+        "model": model_id,
+        "kind": kind,
+        "reporters": crowd_unique_reporters(model_id),
+        "status": status,
+        "available": status != "down",
+    }
+
+
+def record_model_success(model_id: str, install_id: str) -> dict:
+    """Clear this install's failure reports after a successful reply."""
+    if not MODEL_RE.match(model_id) or not INSTALL_ID_RE.match(install_id):
+        raise ValueError("bad model/install id")
+    with _reports_lock:
+        kinds = _reports.get(model_id)
+        if kinds:
+            changed = False
+            for installs in kinds.values():
+                if install_id in installs:
+                    del installs[install_id]
+                    changed = True
+            dead = [k for k, v in kinds.items() if not v]
+            for k in dead:
+                del kinds[k]
+            if not kinds:
+                _reports.pop(model_id, None)
+            if changed:
+                _persist_reports_unlocked()
+    status = crowd_status(model_id)
+    return {"ok": True, "model": model_id, "status": status, "available": status != "down"}
+
+
+def resolve_models_plan(plan_id: str) -> str:
+    """Map alias plans (e.g. premium) to the plan that owns the model list."""
+    return PLAN_MODELS_ALIAS.get(plan_id, plan_id)
+
+
+def models_with_availability(plan_id: str = PLAN_FREE) -> list[dict]:
+    """Fast: no outbound OpenRouter calls — status from crowd reports only."""
+    source = resolve_models_plan(plan_id)
+    out: list[dict] = []
+    for model_id in get_models(source):
+        status = crowd_status(model_id)
+        out.append(
+            {
+                "id": model_id,
+                "status": status,
+                "available": status != "down",
+                "reporters": crowd_unique_reporters(model_id),
+                "plan": plan_id,
+                "models_from": source if source != plan_id else plan_id,
+            }
+        )
+    return out
+
+
+def validate_models(raw, *, allow_empty: bool = False) -> list[str]:
+    if not isinstance(raw, list):
+        raise ValueError("models must be an array")
+    if not raw and not allow_empty:
         raise ValueError("models must be a non-empty array")
     if len(raw) > MAX_MODELS:
         raise ValueError(f"too many models (max {MAX_MODELS})")
@@ -118,28 +375,87 @@ def validate_models(raw) -> list[str]:
             continue
         seen.add(model)
         out.append(model)
-    if not out:
+    if not out and not allow_empty:
         raise ValueError("at least one model required")
     return out
 
 
-def get_models() -> tuple[str, ...]:
+def validate_plans_disjoint(plans: dict[str, list[str]]) -> None:
+    owner: dict[str, str] = {}
+    for plan_id, models in plans.items():
+        for model in models or []:
+            prev = owner.get(model)
+            if prev and prev != plan_id:
+                raise ValueError(
+                    f"model {model} is in both {prev} and {plan_id} (plans must be disjoint)"
+                )
+            owner[model] = plan_id
+
+
+def get_models(plan_id: str = PLAN_FREE) -> tuple[str, ...]:
+    source = resolve_models_plan(plan_id)
     with _models_lock:
-        return tuple(_runtime_models)
+        return tuple(_runtime_models_by_plan.get(source) or ())
+
+
+def get_all_plan_models() -> dict[str, list[str]]:
+    """Own lists only (no aliases)."""
+    with _models_lock:
+        return {pid: list(_runtime_models_by_plan.get(pid) or []) for pid in PLAN_IDS}
+
+
+def plan_for_model(model_id: str) -> str | None:
+    """Which owning plan (not alias) contains this model id."""
+    if not model_id:
+        return None
+    with _models_lock:
+        for plan_id in PLAN_IDS:
+            if model_id in (_runtime_models_by_plan.get(plan_id) or ()):
+                return plan_id
+    return None
+
+
+def api_key_for_plan(plan_id: str) -> str:
+    source = resolve_models_plan(plan_id)
+    if source == PLAN_PREMIUM_PLUS:
+        return OPENROUTER_API_KEY_PREMIUM_PLUS
+    if source == PLAN_PREMIUM_ULTRA:
+        return OPENROUTER_API_KEY_PREMIUM_ULTRA
+    return OPENROUTER_API_KEY
 
 
 def set_models(models: list[str], persist: bool = True) -> None:
-    global _runtime_models
-    cleaned = validate_models(models)
+    """Legacy: set free-plan models only."""
+    set_plan_models({PLAN_FREE: models}, persist=persist)
+
+
+def set_plan_models(plans: dict[str, list[str]], persist: bool = True) -> None:
+    cleaned: dict[str, list[str]] = {}
+    for plan_id in PLAN_IDS:
+        raw = plans.get(plan_id)
+        if raw is None and plan_id != PLAN_FREE:
+            # Keep existing if omitted (partial update from old hub).
+            with _models_lock:
+                cleaned[plan_id] = list(_runtime_models_by_plan.get(plan_id) or [])
+            continue
+        cleaned[plan_id] = validate_models(
+            raw if raw is not None else [],
+            allow_empty=(plan_id != PLAN_FREE),
+        )
+    if PLAN_FREE not in cleaned or not cleaned[PLAN_FREE]:
+        raise ValueError("free plan requires at least one model")
+    validate_plans_disjoint(cleaned)
     with _models_lock:
-        _runtime_models = list(cleaned)
+        for plan_id in PLAN_IDS:
+            _runtime_models_by_plan[plan_id] = list(cleaned[plan_id])
         if persist:
             _write_models_file(cleaned)
 
 
-def _write_models_file(models: list[str]) -> None:
+def _write_models_file(plans: dict[str, list[str]]) -> None:
     MODELS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(models, ensure_ascii=False, indent=2) + "\n"
+    payload_obj = {plan_id: list(plans.get(plan_id) or []) for plan_id in PLAN_IDS}
+    payload = json.dumps(payload_obj, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(
         dir=str(MODELS_PATH.parent), prefix=".openrouter_models.", suffix=".tmp"
     )
@@ -158,21 +474,56 @@ def _write_models_file(models: list[str]) -> None:
 
 
 def load_models_from_disk() -> None:
-    global _runtime_models
     try:
         raw = MODELS_PATH.read_text(encoding="utf-8")
-        models = validate_models(json.loads(raw))
+        data = json.loads(raw)
+        if isinstance(data, list):
+            # Legacy file: plain array = free plan only.
+            plans = {
+                PLAN_FREE: validate_models(data),
+                PLAN_PREMIUM_PLUS: [],
+                PLAN_PREMIUM_ULTRA: [],
+            }
+        elif isinstance(data, dict):
+            plans = {}
+            for plan_id in PLAN_IDS:
+                plans[plan_id] = validate_models(
+                    data.get(plan_id) or ([] if plan_id != PLAN_FREE else list(DEFAULT_AI_MODELS)),
+                    allow_empty=(plan_id != PLAN_FREE),
+                )
+            if not plans[PLAN_FREE]:
+                plans[PLAN_FREE] = list(DEFAULT_AI_MODELS)
+        else:
+            raise ValueError("models file must be array or object")
+        validate_plans_disjoint(plans)
         with _models_lock:
-            _runtime_models = models
-        log.info("loaded %d openrouter models from %s", len(models), MODELS_PATH)
+            for plan_id in PLAN_IDS:
+                _runtime_models_by_plan[plan_id] = list(plans[plan_id])
+        log.info(
+            "loaded openrouter models from %s (free=%d plus=%d ultra=%d)",
+            MODELS_PATH,
+            len(plans[PLAN_FREE]),
+            len(plans[PLAN_PREMIUM_PLUS]),
+            len(plans[PLAN_PREMIUM_ULTRA]),
+        )
+        # Rewrite legacy array file into plan object on next persist opportunity.
+        if isinstance(data, list):
+            try:
+                _write_models_file(plans)
+            except OSError as e:
+                log.warning("could not migrate models file format: %s", e)
     except FileNotFoundError:
-        log.info("no models file at %s ??? using defaults", MODELS_PATH)
+        log.info("no models file at %s — using defaults", MODELS_PATH)
         with _models_lock:
-            _runtime_models = list(DEFAULT_AI_MODELS)
+            _runtime_models_by_plan[PLAN_FREE] = list(DEFAULT_AI_MODELS)
+            _runtime_models_by_plan[PLAN_PREMIUM_PLUS] = []
+            _runtime_models_by_plan[PLAN_PREMIUM_ULTRA] = list(DEFAULT_ULTRA_MODELS)
     except (OSError, ValueError, json.JSONDecodeError) as e:
-        log.warning("failed to load %s (%s) ??? using defaults", MODELS_PATH, e)
+        log.warning("failed to load %s (%s) — using defaults", MODELS_PATH, e)
         with _models_lock:
-            _runtime_models = list(DEFAULT_AI_MODELS)
+            _runtime_models_by_plan[PLAN_FREE] = list(DEFAULT_AI_MODELS)
+            _runtime_models_by_plan[PLAN_PREMIUM_PLUS] = []
+            _runtime_models_by_plan[PLAN_PREMIUM_ULTRA] = list(DEFAULT_ULTRA_MODELS)
 
 
 def _ai_system_prompt(lang: str) -> str:
@@ -200,22 +551,78 @@ def _extract_openrouter_content(payload: dict) -> str:
     return content
 
 
-def call_openrouter(message: str, lang: str) -> str:
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is not set")
-    models = get_models()
+def _clip_openrouter_input(message: str, max_chars: int) -> str:
+    """Silent input budget — keep the end (recent turns), never surface as a setting."""
+    text = (message or "").strip()
+    limit = max(512, int(max_chars))
+    if len(text) <= limit:
+        return text
+    return "…\n" + text[-(limit - 2) :]
+
+
+def _limits_for_model(plan_id: str, model_id: str) -> tuple[int, int]:
+    """Return (max_input_chars, max_output_tokens) for this plan/model."""
+    if plan_id == PLAN_PREMIUM_ULTRA:
+        caps = ULTRA_MODEL_LIMITS.get(model_id)
+        if caps is None:
+            mid = (model_id or "").lower()
+            for key, value in ULTRA_MODEL_LIMITS.items():
+                if key.split("/")[-1] in mid or mid in key:
+                    caps = value
+                    break
+        if caps is None:
+            caps = {"input": 24_000, "output": 4_000, "context": 24_000}
+        tokens = min(int(caps["input"]), int(caps["context"]))
+        return tokens * CHARS_PER_TOKEN, int(caps["output"])
+    return OPENROUTER_MAX_INPUT_CHARS, OPENROUTER_MAX_OUTPUT_TOKENS
+
+
+def call_openrouter(
+    message: str,
+    lang: str,
+    preferred_model: str | None = None,
+    plan_id: str | None = None,
+) -> str:
+    resolved = PLAN_FREE
+    if isinstance(plan_id, str) and plan_id.strip() in PLAN_IDS_ALL:
+        resolved = plan_id.strip()
+    elif preferred_model:
+        preferred = preferred_model.strip()
+        found = plan_for_model(preferred)
+        if found:
+            resolved = found
+        # Unknown model id → stay on free and ignore preferred (legacy safety).
+    plan_id = resolved
+    api_key = api_key_for_plan(plan_id)
+    if not api_key:
+        env_name = {
+            PLAN_PREMIUM_PLUS: "OPENROUTER_API_KEY_PREMIUM_PLUS",
+            PLAN_PREMIUM_ULTRA: "OPENROUTER_API_KEY_PREMIUM_ULTRA",
+        }.get(plan_id, "OPENROUTER_API_KEY")
+        raise RuntimeError(f"{env_name} is not set")
+    models = list(get_models(plan_id))
+    if not models and plan_id == PLAN_PREMIUM_ULTRA:
+        models = list(DEFAULT_ULTRA_MODELS)
+    if not models:
+        raise RuntimeError(f"no models configured for plan {plan_id}")
+    if preferred_model:
+        preferred = preferred_model.strip()
+        if preferred in models:
+            models = [preferred] + [m for m in models if m != preferred]
     system_prompt = _ai_system_prompt(lang)
     seed = random.getrandbits(63)
     failures = []
     for i, model in enumerate(models):
+        in_chars, out_tokens = _limits_for_model(plan_id, model)
+        clipped = _clip_openrouter_input(message, in_chars)
         body = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message},
+                {"role": "user", "content": clipped},
             ],
             "temperature": 0.3,
-            "max_tokens": 1024,
+            "max_tokens": out_tokens,
             "seed": seed,
         }
         req = urllib.request.Request(
@@ -223,7 +630,7 @@ def call_openrouter(message: str, lang: str) -> str:
             data=json.dumps(body).encode("utf-8"),
             method="POST",
             headers={
-                "Authorization": "Bearer " + OPENROUTER_API_KEY,
+                "Authorization": "Bearer " + api_key,
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://mgla.app",
                 "X-Title": "Mgla",
@@ -458,10 +865,81 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_ascii=False,
             ).encode("utf-8")
             self._reply(200, body)
+        elif path == "/mgla-ai/v1/models":
+            self._get_models()
         elif path == "/mgla-ai/v1/update-apk":
             self._get_update_apk()
         else:
             self._reply(404)
+
+    def _get_models(self):
+        if not self._check_token():
+            return
+        # `models` stays free-tier only so current clients keep working.
+        free_models = models_with_availability(PLAN_FREE)
+        plans_payload = {}
+        for plan_id in PLAN_IDS_ALL:
+            source = resolve_models_plan(plan_id)
+            entry = {
+                "id": plan_id,
+                "label": PLAN_LABELS.get(plan_id, plan_id),
+                "models": models_with_availability(plan_id),
+            }
+            if source != plan_id:
+                entry["models_from"] = source
+                entry["own_models"] = False
+            else:
+                entry["own_models"] = True
+            plans_payload[plan_id] = entry
+        self._reply(
+            200,
+            json.dumps(
+                {
+                    "ok": True,
+                    "default_plan": PLAN_FREE,
+                    "models": free_models,
+                    "plans": plans_payload,
+                    "aliases": dict(PLAN_MODELS_ALIAS),
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+        )
+
+    def _post_model_report(self):
+        """Clients report chat success/failure for crowd availability (up/degraded/down)."""
+        if not self._check_token():
+            return
+        raw = self._read_json_body(4 * 1024)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        model = raw.get("model")
+        install_id = raw.get("install_id") or raw.get("iid")
+        kind = raw.get("kind") or raw.get("error") or "timeout"
+        if isinstance(kind, str):
+            kind = kind.strip().lower()
+            if kind in ("ok", "success", "clear"):
+                try:
+                    result = record_model_success(str(model or ""), str(install_id or ""))
+                except ValueError as e:
+                    self._reply(400, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+                    return
+                self._reply(200, json.dumps(result, ensure_ascii=False).encode("utf-8"))
+                return
+            if "timeout" in kind:
+                kind = "timeout"
+            elif "endpoint" in kind or "404" in kind:
+                kind = "no_endpoints"
+            elif kind not in ERROR_KINDS:
+                kind = "unavailable"
+        try:
+            result = record_model_failure(str(model or ""), str(install_id or ""), kind)
+        except ValueError as e:
+            self._reply(400, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        self._reply(200, json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
     def do_POST(self):
         path = urlsplit(self.path).path.rstrip("/") or "/"
@@ -479,6 +957,8 @@ class Handler(BaseHTTPRequestHandler):
             self._post_stats_batch()
         elif path == "/mgla-ai/v1/chat":
             self._post_chat()
+        elif path in ("/mgla-ai/v1/models/report", "/mgla-ai/v1/model-report"):
+            self._post_model_report()
         elif path == "/mgla-ai/v1/gemini":
             self._post_gemini()
         elif path == "/mgla-ai/v1/gemini/transcribe":
@@ -617,8 +1097,20 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(400, b'{"error":"bad body"}')
             return
         try:
-            models = validate_models(raw.get("models"))
-            set_models(models, persist=True)
+            plans_in = raw.get("plans")
+            if isinstance(plans_in, dict):
+                plans = {pid: plans_in.get(pid) for pid in PLAN_IDS}
+                # Prefer explicit free in plans; else legacy "models".
+                if plans.get(PLAN_FREE) is None and raw.get("models") is not None:
+                    plans[PLAN_FREE] = raw.get("models")
+            else:
+                plans = {
+                    PLAN_FREE: raw.get("models"),
+                    PLAN_PREMIUM_PLUS: None,
+                    PLAN_PREMIUM_ULTRA: None,
+                }
+            set_plan_models(plans, persist=True)
+            saved = get_all_plan_models()
         except ValueError as e:
             self._reply(400, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
@@ -626,16 +1118,28 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("persist models failed")
             self._reply(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
-        log.info("openrouter models updated (%d)", len(models))
+        log.info(
+            "openrouter models updated free=%d plus=%d ultra=%d",
+            len(saved[PLAN_FREE]),
+            len(saved[PLAN_PREMIUM_PLUS]),
+            len(saved[PLAN_PREMIUM_ULTRA]),
+        )
         self._reply(
             200,
-            json.dumps({"ok": True, "models": models}, ensure_ascii=False).encode("utf-8"),
+            json.dumps(
+                {"ok": True, "models": saved[PLAN_FREE], "plans": saved},
+                ensure_ascii=False,
+            ).encode("utf-8"),
         )
 
     def _post_chat(self):
         if not self._check_token():
             return
-        if not OPENROUTER_API_KEY:
+        if not (
+            OPENROUTER_API_KEY
+            or OPENROUTER_API_KEY_PREMIUM_PLUS
+            or OPENROUTER_API_KEY_PREMIUM_ULTRA
+        ):
             self._reply(503, b'{"error":"OPENROUTER_API_KEY not configured"}')
             return
         raw = self._read_json_body(MAX_AI_BODY)
@@ -646,14 +1150,30 @@ class Handler(BaseHTTPRequestHandler):
             return
         message = raw.get("message")
         lang = raw.get("lang") or "Russian"
+        preferred_model = raw.get("model")
+        if isinstance(preferred_model, str):
+            preferred_model = preferred_model.strip() or None
+        else:
+            preferred_model = None
+        client_plan = raw.get("plan")
+        if isinstance(client_plan, str):
+            client_plan = client_plan.strip() or None
+        else:
+            client_plan = None
         if not isinstance(message, str) or not message.strip():
             self._reply(400, b'{"error":"message required"}')
             return
-        if len(message) > MAX_AI_MESSAGE:
+        # Oversized bodies are clipped inside call_openrouter; hard reject only absurd sizes.
+        if len(message) > MAX_AI_MESSAGE * 2:
             self._reply(413, b'{"error":"message too long"}')
             return
         try:
-            content = call_openrouter(message.strip(), lang if isinstance(lang, str) else "Russian")
+            content = call_openrouter(
+                message.strip(),
+                lang if isinstance(lang, str) else "Russian",
+                preferred_model,
+                client_plan,
+            )
         except RuntimeError as e:
             log.warning("chat failed: %s", e)
             self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
@@ -749,15 +1269,21 @@ def main() -> None:
     if not TOKEN:
         raise SystemExit("MGLA_WS_TOKEN is not set")
     load_models_from_disk()
+    load_reports_from_disk()
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    plans = get_all_plan_models()
     log.info(
-        "listening on %s:%d, openrouter=%s, sync=%s, features_proxy=%s, models=%d",
+        "listening on %s:%d, openrouter=%s plus=%s ultra=%s, sync=%s, features_proxy=%s, models free=%d plus=%d ultra=%d",
         HOST,
         PORT,
         "yes" if OPENROUTER_API_KEY else "no",
+        "yes" if OPENROUTER_API_KEY_PREMIUM_PLUS else "no",
+        "yes" if OPENROUTER_API_KEY_PREMIUM_ULTRA else "no",
         "yes" if SYNC_TOKEN else "no",
         "yes" if (HUB_FEATURES_URL and HUB_FEATURES_TOKEN) else "no",
-        len(get_models()),
+        len(plans[PLAN_FREE]),
+        len(plans[PLAN_PREMIUM_PLUS]),
+        len(plans[PLAN_PREMIUM_ULTRA]),
     )
     httpd.serve_forever()
 

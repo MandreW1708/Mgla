@@ -40,7 +40,15 @@ public final class MglaHubHttp {
         return MglaWsConfig.isRelayConfigured();
     }
 
+    public static Response get(String path, int connectTimeoutMs, int readTimeoutMs) throws Exception {
+        return request("GET", path, null, connectTimeoutMs, readTimeoutMs);
+    }
+
     public static Response post(String path, byte[] jsonBody, int connectTimeoutMs, int readTimeoutMs) throws Exception {
+        return request("POST", path, jsonBody, connectTimeoutMs, readTimeoutMs);
+    }
+
+    private static Response request(String method, String path, byte[] jsonBody, int connectTimeoutMs, int readTimeoutMs) throws Exception {
         String host = MglaWsConfig.getRelayHost();
         String normalized = path.startsWith("/") ? path : ("/" + path);
         URL url = new URL("https://" + host + normalized);
@@ -48,16 +56,19 @@ public final class MglaHubHttp {
         try {
             conn.setConnectTimeout(connectTimeoutMs);
             conn.setReadTimeout(readTimeoutMs);
-            conn.setRequestMethod("POST");
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conn.setRequestMethod(method);
             conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
             conn.setRequestProperty("X-Mgla-Client", "mgla");
+            boolean hasBody = jsonBody != null && jsonBody.length > 0 && !"GET".equals(method);
+            if (hasBody) {
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            }
             conn.connect();
             if (MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
                 verifyRelayPin(conn.getServerCertificates());
             }
-            if (jsonBody != null && jsonBody.length > 0) {
+            if (hasBody) {
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write(jsonBody);
                 }

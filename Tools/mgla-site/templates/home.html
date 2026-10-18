@@ -31,6 +31,35 @@
   </div>
 </section>
 
+<section class="wrap section premium-section" id="premium">
+  <h2 data-reveal>Mgla Premium</h2>
+  <p class="lead" data-reveal data-reveal-delay="80">
+    Три плана подписки — как в приложении. У каждого свой набор фишек; более высокий план включает всё из предыдущих.
+  </p>
+  <div class="premium-grid">
+    {% for plan in premium_plans %}
+    <article class="premium-card accent-{{ plan.accent }}" data-reveal data-reveal-delay="{{ loop.index0 * 90 }}">
+      <div class="premium-card-top">
+        <div class="premium-name">{{ plan.name }}</div>
+        <div class="premium-tag">{{ plan.tagline }}</div>
+        <div class="premium-price"><span>{{ plan.price }}</span> ₽</div>
+      </div>
+      <ul class="premium-features">
+        {% for f in plan.features %}
+        <li>
+          <span class="premium-check" aria-hidden="true"></span>
+          <div>
+            <strong>{{ f.title }}</strong>
+            <span>{{ f.text }}</span>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="wrap section">
   <div class="contact-strip" data-reveal>
     <div>

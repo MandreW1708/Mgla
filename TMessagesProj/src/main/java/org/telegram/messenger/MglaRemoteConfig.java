@@ -187,6 +187,7 @@ public final class MglaRemoteConfig {
             }
             Set<String> disabled = MglaFeatureFlags.parseDisabledJson(response);
             MglaFeatureFlags.applyDisabled(disabled);
+            MglaSubscription.applyFromFeaturesJson(response);
             FileLog.d("MglaRemoteConfig applied via=" + (viaRelay ? "relay" : "hub") + " disabled=" + disabled);
             return true;
         } finally {

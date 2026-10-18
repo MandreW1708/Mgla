@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS ai_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS subscriptions (
+    tg_id INTEGER PRIMARY KEY,
+    plan TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -128,6 +133,7 @@ class Store:
         self._db.executescript(SCHEMA)
         mgla_token.ensure_schema(self._db)
         self._ensure_default_models()
+        self.ensure_subscriptions_table()
         self._db.commit()
         self._last_cleanup = 0.0
 
@@ -140,6 +146,17 @@ class Store:
                 "INSERT INTO ai_config(key, value) VALUES(?, ?)",
                 ("openrouter_models", json.dumps(list(hub_admin.DEFAULT_OPENROUTER_MODELS))),
             )
+        for plan_id, key in hub_admin.AI_CONFIG_MODEL_KEYS.items():
+            if plan_id == hub_admin.PLAN_FREE:
+                continue
+            exists = self._db.execute(
+                "SELECT 1 FROM ai_config WHERE key = ?", (key,)
+            ).fetchone()
+            if exists is None:
+                self._db.execute(
+                    "INSERT INTO ai_config(key, value) VALUES(?, ?)",
+                    (key, "[]"),
+                )
 
     def ingest(self, batch):
         today = datetime.now(timezone.utc).date()
@@ -248,35 +265,153 @@ class Store:
                         disabled.add(feature)
         return sorted(disabled)
 
+    def ensure_subscriptions_table(self):
+        with self._lock, self._db:
+            self._db.execute(
+                """CREATE TABLE IF NOT EXISTS subscriptions (
+                    tg_id INTEGER PRIMARY KEY,
+                    plan TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
+
+    def plans_by_user(self, tg_ids) -> dict:
+        """Per-account plan map: {tg_id:int -> plan:str}. Missing rows = free."""
+        self.ensure_subscriptions_table()
+        out = {int(x): hub_admin.PLAN_FREE for x in (tg_ids or ())}
+        if not out:
+            return out
+        placeholders = ",".join("?" * len(out))
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT tg_id, plan FROM subscriptions WHERE tg_id IN ({placeholders})",
+                tuple(out.keys()),
+            ).fetchall()
+        for tg_id, plan in rows:
+            out[int(tg_id)] = hub_admin.normalize_plan(plan)
+        return out
+
+    def plan_for_users(self, tg_ids) -> str:
+        """Highest active plan among the given Telegram accounts (legacy single field)."""
+        return hub_admin.best_plan(self.plans_by_user(tg_ids).values())
+
+    def list_subscriptions(self):
+        self.ensure_subscriptions_table()
+        with self._lock:
+            return self._db.execute(
+                "SELECT tg_id, plan, updated_at FROM subscriptions ORDER BY updated_at DESC, tg_id"
+            ).fetchall()
+
+    def set_subscription(self, tg_id: int, plan: str):
+        self.ensure_subscriptions_table()
+        plan = hub_admin.normalize_plan(plan)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with self._lock, self._db:
+            if plan == hub_admin.PLAN_FREE:
+                self._db.execute("DELETE FROM subscriptions WHERE tg_id = ?", (tg_id,))
+            else:
+                self._db.execute(
+                    """INSERT INTO subscriptions(tg_id, plan, updated_at) VALUES(?,?,?)
+                       ON CONFLICT(tg_id) DO UPDATE SET plan=excluded.plan, updated_at=excluded.updated_at""",
+                    (tg_id, plan, now),
+                )
+
+    def remove_subscription(self, tg_id: int):
+        self.ensure_subscriptions_table()
+        with self._lock, self._db:
+            self._db.execute("DELETE FROM subscriptions WHERE tg_id = ?", (tg_id,))
+
     def get_openrouter_models(self):
+        return self.get_plan_models(hub_admin.PLAN_FREE)
+
+    def get_plan_models(self, plan_id):
+        key = hub_admin.AI_CONFIG_MODEL_KEYS.get(plan_id)
+        if not key:
+            return []
         with self._lock:
             row = self._db.execute(
-                "SELECT value FROM ai_config WHERE key = ?", ("openrouter_models",)
+                "SELECT value FROM ai_config WHERE key = ?", (key,)
             ).fetchone()
         if not row:
-            return list(hub_admin.DEFAULT_OPENROUTER_MODELS)
+            if plan_id == hub_admin.PLAN_FREE:
+                return list(hub_admin.DEFAULT_OPENROUTER_MODELS)
+            return []
         try:
-            return hub_admin.models_from_json(row[0])
+            models = hub_admin.models_from_json(
+                row[0], allow_empty=(plan_id != hub_admin.PLAN_FREE)
+            )
         except (ValueError, json.JSONDecodeError):
+            if plan_id == hub_admin.PLAN_FREE:
+                return list(hub_admin.DEFAULT_OPENROUTER_MODELS)
+            return []
+        if plan_id == hub_admin.PLAN_FREE and not models:
             return list(hub_admin.DEFAULT_OPENROUTER_MODELS)
+        return models
+
+    def get_all_plan_models(self):
+        """Own model lists only (Premium aliases Free and is not stored)."""
+        return {
+            plan_id: self.get_plan_models(plan_id)
+            for plan_id in hub_admin.PLANS_WITH_MODEL_LISTS
+        }
 
     def set_openrouter_models(self, models):
+        self.set_plan_models(hub_admin.PLAN_FREE, models)
+
+    def set_plan_models(self, plan_id, models):
+        key = hub_admin.AI_CONFIG_MODEL_KEYS.get(plan_id)
+        if not key:
+            raise ValueError(f"unknown plan: {plan_id}")
         with self._lock, self._db:
             self._db.execute(
                 """INSERT INTO ai_config(key, value) VALUES(?, ?)
                    ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-                ("openrouter_models", json.dumps(list(models))),
+                (key, json.dumps(list(models))),
             )
 
+    def set_all_plan_models(self, plans):
+        hub_admin.validate_plans_disjoint(plans)
+        with self._lock, self._db:
+            for plan_id in hub_admin.PLANS_WITH_MODEL_LISTS:
+                key = hub_admin.AI_CONFIG_MODEL_KEYS[plan_id]
+                models = list(plans.get(plan_id) or [])
+                self._db.execute(
+                    """INSERT INTO ai_config(key, value) VALUES(?, ?)
+                       ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                    (key, json.dumps(models)),
+                )
 
-def push_models_to_bot(models):
-    """Push OpenRouter model list to mglabot. Returns (ok, message)."""
+
+def push_models_to_bot(models=None, plans=None):
+    """Push OpenRouter model lists (all plans) to mglabot. Returns (ok, message)."""
     if not BOT_AI_URL:
-        return False, "MGLA_BOT_AI_URL ???? ??????????"
+        return False, "MGLA_BOT_AI_URL не задан"
     if not HUB_SYNC_TOKEN:
-        return False, "MGLA_HUB_SYNC_TOKEN ???? ??????????"
+        return False, "MGLA_HUB_SYNC_TOKEN не задан"
+    if plans is None:
+        free = list(models) if models is not None else []
+        plans = {
+            hub_admin.PLAN_FREE: free,
+            hub_admin.PLAN_PREMIUM_PLUS: [],
+            hub_admin.PLAN_PREMIUM_ULTRA: [],
+        }
+    # Drop alias-only plans if present — they have no own list.
+    plans = {
+        pid: list(plans.get(pid) or [])
+        for pid in hub_admin.PLANS_WITH_MODEL_LISTS
+    }
+    hub_admin.validate_plans_disjoint(plans)
+    free_models = list(plans.get(hub_admin.PLAN_FREE) or [])
     url = BOT_AI_URL + "/mgla-ai/v1/admin/models"
-    body = json.dumps({"models": list(models)}).encode("utf-8")
+    body = json.dumps(
+        {
+            # Legacy field: free plan only (old bots).
+            "models": free_models,
+            # Own lists only; Premium aliases Free on the bot.
+            "plans": plans,
+            "aliases": dict(hub_admin.PLAN_MODELS_ALIAS),
+        }
+    ).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
@@ -291,12 +426,12 @@ def push_models_to_bot(models):
             raw = resp.read().decode("utf-8", errors="replace")
             if resp.status != 200:
                 return False, f"mglabot HTTP {resp.status}: {raw[:200]}"
-            return True, "???????????? ???????????????????? ???? mglabot"
+            return True, "модели запушены на mglabot"
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")[:300]
         return False, f"mglabot HTTP {e.code}: {err}"
     except (urllib.error.URLError, TimeoutError) as e:
-        return False, f"mglabot ????????????????????: {e}"
+        return False, f"mglabot недоступен: {e}"
 
 
 def _short(v, limit=64):
@@ -612,7 +747,8 @@ class Handler(BaseHTTPRequestHandler):
             body = hub_admin.render_admin_html(
                 global_disabled=self.store.get_global_disabled(),
                 denies=self.store.list_denies(),
-                models=self.store.get_openrouter_models(),
+                models_by_plan=self.store.get_all_plan_models(),
+                subscriptions=self.store.list_subscriptions(),
                 flash_ok=flash_ok,
                 flash_err=flash_err,
                 bot_url=BOT_AI_URL,
@@ -671,32 +807,65 @@ class Handler(BaseHTTPRequestHandler):
                 self.store.remove_deny(tg_id, feature)
                 self._redirect(hub_admin.flash_redirect(ok="???????????? ????????"))
             elif action == "save_models":
-                models = hub_admin.parse_models_text((form.get("models") or [""])[0])
-                self.store.set_openrouter_models(models)
-                ok, msg = push_models_to_bot(models)
+                plans = {}
+                for plan_id in hub_admin.PLANS_WITH_MODEL_LISTS:
+                    field = "models_" + plan_id
+                    if field in form:
+                        raw_text = (form.get(field) or [""])[0]
+                    elif plan_id == hub_admin.PLAN_FREE:
+                        # Legacy single textarea name="models".
+                        raw_text = (form.get("models") or [""])[0]
+                    else:
+                        raw_text = ""
+                    plans[plan_id] = hub_admin.parse_models_text(
+                        raw_text,
+                        allow_empty=(plan_id != hub_admin.PLAN_FREE),
+                    )
+                self.store.set_all_plan_models(plans)
+                ok, msg = push_models_to_bot(plans=plans)
                 if ok:
-                    self._redirect(hub_admin.flash_redirect(ok="???????????? ??????????????????; " + msg))
+                    self._redirect(hub_admin.flash_redirect(ok="планы сохранены; " + msg))
                 else:
                     self._redirect(
                         hub_admin.flash_redirect(
-                            ok="???????????? ?????????????????? ???? ????????",
+                            ok="планы сохранены на хабе",
                             err="push: " + msg,
                         )
                     )
             elif action == "push_models":
-                models = self.store.get_openrouter_models()
-                ok, msg = push_models_to_bot(models)
+                plans = self.store.get_all_plan_models()
+                ok, msg = push_models_to_bot(plans=plans)
                 if ok:
                     self._redirect(hub_admin.flash_redirect(ok=msg))
                 else:
                     self._redirect(hub_admin.flash_redirect(err=msg))
+            elif action == "subscription_set":
+                tg_id = int((form.get("tg_id") or ["0"])[0])
+                plan = (form.get("plan") or [""])[0].strip()
+                if tg_id <= 0:
+                    raise ValueError("bad tg_id")
+                plan = hub_admin.normalize_plan(plan)
+                if plan == hub_admin.PLAN_FREE:
+                    raise ValueError("choose a paid plan")
+                self.store.set_subscription(tg_id, plan)
+                self._redirect(
+                    hub_admin.flash_redirect(
+                        ok=f"подписка {tg_id} → {plan}"
+                    )
+                )
+            elif action == "subscription_remove":
+                tg_id = int((form.get("tg_id") or ["0"])[0])
+                if tg_id <= 0:
+                    raise ValueError("bad tg_id")
+                self.store.remove_subscription(tg_id)
+                self._redirect(hub_admin.flash_redirect(ok=f"подписка снята с {tg_id}"))
             else:
-                self._redirect(hub_admin.flash_redirect(err="?????????????????????? ????????????????"))
+                self._redirect(hub_admin.flash_redirect(err="неизвестное действие"))
         except (ValueError, TypeError) as e:
             self._redirect(hub_admin.flash_redirect(err=str(e)))
         except sqlite3.Error:
             log.exception("admin post failed")
-            self._redirect(hub_admin.flash_redirect(err="???????????? ????"))
+            self._redirect(hub_admin.flash_redirect(err="ошибка БД"))
 
     def _check_client(self):
         if not mgla_token.client_header_ok(self.headers):
@@ -1037,11 +1206,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             disabled = self.store.disabled_for_user(uniq)
+            by_user = self.store.plans_by_user(uniq)
+            plan = hub_admin.best_plan(by_user.values())
         except sqlite3.Error:
             log.exception("features lookup failed")
             self._reply(500)
             return
-        body = json.dumps({"v": 1, "disabled": disabled}, ensure_ascii=False).encode("utf-8")
+        # plans: per Telegram account (source of truth for client entitlements).
+        # plan: highest among requested ids (compat / summary).
+        body = json.dumps(
+            {
+                "v": 1,
+                "disabled": disabled,
+                "plan": plan,
+                "plans": {str(tid): p for tid, p in by_user.items()},
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
         self._reply(200, body)
 
     def _post_stats(self):

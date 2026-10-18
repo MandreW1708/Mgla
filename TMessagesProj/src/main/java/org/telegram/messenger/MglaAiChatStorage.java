@@ -37,6 +37,8 @@ public final class MglaAiChatStorage {
         public String provider;
         public String model;
         public long updatedAt;
+        /** When true, {@link #save} keeps {@link #title} instead of deriving it from the first message. */
+        public boolean customTitle;
         public final ArrayList<Message> messages = new ArrayList<>();
 
         Chat() { }
@@ -61,6 +63,7 @@ public final class MglaAiChatStorage {
                 chat.provider = source.optString("provider", "openrouter");
                 chat.model = source.optString("model", "");
                 chat.updatedAt = source.optLong("updated");
+                chat.customTitle = source.optBoolean("customTitle", false);
                 JSONArray messages = source.optJSONArray("messages");
                 if (messages != null) for (int j = 0; j < messages.length(); j++) {
                     JSONObject m = messages.optJSONObject(j);
@@ -90,11 +93,13 @@ public final class MglaAiChatStorage {
     public static synchronized void save(int account, Chat chat) {
         if (chat == null || TextUtils.isEmpty(chat.id)) return;
         chat.updatedAt = System.currentTimeMillis();
-        if (!chat.messages.isEmpty()) {
+        if (!chat.customTitle && !chat.messages.isEmpty()) {
             String first = null;
             for (Message m : chat.messages) if ("user".equals(m.role) && !TextUtils.isEmpty(m.text)) { first = m.text; break; }
             if (first != null) chat.title = first.replace('\n', ' ').trim();
             if (chat.title.length() > 52) chat.title = chat.title.substring(0, 52) + "…";
+        } else if (chat.customTitle && chat.title != null && chat.title.length() > 52) {
+            chat.title = chat.title.substring(0, 52) + "…";
         }
         ArrayList<Chat> chats = getChats(account);
         for (int i = chats.size() - 1; i >= 0; i--) if (chat.id.equals(chats.get(i).id)) chats.remove(i);
@@ -106,7 +111,7 @@ public final class MglaAiChatStorage {
             for (Chat c : chats) {
                 JSONObject item = new JSONObject();
                 item.put("id", c.id); item.put("title", c.title); item.put("provider", c.provider);
-                item.put("model", c.model); item.put("updated", c.updatedAt);
+                item.put("model", c.model); item.put("updated", c.updatedAt); item.put("customTitle", c.customTitle);
                 JSONArray messages = new JSONArray();
                 for (Message m : c.messages) {
                     JSONObject msg = new JSONObject();
@@ -128,7 +133,7 @@ public final class MglaAiChatStorage {
     }
 
     private static JSONObject toJson(Chat c) throws Exception {
-        JSONObject o = new JSONObject(); o.put("id", c.id); o.put("title", c.title); o.put("provider", c.provider); o.put("model", c.model); o.put("updated", c.updatedAt);
+        JSONObject o = new JSONObject(); o.put("id", c.id); o.put("title", c.title); o.put("provider", c.provider); o.put("model", c.model); o.put("updated", c.updatedAt); o.put("customTitle", c.customTitle);
         JSONArray m = new JSONArray(); for (Message x : c.messages) { JSONObject v = new JSONObject(); v.put("role", x.role); v.put("text", x.text); v.put("date", x.date); m.put(v); } o.put("messages", m); return o;
     }
 }

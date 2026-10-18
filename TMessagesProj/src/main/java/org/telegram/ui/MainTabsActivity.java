@@ -146,8 +146,6 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     private BlurredBackgroundDrawable searchButtonBackground;
     private View fadeView;
     private MglaGlobalMusicBar globalMusicBar;
-    /** True while another fragment covers MainTabs — hide mini-player fully (Mgla settings/Premium, etc.). */
-    private boolean musicBarSuppressed;
     private boolean pendingOpenSearch;
 
     public MainTabsActivity() {
@@ -1328,7 +1326,6 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         final int musicHiddenY = hiddenY + dp(MglaGlobalMusicBar.BAR_HEIGHT + MglaGlobalMusicBar.TABS_GAP_DP + MglaGlobalMusicBar.GLOW_OUTSET_DP);
 
         final float factor = animatorTabsVisible.getFloatValue();
-        final float musicFactor = musicBarSuppressed ? 0f : factor;
 
         tabsViewWrapper.setTranslationY(lerp(hiddenY, normalY, factor));
         tabsView.setClickable(factor > 1);
@@ -1345,20 +1342,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             searchButton.setClickable(interactive);
         }
         if (globalMusicBar != null) {
-            globalMusicBar.setTranslationY(lerp(musicHiddenY, normalY, musicFactor));
-            globalMusicBar.setAlpha(musicFactor);
-            // Keep layout VISIBLE for playback state, but don't intercept touches while covered/hidden.
-            globalMusicBar.setEnabled(musicFactor > 0.99f);
-            globalMusicBar.setClickable(musicFactor > 0.99f);
+            // Same visibility as the tabs island — slide/fade together, never snap-hide under overlays.
+            globalMusicBar.setTranslationY(lerp(musicHiddenY, normalY, factor));
+            globalMusicBar.setAlpha(factor);
+            globalMusicBar.setEnabled(factor > 0.99f);
+            globalMusicBar.setClickable(factor > 0.99f);
         }
-    }
-
-    private void setMusicBarSuppressed(boolean suppressed) {
-        if (musicBarSuppressed == suppressed) {
-            return;
-        }
-        musicBarSuppressed = suppressed;
-        checkUi_tabsPosition();
     }
 
     /** Outer inset of the island glass relative to {@link #tabsView} bounds (blur drawable padding). */
@@ -1684,32 +1673,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     }
 
     @Override
-    public void onTransitionAnimationStart(boolean isOpen, boolean backward) {
-        super.onTransitionAnimationStart(isOpen, backward);
-        // Covered by a fragment opened on top (Settings → Mgla / Premium / etc.).
-        if (!isOpen) {
-            setMusicBarSuppressed(true);
-        }
-    }
-
-    @Override
-    public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
-        super.onTransitionAnimationEnd(isOpen, backward);
-        if (isOpen) {
-            setMusicBarSuppressed(false);
-        }
-    }
-
-    @Override
-    public void onBecomeFullyHidden() {
-        super.onBecomeFullyHidden();
-        setMusicBarSuppressed(true);
-    }
-
-    @Override
     public void onBecomeFullyVisible() {
         super.onBecomeFullyVisible();
-        setMusicBarSuppressed(false);
         applySystemNavigationBar();
     }
 

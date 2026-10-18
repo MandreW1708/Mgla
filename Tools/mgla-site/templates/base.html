@@ -30,6 +30,7 @@
       </button>
       <nav id="site-nav" class="nav-links">
         <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Главная</a>
+        <a href="{{ url_for('home') }}#premium">Premium</a>
         <a href="{{ url_for('guide') }}" class="{{ 'active' if active=='guide' else '' }}">Инструкция</a>
         <a href="{{ url_for('support') }}" class="{{ 'active' if active=='support' else '' }}">Поддержать</a>
       </nav>

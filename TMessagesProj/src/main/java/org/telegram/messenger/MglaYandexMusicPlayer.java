@@ -44,6 +44,8 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     private boolean isMyWaveActive;
     private String currentSourceTitle = "";
     private String currentRotorStation = "user:onyourwave";
+    private String currentRotorSessionId;
+    private final List<String> currentRotorSeeds = new ArrayList<>();
     private boolean isRotorLoading;
     private boolean observersRegistered;
 
@@ -166,6 +168,8 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         if (track == null) return;
         ensureObservers();
         isMyWaveActive = false;
+        currentRotorSessionId = null;
+        currentRotorSeeds.clear();
         currentSourceTitle = sourceTitle != null ? sourceTitle : "";
 
         synchronized (queue) {
@@ -198,20 +202,87 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     }
 
     public void playMyWave() {
-        playRotorStation("user:onyourwave", "Моя волна");
+        List<String> seeds = new ArrayList<>();
+        seeds.add("user:onyourwave");
+        playRotorSession(seeds, "Моя волна");
     }
 
+    /**
+     * Wave based on «Мне нравится»: recommendations mixed from collection preferences,
+     * not just sequential playback of liked tracks.
+     */
     public void playCollectionWave() {
-        playRotorStation("user:collection", "Моя волна по коллекции");
+        ensureObservers();
+        isMyWaveActive = true;
+        currentSourceTitle = "Моя волна по коллекции";
+        currentRotorStation = "collection";
+        currentRotorSessionId = null;
+        currentRotorSeeds.clear();
+        isBuffering = true;
+        notifyPlaybackState(isPlaying, true);
+
+        List<MglaYandexMusicModel.Track> liked = MglaYandexMusicStore.getInstance().getCachedFavorites();
+        if (liked != null && !liked.isEmpty()) {
+            startCollectionWaveWithLiked(liked);
+            return;
+        }
+        MglaYandexMusicApi.fetchFavorites(new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
+            @Override
+            public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
+                if (tracks == null || tracks.isEmpty()) {
+                    // Empty collection — fall back to personal wave.
+                    playMyWave();
+                    return;
+                }
+                startCollectionWaveWithLiked(tracks);
+            }
+
+            @Override
+            public void onError(Exception error) {
+                playMyWave();
+            }
+        });
+    }
+
+    private void startCollectionWaveWithLiked(List<MglaYandexMusicModel.Track> liked) {
+        MglaYandexMusicModel.UserInfo user = MglaYandexMusicStore.getInstance().getUserInfo();
+        List<String> seeds = new ArrayList<>();
+        // Prefer wave seeded by «Мне нравится» playlist; else by a liked track.
+        if (user != null && !TextUtils.isEmpty(user.uid)) {
+            seeds.add("playlist:" + user.uid + ":3");
+        } else {
+            MglaYandexMusicModel.Track seedTrack = liked.get((int) (Math.random() * liked.size()));
+            if (seedTrack != null && !TextUtils.isEmpty(seedTrack.id)) {
+                seeds.add("track:" + seedTrack.id);
+            }
+        }
+        if (seeds.isEmpty()) {
+            seeds.add("user:onyourwave");
+        }
+        playRotorSession(seeds, "Моя волна по коллекции");
     }
 
     public void playRotorStation(String station, String title) {
+        List<String> seeds = new ArrayList<>();
+        seeds.add(!TextUtils.isEmpty(station) ? station : "user:onyourwave");
+        playRotorSession(seeds, title);
+    }
+
+    public void playRotorSession(List<String> seeds, String title) {
         ensureObservers();
         isMyWaveActive = true;
         currentSourceTitle = !TextUtils.isEmpty(title) ? title : "Моя волна";
-        currentRotorStation = !TextUtils.isEmpty(station) ? station : "user:onyourwave";
+        currentRotorStation = seeds != null && !seeds.isEmpty() ? seeds.get(0) : "user:onyourwave";
+        currentRotorSessionId = null;
+        currentRotorSeeds.clear();
+        if (seeds != null) {
+            currentRotorSeeds.addAll(seeds);
+        }
+        if (currentRotorSeeds.isEmpty()) {
+            currentRotorSeeds.add("user:onyourwave");
+        }
 
-        if ("user:onyourwave".equals(currentRotorStation)) {
+        if (currentRotorSeeds.contains("user:onyourwave")) {
             List<MglaYandexMusicModel.Track> cached = MglaYandexMusicStore.getInstance().getCachedRotor();
             if (cached != null && !cached.isEmpty()) {
                 synchronized (queue) {
@@ -235,32 +306,97 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     private void fetchRotorTracks(boolean append) {
         if (isRotorLoading) return;
         isRotorLoading = true;
-        final String station = currentRotorStation != null ? currentRotorStation : "user:onyourwave";
-        MglaYandexMusicApi.fetchRotorTracks(station, new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
-            @Override
-            public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
-                isRotorLoading = false;
-                if (tracks == null || tracks.isEmpty()) return;
-                synchronized (queue) {
-                    if (append) {
-                        queue.addAll(tracks);
-                    } else if (currentTrack == null || !isPlaying) {
-                        queue.clear();
-                        queue.addAll(tracks);
-                        currentIndex = 0;
-                        loadAndPlayCurrent();
-                    } else {
-                        queue.addAll(tracks);
+
+        if (append && !TextUtils.isEmpty(currentRotorSessionId)) {
+            List<String> queueIds = new ArrayList<>();
+            synchronized (queue) {
+                for (MglaYandexMusicModel.Track t : queue) {
+                    if (t != null && !TextUtils.isEmpty(t.id)) {
+                        queueIds.add(t.id);
                     }
                 }
-                notifyQueueChanged();
+            }
+            MglaYandexMusicApi.continueRotorSession(currentRotorSessionId, queueIds, new MglaYandexMusicApi.Callback<MglaYandexMusicApi.RotorBatch>() {
+                @Override
+                public void onSuccess(MglaYandexMusicApi.RotorBatch batch) {
+                    applyRotorBatch(batch, true);
+                }
+
+                @Override
+                public void onError(Exception error) {
+                    // Session expired — open a new one and append.
+                    startFreshRotorSession(true);
+                }
+            });
+            return;
+        }
+
+        startFreshRotorSession(append);
+    }
+
+    private void startFreshRotorSession(boolean append) {
+        final List<String> seeds = new ArrayList<>(currentRotorSeeds);
+        MglaYandexMusicApi.startRotorSession(seeds, new MglaYandexMusicApi.Callback<MglaYandexMusicApi.RotorBatch>() {
+            @Override
+            public void onSuccess(MglaYandexMusicApi.RotorBatch batch) {
+                applyRotorBatch(batch, append);
             }
 
             @Override
             public void onError(Exception error) {
-                isRotorLoading = false;
+                // Playlist seed may fail — retry with a liked track, then personal wave.
+                if (!seeds.isEmpty() && seeds.get(0).startsWith("playlist:")) {
+                    List<MglaYandexMusicModel.Track> liked = MglaYandexMusicStore.getInstance().getCachedFavorites();
+                    if (liked != null && !liked.isEmpty()) {
+                        MglaYandexMusicModel.Track seedTrack = liked.get((int) (Math.random() * liked.size()));
+                        if (seedTrack != null && !TextUtils.isEmpty(seedTrack.id)) {
+                            currentRotorSeeds.clear();
+                            currentRotorSeeds.add("track:" + seedTrack.id);
+                            startFreshRotorSession(append);
+                            return;
+                        }
+                    }
+                }
+                MglaYandexMusicApi.fetchRotorTracks("user:onyourwave", new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
+                    @Override
+                    public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
+                        isRotorLoading = false;
+                        applyRotorTracks(tracks, append);
+                    }
+
+                    @Override
+                    public void onError(Exception e2) {
+                        isRotorLoading = false;
+                    }
+                });
             }
         });
+    }
+
+    private void applyRotorBatch(MglaYandexMusicApi.RotorBatch batch, boolean append) {
+        isRotorLoading = false;
+        if (batch == null) return;
+        if (!TextUtils.isEmpty(batch.sessionId)) {
+            currentRotorSessionId = batch.sessionId;
+        }
+        applyRotorTracks(batch.tracks, append);
+    }
+
+    private void applyRotorTracks(List<MglaYandexMusicModel.Track> tracks, boolean append) {
+        if (tracks == null || tracks.isEmpty()) return;
+        synchronized (queue) {
+            if (append) {
+                queue.addAll(tracks);
+            } else if (currentTrack == null || !isPlaying) {
+                queue.clear();
+                queue.addAll(tracks);
+                currentIndex = 0;
+                loadAndPlayCurrent();
+            } else {
+                queue.addAll(tracks);
+            }
+        }
+        notifyQueueChanged();
     }
 
     private void loadAndPlayCurrent() {

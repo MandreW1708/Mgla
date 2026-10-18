@@ -382,36 +382,344 @@ public final class MglaYandexMusicApi {
         });
     }
 
+    public static final class RotorBatch {
+        public final String sessionId;
+        public final String batchId;
+        public final List<MglaYandexMusicModel.Track> tracks;
+
+        public RotorBatch(String sessionId, String batchId, List<MglaYandexMusicModel.Track> tracks) {
+            this.sessionId = sessionId;
+            this.batchId = batchId;
+            this.tracks = tracks != null ? tracks : new ArrayList<>();
+        }
+    }
+
+    /** Start a recommendation wave session (Моя волна / wave by playlist/track/artist). */
+    public static void startRotorSession(List<String> seeds, Callback<RotorBatch> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                List<String> seedList = seeds != null ? seeds : new ArrayList<>();
+                if (seedList.isEmpty()) {
+                    seedList.add("user:onyourwave");
+                }
+                JSONObject body = new JSONObject();
+                JSONArray seedsArr = new JSONArray();
+                for (String seed : seedList) {
+                    if (!TextUtils.isEmpty(seed)) {
+                        seedsArr.put(seed);
+                    }
+                }
+                body.put("seeds", seedsArr);
+                body.put("includeTracksInResponse", true);
+                body.put("includeWaveModel", true);
+                body.put("interactive", true);
+
+                HttpURLConnection conn = setupConnection(BASE_URL + "/rotor/session/new", "POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                OutputStream os = conn.getOutputStream();
+                os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                os.flush();
+                os.close();
+
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                if (result == null) {
+                    result = root;
+                }
+                RotorBatch batch = parseRotorBatch(result);
+                if (batch.tracks.isEmpty()) {
+                    throw new Exception("Empty rotor session sequence");
+                }
+                if (seedList.contains("user:onyourwave")) {
+                    MglaYandexMusicStore.getInstance().setCachedRotor(batch.tracks);
+                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(batch);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    /** Fetch next batch for an existing wave session. */
+    public static void continueRotorSession(String sessionId, List<String> queueTrackIds, Callback<RotorBatch> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                if (TextUtils.isEmpty(sessionId)) {
+                    throw new Exception("Missing rotor session id");
+                }
+                JSONObject body = new JSONObject();
+                JSONArray queueArr = new JSONArray();
+                if (queueTrackIds != null) {
+                    for (String id : queueTrackIds) {
+                        if (!TextUtils.isEmpty(id)) {
+                            queueArr.put(id);
+                        }
+                    }
+                }
+                body.put("queue", queueArr);
+
+                HttpURLConnection conn = setupConnection(BASE_URL + "/rotor/session/" + Uri.encode(sessionId) + "/tracks", "POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                OutputStream os = conn.getOutputStream();
+                os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                os.flush();
+                os.close();
+
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                if (result == null) {
+                    result = root;
+                }
+                RotorBatch parsed = parseRotorBatch(result);
+                final RotorBatch batch = TextUtils.isEmpty(parsed.sessionId)
+                        ? new RotorBatch(sessionId, parsed.batchId, parsed.tracks)
+                        : parsed;
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(batch);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    /** Legacy station endpoint (fallback). Prefer {@link #startRotorSession}. */
     public static void fetchRotorTracks(String station, Callback<List<MglaYandexMusicModel.Track>> callback) {
         Utilities.globalQueue.postRunnable(() -> {
             try {
                 String targetStation = TextUtils.isEmpty(station) ? "user:onyourwave" : station;
-                String url = BASE_URL + "/rotor/station/tracks?station=" + Uri.encode(targetStation);
+                String url = BASE_URL + "/rotor/station/" + Uri.encode(targetStation) + "/tracks?settings2=true";
                 HttpURLConnection conn = setupConnection(url, "GET");
                 String resp = readResponse(conn);
                 JSONObject root = new JSONObject(resp);
                 JSONObject result = root.optJSONObject("result");
-                JSONArray seq = result != null ? result.optJSONArray("sequence") : null;
+                List<MglaYandexMusicModel.Track> list = parseRotorSequence(result != null ? result.optJSONArray("sequence") : null);
 
-                List<MglaYandexMusicModel.Track> list = new ArrayList<>();
-                if (seq != null) {
-                    for (int i = 0; i < seq.length(); i++) {
-                        JSONObject item = seq.optJSONObject(i);
-                        if (item != null) {
-                            JSONObject trackObj = item.optJSONObject("track");
-                            if (trackObj != null) {
-                                MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(trackObj);
-                                if (t != null) {
-                                    t.isLiked = MglaYandexMusicStore.getInstance().isLiked(t.id);
-                                    list.add(t);
-                                }
+                if (!list.isEmpty() && "user:onyourwave".equals(targetStation)) {
+                    MglaYandexMusicStore.getInstance().setCachedRotor(list);
+                }
+
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(list);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    private static RotorBatch parseRotorBatch(JSONObject result) {
+        if (result == null) {
+            return new RotorBatch(null, null, new ArrayList<>());
+        }
+        String sessionId = result.optString("radioSessionId", result.optString("sessionId", null));
+        String batchId = result.optString("batchId", null);
+        List<MglaYandexMusicModel.Track> tracks = parseRotorSequence(result.optJSONArray("sequence"));
+        return new RotorBatch(sessionId, batchId, tracks);
+    }
+
+    private static List<MglaYandexMusicModel.Track> parseRotorSequence(JSONArray seq) {
+        List<MglaYandexMusicModel.Track> list = new ArrayList<>();
+        if (seq == null) {
+            return list;
+        }
+        for (int i = 0; i < seq.length(); i++) {
+            JSONObject item = seq.optJSONObject(i);
+            if (item == null) continue;
+            JSONObject trackObj = item.optJSONObject("track");
+            if (trackObj == null) continue;
+            MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(trackObj);
+            if (t != null) {
+                t.isLiked = MglaYandexMusicStore.getInstance().isLiked(t.id);
+                list.add(t);
+            }
+        }
+        return list;
+    }
+
+    public static void fetchArtistBrief(String artistId, Callback<MglaYandexMusicModel.ArtistBrief> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                if (TextUtils.isEmpty(artistId)) {
+                    throw new Exception("Artist id is empty");
+                }
+                HttpURLConnection conn = setupConnection(BASE_URL + "/artists/" + Uri.encode(artistId) + "/brief-info", "GET");
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                if (result == null) {
+                    throw new Exception("Invalid artist brief response");
+                }
+
+                MglaYandexMusicModel.ArtistBrief brief = new MglaYandexMusicModel.ArtistBrief();
+                brief.artist = MglaYandexMusicModel.Artist.fromApiJson(result.optJSONObject("artist"));
+                if (brief.artist == null) {
+                    brief.artist = new MglaYandexMusicModel.Artist();
+                    brief.artist.id = artistId;
+                    brief.artist.name = "Исполнитель";
+                }
+
+                JSONArray popular = result.optJSONArray("popularTracks");
+                if (popular != null) {
+                    for (int i = 0; i < popular.length(); i++) {
+                        MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(popular.optJSONObject(i));
+                        if (t != null) {
+                            t.isLiked = MglaYandexMusicStore.getInstance().isLiked(t.id);
+                            brief.popularTracks.add(t);
+                        }
+                    }
+                }
+
+                JSONArray albums = result.optJSONArray("albums");
+                if (albums != null) {
+                    for (int i = 0; i < albums.length(); i++) {
+                        MglaYandexMusicModel.Album album = MglaYandexMusicModel.Album.fromApiJson(albums.optJSONObject(i));
+                        if (album != null && !TextUtils.isEmpty(album.id)) {
+                            brief.albums.add(album);
+                        }
+                    }
+                }
+                if (brief.albums.isEmpty()) {
+                    JSONArray lastReleases = result.optJSONArray("lastReleases");
+                    if (lastReleases != null) {
+                        for (int i = 0; i < lastReleases.length(); i++) {
+                            MglaYandexMusicModel.Album album = MglaYandexMusicModel.Album.fromApiJson(lastReleases.optJSONObject(i));
+                            if (album != null && !TextUtils.isEmpty(album.id)) {
+                                brief.albums.add(album);
                             }
                         }
                     }
                 }
 
-                if (!list.isEmpty() && "user:onyourwave".equals(targetStation)) {
-                    MglaYandexMusicStore.getInstance().setCachedRotor(list);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(brief);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    public static void fetchArtistTracks(String artistId, int page, int pageSize, Callback<List<MglaYandexMusicModel.Track>> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                if (TextUtils.isEmpty(artistId)) {
+                    throw new Exception("Artist id is empty");
+                }
+                String url = BASE_URL + "/artists/" + Uri.encode(artistId) + "/tracks?page=" + page + "&page-size=" + pageSize;
+                HttpURLConnection conn = setupConnection(url, "GET");
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                JSONArray tracksArr = result != null ? result.optJSONArray("tracks") : null;
+                if (tracksArr == null && result != null) {
+                    tracksArr = result.optJSONArray("items");
+                }
+
+                List<MglaYandexMusicModel.Track> list = new ArrayList<>();
+                if (tracksArr != null) {
+                    for (int i = 0; i < tracksArr.length(); i++) {
+                        MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(tracksArr.optJSONObject(i));
+                        if (t != null) {
+                            t.isLiked = MglaYandexMusicStore.getInstance().isLiked(t.id);
+                            list.add(t);
+                        }
+                    }
+                }
+
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(list);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    public static void fetchArtistAlbums(String artistId, Callback<List<MglaYandexMusicModel.Album>> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                if (TextUtils.isEmpty(artistId)) {
+                    throw new Exception("Artist id is empty");
+                }
+                String url = BASE_URL + "/artists/" + Uri.encode(artistId) + "/direct-albums?page=0&page-size=50&sort-by=rating";
+                HttpURLConnection conn = setupConnection(url, "GET");
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                JSONArray albumsArr = result != null ? result.optJSONArray("albums") : null;
+                if (albumsArr == null && result != null) {
+                    albumsArr = result.optJSONArray("items");
+                }
+
+                List<MglaYandexMusicModel.Album> list = new ArrayList<>();
+                if (albumsArr != null) {
+                    for (int i = 0; i < albumsArr.length(); i++) {
+                        MglaYandexMusicModel.Album album = MglaYandexMusicModel.Album.fromApiJson(albumsArr.optJSONObject(i));
+                        if (album != null && !TextUtils.isEmpty(album.id)) {
+                            list.add(album);
+                        }
+                    }
+                }
+
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(list);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    public static void fetchAlbumTracks(String albumId, Callback<List<MglaYandexMusicModel.Track>> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                if (TextUtils.isEmpty(albumId)) {
+                    throw new Exception("Album id is empty");
+                }
+                HttpURLConnection conn = setupConnection(BASE_URL + "/albums/" + Uri.encode(albumId) + "/with-tracks", "GET");
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                JSONArray volumes = result != null ? result.optJSONArray("volumes") : null;
+
+                List<MglaYandexMusicModel.Track> list = new ArrayList<>();
+                if (volumes != null) {
+                    for (int v = 0; v < volumes.length(); v++) {
+                        JSONArray vol = volumes.optJSONArray(v);
+                        if (vol == null) continue;
+                        for (int i = 0; i < vol.length(); i++) {
+                            MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(vol.optJSONObject(i));
+                            if (t != null) {
+                                t.isLiked = MglaYandexMusicStore.getInstance().isLiked(t.id);
+                                list.add(t);
+                            }
+                        }
+                    }
                 }
 
                 AndroidUtilities.runOnUIThread(() -> {

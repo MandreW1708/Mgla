@@ -100,6 +100,68 @@ sudo cp /opt/mgla-ws-relay/nginx-mglahub.conf /etc/nginx/sites-available/mglahub
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+## Подписки (Premium / Premium+ / Ultra) — только mglahub
+
+База подписчиков живёт **только на mglahub** в SQLite `stats.db`, таблица `subscriptions`.
+Авто-обход на **mglabot** (`mgla-ws-relay`, mtproxy, tproxy) **не трогать**.
+
+### Что сделать на mglahub
+
+```bash
+# 1) Бэкап БД (обязательно)
+sudo cp -a /opt/mgla-ws-relay/stats.db /opt/mgla-ws-relay/stats.db.bak.$(date +%Y%m%d%H%M%S)
+
+# 2) Залить новые файлы хаба (НЕ relay.py / НЕ mtproxy)
+sudo cp stats_server.py hub_admin.py /opt/mgla-ws-relay/
+
+# 3) Рестарт ТОЛЬКО stats (подписки + /admin + /features)
+sudo systemctl restart mgla-stats
+sudo systemctl status mgla-stats --no-pager
+
+# Таблица создаётся сама при старте:
+#   CREATE TABLE IF NOT EXISTS subscriptions (
+#     tg_id INTEGER PRIMARY KEY,
+#     plan TEXT NOT NULL,          -- premium | premium_plus | premium_ultra
+#     updated_at TEXT NOT NULL
+#   );
+```
+
+### Выдать себе Ultra
+
+Вариант A — админка: `https://mglahub.mooo.com/admin`  
+→ блок **«Подписки Mgla Premium»** → Telegram ID → Premium Ultra → Выдать план.
+
+Вариант B — SQL:
+
+```bash
+sudo sqlite3 /opt/mgla-ws-relay/stats.db \
+  "INSERT INTO subscriptions(tg_id, plan, updated_at)
+   VALUES(1004685048, 'premium_ultra', datetime('now'))
+   ON CONFLICT(tg_id) DO UPDATE SET
+     plan=excluded.plan, updated_at=excluded.updated_at;"
+
+sudo sqlite3 /opt/mgla-ws-relay/stats.db \
+  "SELECT tg_id, plan, updated_at FROM subscriptions WHERE tg_id=1004685048;"
+```
+
+### Проверка ответа features (должен быть plan)
+
+```bash
+curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \
+  -H "Content-Type: application/json" \
+  -H "X-Mgla-Token: ТОКЕН_ХАБА" \
+  -d '{"tg_id":1004685048}'
+# ожидаемо: {"v":1,"disabled":[...],"plan":"premium_ultra"}
+```
+
+Клиент с включённым обходом ходит через релей-прокси features — релей **только проксирует** тело, таблицу подписок не хранит. Рестарт `mgla-ws-relay` / `mgla-ai-proxy` для подписок **не нужен**.
+
+### Чего НЕ делать
+
+- не рестартить `mgla-ws-relay`, `mgla-mtproxy`, `mgla-tproxy`
+- не менять `env` релея ради подписок
+- не путать `update_supporters` (ранние APK) с `subscriptions` (тарифы)
+
 ## Проверка
 
 ```bash
@@ -113,12 +175,12 @@ curl -s https://mglahub.mooo.com/mgla-stats/v1/health
 # Статистика напрямую: POST /mgla-stats/v1/batch
 # Через релей: POST /mgla-ai/v1/stats-batch
 
-# Feature flags напрямую на хаб:
+# Feature flags + plan напрямую на хаб:
 curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \
   -H "Content-Type: application/json" \
   -H "X-Mgla-Token: ТОКЕН_ХАБА" \
   -d '{"tg_id":123456789}'
-# {"v":1,"disabled":[...]}
+# {"v":1,"disabled":[...],"plan":"free"|"premium"|"premium_plus"|"premium_ultra"}
 
 # Тот же ответ через релей (когда клиент сидит на WS-обходе):
 curl -s -X POST https://mglabot.mooo.com/mgla-ai/v1/features \
@@ -127,7 +189,7 @@ curl -s -X POST https://mglabot.mooo.com/mgla-ai/v1/features \
   -d '{"tg_id":123456789}'
 
 # Панель статистики: https://mglahub.mooo.com/
-# Управление (flags + модели): https://mglahub.mooo.com/admin
+# Управление (flags + модели + подписки): https://mglahub.mooo.com/admin
 # логин: admin / пароль: MGLA_STATS_REPORT_PASSWORD
 ```
 

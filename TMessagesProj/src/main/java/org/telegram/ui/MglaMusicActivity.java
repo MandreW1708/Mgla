@@ -51,6 +51,7 @@ import org.telegram.messenger.MglaYandexMusicModel;
 import org.telegram.messenger.MglaYandexMusicPlayer;
 import org.telegram.messenger.MglaYandexMusicStore;
 import org.telegram.messenger.R;
+import org.telegram.messenger.VpnMonitor;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -132,9 +133,6 @@ public class MglaMusicActivity extends BaseFragment implements
     private LinearLayout artistsContainer;
     private ProgressBar artistsLoading;
 
-    // Donate button
-    private FrameLayout donateButton;
-
     // Full track-list page (favorites or playlist)
     private TextView fullFavoritesTitleText;
     private TextView fullFavoritesCountText;
@@ -151,6 +149,30 @@ public class MglaMusicActivity extends BaseFragment implements
     private FullPlaylistAdapter fullPlaylistsAdapter;
     private ProgressBar fullPlaylistsLoading;
     private boolean openedPlaylistFromFullList;
+
+    // Full artists list page
+    private LinearLayout fullArtistsView;
+    private TextView fullArtistsCountText;
+    private RecyclerListView fullArtistsListView;
+    private FullArtistAdapter fullArtistsAdapter;
+    private ProgressBar fullArtistsLoading;
+
+    // Artist detail page
+    private ScrollView artistPageView;
+    private ImageView artistPageCover;
+    private TextView artistPageName;
+    private TextView artistPageSubtitle;
+    private LinearLayout artistPopularContainer;
+    private LinearLayout artistAlbumsContainer;
+    private ProgressBar artistPageLoading;
+    private TextView artistShowAllTracksBtn;
+    private MglaYandexMusicModel.Artist currentArtist;
+    private final List<MglaYandexMusicModel.Track> artistPopularTracks = new ArrayList<>();
+    private final List<MglaYandexMusicModel.Track> artistAllTracks = new ArrayList<>();
+    private final List<MglaYandexMusicModel.Album> artistAlbums = new ArrayList<>();
+    private boolean openedArtistFromFullList;
+    private boolean openedDetailFromArtist;
+    private static final int ARTIST_POPULAR_PREVIEW = 8;
 
     // Search Page
     private EditText searchInput;
@@ -192,6 +214,28 @@ public class MglaMusicActivity extends BaseFragment implements
         MglaYandexMusicPlayer.getInstance().removeListener(this);
         MglaYandexMusicStore.getInstance().removeAuthListener(this);
         super.onFragmentDestroy();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        updateCollectionWaveSubtitle();
+    }
+
+    /** Under «Моя волна»: VPN warning when active, otherwise the color tagline. */
+    private void updateCollectionWaveSubtitle() {
+        if (collectionWaveSubtitle == null) {
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            collectionWaveSubtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
+            collectionWaveSubtitle.setText("При включённом VPN может не работать");
+            return;
+        }
+        SpannableStringBuilder span = new SpannableStringBuilder("У вашей музыки есть цвет");
+        span.setSpan(new ForegroundColorSpan(MD3_ON_SURFACE_VARIANT), 0, 20, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        span.setSpan(new ForegroundColorSpan(MD3_PRIMARY), 20, 24, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        collectionWaveSubtitle.setText(span);
     }
 
     /** Soft palette from the active Telegram theme — muted accent, quiet surfaces. */
@@ -243,12 +287,22 @@ public class MglaMusicActivity extends BaseFragment implements
         fullPlaylistsView.setVisibility(View.GONE);
         mainContainer.addView(fullPlaylistsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 4. Search Page
+        // 4. Full artists list
+        fullArtistsView = createFullArtistsPage(context);
+        fullArtistsView.setVisibility(View.GONE);
+        mainContainer.addView(fullArtistsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // 5. Artist detail page
+        artistPageView = createArtistPage(context);
+        artistPageView.setVisibility(View.GONE);
+        mainContainer.addView(artistPageView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // 6. Search Page
         searchView = createSearchPage(context);
         searchView.setVisibility(View.GONE);
         mainContainer.addView(searchView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 5. Auth Promo Page (shown when unauthorized)
+        // 7. Auth Promo Page (shown when unauthorized)
         authPromoView = createAuthPromoPage(context);
         authPromoView.setVisibility(View.GONE);
         mainContainer.addView(authPromoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -355,13 +409,10 @@ public class MglaMusicActivity extends BaseFragment implements
         content.addView(waveCardWrapper, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         collectionWaveSubtitle = new TextView(context);
-        SpannableStringBuilder span = new SpannableStringBuilder("У вашей музыки есть цвет");
-        span.setSpan(new ForegroundColorSpan(MD3_ON_SURFACE_VARIANT), 0, 20, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        span.setSpan(new ForegroundColorSpan(MD3_PRIMARY), 20, 24, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        collectionWaveSubtitle.setText(span);
         collectionWaveSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         collectionWaveSubtitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
         collectionWaveSubtitle.setGravity(Gravity.CENTER);
+        updateCollectionWaveSubtitle();
         content.addView(collectionWaveSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 16));
 
         // Favorites playlist preview — surface card
@@ -420,9 +471,6 @@ public class MglaMusicActivity extends BaseFragment implements
         artistsContainer.setOrientation(LinearLayout.HORIZONTAL);
         artistsScrollView.addView(artistsContainer, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
         content.addView(artistsScrollView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        donateButton = createDonateButton(context);
-        content.addView(donateButton, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 28, 16, 20));
 
         scroll.addView(content);
         return scroll;
@@ -510,7 +558,7 @@ public class MglaMusicActivity extends BaseFragment implements
         styleMd3SectionTitle(artistsSectionTitle, "Любимые исполнители");
         row.addView(artistsSectionTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
         row.addView(createMd3Chevron(context), LayoutHelper.createLinear(32, 32));
-        row.setOnClickListener(v -> loadArtists());
+        row.setOnClickListener(v -> showFullArtists());
         return row;
     }
 
@@ -534,43 +582,6 @@ public class MglaMusicActivity extends BaseFragment implements
         chevron.setColorFilter(new PorterDuffColorFilter(MD3_PRIMARY, PorterDuff.Mode.SRC_IN));
         chevron.setPadding(dp(6), dp(6), dp(2), dp(6));
         return chevron;
-    }
-
-    private FrameLayout createDonateButton(Context context) {
-        FrameLayout container = new FrameLayout(context);
-        GradientDrawable pillBg = new GradientDrawable();
-        pillBg.setCornerRadius(dp(28));
-        pillBg.setColor(MD3_SURFACE_CONTAINER);
-        pillBg.setStroke(dp(1), MD3_OUTLINE_VARIANT);
-        container.setBackground(pillBg);
-        container.setPadding(dp(20), dp(14), dp(20), dp(14));
-
-        LinearLayout inner = new LinearLayout(context);
-        inner.setOrientation(LinearLayout.HORIZONTAL);
-        inner.setGravity(Gravity.CENTER);
-
-        TextView rubleIcon = new TextView(context);
-        rubleIcon.setText("₽");
-        rubleIcon.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        rubleIcon.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        rubleIcon.setTextColor(MD3_PRIMARY);
-        GradientDrawable circleBg = new GradientDrawable();
-        circleBg.setShape(GradientDrawable.OVAL);
-        circleBg.setColor(MD3_PRIMARY_CONTAINER);
-        rubleIcon.setBackground(circleBg);
-        rubleIcon.setGravity(Gravity.CENTER);
-        inner.addView(rubleIcon, LayoutHelper.createLinear(24, 24, 0, 0, 10, 0));
-
-        TextView text = new TextView(context);
-        text.setText("Отправить донат для вдохновения");
-        text.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        text.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
-        text.setTextColor(MD3_ON_SURFACE);
-        inner.addView(text, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
-
-        container.addView(inner, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-        container.setOnClickListener(v -> Toast.makeText(context, "Спасибо за поддержку проекта Mgla! 🎵", Toast.LENGTH_SHORT).show());
-        return container;
     }
 
     // ==========================================
@@ -671,6 +682,7 @@ public class MglaMusicActivity extends BaseFragment implements
     private void openPlaylist(MglaYandexMusicModel.Playlist playlist) {
         if (playlist == null) return;
         openedPlaylistFromFullList = fullPlaylistsView != null && fullPlaylistsView.getVisibility() == View.VISIBLE;
+        openedDetailFromArtist = false;
         detailSourceTitle = playlist.title;
         if (fullFavoritesTitleText != null) {
             fullFavoritesTitleText.setText(playlist.title);
@@ -765,12 +777,6 @@ public class MglaMusicActivity extends BaseFragment implements
 
         row.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 6, 0));
 
-        ImageView downloadBtn = new ImageView(context);
-        downloadBtn.setImageDrawable(new DownloadDrawable(MD3_PRIMARY));
-        downloadBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
-        downloadBtn.setOnClickListener(v -> Toast.makeText(context, "Трек сохранен: " + track.title, Toast.LENGTH_SHORT).show());
-        row.addView(downloadBtn, LayoutHelper.createLinear(36, 36, 0, 0, 2, 0));
-
         ImageView moreBtn = new ImageView(context);
         moreBtn.setImageResource(R.drawable.ic_ab_other);
         moreBtn.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
@@ -824,12 +830,7 @@ public class MglaMusicActivity extends BaseFragment implements
             name.setWidth(dp(96));
             item.addView(name, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 10, 0, 0));
 
-            item.setOnClickListener(v -> {
-                openSearch();
-                if (searchInput != null) {
-                    searchInput.setText(artist.name);
-                }
-            });
+            item.setOnClickListener(v -> openArtist(artist));
 
             artistsContainer.addView(item, lp);
         }
@@ -930,6 +931,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void showFullFavorites() {
         openedPlaylistFromFullList = false;
+        openedDetailFromArtist = false;
         detailSourceTitle = "Мне нравится";
         detailTracks.clear();
         detailTracks.addAll(favoritesList);
@@ -949,6 +951,8 @@ public class MglaMusicActivity extends BaseFragment implements
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (searchView != null) searchView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+        if (artistPageView != null) artistPageView.setVisibility(View.GONE);
         if (fullFavoritesView != null) {
             fullFavoritesView.setVisibility(View.VISIBLE);
         }
@@ -956,6 +960,13 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void closeFullFavorites() {
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (openedDetailFromArtist) {
+            openedDetailFromArtist = false;
+            if (artistPageView != null) {
+                artistPageView.setVisibility(View.VISIBLE);
+                return;
+            }
+        }
         if (openedPlaylistFromFullList) {
             openedPlaylistFromFullList = false;
             if (fullPlaylistsView != null) {
@@ -1025,6 +1036,8 @@ public class MglaMusicActivity extends BaseFragment implements
     private void showFullPlaylists() {
         if (searchView != null) searchView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+        if (artistPageView != null) artistPageView.setVisibility(View.GONE);
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) {
             fullPlaylistsView.setVisibility(View.VISIBLE);
@@ -1050,6 +1063,584 @@ public class MglaMusicActivity extends BaseFragment implements
         if (fullPlaylistsAdapter != null) {
             fullPlaylistsAdapter.notifyDataSetChanged();
         }
+    }
+
+    // ==========================================
+    // FULL ARTISTS LIST PAGE
+    // ==========================================
+
+    private LinearLayout createFullArtistsPage(Context context) {
+        LinearLayout layout = new LinearLayout(context);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(16), dp(10), dp(16), 0);
+
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView backBtn = createMd3IconButton(context, R.drawable.ic_ab_back, v -> closeFullArtists());
+        header.addView(backBtn, LayoutHelper.createLinear(40, 40, 0, 0, 12, 0));
+
+        LinearLayout textCol = new LinearLayout(context);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+
+        TextView title = new TextView(context);
+        title.setText("Любимые исполнители");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
+        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        title.setTextColor(MD3_ON_SURFACE);
+        textCol.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        fullArtistsCountText = new TextView(context);
+        fullArtistsCountText.setText("0 исполнителей");
+        fullArtistsCountText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        fullArtistsCountText.setTextColor(MD3_ON_SURFACE_VARIANT);
+        textCol.addView(fullArtistsCountText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+
+        header.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+        layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
+
+        fullArtistsLoading = new ProgressBar(context);
+        fullArtistsLoading.setVisibility(View.GONE);
+        layout.addView(fullArtistsLoading, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 20, 0, 20));
+
+        fullArtistsListView = new RecyclerListView(context);
+        fullArtistsListView.setLayoutManager(new LinearLayoutManager(context));
+        fullArtistsListView.setClipToPadding(false);
+        fullArtistsListView.setPadding(0, 0, 0, islandBottomInset());
+        fullArtistsAdapter = new FullArtistAdapter();
+        fullArtistsListView.setAdapter(fullArtistsAdapter);
+        fullArtistsListView.setOnItemClickListener((view, position) -> {
+            if (position < 0 || position >= artistsList.size()) {
+                return;
+            }
+            openArtist(artistsList.get(position));
+        });
+        layout.addView(fullArtistsListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
+
+        return layout;
+    }
+
+    private void showFullArtists() {
+        if (searchView != null) searchView.setVisibility(View.GONE);
+        if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        if (artistPageView != null) artistPageView.setVisibility(View.GONE);
+        if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
+        if (fullArtistsView != null) {
+            fullArtistsView.setVisibility(View.VISIBLE);
+        }
+        refreshFullArtistsUi();
+        if (artistsList.isEmpty()) {
+            if (fullArtistsLoading != null) {
+                fullArtistsLoading.setVisibility(View.VISIBLE);
+            }
+        }
+        loadArtists();
+    }
+
+    private void closeFullArtists() {
+        if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+        if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshFullArtistsUi() {
+        if (fullArtistsCountText != null) {
+            fullArtistsCountText.setText(formatArtistCount(artistsList.size()));
+        }
+        if (fullArtistsAdapter != null) {
+            fullArtistsAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private void openArtist(MglaYandexMusicModel.Artist artist) {
+        if (artist == null || TextUtils.isEmpty(artist.id)) {
+            return;
+        }
+        openedArtistFromFullList = fullArtistsView != null && fullArtistsView.getVisibility() == View.VISIBLE;
+        openedDetailFromArtist = false;
+        currentArtist = artist;
+        artistPopularTracks.clear();
+        artistAllTracks.clear();
+        artistAlbums.clear();
+
+        if (artistPageName != null) {
+            artistPageName.setText(artist.name);
+        }
+        if (artistPageSubtitle != null) {
+            artistPageSubtitle.setText("Популярные треки и альбомы");
+        }
+        if (artistPageCover != null) {
+            MglaMusicImageHelper.bindCircleCover(artistPageCover, artist.getCoverUrl(300), R.drawable.bot_music);
+        }
+        if (artistPopularContainer != null) {
+            artistPopularContainer.removeAllViews();
+        }
+        if (artistAlbumsContainer != null) {
+            artistAlbumsContainer.removeAllViews();
+        }
+        if (artistShowAllTracksBtn != null) {
+            artistShowAllTracksBtn.setVisibility(View.GONE);
+        }
+
+        hideAllContentPages();
+        if (artistPageView != null) {
+            artistPageView.setVisibility(View.VISIBLE);
+        }
+        if (artistPageLoading != null) {
+            artistPageLoading.setVisibility(View.VISIBLE);
+        }
+
+        final String artistId = artist.id;
+        MglaYandexMusicApi.fetchArtistBrief(artistId, new MglaYandexMusicApi.Callback<MglaYandexMusicModel.ArtistBrief>() {
+            @Override
+            public void onSuccess(MglaYandexMusicModel.ArtistBrief brief) {
+                if (currentArtist == null || !TextUtils.equals(currentArtist.id, artistId)) {
+                    return;
+                }
+                if (artistPageLoading != null) {
+                    artistPageLoading.setVisibility(View.GONE);
+                }
+                if (brief != null && brief.artist != null) {
+                    currentArtist = brief.artist;
+                    if (artistPageName != null) {
+                        artistPageName.setText(brief.artist.name);
+                    }
+                    if (artistPageCover != null) {
+                        MglaMusicImageHelper.bindCircleCover(artistPageCover, brief.artist.getCoverUrl(300), R.drawable.bot_music);
+                    }
+                }
+                artistPopularTracks.clear();
+                if (brief != null && brief.popularTracks != null) {
+                    artistPopularTracks.addAll(brief.popularTracks);
+                }
+                artistAlbums.clear();
+                if (brief != null && brief.albums != null) {
+                    artistAlbums.addAll(brief.albums);
+                }
+                bindArtistPopularPreview();
+                bindArtistAlbums();
+                if (artistAlbums.isEmpty()) {
+                    loadArtistAlbumsFallback(artistId);
+                }
+            }
+
+            @Override
+            public void onError(Exception error) {
+                if (artistPageLoading != null) {
+                    artistPageLoading.setVisibility(View.GONE);
+                }
+                Toast.makeText(getContext(), "Не удалось загрузить артиста", Toast.LENGTH_SHORT).show();
+                loadArtistTracksFallback(artistId);
+            }
+        });
+    }
+
+    private ScrollView createArtistPage(Context context) {
+        ScrollView scroll = new ScrollView(context);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, islandBottomInset());
+        scroll.setFillViewport(true);
+
+        LinearLayout layout = new LinearLayout(context);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(16), dp(10), dp(16), dp(24));
+
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView backBtn = createMd3IconButton(context, R.drawable.ic_ab_back, v -> closeArtistPage());
+        header.addView(backBtn, LayoutHelper.createLinear(40, 40, 0, 0, 12, 0));
+
+        TextView title = new TextView(context);
+        title.setText("Исполнитель");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        title.setTextColor(MD3_ON_SURFACE);
+        header.addView(title, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+        layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 18));
+
+        artistPageCover = new ImageView(context);
+        artistPageCover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        layout.addView(artistPageCover, LayoutHelper.createLinear(120, 120, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
+
+        artistPageName = new TextView(context);
+        artistPageName.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
+        artistPageName.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        artistPageName.setTextColor(MD3_ON_SURFACE);
+        artistPageName.setGravity(Gravity.CENTER);
+        layout.addView(artistPageName, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 4));
+
+        artistPageSubtitle = new TextView(context);
+        artistPageSubtitle.setText("Популярные треки и альбомы");
+        artistPageSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        artistPageSubtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
+        artistPageSubtitle.setGravity(Gravity.CENTER);
+        layout.addView(artistPageSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
+
+        TextView playPopularBtn = new TextView(context);
+        playPopularBtn.setText("▶  Слушать популярное");
+        playPopularBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        playPopularBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        playPopularBtn.setTextColor(MD3_ON_PRIMARY_CONTAINER);
+        playPopularBtn.setGravity(Gravity.CENTER);
+        GradientDrawable playBg = new GradientDrawable();
+        playBg.setCornerRadius(dp(22));
+        playBg.setColor(MD3_PRIMARY_CONTAINER);
+        playPopularBtn.setBackground(playBg);
+        playPopularBtn.setPadding(dp(18), dp(12), dp(18), dp(12));
+        playPopularBtn.setOnClickListener(v -> {
+            if (!artistPopularTracks.isEmpty()) {
+                String titleText = currentArtist != null ? currentArtist.name : "Исполнитель";
+                MglaYandexMusicPlayer.getInstance().playTrack(
+                        artistPopularTracks.get(0),
+                        new ArrayList<>(artistPopularTracks),
+                        titleText);
+            }
+        });
+        layout.addView(playPopularBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 18));
+
+        artistPageLoading = new ProgressBar(context);
+        artistPageLoading.setVisibility(View.GONE);
+        layout.addView(artistPageLoading, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 10, 0, 10));
+
+        TextView popularHeader = new TextView(context);
+        popularHeader.setText("Популярные треки");
+        popularHeader.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        popularHeader.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        popularHeader.setTextColor(MD3_ON_SURFACE);
+        layout.addView(popularHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 10));
+
+        artistPopularContainer = new LinearLayout(context);
+        artistPopularContainer.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(artistPopularContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        artistShowAllTracksBtn = new TextView(context);
+        artistShowAllTracksBtn.setText("Все треки");
+        artistShowAllTracksBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        artistShowAllTracksBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        artistShowAllTracksBtn.setTextColor(MD3_PRIMARY);
+        artistShowAllTracksBtn.setGravity(Gravity.CENTER);
+        GradientDrawable allTracksBg = new GradientDrawable();
+        allTracksBg.setCornerRadius(dp(18));
+        allTracksBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        artistShowAllTracksBtn.setBackground(allTracksBg);
+        artistShowAllTracksBtn.setPadding(dp(16), dp(12), dp(16), dp(12));
+        artistShowAllTracksBtn.setVisibility(View.GONE);
+        artistShowAllTracksBtn.setOnClickListener(v -> openArtistAllTracks());
+        layout.addView(artistShowAllTracksBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 12, 0, 0));
+
+        TextView albumsHeader = new TextView(context);
+        albumsHeader.setText("Альбомы");
+        albumsHeader.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        albumsHeader.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        albumsHeader.setTextColor(MD3_ON_SURFACE);
+        layout.addView(albumsHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 28, 0, 12));
+
+        HorizontalScrollView albumsScroll = new HorizontalScrollView(context);
+        albumsScroll.setHorizontalScrollBarEnabled(false);
+        albumsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        albumsScroll.setClipToPadding(false);
+
+        artistAlbumsContainer = new LinearLayout(context);
+        artistAlbumsContainer.setOrientation(LinearLayout.HORIZONTAL);
+        albumsScroll.addView(artistAlbumsContainer, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
+        layout.addView(albumsScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        scroll.addView(layout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        return scroll;
+    }
+
+    private void bindArtistPopularPreview() {
+        if (artistPopularContainer == null) {
+            return;
+        }
+        artistPopularContainer.removeAllViews();
+        if (artistPopularTracks.isEmpty()) {
+            TextView empty = new TextView(getContext());
+            empty.setText("Популярные треки не найдены");
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            empty.setTextColor(MD3_ON_SURFACE_VARIANT);
+            artistPopularContainer.addView(empty);
+            if (artistShowAllTracksBtn != null) {
+                artistShowAllTracksBtn.setVisibility(View.GONE);
+            }
+            return;
+        }
+
+        int preview = Math.min(ARTIST_POPULAR_PREVIEW, artistPopularTracks.size());
+        String source = currentArtist != null ? currentArtist.name : "Исполнитель";
+        for (int i = 0; i < preview; i++) {
+            final MglaYandexMusicModel.Track track = artistPopularTracks.get(i);
+            View row = createPreviewTrackRow(getContext(), track);
+            row.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playTrack(
+                    track, new ArrayList<>(artistPopularTracks), source));
+            artistPopularContainer.addView(row, LayoutHelper.createLinear(
+                    LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, i < preview - 1 ? 4 : 0));
+        }
+        if (artistShowAllTracksBtn != null) {
+            artistShowAllTracksBtn.setVisibility(View.VISIBLE);
+            artistShowAllTracksBtn.setText(artistPopularTracks.size() > ARTIST_POPULAR_PREVIEW
+                    ? "Все треки"
+                    : "Показать все треки");
+        }
+    }
+
+    private void bindArtistAlbums() {
+        if (artistAlbumsContainer == null) {
+            return;
+        }
+        artistAlbumsContainer.removeAllViews();
+        if (artistAlbums.isEmpty()) {
+            TextView empty = new TextView(getContext());
+            empty.setText("Альбомы не найдены");
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            empty.setTextColor(MD3_ON_SURFACE_VARIANT);
+            artistAlbumsContainer.addView(empty);
+            return;
+        }
+        for (int i = 0; i < artistAlbums.size(); i++) {
+            final MglaYandexMusicModel.Album album = artistAlbums.get(i);
+            LinearLayout card = new LinearLayout(getContext());
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(8), dp(8), dp(8), dp(10));
+            card.setBackground(md3SurfaceDrawable(MD3_SURFACE_CONTAINER, 16));
+            LinearLayout.LayoutParams lp = LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT);
+            if (i < artistAlbums.size() - 1) {
+                lp.rightMargin = dp(10);
+            }
+
+            ImageView cover = new ImageView(getContext());
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            MglaMusicImageHelper.bindCover(cover, album.getCoverUrl(200), 12, R.drawable.bot_music);
+            card.addView(cover, LayoutHelper.createLinear(120, 120));
+
+            TextView title = new TextView(getContext());
+            title.setText(album.title);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+            title.setTextColor(MD3_ON_SURFACE);
+            title.setSingleLine(true);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            title.setPadding(0, dp(8), 0, 0);
+            card.addView(title, LayoutHelper.createLinear(120, LayoutHelper.WRAP_CONTENT));
+
+            TextView meta = new TextView(getContext());
+            String year = album.year > 0 ? String.valueOf(album.year) : "";
+            String count = album.trackCount > 0 ? formatTrackCount(album.trackCount) : "";
+            meta.setText(TextUtils.isEmpty(year) ? count : (TextUtils.isEmpty(count) ? year : year + " · " + count));
+            meta.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            meta.setTextColor(MD3_ON_SURFACE_VARIANT);
+            meta.setSingleLine(true);
+            card.addView(meta, LayoutHelper.createLinear(120, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+
+            card.setOnClickListener(v -> openAlbum(album));
+            artistAlbumsContainer.addView(card, lp);
+        }
+    }
+
+    private void loadArtistAlbumsFallback(String artistId) {
+        MglaYandexMusicApi.fetchArtistAlbums(artistId, new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Album>>() {
+            @Override
+            public void onSuccess(List<MglaYandexMusicModel.Album> albums) {
+                if (currentArtist == null || !TextUtils.equals(currentArtist.id, artistId)) {
+                    return;
+                }
+                artistAlbums.clear();
+                if (albums != null) {
+                    artistAlbums.addAll(albums);
+                }
+                bindArtistAlbums();
+            }
+
+            @Override
+            public void onError(Exception error) {
+            }
+        });
+    }
+
+    private void loadArtistTracksFallback(String artistId) {
+        MglaYandexMusicApi.fetchArtistTracks(artistId, 0, 40, new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
+            @Override
+            public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
+                if (currentArtist == null || !TextUtils.equals(currentArtist.id, artistId)) {
+                    return;
+                }
+                artistPopularTracks.clear();
+                if (tracks != null) {
+                    artistPopularTracks.addAll(tracks);
+                }
+                bindArtistPopularPreview();
+            }
+
+            @Override
+            public void onError(Exception error) {
+            }
+        });
+    }
+
+    private void openArtistAllTracks() {
+        if (currentArtist == null || TextUtils.isEmpty(currentArtist.id)) {
+            return;
+        }
+        openedDetailFromArtist = true;
+        detailSourceTitle = currentArtist.name;
+        detailTracks.clear();
+        if (!artistAllTracks.isEmpty()) {
+            detailTracks.addAll(artistAllTracks);
+        } else if (!artistPopularTracks.isEmpty()) {
+            detailTracks.addAll(artistPopularTracks);
+        }
+        if (fullFavoritesTitleText != null) {
+            fullFavoritesTitleText.setText(currentArtist.name);
+        }
+        if (fullFavoritesCountText != null) {
+            fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
+        }
+        if (fullFavoritesAdapter != null) {
+            fullFavoritesAdapter.notifyDataSetChanged();
+        }
+        showTrackDetailPage();
+        if (fullFavoritesLoading != null) {
+            fullFavoritesLoading.setVisibility(View.VISIBLE);
+        }
+
+        final String artistId = currentArtist.id;
+        final String artistName = currentArtist.name;
+        artistAllTracks.clear();
+        loadArtistTracksPages(artistId, artistName, 0);
+    }
+
+    private void loadArtistTracksPages(String artistId, String artistName, int page) {
+        MglaYandexMusicApi.fetchArtistTracks(artistId, page, 50, new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
+            @Override
+            public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
+                if (currentArtist == null || !TextUtils.equals(currentArtist.id, artistId)) {
+                    return;
+                }
+                if (tracks != null && !tracks.isEmpty()) {
+                    artistAllTracks.addAll(tracks);
+                    if (tracks.size() >= 50 && page < 8) {
+                        loadArtistTracksPages(artistId, artistName, page + 1);
+                        return;
+                    }
+                }
+                if (fullFavoritesLoading != null) {
+                    fullFavoritesLoading.setVisibility(View.GONE);
+                }
+                detailTracks.clear();
+                detailTracks.addAll(artistAllTracks.isEmpty() ? artistPopularTracks : artistAllTracks);
+                detailSourceTitle = artistName;
+                if (fullFavoritesCountText != null) {
+                    fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
+                }
+                if (fullFavoritesAdapter != null) {
+                    fullFavoritesAdapter.notifyDataSetChanged();
+                }
+            }
+
+            @Override
+            public void onError(Exception error) {
+                if (fullFavoritesLoading != null) {
+                    fullFavoritesLoading.setVisibility(View.GONE);
+                }
+                if (detailTracks.isEmpty()) {
+                    Toast.makeText(getContext(), "Не удалось загрузить треки", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    private void openAlbum(MglaYandexMusicModel.Album album) {
+        if (album == null || TextUtils.isEmpty(album.id)) {
+            return;
+        }
+        openedDetailFromArtist = artistPageView != null && artistPageView.getVisibility() == View.VISIBLE;
+        detailSourceTitle = album.title;
+        detailTracks.clear();
+        if (fullFavoritesTitleText != null) {
+            fullFavoritesTitleText.setText(album.title);
+        }
+        if (fullFavoritesCountText != null) {
+            fullFavoritesCountText.setText(album.trackCount > 0 ? formatTrackCount(album.trackCount) : "Загрузка...");
+        }
+        if (fullFavoritesAdapter != null) {
+            fullFavoritesAdapter.notifyDataSetChanged();
+        }
+        showTrackDetailPage();
+        if (fullFavoritesLoading != null) {
+            fullFavoritesLoading.setVisibility(View.VISIBLE);
+        }
+
+        MglaYandexMusicApi.fetchAlbumTracks(album.id, new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
+            @Override
+            public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
+                if (fullFavoritesLoading != null) {
+                    fullFavoritesLoading.setVisibility(View.GONE);
+                }
+                detailTracks.clear();
+                if (tracks != null) {
+                    detailTracks.addAll(tracks);
+                }
+                if (fullFavoritesCountText != null) {
+                    fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
+                }
+                if (fullFavoritesAdapter != null) {
+                    fullFavoritesAdapter.notifyDataSetChanged();
+                }
+            }
+
+            @Override
+            public void onError(Exception error) {
+                if (fullFavoritesLoading != null) {
+                    fullFavoritesLoading.setVisibility(View.GONE);
+                }
+                Toast.makeText(getContext(), "Не удалось загрузить альбом", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void closeArtistPage() {
+        if (artistPageView != null) {
+            artistPageView.setVisibility(View.GONE);
+        }
+        if (openedArtistFromFullList) {
+            openedArtistFromFullList = false;
+            if (fullArtistsView != null) {
+                fullArtistsView.setVisibility(View.VISIBLE);
+                return;
+            }
+        }
+        if (collectionScrollView != null) {
+            collectionScrollView.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideAllContentPages() {
+        if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
+        if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+        if (artistPageView != null) artistPageView.setVisibility(View.GONE);
+        if (searchView != null) searchView.setVisibility(View.GONE);
+    }
+
+    private static String formatArtistCount(int count) {
+        int mod100 = count % 100;
+        int mod10 = count % 10;
+        if (mod100 >= 11 && mod100 <= 19) {
+            return count + " исполнителей";
+        }
+        if (mod10 == 1) {
+            return count + " исполнитель";
+        }
+        if (mod10 >= 2 && mod10 <= 4) {
+            return count + " исполнителя";
+        }
+        return count + " исполнителей";
     }
 
     private static String formatPlaylistCount(int count) {
@@ -1162,7 +1753,10 @@ public class MglaMusicActivity extends BaseFragment implements
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+        if (artistPageView != null) artistPageView.setVisibility(View.GONE);
         openedPlaylistFromFullList = false;
+        openedDetailFromArtist = false;
         if (searchView != null) {
             searchView.setVisibility(View.VISIBLE);
             if (searchInput != null) {
@@ -1342,24 +1936,35 @@ public class MglaMusicActivity extends BaseFragment implements
             artistsList.clear();
             artistsList.addAll(cached);
             updateArtistsCarousel();
+            refreshFullArtistsUi();
+            if (fullArtistsLoading != null && !artistsList.isEmpty()) {
+                fullArtistsLoading.setVisibility(View.GONE);
+            }
         } else {
             if (artistsLoading != null) artistsLoading.setVisibility(View.VISIBLE);
+            if (fullArtistsView != null && fullArtistsView.getVisibility() == View.VISIBLE
+                    && fullArtistsLoading != null) {
+                fullArtistsLoading.setVisibility(View.VISIBLE);
+            }
         }
 
         MglaYandexMusicApi.fetchLikedArtists(new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Artist>>() {
             @Override
             public void onSuccess(List<MglaYandexMusicModel.Artist> artists) {
                 if (artistsLoading != null) artistsLoading.setVisibility(View.GONE);
+                if (fullArtistsLoading != null) fullArtistsLoading.setVisibility(View.GONE);
                 artistsList.clear();
                 if (artists != null) {
                     artistsList.addAll(artists);
                 }
                 updateArtistsCarousel();
+                refreshFullArtistsUi();
             }
 
             @Override
             public void onError(Exception error) {
                 if (artistsLoading != null) artistsLoading.setVisibility(View.GONE);
+                if (fullArtistsLoading != null) fullArtistsLoading.setVisibility(View.GONE);
             }
         });
     }
@@ -1371,12 +1976,16 @@ public class MglaMusicActivity extends BaseFragment implements
         }
         if (!auth) {
             if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+            if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+            if (artistPageView != null) artistPageView.setVisibility(View.GONE);
             if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
             if (searchView != null) searchView.setVisibility(View.GONE);
         }
         if (collectionScrollView != null) {
             boolean showCollection = auth
                     && (fullPlaylistsView == null || fullPlaylistsView.getVisibility() != View.VISIBLE)
+                    && (fullArtistsView == null || fullArtistsView.getVisibility() != View.VISIBLE)
+                    && (artistPageView == null || artistPageView.getVisibility() != View.VISIBLE)
                     && (fullFavoritesView == null || fullFavoritesView.getVisibility() != View.VISIBLE)
                     && (searchView == null || searchView.getVisibility() != View.VISIBLE);
             collectionScrollView.setVisibility(showCollection ? View.VISIBLE : View.GONE);
@@ -1541,6 +2150,14 @@ public class MglaMusicActivity extends BaseFragment implements
             closeFullPlaylists();
             return false;
         }
+        if (artistPageView != null && artistPageView.getVisibility() == View.VISIBLE) {
+            closeArtistPage();
+            return false;
+        }
+        if (fullArtistsView != null && fullArtistsView.getVisibility() == View.VISIBLE) {
+            closeFullArtists();
+            return false;
+        }
         return super.onBackPressed(invoked);
     }
 
@@ -1575,6 +2192,9 @@ public class MglaMusicActivity extends BaseFragment implements
             collectionScrollView.smoothScrollTo(0, 0);
         } else if (fullFavoritesListView != null && fullFavoritesView.getVisibility() == View.VISIBLE) {
             fullFavoritesListView.smoothScrollToPosition(0);
+        } else if (fullArtistsListView != null && fullArtistsView != null
+                && fullArtistsView.getVisibility() == View.VISIBLE) {
+            fullArtistsListView.smoothScrollToPosition(0);
         }
     }
 
@@ -1677,6 +2297,69 @@ public class MglaMusicActivity extends BaseFragment implements
                 this.cover = cover;
                 this.title = title;
                 this.subtitle = subtitle;
+            }
+        }
+    }
+
+    private class FullArtistAdapter extends RecyclerView.Adapter<FullArtistAdapter.Holder> {
+        @NonNull
+        @Override
+        public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            Context ctx = parent.getContext();
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(10), dp(8), dp(10));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(16));
+            bg.setColor(MD3_SURFACE_CONTAINER);
+            row.setBackground(bg);
+
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = dp(8);
+            row.setLayoutParams(lp);
+
+            ImageView cover = new ImageView(ctx);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            row.addView(cover, LayoutHelper.createLinear(56, 56, 0, 0, 12, 0));
+
+            TextView title = new TextView(ctx);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+            title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+            title.setTextColor(MD3_ON_SURFACE);
+            title.setSingleLine(true);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            row.addView(title, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 8, 0));
+
+            ImageView chevron = new ImageView(ctx);
+            chevron.setImageResource(R.drawable.msg_arrowright);
+            chevron.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+            row.addView(chevron, LayoutHelper.createLinear(24, 24));
+
+            return new Holder(row, cover, title);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull Holder holder, int position) {
+            MglaYandexMusicModel.Artist artist = artistsList.get(position);
+            holder.title.setText(artist.name);
+            MglaMusicImageHelper.bindCircleCover(holder.cover, artist.getCoverUrl(100), R.drawable.bot_music);
+        }
+
+        @Override
+        public int getItemCount() {
+            return artistsList.size();
+        }
+
+        class Holder extends RecyclerView.ViewHolder {
+            final ImageView cover;
+            final TextView title;
+
+            Holder(View itemView, ImageView cover, TextView title) {
+                super(itemView);
+                this.cover = cover;
+                this.title = title;
             }
         }
     }
@@ -1986,50 +2669,4 @@ public class MglaMusicActivity extends BaseFragment implements
         }
     }
 
-    /**
-     * Download icon (arrow pointing down to horizontal tray).
-     */
-    private static class DownloadDrawable extends Drawable {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        DownloadDrawable(int color) {
-            paint.setColor(color);
-            paint.setStrokeWidth(dp(1.8f));
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
-        }
-
-        @Override
-        public void draw(@NonNull Canvas canvas) {
-            Rect b = getBounds();
-            float cx = b.centerX();
-            float cy = b.centerY();
-            float arrowH = dp(4.5f);
-            float arrowW = dp(3.5f);
-
-            // Arrow vertical line
-            canvas.drawLine(cx, cy - dp(5), cx, cy + dp(2), paint);
-            // Arrow head
-            canvas.drawLine(cx - arrowW, cy + dp(2) - arrowH, cx, cy + dp(2), paint);
-            canvas.drawLine(cx + arrowW, cy + dp(2) - arrowH, cx, cy + dp(2), paint);
-            // Bottom horizontal line
-            canvas.drawLine(cx - dp(5.5f), cy + dp(6), cx + dp(5.5f), cy + dp(6), paint);
-        }
-
-        @Override
-        public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
-        }
-
-        @Override
-        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
-            paint.setColorFilter(colorFilter);
-        }
-
-        @Override
-        public int getOpacity() {
-            return android.graphics.PixelFormat.TRANSLUCENT;
-        }
-    }
 }

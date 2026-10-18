@@ -77,6 +77,84 @@ FEATURE_PREVIEWS = [
     },
 ]
 
+# Mirrors MglaPremiumActivity.fillFeaturesForPlan — keep in sync with the app.
+_PREMIUM_BASE_FEATURES = [
+    {
+        "title": "Новые анимации",
+        "text": "Очень много крутых новых анимаций интерфейса",
+    },
+    {
+        "title": "Планировщик задач",
+        "text": "Удобный список задач прямо в приложении",
+    },
+    {
+        "title": "Локальные модели",
+        "text": "Используйте локальные ИИ-модели на устройстве",
+    },
+    {
+        "title": "Живая память",
+        "text": "Персональная память ассистента, которая растёт вместе с вами",
+    },
+    {
+        "title": "Темы для новых иконок",
+        "text": "Специально созданные темы под все иконки нового типа",
+    },
+    {
+        "title": "Автоперевод",
+        "text": "Автоматический перевод сообщений и чатов",
+    },
+]
+
+_PREMIUM_PLUS_EXTRA = [
+    {
+        "title": "Облачные ИИ-модели",
+        "text": "Более умные облачные модели в дополнение к локальным",
+        "tier": "plus",
+    },
+]
+
+_PREMIUM_ULTRA_EXTRA = [
+    {
+        "title": "Продвинутые ИИ-модели",
+        "text": "Ещё более умные и дорогие облачные модели",
+        "tier": "ultra",
+    },
+    {
+        "title": "Приоритет и автообход",
+        "text": "Приоритетная скорость и подключение автообхода",
+        "tier": "ultra",
+    },
+]
+
+PREMIUM_PLANS = [
+    {
+        "id": "premium",
+        "name": "Premium",
+        "tagline": "Базовый премиум",
+        "price": 200,
+        "accent": "blue",
+        "features": list(_PREMIUM_BASE_FEATURES),
+    },
+    {
+        "id": "premium_plus",
+        "name": "Premium+",
+        "tagline": "Облачный ИИ",
+        "price": 400,
+        "accent": "red",
+        "features": list(_PREMIUM_BASE_FEATURES) + list(_PREMIUM_PLUS_EXTRA),
+    },
+    {
+        "id": "premium_ultra",
+        "name": "Premium Ultra",
+        "tagline": "Максимум",
+        "price": 1500,
+        "accent": "gold",
+        "features": list(_PREMIUM_BASE_FEATURES)
+        + list(_PREMIUM_PLUS_EXTRA)
+        + list(_PREMIUM_ULTRA_EXTRA),
+    },
+]
+
 
 def _load_secret() -> str:
     if SECRET_FILE.exists():
@@ -272,6 +350,7 @@ def create_app() -> Flask:
             "home.html",
             home=home_row,
             features=FEATURE_PREVIEWS,
+            premium_plans=PREMIUM_PLANS,
             active="home",
         )
 

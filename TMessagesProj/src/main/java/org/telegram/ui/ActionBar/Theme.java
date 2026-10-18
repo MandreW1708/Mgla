@@ -6358,6 +6358,8 @@ public class Theme {
         ensureMaterialAccentBase(themeInfo);
         final org.telegram.ui.MglaIconThemes.Palette palette =
                 org.telegram.ui.MglaIconThemes.paletteForTheme(themeInfo != null ? themeInfo.name : null);
+        // Near-black accents stay exact on bubbles/icons-on-white; lift for text on dark chrome.
+        final int uiAccent = readableMglaUiAccent(palette.accent);
         ThemeAccent accentObj = new ThemeAccent();
         accentObj.parentTheme = themeInfo;
         accentObj.accentColor = palette.accent;
@@ -6379,22 +6381,19 @@ public class Theme {
             currentColors.delete(key_chat_outBubbleGradientAnimated);
         }
         currentColors.put(key_chat_outBubbleSelected, palette.bubble);
-        currentColors.put(key_windowBackgroundWhiteBlueText, palette.accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText2, palette.accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText3, palette.accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText4, palette.accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText5, palette.accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText6, palette.accent);
-        currentColors.put(key_windowBackgroundWhiteBlueText7, palette.accent);
-        currentColors.put(key_featuredStickers_addButton, palette.accent);
-        currentColors.put(key_switchTrackChecked, palette.accent);
-        currentColors.put(key_checkbox, palette.accent);
+        currentColors.put(key_windowBackgroundWhiteBlueText, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueText2, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueText3, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueText4, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueText5, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueText6, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueText7, uiAccent);
+        currentColors.put(key_windowBackgroundWhiteBlueHeader, uiAccent);
+        currentColors.put(key_featuredStickers_addButton, uiAccent);
+        currentColors.put(key_featuredStickers_addButtonPressed, uiAccent);
+        currentColors.put(key_switchTrackChecked, uiAccent);
+        currentColors.put(key_checkbox, uiAccent);
         currentColors.put(key_checkboxCheck, 0xFFFFFFFF);
-        // Dymka: exact switch / header colors (avoid hue-wash pink).
-        if (themeInfo != null && MGLA_THEME_DYMKA.equals(themeInfo.name)) {
-            currentColors.put(key_switchTrackChecked, org.telegram.ui.MglaIconThemes.DYMKA_SWITCH);
-            currentColors.put(key_windowBackgroundWhiteBlueHeader, org.telegram.ui.MglaIconThemes.DYMKA_HEADER);
-        }
         // Firm amoled/dark keep accent loaders/links; icon themes need contrast on colored bubbles.
         final boolean firmTheme = MGLA_THEME_AMOLED.equals(themeInfo.name)
                 || MGLA_THEME_DARK.equals(themeInfo.name);
@@ -6404,19 +6403,36 @@ public class Theme {
             currentColors.put(key_chat_inLoader, palette.accent);
             currentColors.put(key_chat_outLoader, palette.accent);
         } else {
-            // Outgoing: white on colored bubble (same idea as white file-button circle).
-            // Incoming: accent on neutral in-bubble.
+            // Outgoing: white on dark bubble (links, loader ring); dark glyph on white file circle.
+            // Incoming: lifted accent for links on dark in-bubble; dark loader + white glyph.
             currentColors.put(key_chat_messageLinkOut, 0xFFFFFFFF);
-            currentColors.put(key_chat_messageLinkIn, palette.accent);
+            currentColors.put(key_chat_messageLinkIn, uiAccent);
             currentColors.put(key_chat_outLoader, 0xFFFFFFFF);
             currentColors.put(key_chat_outLoaderSelected, 0xFFFFFFFF);
+            currentColors.put(key_chat_outFileProgress, palette.bubble);
+            currentColors.put(key_chat_outFileProgressSelected, palette.bubble);
             currentColors.put(key_chat_outMediaIcon, palette.accent);
             currentColors.put(key_chat_outMediaIconSelected, palette.accent);
             currentColors.put(key_chat_inLoader, palette.accent);
             currentColors.put(key_chat_inLoaderSelected, palette.accent);
+            currentColors.put(key_chat_inFileProgress, uiAccent);
+            currentColors.put(key_chat_inFileProgressSelected, uiAccent);
             currentColors.put(key_chat_inMediaIcon, 0xFFFFFFFF);
             currentColors.put(key_chat_inMediaIconSelected, 0xFFFFFFFF);
+            currentColors.put(key_chat_linkSelectBackground, Theme.multAlpha(uiAccent, 0.28f));
         }
+    }
+
+    /** Lift near-black accents so links/controls stay readable on dark surfaces. */
+    private static int readableMglaUiAccent(int accent) {
+        float[] hsv = getTempHsv(5);
+        Color.colorToHSV(accent, hsv);
+        if (hsv[2] >= 0.42f) {
+            return accent;
+        }
+        hsv[1] = Math.min(1f, Math.max(hsv[1], 0.72f));
+        hsv[2] = 0.62f;
+        return Color.HSVToColor(Color.alpha(accent), hsv);
     }
 
     private static int getAndroidSystemColor(String name, int fallback) {

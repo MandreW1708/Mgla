@@ -76,11 +76,90 @@ DEFAULT_OPENROUTER_MODELS = (
     "google/gemma-4-31b-it:free",
 )
 
+# Stable plan ids for future subscription / entitlements (client + billing).
+PLAN_FREE = "free"
+PLAN_PREMIUM = "premium"
+PLAN_PREMIUM_PLUS = "premium_plus"
+PLAN_PREMIUM_ULTRA = "premium_ultra"
+
+# (plan_id, UI title, short description). Keys live only on mglabot env — never in git.
+PLAN_CATALOG: Sequence[Tuple[str, str, str]] = (
+    (
+        PLAN_FREE,
+        "Free",
+        "Бесплатно для всех. Ключ: OPENROUTER_API_KEY на mglabot.",
+    ),
+    (
+        PLAN_PREMIUM,
+        "Premium",
+        "Будущий план подписки без отдельных нейросетей — те же модели, что у Free "
+        "(и тот же OPENROUTER_API_KEY). Список моделей здесь не редактируется.",
+    ),
+    (
+        PLAN_PREMIUM_PLUS,
+        "Premium+",
+        "Будущий план подписки. Ключ: OPENROUTER_API_KEY_PREMIUM_PLUS на mglabot.",
+    ),
+    (
+        PLAN_PREMIUM_ULTRA,
+        "Premium Ultra",
+        "Будущий план подписки. Ключ: OPENROUTER_API_KEY_PREMIUM_ULTRA на mglabot.",
+    ),
+)
+
+# Plans that own a model list in SQLite / push payload.
+# Premium has no own list — it aliases Free (see PLAN_MODELS_ALIAS).
+PLANS_WITH_MODEL_LISTS: Sequence[str] = (
+    PLAN_FREE,
+    PLAN_PREMIUM_PLUS,
+    PLAN_PREMIUM_ULTRA,
+)
+
+# plan_id → which plan's model list it uses (no separate storage).
+PLAN_MODELS_ALIAS = {
+    PLAN_PREMIUM: PLAN_FREE,
+}
+
+# Rank for multi-account: highest plan wins.
+PLAN_RANK = {
+    PLAN_FREE: 0,
+    PLAN_PREMIUM: 1,
+    PLAN_PREMIUM_PLUS: 2,
+    PLAN_PREMIUM_ULTRA: 3,
+}
+PLAN_IDS_ALL = (PLAN_FREE, PLAN_PREMIUM, PLAN_PREMIUM_PLUS, PLAN_PREMIUM_ULTRA)
+
+
+def normalize_plan(plan_id: str | None) -> str:
+    if isinstance(plan_id, str) and plan_id.strip() in PLAN_RANK:
+        return plan_id.strip()
+    return PLAN_FREE
+
+
+def best_plan(plans) -> str:
+    best = PLAN_FREE
+    best_rank = 0
+    for plan in plans or ():
+        pid = normalize_plan(plan)
+        rank = PLAN_RANK.get(pid, 0)
+        if rank > best_rank:
+            best = pid
+            best_rank = rank
+    return best
+
+# SQLite ai_config keys per plan that stores its own list.
+# Free keeps legacy key for backwards compatibility.
+AI_CONFIG_MODEL_KEYS = {
+    PLAN_FREE: "openrouter_models",
+    PLAN_PREMIUM_PLUS: "openrouter_models_premium_plus",
+    PLAN_PREMIUM_ULTRA: "openrouter_models_premium_ultra",
+}
+
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}$")
 MAX_MODELS = 40
 
 
-def parse_models_text(text: str) -> List[str]:
+def parse_models_text(text: str, *, allow_empty: bool = False) -> List[str]:
     """Parse one-model-per-line textarea into a validated list."""
     if not isinstance(text, str):
         raise ValueError("models text required")
@@ -98,9 +177,22 @@ def parse_models_text(text: str) -> List[str]:
         out.append(model)
         if len(out) > MAX_MODELS:
             raise ValueError(f"too many models (max {MAX_MODELS})")
-    if not out:
+    if not out and not allow_empty:
         raise ValueError("at least one model required")
     return out
+
+
+def validate_plans_disjoint(plans: dict) -> None:
+    """Raise if the same model id appears in more than one subscription plan."""
+    owner: dict = {}
+    for plan_id, models in plans.items():
+        for model in models or []:
+            prev = owner.get(model)
+            if prev and prev != plan_id:
+                raise ValueError(
+                    f"модель «{model}» уже в плане «{prev}» — списки планов не должны пересекаться"
+                )
+            owner[model] = plan_id
 
 
 def models_to_text(models: Iterable[str]) -> str:
@@ -115,12 +207,22 @@ def render_admin_html(
     *,
     global_disabled: dict,
     denies: Sequence[Tuple[int, str, str]],
-    models: Sequence[str],
+    models: Sequence[str] | None = None,
+    models_by_plan: dict | None = None,
+    subscriptions: Sequence[Tuple[int, str, str]] | None = None,
     flash_ok: str = "",
     flash_err: str = "",
     bot_url: str = "",
 ) -> str:
     """Build the /admin control page."""
+    if models_by_plan is None:
+        models_by_plan = {
+            PLAN_FREE: list(models or DEFAULT_OPENROUTER_MODELS),
+            PLAN_PREMIUM_PLUS: [],
+            PLAN_PREMIUM_ULTRA: [],
+        }
+    if subscriptions is None:
+        subscriptions = []
     rows = []
     for fid, label in FEATURE_CATALOG:
         checked = " checked" if global_disabled.get(fid) else ""
@@ -160,6 +262,33 @@ def render_admin_html(
         )
     if not deny_rows:
         deny_rows.append("<tr><td colspan='4' class='empty'>Пока нет персональных запретов.</td></tr>")
+
+    plan_options = "".join(
+        f"<option value='{html.escape(pid)}'>{html.escape(title)}</option>"
+        for pid, title, _ in PLAN_CATALOG
+        if pid != PLAN_FREE
+    )
+    sub_rows = []
+    for tg_id, plan, updated in subscriptions:
+        title = next((t for pid, t, _ in PLAN_CATALOG if pid == plan), plan)
+        sub_rows.append(
+            "<tr>"
+            f"<td class='num'>{tg_id}</td>"
+            f"<td class='name'>{html.escape(title)} (<code>{html.escape(plan)}</code>)</td>"
+            f"<td class='num'>{html.escape(updated or '')}</td>"
+            "<td>"
+            f"<form method='post' action='/admin' class='inline'>"
+            "<input type='hidden' name='action' value='subscription_remove'>"
+            f"<input type='hidden' name='tg_id' value='{tg_id}'>"
+            "<button type='submit' class='btn danger'>Снять</button>"
+            "</form>"
+            "</td>"
+            "</tr>"
+        )
+    if not sub_rows:
+        sub_rows.append(
+            "<tr><td colspan='4' class='empty'>Подписчиков пока нет — добавьте Telegram ID ниже.</td></tr>"
+        )
 
     flash = ""
     if flash_ok:
@@ -326,16 +455,44 @@ form.inline {{ display:inline; margin:0; }}
   </div>
 
   <div class="card">
-    <h2>🤖 OpenRouter — модели (fallback по порядку)</h2>
-    <p class="sub">Источник правды на хабе. При сохранении список пушится на mglabot
-      (<code>{bot_hint}</code>). Ключ API на хабе не хранится.</p>
+    <h2>💎 Подписки Mgla Premium</h2>
+    <p class="sub">План привязан к Telegram ID аккаунта (не ко всему клиенту). В ответе
+      <code>POST /features</code> — объект <code>plans</code> (tg_id → plan) и сводный
+      <code>plan</code> (лучший среди запрошенных). Без записи — Free, вкладка ИИ скрыта.</p>
+    <form method="post" action="/admin">
+      <input type="hidden" name="action" value="subscription_set">
+      <div class="row">
+        <label class="field">🆔 Telegram ID
+          <input type="number" name="tg_id" required min="1" step="1" placeholder="123456789">
+        </label>
+        <label class="field">📦 План
+          <select name="plan">{plan_options}</select>
+        </label>
+        <button class="btn" type="submit">💾 Выдать план</button>
+      </div>
+    </form>
+    <div class="table-wrap" style="margin-top:16px">
+    <table>
+      <thead><tr><th>tg_id</th><th>План</th><th>Когда</th><th></th></tr></thead>
+      <tbody>
+        {"".join(sub_rows)}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🤖 OpenRouter — модели по планам</h2>
+    <p class="sub">Отдельные списки: Free / Premium+ / Premium Ultra (без пересечений).
+      План <code>premium</code> своих нейросетей не имеет — те же модели, что Free.
+      Источник правды на хабе; при сохранении пушится на mglabot (<code>{bot_hint}</code>).
+      API-ключи только в env на mglabot. Plan id: <code>free</code>, <code>premium</code>,
+      <code>premium_plus</code>, <code>premium_ultra</code>.</p>
     <form method="post" action="/admin">
       <input type="hidden" name="action" value="save_models">
-      <label class="field" style="width:100%;flex:1 1 100%">📋 Модели (одна на строку)
-        <textarea name="models" spellcheck="false">{html.escape(models_to_text(models))}</textarea>
-      </label>
+      {_render_plan_textareas(models_by_plan)}
       <div class="row">
-        <button class="btn" type="submit">💾 Сохранить и пушить на mglabot</button>
+        <button class="btn" type="submit">💾 Сохранить все планы и пушить на mglabot</button>
       </div>
     </form>
     <form method="post" action="/admin" style="margin-top:10px">
@@ -351,6 +508,42 @@ form.inline {{ display:inline; margin:0; }}
 """
 
 
+def _render_plan_textareas(models_by_plan: dict) -> str:
+    blocks = []
+    for plan_id, title, desc in PLAN_CATALOG:
+        alias = PLAN_MODELS_ALIAS.get(plan_id)
+        if alias:
+            alias_title = next((t for pid, t, _ in PLAN_CATALOG if pid == alias), alias)
+            blocks.append(
+                f"""
+      <div class="plan-block" style="margin:14px 0 18px;padding:12px;border:1px dashed var(--line);border-radius:12px;background:rgba(0,0,0,.12)">
+        <h3 style="margin:0 0 4px;font-size:15px">{html.escape(title)}
+          <code style="font-size:11px;font-weight:500;margin-left:6px">{html.escape(plan_id)}</code>
+        </h3>
+        <p class="sub" style="margin:0">{html.escape(desc)}</p>
+        <p class="sub" style="margin:8px 0 0">🔗 Модели = список плана <strong>{html.escape(alias_title)}</strong>
+          (<code>{html.escape(alias)}</code>). Отдельный textarea не нужен.</p>
+      </div>"""
+            )
+            continue
+        models = models_by_plan.get(plan_id) or []
+        required = " required" if plan_id == PLAN_FREE else ""
+        hint = "обязателен ≥1 модель" if plan_id == PLAN_FREE else "можно пустым до запуска подписки"
+        blocks.append(
+            f"""
+      <div class="plan-block" style="margin:14px 0 18px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.18)">
+        <h3 style="margin:0 0 4px;font-size:15px">{html.escape(title)}
+          <code style="font-size:11px;font-weight:500;margin-left:6px">{html.escape(plan_id)}</code>
+        </h3>
+        <p class="sub" style="margin:0 0 8px">{html.escape(desc)} ({hint})</p>
+        <label class="field" style="width:100%;flex:1 1 100%">📋 Модели (одна на строку, порядок = fallback)
+          <textarea name="models_{html.escape(plan_id)}" spellcheck="false"{required}>{html.escape(models_to_text(models))}</textarea>
+        </label>
+      </div>"""
+        )
+    return "".join(blocks)
+
+
 def flash_redirect(ok: str = "", err: str = "") -> str:
     parts = []
     if ok:
@@ -360,8 +553,12 @@ def flash_redirect(ok: str = "", err: str = "") -> str:
     return "/admin" + (("?" + "&".join(parts)) if parts else "")
 
 
-def models_from_json(raw: str) -> List[str]:
+def models_from_json(raw: str, *, allow_empty: bool = True) -> List[str]:
     data = json.loads(raw)
     if not isinstance(data, list):
         raise ValueError("models must be a JSON array")
-    return parse_models_text("\n".join(str(x) for x in data))
+    if not data:
+        if allow_empty:
+            return []
+        raise ValueError("at least one model required")
+    return parse_models_text("\n".join(str(x) for x in data), allow_empty=allow_empty)
