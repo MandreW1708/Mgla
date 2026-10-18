@@ -97,10 +97,6 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
     private static final ExecutorService sizePool = Executors.newFixedThreadPool(6);
 
     private static final Pattern WEIGHT_PATTERN = Pattern.compile("(?i)(\\d+(?:\\.\\d+)?)\\s?([mb])(?![a-z])");
-    /** Модели тяжелее этого веса в поиске скрываются — не поместятся в память. */
-    /** 4 GiB is the largest model the on-device runtime accepts.  It is still
-     * checked against the currently available RAM before it is mapped. */
-    private static final long MAX_MODEL_BYTES = 4L * 1024 * 1024 * 1024;
 
     public MglaLocalModelsActivity() {
         this(null);
@@ -141,6 +137,7 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
         listView.setAdapter(adapter);
         page.addView(listView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
+        MglaLocalModelsManager.clearSelectionIfUnsupported(context);
         rebuildRows();
         refreshSelected(context);
         return fragmentView;
@@ -178,6 +175,10 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
                     if (id.isEmpty()) {
                         continue;
                     }
+                    // Skip Gemma 3 / Qwen3 / 3B+ etc. — same filter for chat and Chat DNA.
+                    if (!MglaLocalModelsManager.isSearchRepoCompatible(id)) {
+                        continue;
+                    }
                     results.add(new SearchResult(id, obj.optLong("downloads", 0)));
                 }
             } catch (Throwable e) {
@@ -199,7 +200,7 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
                     synchronized (sizeCache) {
                         cached = sizeCache.get(r.id);
                     }
-                    if (cached == null || cached <= MAX_MODEL_BYTES) {
+                    if (cached == null || MglaLocalModelsManager.isSearchSizeCompatible(cached)) {
                         searchResults.add(r);
                     }
                 }
@@ -306,7 +307,7 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
             }
             final String storageId = MglaLocalModelsManager.sanitizeId(result.id);
             AndroidUtilities.runOnUIThread(() -> {
-                if (outSize > MAX_MODEL_BYTES) {
+                if (!MglaLocalModelsManager.isSearchSizeCompatible(outSize)) {
                     for (int i = searchResults.size() - 1; i >= 0; i--) {
                         if (searchResults.get(i).id.equals(result.id)) {
                             searchResults.remove(i);
@@ -564,7 +565,7 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
                     break;
                 case ROW_NOTE:
                     TextInfoPrivacyCell note = new TextInfoPrivacyCell(context);
-                    note.setText("В выдаче скрываются модели тяжелее 4 ГБ. Перед запуском приложение дополнительно проверит свободную память устройства.");
+                    note.setText("Поиск показывает только модели, совместимые с локальным рантаймом (чат и Chat DNA): без Gemma 3 / Qwen3, до ~2,4 ГБ. Рекомендованные из каталога всегда подходят.");
                     view = note;
                     break;
                 case ROW_SEARCH:
@@ -687,14 +688,21 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
         views.badge.setVisibility(badge ? View.VISIBLE : View.GONE);
         String weight = extractWeight(model.title);
         String size = model.sizeBytes > 0 ? MglaLocalModelsManager.formatSize(model.sizeBytes) : null;
+        String desc = model.description != null ? model.description : "";
+        if (MglaLocalModelsManager.isDownloaded(context, model.id)) {
+            String reason = MglaLocalModelsManager.unsupportedReason(MglaLocalModelsManager.modelFile(context, model.id));
+            if (reason != null) {
+                desc = "Несовместима с локальным рантаймом — тап, чтобы удалить";
+            }
+        }
         if (weight != null && size != null) {
-            views.desc.setText(model.description + " • вес: " + weight + " • " + size);
+            views.desc.setText(desc + " • вес: " + weight + " • " + size);
         } else if (weight != null) {
-            views.desc.setText(model.description + " • вес: " + weight);
+            views.desc.setText(desc + " • вес: " + weight);
         } else if (size != null) {
-            views.desc.setText(model.description + " • " + size);
+            views.desc.setText(desc + " • " + size);
         } else {
-            views.desc.setText(model.description);
+            views.desc.setText(desc);
         }
         registerRow(views, model.id);
         updateRowState(context, model.id);
@@ -825,10 +833,32 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
         if (MglaLocalModelsManager.isDownloaded(context, model.id)) {
             if (model.id.equals(MglaLocalModelsManager.getSelectedModelId())) {
                 confirmDelete(context, model, displayTitle);
-            } else {
-                MglaLocalModelsManager.selectModel(model.id);
-                refreshAllStates(context);
+                return;
             }
+            String reason = MglaLocalModelsManager.unsupportedReason(MglaLocalModelsManager.modelFile(context, model.id));
+            if (reason != null) {
+                new AlertDialog.Builder(context)
+                        .setTitle(displayTitle)
+                        .setMessage(reason + "\n\nМожно удалить файл, чтобы освободить место.")
+                        .setPositiveButton("Удалить", (d, w) -> {
+                            MglaLocalModelsManager.deleteModel(context, model.id);
+                            MglaLocalModelsManager.forgetCustomModel(model.id);
+                            rebuildRows();
+                            refreshSelected(context);
+                        })
+                        .setNegativeButton("Закрыть", null)
+                        .show();
+                return;
+            }
+            MglaLocalModelsManager.selectModel(model.id);
+            refreshAllStates(context);
+            return;
+        }
+        if (!MglaLocalModelsManager.isSearchRepoCompatible(displayTitle)
+                && !MglaLocalModelsManager.isSearchRepoCompatible(model.id)
+                && !MglaLocalModelsManager.isSearchRepoCompatible(model.title)) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error,
+                    "Эта модель не совместима с локальным рантаймом").show();
             return;
         }
         startDownload(context, model, displayTitle);
@@ -893,23 +923,44 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
     private void resolveAndDownload(Context context, MglaLocalModelsManager.ModelInfo model, String displayTitle) {
         new Thread(() -> {
             String fileName = null;
+            long fileSize = 0;
+            String blockReason = null;
+            if (!MglaLocalModelsManager.isSearchRepoCompatible(displayTitle)) {
+                blockReason = "Репозиторий не совместим с локальным рантаймом (чат / Chat DNA)";
+            }
             HttpURLConnection conn = null;
             try {
-                conn = (HttpURLConnection) new URL("https://huggingface.co/api/models/" + displayTitle).openConnection();
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(15000);
-                conn.setRequestProperty("User-Agent", "Mgla/1.0");
-                if (conn.getResponseCode() != 200) {
-                    throw new Exception("HTTP " + conn.getResponseCode());
-                }
-                StringBuilder body = new StringBuilder();
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        body.append(line);
+                if (blockReason == null) {
+                    conn = (HttpURLConnection) new URL("https://huggingface.co/api/models/" + displayTitle + "?blobs=true").openConnection();
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(15000);
+                    conn.setRequestProperty("User-Agent", "Mgla/1.0");
+                    if (conn.getResponseCode() != 200) {
+                        throw new Exception("HTTP " + conn.getResponseCode());
+                    }
+                    StringBuilder body = new StringBuilder();
+                    try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            body.append(line);
+                        }
+                    }
+                    JSONArray siblings = new JSONObject(body.toString()).optJSONArray("siblings");
+                    fileName = chooseGguf(siblings);
+                    if (fileName != null && siblings != null) {
+                        for (int i = 0; i < siblings.length(); i++) {
+                            JSONObject sib = siblings.optJSONObject(i);
+                            if (fileName.equals(sib.optString("rfilename", ""))) {
+                                fileSize = sib.optLong("size", 0);
+                                break;
+                            }
+                        }
+                    }
+                    if (fileSize > 0 && !MglaLocalModelsManager.isSearchSizeCompatible(fileSize)) {
+                        blockReason = "Файл слишком большой (" + MglaLocalModelsManager.formatSize(fileSize) + ")";
+                        fileName = null;
                     }
                 }
-                fileName = chooseGguf(new JSONObject(body.toString()).optJSONArray("siblings"));
             } catch (Throwable e) {
                 FileLog.e(e);
             } finally {
@@ -918,11 +969,13 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
                 }
             }
             final String chosen = fileName;
+            final String error = blockReason;
             AndroidUtilities.runOnUIThread(() -> {
                 if (chosen == null) {
                     updateRowState(context, model.id);
                     if (getParentActivity() != null) {
-                        BulletinFactory.of(MglaLocalModelsActivity.this).createSimpleBulletin(R.raw.error, "В репозитории нет GGUF-файла").show();
+                        BulletinFactory.of(MglaLocalModelsActivity.this).createSimpleBulletin(R.raw.error,
+                                error != null ? error : "В репозитории нет GGUF-файла").show();
                     }
                     return;
                 }

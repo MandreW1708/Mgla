@@ -7,17 +7,23 @@ import android.os.Build;
 import android.text.TextUtils;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Set;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Mgla: менеджер локальных ИИ-моделей.
@@ -46,25 +52,29 @@ public class MglaLocalModelsManager {
         }
     }
 
+    /**
+     * Only architectures supported by the bundled talk-llama snapshot
+     * (llama / qwen2 / gemma2 / … — not qwen3 or gemma3).
+     */
     public static final ModelInfo[] CATALOG = {
         new ModelInfo(
             "smollm2-135m",
             "SmolLM2 135M Instruct",
-            "Крошечная модель, мгновенный инференс, темы по смыслу",
+            "Крошечная модель, мгновенный инференс",
             "https://huggingface.co/Felladrin/gguf-Q8_0-SmolLM2-135M-Instruct/resolve/main/smollm2-135m-instruct-q8_0.gguf",
             150_000_000L),
         new ModelInfo(
-            "qwen3-0.6b",
-            "Qwen3 0.6B Instruct",
+            "qwen25-0.5b",
+            "Qwen2.5 0.5B Instruct",
             "Сильная малая модель, хорошее понимание русского",
-            "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
-            660_000_000L),
+            "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+            490_000_000L),
         new ModelInfo(
-            "gemma-3-270m",
-            "Gemma 3 270M IT",
-            "Быстрая модель Google, аккуратные короткие ответы",
-            "https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-Q4_K_M.gguf",
-            190_000_000L),
+            "tinyllama-1.1b",
+            "TinyLlama 1.1B Chat",
+            "Лёгкая chat-модель на архитектуре Llama",
+            "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+            670_000_000L),
         new ModelInfo(
             "smollm2-1.7b",
             "SmolLM2 1.7B Instruct",
@@ -164,6 +174,23 @@ public class MglaLocalModelsManager {
         return activeDownloads.containsKey(id);
     }
 
+    /**
+     * Hard cap for on-device GGUF (chat + Chat DNA). Larger files are hidden
+     * from HuggingFace search and refused at select/load time.
+     */
+    public static final long MAX_MODEL_BYTES = 2_400_000_000L;
+
+    private static final Pattern WEIGHT_PATTERN =
+            Pattern.compile("(?i)(\\d+(?:\\.\\d+)?)\\s?([mb])(?![a-z0-9])");
+
+    /** Families the bundled llama.cpp cannot run (name / repo heuristics). */
+    private static final String[] UNSUPPORTED_NAME_MARKERS = {
+            "gemma-3", "gemma3", "gemma_3", "gemma3n",
+            "qwen3", "qwen-3", "qwen_3",
+            "deepseek-r1", "deepseek_r1",
+            "llama-4", "llama4",
+    };
+
     /** Скачанная и выбранная модель (null — ничего не загружено). */
     public static File getLoadedModel(Context context) {
         String id = prefs().getString(PREF_LOADED_MODEL, "");
@@ -173,8 +200,288 @@ public class MglaLocalModelsManager {
         return modelFile(context, id);
     }
 
+    /**
+     * Model safe for chat inference and Chat DNA (same selection).
+     * Returns null if nothing selected or the file is incompatible.
+     */
+    public static File getRunnableModel(Context context) {
+        File model = getLoadedModel(context);
+        if (model == null) {
+            return null;
+        }
+        if (unsupportedReason(model) != null) {
+            return null;
+        }
+        return model;
+    }
+
     public static void selectModel(String id) {
-        prefs().edit().putString(PREF_LOADED_MODEL, id == null ? "" : id).apply();
+        if (TextUtils.isEmpty(id)) {
+            prefs().edit().putString(PREF_LOADED_MODEL, "").apply();
+            return;
+        }
+        Context ctx = ApplicationLoader.applicationContext;
+        if (ctx != null && isDownloaded(ctx, id)) {
+            String reason = unsupportedReason(modelFile(ctx, id));
+            if (reason != null) {
+                FileLog.d("MglaLocalModels: refuse select " + id + ": " + reason);
+                return;
+            }
+        }
+        prefs().edit().putString(PREF_LOADED_MODEL, id).apply();
+    }
+
+    /**
+     * Whether a HuggingFace repo id looks runnable on-device (before download).
+     * Used by search so Gemma 3 / huge models never appear in the list.
+     */
+    public static boolean isSearchRepoCompatible(String repoId) {
+        if (TextUtils.isEmpty(repoId)) {
+            return false;
+        }
+        String id = repoId.toLowerCase(Locale.US);
+        for (String marker : UNSUPPORTED_NAME_MARKERS) {
+            if (id.contains(marker)) {
+                return false;
+            }
+        }
+        // Explicit param counts that will not fit / are too slow on phones.
+        Double billions = parseParamBillions(id);
+        if (billions != null && billions >= 3.0) {
+            return false;
+        }
+        return true;
+    }
+
+    public static boolean isSearchSizeCompatible(long sizeBytes) {
+        return sizeBytes <= 0 || sizeBytes <= MAX_MODEL_BYTES;
+    }
+
+    /** Parse ≈parameter count in billions from a repo/file name (null if unknown). */
+    public static Double parseParamBillions(String name) {
+        if (TextUtils.isEmpty(name)) {
+            return null;
+        }
+        Matcher m = WEIGHT_PATTERN.matcher(name);
+        Double best = null;
+        while (m.find()) {
+            try {
+                double v = Double.parseDouble(m.group(1));
+                String unit = m.group(2).toLowerCase(Locale.US);
+                double billions = "b".equals(unit) ? v : v / 1000.0;
+                if (best == null || billions > best) {
+                    best = billions;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        return best;
+    }
+
+    /** Clear selection if the currently chosen file became incompatible. */
+    public static void clearSelectionIfUnsupported(Context context) {
+        File loaded = getLoadedModel(context);
+        if (loaded != null && unsupportedReason(loaded) != null) {
+            prefs().edit().putString(PREF_LOADED_MODEL, "").apply();
+        }
+    }
+
+    /**
+     * Architectures known to the bundled talk-llama / ggml snapshot.
+     * Gemma 3 / Qwen 3 are NOT here — that matches the user's failed gemma-3-4b.
+     */
+    private static final Set<String> SUPPORTED_ARCH = new HashSet<>(Arrays.asList(
+            "llama", "qwen", "qwen2", "qwen2moe", "qwen2vl",
+            "gemma", "gemma2", "phi2", "phi3", "phimoe",
+            "mistral", "mixtral", "starcoder", "starcoder2",
+            "falcon", "gpt2", "gptj", "gptneox", "mpt",
+            "baichuan", "internlm2", "minicpm", "minicpm3",
+            "stablelm", "olmo", "olmo2", "olmoe", "granite", "granitemoe",
+            "deepseek", "deepseek2", "command-r", "cohere2",
+            "nemotron", "openelm", "refact", "orion", "plamo",
+            "codeshell", "chatglm", "bitnet", "arctic", "exaone",
+            "rwkv6", "rwkv6qwen2", "chameleon", "wavtokenizer-dec",
+            "bert", "nomic-bert", "jina-bert-v2", "bloom", "jais",
+            "dbrx", "mamba", "xverse", "grok", "deci"
+    ));
+
+    /**
+     * Read {@code general.architecture} from a GGUF header (null if unreadable).
+     */
+    public static String readGgufArchitecture(File modelFile) {
+        if (modelFile == null || !modelFile.isFile()) {
+            return null;
+        }
+        try (FileInputStream in = new FileInputStream(modelFile)) {
+            byte[] head = new byte[(int) Math.min(modelFile.length(), 4L * 1024L * 1024L)];
+            int n = 0;
+            while (n < head.length) {
+                int r = in.read(head, n, head.length - n);
+                if (r < 0) {
+                    break;
+                }
+                n += r;
+            }
+            if (n < 24) {
+                return null;
+            }
+            ByteBuffer buf = ByteBuffer.wrap(head, 0, n).order(ByteOrder.LITTLE_ENDIAN);
+            byte[] magic = new byte[4];
+            buf.get(magic);
+            if (magic[0] != 'G' || magic[1] != 'G' || magic[2] != 'U' || magic[3] != 'F') {
+                return null;
+            }
+            int version = buf.getInt();
+            if (version < 2 || version > 3) {
+                return null;
+            }
+            buf.getLong(); // n_tensors
+            long nKv = buf.getLong();
+            if (nKv < 0 || nKv > 10_000) {
+                return null;
+            }
+            for (long i = 0; i < nKv; i++) {
+                String key = readGgufString(buf);
+                if (key == null) {
+                    return null;
+                }
+                if (buf.remaining() < 4) {
+                    return null;
+                }
+                int type = buf.getInt();
+                if ("general.architecture".equals(key)) {
+                    if (type != 8) { // GGUF_TYPE_STRING
+                        return null;
+                    }
+                    return readGgufString(buf);
+                }
+                if (!skipGgufValue(buf, type)) {
+                    return null;
+                }
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        return null;
+    }
+
+    /** null = OK; otherwise a user-facing Russian reason to refuse loading. */
+    public static String unsupportedReason(File modelFile) {
+        if (modelFile == null || !modelFile.isFile()) {
+            return "Файл модели не найден";
+        }
+        if (modelFile.length() < 1024) {
+            return "Файл модели повреждён или пуст";
+        }
+        // Large weights without mmap usually need several GB free RAM on phone.
+        if (modelFile.length() > MAX_MODEL_BYTES) {
+            return "Модель слишком большая для телефона (~"
+                    + formatSize(modelFile.length())
+                    + "). Возьмите модель ≤1–2 ГБ из каталога (SmolLM2 / Qwen2.5).";
+        }
+        String arch = readGgufArchitecture(modelFile);
+        if (TextUtils.isEmpty(arch)) {
+            return null; // let native try; header may be unusual
+        }
+        String lower = arch.toLowerCase(Locale.US).trim();
+        if (SUPPORTED_ARCH.contains(lower)) {
+            return null;
+        }
+        if (lower.startsWith("gemma3") || "gemma3".equals(lower)) {
+            return "Архитектура Gemma 3 (" + arch + ") не поддерживается текущим локальным рантаймом. "
+                    + "Скачайте SmolLM2, Qwen2.5 или TinyLlama из каталога.";
+        }
+        if (lower.startsWith("qwen3") || "qwen3".equals(lower)) {
+            return "Архитектура Qwen3 не поддерживается текущим локальным рантаймом. "
+                    + "Скачайте Qwen2.5 или SmolLM2 из каталога.";
+        }
+        return "Архитектура «" + arch + "» не поддерживается. "
+                + "Используйте модель из каталога (llama / qwen2 / gemma2 / …).";
+    }
+
+    private static String readGgufString(ByteBuffer buf) {
+        if (buf.remaining() < 8) {
+            return null;
+        }
+        long len = buf.getLong();
+        if (len < 0 || len > buf.remaining() || len > 1_000_000) {
+            return null;
+        }
+        byte[] bytes = new byte[(int) len];
+        buf.get(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private static boolean skipGgufValue(ByteBuffer buf, int type) {
+        switch (type) {
+            case 0: // u8
+            case 1: // i8
+            case 7: // bool
+                if (buf.remaining() < 1) return false;
+                buf.position(buf.position() + 1);
+                return true;
+            case 2: // u16
+            case 3: // i16
+                if (buf.remaining() < 2) return false;
+                buf.position(buf.position() + 2);
+                return true;
+            case 4: // u32
+            case 5: // i32
+            case 6: // f32
+                if (buf.remaining() < 4) return false;
+                buf.position(buf.position() + 4);
+                return true;
+            case 8: // string
+                return readGgufString(buf) != null;
+            case 9: { // array
+                if (buf.remaining() < 4 + 8) return false;
+                int arrType = buf.getInt();
+                long n = buf.getLong();
+                if (n < 0 || n > 50_000_000) return false;
+                if (arrType == 8) {
+                    for (long i = 0; i < n; i++) {
+                        if (readGgufString(buf) == null) return false;
+                    }
+                    return true;
+                }
+                int elem = ggufScalarSize(arrType);
+                if (elem <= 0) return false;
+                long bytes = n * (long) elem;
+                if (bytes > buf.remaining()) return false;
+                buf.position(buf.position() + (int) bytes);
+                return true;
+            }
+            case 10: // u64
+            case 11: // i64
+            case 12: // f64
+                if (buf.remaining() < 8) return false;
+                buf.position(buf.position() + 8);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static int ggufScalarSize(int type) {
+        switch (type) {
+            case 0:
+            case 1:
+            case 7:
+                return 1;
+            case 2:
+            case 3:
+                return 2;
+            case 4:
+            case 5:
+            case 6:
+                return 4;
+            case 10:
+            case 11:
+            case 12:
+                return 8;
+            default:
+                return -1;
+        }
     }
 
     public static String getSelectedModelId() {

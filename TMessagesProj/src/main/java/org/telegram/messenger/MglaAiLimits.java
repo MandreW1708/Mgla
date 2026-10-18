@@ -24,7 +24,8 @@ public final class MglaAiLimits {
 
     /** Default Free / Premium+ cloud caps. */
     public static final int DEFAULT_INPUT_TOKENS = 2_000;
-    public static final int DEFAULT_OUTPUT_TOKENS = 768;
+    /** Was 768 — replies often hit the cap mid-sentence with no visible error. */
+    public static final int DEFAULT_OUTPUT_TOKENS = 2_048;
     public static final int DEFAULT_CONTEXT_TOKENS = 2_000;
 
     public static final class ModelBudget {

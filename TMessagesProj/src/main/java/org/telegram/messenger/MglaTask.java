@@ -17,10 +17,16 @@ public class MglaTask {
     public int sortOrder;
     public long dialogId;
     public int messageId;
+    public int repeatInterval; // 0 = нет повтора; иначе каждые N единиц
+    public int repeatUnit;     // MglaTaskRepeat.UNIT_DAY / UNIT_WEEK / UNIT_MONTH
     public ArrayList<SubItem> subItems = new ArrayList<>();
 
     public boolean hasReminder() {
         return remindAt > 0;
+    }
+
+    public boolean hasRepeat() {
+        return repeatInterval > 0 && repeatUnit >= MglaTaskRepeat.UNIT_DAY && repeatUnit <= MglaTaskRepeat.UNIT_MONTH && dueAt > 0;
     }
 
     public boolean isLinkedToMessage() {

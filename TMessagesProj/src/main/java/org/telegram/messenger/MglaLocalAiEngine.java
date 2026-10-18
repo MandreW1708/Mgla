@@ -43,7 +43,8 @@ public class MglaLocalAiEngine {
     /** Генерирует 4 главные темы из последних сообщений чата. */
     public static ArrayList<String> generateTopics(Context context, int accountId, long dialogId) {
         ArrayList<String> texts = loadTexts(accountId, dialogId, 250);
-        File model = MglaLocalModelsManager.getLoadedModel(context);
+        // Same selected model as AI chat — only runnable/compatible GGUF.
+        File model = MglaLocalModelsManager.getRunnableModel(context);
         if (model != null) {
             // Локальная скачанная модель: расширенный анализ с попыткой
             // использовать модельные веса (если поддерживается форматом).

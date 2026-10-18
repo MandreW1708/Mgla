@@ -30,6 +30,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.MglaTask;
+import org.telegram.messenger.MglaTaskRepeat;
 import org.telegram.messenger.MglaTasksReminderScheduler;
 import org.telegram.messenger.MglaTasksStorage;
 import org.telegram.messenger.R;
@@ -41,6 +42,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.MglaTaskCell;
+import org.telegram.ui.Components.MglaTaskDetailsSheet;
 import org.telegram.ui.Components.MglaTaskEditSheet;
 import org.telegram.ui.Components.MglaTaskGroupsSheet;
 import org.telegram.ui.Components.MglaTasksCalendarView;
@@ -584,11 +586,8 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private void updateDayTasks() {
         dayTasks.clear();
         long dayStart = calendarView.getSelectedDay();
-        calendar.setTimeInMillis(dayStart);
-        calendar.add(Calendar.DAY_OF_MONTH, 1);
-        long nextDay = calendar.getTimeInMillis();
         for (MglaTask task : filteredTasks) {
-            if (task.dueAt >= dayStart && task.dueAt < nextDay) {
+            if (MglaTaskRepeat.occursOn(task, dayStart)) {
                 if (task.done && !showDone) {
                     continue;
                 }
@@ -616,6 +615,21 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         } else {
             MglaTasksReminderScheduler.cancel(task.id);
         }
+    }
+
+    private void openTaskDetails(MglaTask task) {
+        Context context = getContext();
+        if (context == null) {
+            return;
+        }
+        MglaTaskDetailsSheet sheet = new MglaTaskDetailsSheet(context, task,
+                () -> openTaskEditor(task),
+                () -> {
+                    MglaTasksStorage.getInstance().deleteTask(task.id);
+                    MglaTasksReminderScheduler.cancel(task.id);
+                });
+        sheet.setOnOpenMessage(() -> openLinkedMessage(task));
+        showDialog(sheet);
     }
 
     private void openTaskEditor(MglaTask task) {
@@ -688,7 +702,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                 cell.setOnClickListener(v -> {
                     MglaTask task = cell.getTask();
                     if (task != null) {
-                        openTaskEditor(task);
+                        openTaskDetails(task);
                     }
                 });
                 cell.setOnLongClickListener(v -> {
@@ -697,6 +711,12 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                         showTaskOptions(task);
                     }
                     return true;
+                });
+                cell.setOnOpenClickListener(v -> {
+                    MglaTask task = cell.getTask();
+                    if (task != null) {
+                        openLinkedMessage(task);
+                    }
                 });
                 cell.setOnCheckClickListener(v -> {
                     MglaTask task = cell.getTask();
@@ -764,7 +784,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             cell.setOnClickListener(v -> {
                 MglaTask task = cell.getTask();
                 if (task != null) {
-                    openTaskEditor(task);
+                    openTaskDetails(task);
                 }
             });
             cell.setOnLongClickListener(v -> {
@@ -773,6 +793,12 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                     showTaskOptions(task);
                 }
                 return true;
+            });
+            cell.setOnOpenClickListener(v -> {
+                MglaTask task = cell.getTask();
+                if (task != null) {
+                    openLinkedMessage(task);
+                }
             });
             cell.setOnCheckClickListener(v -> {
                 MglaTask task = cell.getTask();

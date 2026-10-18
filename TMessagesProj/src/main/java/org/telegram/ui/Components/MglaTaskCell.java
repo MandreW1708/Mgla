@@ -18,7 +18,11 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.core.graphics.ColorUtils;
+
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaTask;
+import org.telegram.messenger.MglaTaskRepeat;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.Theme;
 
@@ -30,21 +34,24 @@ public class MglaTaskCell extends FrameLayout {
 
     private final CheckView checkView;
     private final TextView titleView;
+    private final LinearLayout content;
     private final LinearLayout metaLayout;
     private final TextView dueView;
+    private final TextView repeatView;
     private final ImageView remindIcon;
-    private final ImageView linkIcon;
     private final View groupDot;
     private final GradientDrawable groupDotDrawable;
     private final TextView groupNameView;
     private final TextView subProgressView;
     private final TextView noteView;
+    private final TextView openButton;
 
     private final SimpleDateFormat dueFormat = new SimpleDateFormat("d MMM, HH:mm", Locale.getDefault());
     private final Date dateInstance = new Date();
 
     private MglaTask currentTask;
     private OnClickListener checkClickListener;
+    private OnClickListener openClickListener;
 
     public MglaTaskCell(Context context) {
         super(context);
@@ -61,7 +68,7 @@ public class MglaTaskCell extends FrameLayout {
         });
         addView(checkContainer, LayoutHelper.createFrame(44, 44, Gravity.LEFT | Gravity.CENTER_VERTICAL, 8, 0, 0, 0));
 
-        LinearLayout content = new LinearLayout(context);
+        content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER_VERTICAL);
         content.setPadding(0, dp(10), 0, dp(10));
@@ -84,8 +91,8 @@ public class MglaTaskCell extends FrameLayout {
         remindIcon = makeMetaIcon(context, R.drawable.outline_message_time_24);
         metaLayout.addView(remindIcon, LayoutHelper.createLinear(14, 14, 0, 0, 10, 0));
 
-        linkIcon = makeMetaIcon(context, R.drawable.media_link_24);
-        metaLayout.addView(linkIcon, LayoutHelper.createLinear(14, 14, 0, 0, 10, 0));
+        repeatView = makeMetaText(context);
+        metaLayout.addView(repeatView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 10, 0));
 
         groupDotDrawable = new GradientDrawable();
         groupDotDrawable.setShape(GradientDrawable.OVAL);
@@ -101,6 +108,27 @@ public class MglaTaskCell extends FrameLayout {
 
         noteView = makeMetaText(context);
         metaLayout.addView(noteView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        int accent = Theme.getColor(Theme.key_chat_messagePanelSend);
+        openButton = new TextView(context);
+        openButton.setText("Открыть");
+        openButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        openButton.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        openButton.setTextColor(accent);
+        openButton.setGravity(Gravity.CENTER);
+        openButton.setSingleLine(true);
+        openButton.setPadding(dp(12), 0, dp(12), 0);
+        GradientDrawable openBg = new GradientDrawable();
+        openBg.setCornerRadius(dp(16));
+        openBg.setColor(ColorUtils.setAlphaComponent(accent, 26));
+        openButton.setBackground(openBg);
+        openButton.setVisibility(GONE);
+        openButton.setOnClickListener(v -> {
+            if (openClickListener != null) {
+                openClickListener.onClick(MglaTaskCell.this);
+            }
+        });
+        addView(openButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 32, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 12, 0));
     }
 
     private TextView makeMetaText(Context context) {
@@ -127,10 +155,23 @@ public class MglaTaskCell extends FrameLayout {
         checkClickListener = listener;
     }
 
+    public void setOnOpenClickListener(OnClickListener listener) {
+        openClickListener = listener;
+    }
+
     public void setTask(MglaTask task, MglaTask.Group group) {
         currentTask = task;
         boolean done = task.done;
         checkView.setChecked(done, false);
+
+        boolean linked = task.dialogId != 0;
+        openButton.setVisibility(linked ? VISIBLE : GONE);
+        FrameLayout.LayoutParams contentLp = (FrameLayout.LayoutParams) content.getLayoutParams();
+        int rightMargin = dp(linked ? 92 : 16);
+        if (contentLp.rightMargin != rightMargin) {
+            contentLp.rightMargin = rightMargin;
+            content.setLayoutParams(contentLp);
+        }
 
         titleView.setText(task.title);
         titleView.getPaint().setStrikeThruText(done);
@@ -140,7 +181,7 @@ public class MglaTaskCell extends FrameLayout {
         if (task.dueAt > 0) {
             dateInstance.setTime(task.dueAt);
             dueView.setText(dueFormat.format(dateInstance));
-            boolean overdue = task.dueAt < System.currentTimeMillis() && !done;
+            boolean overdue = task.dueAt < System.currentTimeMillis() && !done && !task.hasRepeat();
             dueView.setTextColor(Theme.getColor(overdue ? Theme.key_text_RedRegular : Theme.key_windowBackgroundWhiteGrayText));
             dueView.setVisibility(VISIBLE);
             hasMeta = true;
@@ -155,11 +196,13 @@ public class MglaTaskCell extends FrameLayout {
             remindIcon.setVisibility(GONE);
         }
 
-        if (task.dialogId != 0) {
-            linkIcon.setVisibility(VISIBLE);
+        String repeatLabel = MglaTaskRepeat.label(task);
+        if (repeatLabel != null) {
+            repeatView.setText("↻ " + repeatLabel);
+            repeatView.setVisibility(VISIBLE);
             hasMeta = true;
         } else {
-            linkIcon.setVisibility(GONE);
+            repeatView.setVisibility(GONE);
         }
 
         if (group != null) {

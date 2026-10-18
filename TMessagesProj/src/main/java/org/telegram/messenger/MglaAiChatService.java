@@ -52,6 +52,9 @@ public final class MglaAiChatService {
         void onDelta(String text);
         void onComplete();
         void onError(String message);
+        /** Optional local-GGUF progress («Читаю запрос…» / «Пишу ответ…»). */
+        default void onStatus(String status) {
+        }
     }
 
     public static final class ModelInfo {
@@ -111,10 +114,20 @@ public final class MglaAiChatService {
     public static final class Request {
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private volatile HttpURLConnection connection;
+        private volatile long localHandle;
         public void cancel() {
             cancelled.set(true);
             HttpURLConnection c = connection;
-            if (c != null) c.disconnect();
+            if (c != null) {
+                c.disconnect();
+            }
+            long h = localHandle;
+            if (h != 0) {
+                MglaLlamaNative.abort(h);
+            }
+        }
+        void bindLocalHandle(long handle) {
+            localHandle = handle;
         }
         boolean isCancelled() { return cancelled.get(); }
     }
@@ -435,6 +448,11 @@ public final class MglaAiChatService {
         return out;
     }
 
+    private static final String TRUNCATION_NOTICE =
+            "\n\n…ответ обрезан (лимит длины). Спросите «продолжи».";
+    private static final String INTERRUPTED_NOTICE =
+            "\n\n⚠️ Соединение оборвалось — ответ может быть неполным.";
+
     private static void streamOpenRouter(String model, ArrayList<MglaAiChatStorage.Message> messages, ArrayList<String> imagePaths, float temperature, int maxTokens, Request request, Callback callback) throws Exception {
         if (TextUtils.isEmpty(BuildConfig.OPENROUTER_API_KEY)) {
             if (MglaHubHttp.isConfigured()) {
@@ -458,7 +476,8 @@ public final class MglaAiChatService {
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(120_000);
+        // Idle gap between SSE tokens (slow free models) — was easy to hit 120s mid-reply.
+        conn.setReadTimeout(180_000);
         conn.setRequestProperty("Authorization", "Bearer " + BuildConfig.OPENROUTER_API_KEY);
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("Accept", "text/event-stream");
@@ -468,29 +487,71 @@ public final class MglaAiChatService {
         int code = conn.getResponseCode();
         InputStream stream = code < 400 ? conn.getInputStream() : conn.getErrorStream();
         if (code >= 400) throw new Exception("OpenRouter: HTTP " + code + " — " + readLimited(stream, 1200));
+        boolean sawDone = false;
+        String finishReason = null;
+        int contentChars = 0;
+        String streamFatal = null;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             String line;
-            while (!request.isCancelled() && (line = reader.readLine()) != null) {
+            while (!request.isCancelled() && streamFatal == null && (line = reader.readLine()) != null) {
                 if (!line.startsWith("data:")) continue;
                 String data = line.substring(5).trim();
-                if ("[DONE]".equals(data)) break;
+                if ("[DONE]".equals(data)) {
+                    sawDone = true;
+                    break;
+                }
                 try {
                     JSONObject json = new JSONObject(data);
+                    // OpenRouter may put the error in the SSE payload instead of HTTP status.
+                    if (json.has("error")) {
+                        Object err = json.opt("error");
+                        String msg = err instanceof JSONObject
+                                ? ((JSONObject) err).optString("message", err.toString())
+                                : String.valueOf(err);
+                        streamFatal = TextUtils.isEmpty(msg) ? "Ошибка стрима OpenRouter" : msg;
+                        break;
+                    }
                     JSONArray choices = json.optJSONArray("choices");
                     if (choices == null || choices.length() == 0) continue;
-                    JSONObject delta = choices.optJSONObject(0).optJSONObject("delta");
+                    JSONObject choice = choices.optJSONObject(0);
+                    if (choice == null) continue;
+                    String fr = choice.optString("finish_reason", null);
+                    if (!TextUtils.isEmpty(fr) && !"null".equals(fr)) {
+                        finishReason = fr;
+                    }
+                    JSONObject delta = choice.optJSONObject("delta");
                     String token = delta == null ? null : delta.optString("content", null);
-                    if (!TextUtils.isEmpty(token)) AndroidUtilities.runOnUIThread(() -> callback.onDelta(token));
+                    if (!TextUtils.isEmpty(token)) {
+                        contentChars += token.length();
+                        AndroidUtilities.runOnUIThread(() -> callback.onDelta(token));
+                    }
                 } catch (Throwable ignored) {
                     // Providers occasionally send non-content SSE events; they are harmless.
                 }
             }
         } finally { conn.disconnect(); request.connection = null; }
-        if (!request.isCancelled()) {
-            reportModelSuccess(model);
-            MglaAiLimits.consumeCloudRequest(model);
-            AndroidUtilities.runOnUIThread(callback::onComplete);
+        if (streamFatal != null) {
+            throw new Exception(streamFatal);
         }
+        if (request.isCancelled()) {
+            return;
+        }
+        if (contentChars == 0 && !sawDone) {
+            throw new Exception("Соединение оборвалось — ответ не получен");
+        }
+        String notice = null;
+        if ("length".equals(finishReason)) {
+            notice = TRUNCATION_NOTICE;
+        } else if (!sawDone && TextUtils.isEmpty(finishReason)) {
+            notice = INTERRUPTED_NOTICE;
+        }
+        if (notice != null) {
+            final String n = notice;
+            AndroidUtilities.runOnUIThread(() -> callback.onDelta(n));
+        }
+        reportModelSuccess(model);
+        MglaAiLimits.consumeCloudRequest(model);
+        AndroidUtilities.runOnUIThread(callback::onComplete);
     }
 
     private static void streamOpenRouterViaHub(String model, ArrayList<MglaAiChatStorage.Message> messages, Request request, Callback callback) throws Exception {
@@ -515,32 +576,48 @@ public final class MglaAiChatService {
                 "/mgla-ai/v1/chat",
                 body.toString().getBytes(StandardCharsets.UTF_8),
                 30_000,
-                90_000
+                150_000
         );
         if (request.isCancelled()) {
             return;
         }
         if (response.code != 200) {
-            String err = MglaHubHttp.extractJsonStringField(response.body, "error");
+            String err = null;
+            try {
+                err = new JSONObject(response.body).optString("error", null);
+            } catch (Throwable ignore) {
+                err = MglaHubHttp.extractJsonStringField(response.body, "error");
+            }
             throw new Exception(!TextUtils.isEmpty(err) ? err : ("Хаб ИИ: HTTP " + response.code));
         }
-        String text = MglaHubHttp.extractJsonStringField(response.body, "content");
+        String text;
+        String usedModel;
+        try {
+            JSONObject json = new JSONObject(response.body);
+            text = json.optString("content", "");
+            usedModel = json.optString("model", model);
+        } catch (Throwable parseErr) {
+            // Fallback for odd payloads — prefer real JSONObject when possible.
+            text = MglaHubHttp.extractJsonStringField(response.body, "content");
+            usedModel = MglaHubHttp.extractJsonStringField(response.body, "model");
+        }
         if (TextUtils.isEmpty(text)) {
             throw new Exception("пустой ответ хаба");
         }
-        String usedModel = MglaHubHttp.extractJsonStringField(response.body, "model");
         if (TextUtils.isEmpty(usedModel)) {
             usedModel = model;
         }
+        // Drip in larger chunks so long replies don't "freeze" mid-animation for many seconds.
+        final int chunk = 48;
         long delay = 0;
-        for (int i = 0; i < text.length(); i += 18) {
-            final String part = text.substring(i, Math.min(text.length(), i + 18));
+        for (int i = 0; i < text.length(); i += chunk) {
+            final String part = text.substring(i, Math.min(text.length(), i + chunk));
             AndroidUtilities.runOnUIThread(() -> {
                 if (!request.isCancelled()) {
                     callback.onDelta(part);
                 }
             }, delay);
-            delay += 18;
+            delay += 12;
         }
         reportModelSuccess(usedModel);
         MglaAiLimits.consumeCloudRequest(usedModel);

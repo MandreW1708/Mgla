@@ -175,6 +175,8 @@ public class MglaTasksStorage {
                 existing.sortOrder = task.sortOrder;
                 existing.dialogId = task.dialogId;
                 existing.messageId = task.messageId;
+                existing.repeatInterval = task.repeatInterval;
+                existing.repeatUnit = task.repeatUnit;
                 existing.subItems = task.subItems;
             } else {
                 synchronized (tasks) {
@@ -200,7 +202,7 @@ public class MglaTasksStorage {
         storageQueue.postRunnable(() -> {
             try {
                 ensureOpen();
-                SQLitePreparedStatement state = database.executeFast("INSERT OR REPLACE INTO tasks(account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                SQLitePreparedStatement state = database.executeFast("INSERT OR REPLACE INTO tasks(account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, repeat_interval, repeat_unit, id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 state.requery();
                 bindTask(state, task, true);
                 state.stepThis().dispose();
@@ -474,6 +476,14 @@ public class MglaTasksStorage {
         database.executeFast("CREATE INDEX IF NOT EXISTS tasks_remind_at_idx ON tasks(remind_at)").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS tasks_due_at_idx ON tasks(due_at)").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS task_items_task_id_idx ON task_items(task_id)").stepThis().dispose();
+        try {
+            database.executeFast("ALTER TABLE tasks ADD COLUMN repeat_interval INTEGER DEFAULT 0").stepThis().dispose();
+        } catch (Exception ignore) {
+        }
+        try {
+            database.executeFast("ALTER TABLE tasks ADD COLUMN repeat_unit INTEGER DEFAULT 0").stepThis().dispose();
+        } catch (Exception ignore) {
+        }
     }
 
     private void loadInternal() throws Exception {
@@ -493,7 +503,7 @@ public class MglaTasksStorage {
         } finally {
             cursor.dispose();
         }
-        cursor = database.queryFinalized("SELECT id, account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id FROM tasks ORDER BY sort_order, id");
+        cursor = database.queryFinalized("SELECT id, account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, repeat_interval, repeat_unit FROM tasks ORDER BY sort_order, id");
         try {
             while (cursor.next()) {
                 MglaTask task = new MglaTask();
@@ -510,6 +520,8 @@ public class MglaTasksStorage {
                 task.sortOrder = cursor.intValue(10);
                 task.dialogId = cursor.longValue(11);
                 task.messageId = cursor.intValue(12);
+                task.repeatInterval = cursor.intValue(13);
+                task.repeatUnit = cursor.intValue(14);
                 newTasks.add(task);
             }
         } finally {
@@ -552,8 +564,10 @@ public class MglaTasksStorage {
         state.bindInteger(10, task.sortOrder);
         state.bindLong(11, task.dialogId);
         state.bindInteger(12, task.messageId);
+        state.bindInteger(13, task.repeatInterval);
+        state.bindInteger(14, task.repeatUnit);
         if (withId) {
-            state.bindLong(13, task.id);
+            state.bindLong(15, task.id);
         }
     }
 }

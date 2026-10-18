@@ -171,6 +171,10 @@ public final class MglaIconThemes {
      * Applies and persists the theme for {@code icon}.
      * Safe to call before {@link LauncherIconController#setIcon} — uses commit-style theme save
      * and does not rebuild UI (the process often dies when the launcher icon changes).
+     * <p>
+     * Pins the same theme as both day and night. Otherwise AUTO_NIGHT_TYPE_SYSTEM (default on
+     * API 29+) keeps showing the last night theme (usually «Dark Blue») after restart — common
+     * on Realme/ColorOS where system dark mode stays on.
      */
     public static boolean applyThemeForIconQuiet(LauncherIcon icon) {
         if (icon == null || !hasThemeOffer(icon)) {
@@ -188,12 +192,15 @@ public final class MglaIconThemes {
             if (info == null) {
                 return false;
             }
-            // save=true persists day/night theme keys before the process may be killed.
+            // Day theme + active colors.
             Theme.applyTheme(info, true, false);
-            // applyTheme uses SharedPreferences.apply() (async). Icon swap often kills the
-            // process before the flush — force a synchronous commit of the theme key.
+            // Pin as night theme so system dark mode does not fall back to Dark Blue.
+            Theme.setCurrentNightTheme(info);
+            // applyTheme / saveAutoNight use apply() (async). Icon swap / OEM process kill
+            // often happens before the flush — force both keys to disk.
             MessagesController.getGlobalMainSettings().edit()
                     .putString("theme", info.getKey())
+                    .putString("nighttheme", info.getKey())
                     .commit();
             return true;
         } catch (Throwable ignore) {
@@ -210,8 +217,9 @@ public final class MglaIconThemes {
     }
 
     /**
-     * On cold start / resume: if auto-apply is on, ensure the active theme matches the current icon.
-     * No-op when already matching or when auto-apply is off.
+     * On cold start / resume: if auto-apply is on, ensure the <em>active</em> theme matches the
+     * current icon. Must use {@link Theme#getActiveTheme()} — {@link Theme#getCurrentTheme()} is
+     * only the day slot and stays correct while night mode still shows Dark Blue.
      */
     public static void syncThemeToCurrentIconIfNeeded() {
         if (!isAutoApplyEnabled()) {
@@ -221,19 +229,19 @@ public final class MglaIconThemes {
         if (!hasThemeOffer(icon)) {
             return;
         }
-        Theme.ThemeInfo current = Theme.getCurrentTheme();
+        Theme.ThemeInfo active = Theme.getActiveTheme();
         String expectedKey = icon == LauncherIcon.DEFAULT
                 ? Theme.MGLA_THEME_AMOLED
                 : themeKeyForIcon(icon);
-        if (expectedKey == null || current == null) {
+        if (expectedKey == null || active == null) {
             return;
         }
         // For DEFAULT also accept firm dark as a valid match (user may have picked it earlier).
         if (icon == LauncherIcon.DEFAULT) {
-            if (Theme.MGLA_THEME_AMOLED.equals(current.name) || Theme.MGLA_THEME_DARK.equals(current.name)) {
+            if (Theme.MGLA_THEME_AMOLED.equals(active.name) || Theme.MGLA_THEME_DARK.equals(active.name)) {
                 return;
             }
-        } else if (expectedKey.equals(current.name)) {
+        } else if (expectedKey.equals(active.name)) {
             return;
         }
         applyThemeForIconQuiet(icon);

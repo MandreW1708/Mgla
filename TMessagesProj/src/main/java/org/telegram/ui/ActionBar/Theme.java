@@ -7044,7 +7044,10 @@ public class Theme {
             }
         } else {
             ThemeInfo dayTheme = currentDayTheme;
-            if (dayTheme != null && dayTheme.isDark() && selectedAutoNightType != AUTO_NIGHT_TYPE_NONE && defaultTheme != null) {
+            // Dark day themes are normally replaced with Blue under auto-night. Skip that when
+            // day and night were intentionally pinned to the same theme (icon-theme auto-apply).
+            if (dayTheme != null && dayTheme.isDark() && selectedAutoNightType != AUTO_NIGHT_TYPE_NONE
+                    && defaultTheme != null && dayTheme != currentNightTheme) {
                 dayTheme = defaultTheme;
             }
             if (currentTheme != dayTheme && (currentTheme == null || dayTheme != null && currentTheme.isDark() != dayTheme.isDark())) {

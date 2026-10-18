@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -23,11 +24,13 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.core.graphics.ColorUtils;
 import androidx.core.widget.NestedScrollView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MglaTask;
+import org.telegram.messenger.MglaTaskRepeat;
 import org.telegram.messenger.MglaTasksStorage;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
@@ -49,6 +52,8 @@ public class MglaTaskEditSheet extends BottomSheet {
     private final Runnable onDelete;
     private long dueAt;
     private int remindIndex = 4;
+    private int repeatInterval;
+    private int repeatUnit;
     private MglaTask.Group selectedGroup;
     private final ArrayList<MglaTask.SubItem> subItems = new ArrayList<>();
 
@@ -58,6 +63,8 @@ public class MglaTaskEditSheet extends BottomSheet {
     private LinearLayout dateRow;
     private TextView remindValue;
     private LinearLayout remindRow;
+    private TextView repeatValue;
+    private LinearLayout repeatRow;
     private TextView groupValue;
     private LinearLayout subItemsLayout;
     private TextView saveButton;
@@ -75,6 +82,8 @@ public class MglaTaskEditSheet extends BottomSheet {
 
         if (task != null) {
             dueAt = task.dueAt;
+            repeatInterval = task.repeatInterval;
+            repeatUnit = task.repeatUnit;
             if (task.remindAt > 0 && task.dueAt > 0) {
                 long diff = task.dueAt - task.remindAt;
                 for (int a = 0; a < REMIND_OFFSETS.length; a++) {
@@ -161,8 +170,11 @@ public class MglaTaskEditSheet extends BottomSheet {
         dateRow.setOnLongClickListener(v -> {
             if (dueAt != 0) {
                 dueAt = 0;
+                repeatInterval = 0;
+                repeatUnit = 0;
                 updateDateValue();
                 updateRemindValue();
+                updateRepeatValue();
             }
             return true;
         });
@@ -172,6 +184,11 @@ public class MglaTaskEditSheet extends BottomSheet {
         remindValue = (TextView) remindRow.getTag();
         remindRow.setOnClickListener(v -> showRemindPicker());
         root.addView(remindRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        repeatRow = makeRow(context, "Повтор", false);
+        repeatValue = (TextView) repeatRow.getTag();
+        repeatRow.setOnClickListener(v -> showRepeatPicker());
+        root.addView(repeatRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         LinearLayout groupRow = makeRow(context, "Группа", false);
         groupValue = (TextView) groupRow.getTag();
@@ -250,6 +267,7 @@ public class MglaTaskEditSheet extends BottomSheet {
 
         updateDateValue();
         updateRemindValue();
+        updateRepeatValue();
         updateGroupValue();
         updateSaveButton();
     }
@@ -316,6 +334,7 @@ public class MglaTaskEditSheet extends BottomSheet {
                 dueAt = scheduleDate * 1000L;
                 updateDateValue();
                 updateRemindValue();
+                updateRepeatValue();
             }
         }, null);
     }
@@ -331,6 +350,136 @@ public class MglaTaskEditSheet extends BottomSheet {
             updateRemindValue();
         });
         builder.show();
+    }
+
+    private void updateRepeatValue() {
+        if (dueAt == 0) {
+            repeatValue.setText("Сначала задайте дату");
+            repeatRow.setAlpha(0.5f);
+            repeatRow.setClickable(false);
+        } else {
+            String label = MglaTaskRepeat.label(repeatInterval, repeatUnit, dueAt);
+            repeatValue.setText(label != null ? label : "Не повторять");
+            repeatRow.setAlpha(1f);
+            repeatRow.setClickable(true);
+        }
+    }
+
+    private void showRepeatPicker() {
+        if (dueAt == 0) {
+            return;
+        }
+        String[] items = { "Не повторять", "Каждый день", "Каждую неделю", "Каждый месяц", "Свой интервал…" };
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle("Повтор");
+        builder.setItems(items, (d, which) -> {
+            switch (which) {
+                case 0:
+                    repeatInterval = 0;
+                    repeatUnit = 0;
+                    updateRepeatValue();
+                    break;
+                case 1:
+                    repeatInterval = 1;
+                    repeatUnit = MglaTaskRepeat.UNIT_DAY;
+                    updateRepeatValue();
+                    break;
+                case 2:
+                    repeatInterval = 1;
+                    repeatUnit = MglaTaskRepeat.UNIT_WEEK;
+                    updateRepeatValue();
+                    break;
+                case 3:
+                    repeatInterval = 1;
+                    repeatUnit = MglaTaskRepeat.UNIT_MONTH;
+                    updateRepeatValue();
+                    break;
+                case 4:
+                    showCustomRepeatDialog();
+                    break;
+            }
+        });
+        builder.show();
+    }
+
+    private void showCustomRepeatDialog() {
+        Context context = getContext();
+        int accent = Theme.getColor(Theme.key_chat_messagePanelSend);
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(dp(20), dp(8), dp(20), 0);
+
+        EditText intervalEdit = new EditText(context);
+        intervalEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
+        intervalEdit.setHint("Интервал");
+        intervalEdit.setText(String.valueOf(repeatInterval > 0 ? repeatInterval : 2));
+        intervalEdit.setSelection(intervalEdit.getText().length());
+        intervalEdit.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        intervalEdit.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        container.addView(intervalEdit, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+
+        LinearLayout unitsRow = new LinearLayout(context);
+        unitsRow.setOrientation(LinearLayout.HORIZONTAL);
+        container.addView(unitsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        int[] unitValues = { MglaTaskRepeat.UNIT_DAY, MglaTaskRepeat.UNIT_WEEK, MglaTaskRepeat.UNIT_MONTH };
+        String[] unitNames = { "Дни", "Недели", "Месяцы" };
+        TextView[] unitButtons = new TextView[3];
+        int initialUnit = repeatUnit >= MglaTaskRepeat.UNIT_DAY && repeatUnit <= MglaTaskRepeat.UNIT_MONTH ? repeatUnit : MglaTaskRepeat.UNIT_DAY;
+        final int[] selectedUnit = { initialUnit };
+        for (int a = 0; a < 3; a++) {
+            final int unit = unitValues[a];
+            TextView button = new TextView(context);
+            button.setText(unitNames[a]);
+            button.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            button.setGravity(Gravity.CENTER);
+            button.setSingleLine(true);
+            button.setOnClickListener(v -> {
+                selectedUnit[0] = unit;
+                for (int b = 0; b < 3; b++) {
+                    styleUnitButton(unitButtons[b], accent, unitValues[b] == selectedUnit[0]);
+                }
+            });
+            unitButtons[a] = button;
+            styleUnitButton(button, accent, unit == selectedUnit[0]);
+            unitsRow.addView(button, LayoutHelper.createLinear(0, 36, 1f, a == 0 ? 0 : 8, 0, 0, 0));
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle("Свой интервал");
+        builder.setView(container);
+        builder.setPositiveButton("Готово", (d, w) -> {
+            int interval;
+            try {
+                interval = Integer.parseInt(intervalEdit.getText().toString().trim());
+            } catch (NumberFormatException e) {
+                interval = 0;
+            }
+            if (interval < 1) {
+                return;
+            }
+            repeatInterval = Math.min(interval, 999);
+            repeatUnit = selectedUnit[0];
+            updateRepeatValue();
+        });
+        builder.setNegativeButton("Отмена", null);
+        builder.show();
+    }
+
+    private void styleUnitButton(TextView button, int accent, boolean selected) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(18));
+        if (selected) {
+            bg.setColor(accent);
+            button.setTextColor(0xFFFFFFFF);
+            button.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        } else {
+            bg.setColor(ColorUtils.setAlphaComponent(accent, 26));
+            button.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+            button.setTypeface(null);
+        }
+        button.setBackground(bg);
     }
 
     private void showGroupPicker() {
@@ -501,6 +650,13 @@ public class MglaTaskEditSheet extends BottomSheet {
         resultTask.groupId = selectedGroup != null ? selectedGroup.id : 0;
         resultTask.dueAt = dueAt;
         resultTask.remindAt = dueAt > 0 && remindIndex < REMIND_OFFSETS.length ? dueAt - REMIND_OFFSETS[remindIndex] : 0;
+        if (dueAt > 0) {
+            resultTask.repeatInterval = repeatInterval;
+            resultTask.repeatUnit = repeatUnit;
+        } else {
+            resultTask.repeatInterval = 0;
+            resultTask.repeatUnit = 0;
+        }
         resultTask.subItems = new ArrayList<>();
         for (MglaTask.SubItem item : subItems) {
             if (!TextUtils.isEmpty(item.title == null ? null : item.title.trim())) {

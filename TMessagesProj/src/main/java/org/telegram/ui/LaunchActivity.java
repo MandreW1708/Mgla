@@ -7017,6 +7017,12 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             onResumeStaticCallback.run();
             onResumeStaticCallback = null;
         }
+        // Re-pin icon theme before auto-night runs — otherwise SYSTEM dark mode keeps
+        // currentNightTheme (often Dark Blue) and sync used to no-op on day-theme alone.
+        try {
+            MglaIconThemes.syncThemeToCurrentIconIfNeeded();
+        } catch (Throwable ignore) {
+        }
         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM) {
             Theme.checkAutoNightThemeConditions();
         }
@@ -7029,11 +7035,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         showLanguageAlert(false);
         MglaStats.count("app_foreground");
         MglaRemoteConfig.maybeFetch(true);
-        // After launcher-icon swap the process may restart; re-sync theme if auto-apply is on.
-        try {
-            MglaIconThemes.syncThemeToCurrentIconIfNeeded();
-        } catch (Throwable ignore) {
-        }
         if (passcodeDialog == null || passcodeDialog.passcodeView.getVisibility() != View.VISIBLE) {
             MglaBrandedThemeOffer.showIfNeeded(this);
         }

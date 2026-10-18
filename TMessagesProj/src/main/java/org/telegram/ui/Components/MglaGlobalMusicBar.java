@@ -71,10 +71,26 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     public static final int TABS_GAP_DP = 2;
 
     private static boolean globallyVisible;
+    /** Visible glass island width in px (no glow), updated on layout while shown. */
+    private static int lastGlassWidthPx;
 
     /** Whether the global mini-player island is currently shown (for blur exclusion holes). */
     public static boolean isGloballyVisible() {
         return globallyVisible;
+    }
+
+    /**
+     * Preferred AI composer width: match the mini-player glass when visible,
+     * otherwise the usual tabs side margins.
+     */
+    public static int preferredComposerWidthPx(int parentWidthPx) {
+        if (parentWidthPx <= 0) {
+            parentWidthPx = AndroidUtilities.displaySize.x;
+        }
+        if (globallyVisible && lastGlassWidthPx > dp(120)) {
+            return Math.min(lastGlassWidthPx, parentWidthPx);
+        }
+        return Math.max(dp(180), parentWidthPx - dp(DialogsActivity.MAIN_TABS_MARGIN * 2));
     }
 
     private static final ArrayList<VisibilityListener> globalVisibilityListeners = new ArrayList<>();
@@ -750,6 +766,9 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
+        if (glassIsland != null && glassIsland.getWidth() > 0 && getVisibility() == VISIBLE) {
+            lastGlassWidthPx = glassIsland.getWidth();
+        }
         if (changed) {
             invalidateGlass();
         }

@@ -13,6 +13,7 @@ import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaTask;
+import org.telegram.messenger.MglaTaskRepeat;
 import org.telegram.ui.ActionBar.Theme;
 
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ public class MglaTasksCalendarView extends LinearLayout {
     private long selectedDay;
     private long todayDay;
     private final HashSet<Long> daysWithTasks = new HashSet<>();
+    private final ArrayList<MglaTask> tasks = new ArrayList<>();
     private final DayCell[] cells = new DayCell[GRID_CELLS];
     private final TextView titleView;
 
@@ -126,13 +128,9 @@ public class MglaTasksCalendarView extends LinearLayout {
         rebuild();
     }
 
-    public void setTasks(ArrayList<MglaTask> tasks) {
-        daysWithTasks.clear();
-        for (MglaTask task : tasks) {
-            if (task.dueAt > 0) {
-                daysWithTasks.add(dayStartOf(task.dueAt));
-            }
-        }
+    public void setTasks(ArrayList<MglaTask> newTasks) {
+        tasks.clear();
+        tasks.addAll(newTasks);
         rebuild();
     }
 
@@ -178,6 +176,13 @@ public class MglaTasksCalendarView extends LinearLayout {
         int firstDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK);
         int offset = (firstDayOfWeek - Calendar.MONDAY + 7) % 7;
         calendar.add(Calendar.DAY_OF_MONTH, -offset);
+
+        long gridStart = calendar.getTimeInMillis();
+        long gridEnd = gridStart + GRID_CELLS * 24L * 60 * 60 * 1000;
+        daysWithTasks.clear();
+        for (MglaTask task : tasks) {
+            MglaTaskRepeat.addOccurrenceDays(task, gridStart, gridEnd, daysWithTasks);
+        }
 
         for (int a = 0; a < GRID_CELLS; a++) {
             DayCell cell = cells[a];

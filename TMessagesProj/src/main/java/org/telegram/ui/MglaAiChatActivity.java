@@ -37,6 +37,8 @@ import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MglaAiChatService;
 import org.telegram.messenger.MglaAiChatStorage;
 import org.telegram.messenger.MglaAiLimits;
+import org.telegram.messenger.MglaLocalChatRuntime;
+import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
@@ -48,7 +50,9 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.MenuDrawable;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MglaAiMarkdown;
 import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
@@ -71,6 +75,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     private static final int MENU_SETTINGS = 3;
     private static final int MENU_CHATS = 4;
     private static final int MENU_QUOTA = 5;
+    private static final int MENU_MODEL_RAM = 6;
     /** Extra lift above the IME so the glass composer isn't clipped by the keyboard. */
     private static final int KEYBOARD_EXTRA_GAP_DP = 14;
 
@@ -90,6 +95,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     private MenuDrawable menuDrawable;
     private ActionBarMenuItem overflowMenu;
     private ActionBarMenuItem quotaMenuItem;
+    private ActionBarMenuItem modelRamMenuItem;
+    private boolean emptyStateVisible;
     private ViewTreeObserver.OnGlobalLayoutListener keyboardLayoutListener;
     private int lastKeyboardHeight;
     private final ArrayList<String> attachedPhotos = new ArrayList<>();
@@ -146,7 +153,10 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         }
 
         ActionBarMenu menu = actionBar.createMenu();
-        // Counter sits to the left of the ⋮ overflow (added first → left in the menu row).
+        // Order (left → right among action items): Load/Unload → Ultra counter → ⋮
+        modelRamMenuItem = menu.addItem(MENU_MODEL_RAM, "Загрузить модель");
+        styleModelRamButton();
+        modelRamMenuItem.setVisibility(View.GONE);
         quotaMenuItem = menu.addItem(MENU_QUOTA, "0/20");
         if (quotaMenuItem.getTextView() != null) {
             quotaMenuItem.getTextView().setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
@@ -165,6 +175,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                     } else {
                         finishFragment();
                     }
+                } else if (id == MENU_MODEL_RAM) {
+                    onModelRamMenuClick();
                 } else if (id == MENU_QUOTA) {
                     if (MglaAiLimits.hasDailyQuotaUi()) {
                         AndroidUtilities.runOnUIThread(() -> {
@@ -190,6 +202,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             }
         });
         updateQuotaCounter();
+        updateModelRamMenu();
 
         root = new SizeNotifierFrameLayout(context) {
             @Override
@@ -405,6 +418,18 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                 && MglaAiChatService.PROVIDER_OPENROUTER.equals(chat.provider)
                 && MglaSubscription.canAttachMedia();
         attachButton.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (input != null) {
+            FrameLayout.LayoutParams ilp = (FrameLayout.LayoutParams) input.getLayoutParams();
+            if (ilp != null) {
+                int left = show ? dp(36) : 0;
+                int right = dp(34 + 6);
+                if (ilp.leftMargin != left || ilp.rightMargin != right) {
+                    ilp.leftMargin = left;
+                    ilp.rightMargin = right;
+                    input.setLayoutParams(ilp);
+                }
+            }
+        }
         if (!show) {
             attachedPhotos.clear();
             updateAttachmentBadge();
@@ -447,13 +472,14 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         composer = new FrameLayout(c);
         LinearLayout box = new LinearLayout(c);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        // Slimmer horizontal padding so the glass spans closer to the music island length.
+        box.setPadding(dp(8), dp(6), dp(8), dp(6));
 
         composerGlass = iBlur3FactoryLiquidGlass.create(composer, BlurredBackgroundProviderImpl.inputFieldShareAlert(resourceProvider));
         composerGlass.setRadius(dp(22));
-        composerGlass.setPadding(dp(8));
+        composerGlass.setPadding(dp(6));
         composer.setBackground(composerGlass);
-        composer.setPadding(dp(8), dp(8), dp(8), dp(8));
+        composer.setPadding(dp(6), dp(6), dp(6), dp(6));
         composer.setClipToPadding(false);
         composer.setClipChildren(false);
 
@@ -491,16 +517,20 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         attachmentBadge.setVisibility(View.GONE);
         box.addView(attachmentBadge, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
-        LinearLayout row = new LinearLayout(c);
-        row.setGravity(Gravity.BOTTOM);
+        // FrameLayout: send stays bottom-right; EditText grows upward above it.
+        final int sendSize = 34;
+        final int attachW = 36;
+        FrameLayout row = new FrameLayout(c);
+        row.setClipChildren(false);
+        row.setClipToPadding(false);
 
         attachButton = new TextView(c);
         attachButton.setText("📎");
-        attachButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        attachButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         attachButton.setGravity(Gravity.CENTER);
         attachButton.setTextColor(Theme.getColor(Theme.key_chat_messagePanelIcons));
         attachButton.setOnClickListener(v -> openPhotoPicker());
-        row.addView(attachButton, LayoutHelper.createLinear(40, 44, Gravity.BOTTOM));
+        row.addView(attachButton, LayoutHelper.createFrame(attachW, sendSize, Gravity.LEFT | Gravity.BOTTOM));
 
         input = new EditText(c);
         input.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
@@ -509,7 +539,10 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         input.setHint("Сообщение");
         input.setBackgroundColor(Color.TRANSPARENT);
         input.setMaxLines(5);
+        input.setMinHeight(dp(sendSize));
         input.setSingleLine(false);
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setPadding(dp(4), dp(6), dp(4), dp(6));
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
         input.setOnEditorActionListener((v, a, e) -> {
             if (a == EditorInfo.IME_ACTION_SEND) {
@@ -518,14 +551,19 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             }
             return false;
         });
-        row.addView(input, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+        row.addView(input, LayoutHelper.createFrame(
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.LEFT | Gravity.BOTTOM,
+                attachW, 0, sendSize + 6, 0
+        ));
 
         send = new TextView(c);
         send.setText("➤");
-        send.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        send.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         send.setGravity(Gravity.CENTER);
+        send.setIncludeFontPadding(false);
         send.setTextColor(onAccent);
-        send.setBackground(round(accent, 22));
+        send.setBackground(round(accent, sendSize / 2f));
         send.setOnClickListener(v -> {
             if (request == null) {
                 sendMessage();
@@ -533,14 +571,41 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                 stopRequest();
             }
         });
-        row.addView(send, LayoutHelper.createLinear(44, 44, Gravity.BOTTOM, dp(8), 0, 0, 0));
+        row.addView(send, LayoutHelper.createFrame(sendSize, sendSize, Gravity.RIGHT | Gravity.BOTTOM));
         box.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         composer.addView(box, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        int side = dp(DialogsActivity.MAIN_TABS_MARGIN);
         root.addView(composer, LayoutHelper.createFrame(
-                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM,
-                dp(8), 0, dp(8), idleBottomMargin()
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL,
+                side, 0, side, idleBottomMargin()
         ));
+        composer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> syncComposerWidthToMusicIsland());
+        root.post(this::syncComposerWidthToMusicIsland);
+    }
+
+    /** Match composer glass width to the mini-player island when it is visible. */
+    private void syncComposerWidthToMusicIsland() {
+        if (composer == null || root == null) {
+            return;
+        }
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) composer.getLayoutParams();
+        if (lp == null) {
+            return;
+        }
+        int parentW = root.getWidth();
+        if (parentW <= 0) {
+            parentW = AndroidUtilities.displaySize.x;
+        }
+        int target = MglaGlobalMusicBar.preferredComposerWidthPx(parentW);
+        int side = Math.max(0, (parentW - target) / 2);
+        if (lp.width != target || lp.leftMargin != side || lp.rightMargin != side) {
+            lp.width = target;
+            lp.leftMargin = side;
+            lp.rightMargin = side;
+            lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            composer.setLayoutParams(lp);
+        }
     }
 
     private int idleBottomMargin() {
@@ -589,6 +654,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             lp.bottomMargin = bottom;
             composer.setLayoutParams(lp);
         }
+        syncComposerWidthToMusicIsland();
         int composerH = composer.getHeight();
         if (composerH <= 0) {
             composerH = dp(72);
@@ -652,17 +718,12 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         messages.removeAllViews();
         streamedBubble = null;
         streamedText = "";
+        emptyStateVisible = false;
         updateProvider();
         updateSettingsMenuVisibility();
+        updateModelRamMenu();
         if (chat.messages.isEmpty()) {
-            TextView title = text("Чем могу помочь?", 26, Theme.key_windowBackgroundWhiteBlackText);
-            title.setTypeface(AndroidUtilities.bold());
-            title.setGravity(Gravity.CENTER);
-            title.setPadding(0, dp(38), 0, dp(10));
-            messages.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-            TextView hint = text("Новый диалог начинается с чистого контекста.\nИстория хранится только на устройстве.", 15, Theme.key_windowBackgroundWhiteGrayText);
-            hint.setGravity(Gravity.CENTER);
-            messages.addView(hint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            showEmptyState();
         } else {
             for (MglaAiChatStorage.Message m : chat.messages) {
                 addBubble(m.role, m.text, animate);
@@ -675,14 +736,56 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
 
+    private void showEmptyState() {
+        emptyStateVisible = true;
+        boolean local = chat != null && MglaAiChatService.PROVIDER_LOCAL.equals(chat.provider);
+        TextView title = text("Чем могу помочь?", 26, Theme.key_windowBackgroundWhiteBlackText);
+        title.setTypeface(AndroidUtilities.bold());
+        title.setGravity(Gravity.CENTER);
+        // Sit higher under the action bar (was dp(38)).
+        title.setPadding(dp(16), dp(8), dp(16), dp(8));
+        messages.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        if (local) {
+            TextView warn = text(
+                    "Локальный ИИ работает на процессоре телефона: это ресурсоёмко, ответы могут быть медленными, "
+                            + "сбои и обрывы возможны. Перед чатом нажмите «Загрузить» в шапке — "
+                            + "после использования лучше «Выгрузить», чтобы освободить память.",
+                    14, Theme.key_windowBackgroundWhiteGrayText);
+            warn.setGravity(Gravity.CENTER);
+            warn.setPadding(dp(20), dp(4), dp(20), dp(8));
+            warn.setLineSpacing(dp(2), 1f);
+            messages.addView(warn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        } else {
+            TextView hint = text("Новый диалог начинается с чистого контекста.\nИстория хранится только на устройстве.", 15, Theme.key_windowBackgroundWhiteGrayText);
+            hint.setGravity(Gravity.CENTER);
+            hint.setPadding(dp(16), dp(4), dp(16), 0);
+            messages.addView(hint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        }
+    }
+
+    private void clearEmptyStateIfNeeded() {
+        if (!emptyStateVisible || messages == null) {
+            return;
+        }
+        emptyStateVisible = false;
+        messages.removeAllViews();
+    }
+
     private void addBubble(String role, String value, boolean animate) {
         boolean mine = "user".equals(role);
         int bubbleColor = Theme.getColor(mine ? Theme.key_featuredStickers_addButton : Theme.key_windowBackgroundWhite);
-        TextView b = text(value, 16, Theme.key_windowBackgroundWhiteBlackText);
+        TextView b = text("", 16, Theme.key_windowBackgroundWhiteBlackText);
         b.setTextColor(ColorUtils.calculateLuminance(bubbleColor) < .42f ? Color.WHITE : 0xFF17212B);
         b.setLineSpacing(dp(2), 1);
         b.setPadding(dp(14), dp(10), dp(14), dp(10));
         b.setBackground(round(bubbleColor, mine ? 22 : 18));
+        // Assistant replies: full Markdown. User bubbles stay plain text.
+        if (mine) {
+            b.setText(value);
+        } else {
+            applyAssistantMarkdown(b, value);
+        }
         messages.addView(b, LayoutHelper.createLinear(
                 LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
                 mine ? Gravity.RIGHT : Gravity.LEFT,
@@ -694,6 +797,18 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             b.animate().alpha(1).translationY(0).setDuration(180).start();
         }
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void applyAssistantMarkdown(TextView bubble, String markdown) {
+        if (bubble == null) {
+            return;
+        }
+        MglaAiMarkdown.setMarkdown(bubble, markdown != null ? markdown : "", true);
+        // Re-apply bubble text color after Markwon theme spans (code/quote keep their own).
+        int bubbleColor = Theme.getColor(Theme.key_windowBackgroundWhite);
+        if (ColorUtils.calculateLuminance(bubbleColor) < .42f) {
+            bubble.setTextColor(Color.WHITE);
+        }
     }
 
     private void openPhotoPicker() {
@@ -773,7 +888,21 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (!attachedPhotos.isEmpty()) {
             value = (TextUtils.isEmpty(value) ? "" : value + "\n") + "📷 Прикреплено фото: " + attachedPhotos.size();
         }
+        if (MglaAiChatService.PROVIDER_LOCAL.equals(chat.provider)
+                && !MglaLocalChatRuntime.isSelectedModelLoaded(getParentActivity() != null
+                ? getParentActivity() : ApplicationLoader.applicationContext)) {
+            if (getParentActivity() != null) {
+                new AlertDialog.Builder(getParentActivity())
+                        .setTitle("Локальная модель")
+                        .setMessage("Сначала загрузите модель в память кнопкой «Загрузить» в шапке чата.")
+                        .setPositiveButton("Загрузить", (d, w) -> onModelRamMenuClick())
+                        .setNegativeButton("Отмена", null)
+                        .show();
+            }
+            return;
+        }
         ArrayList<String> imagesForRequest = new ArrayList<>(attachedPhotos);
+        clearEmptyStateIfNeeded();
         chat.messages.add(new MglaAiChatStorage.Message("user", value, System.currentTimeMillis()));
         addBubble("user", value, true);
         chat.messages.add(new MglaAiChatStorage.Message("assistant", "", System.currentTimeMillis()));
@@ -784,10 +913,13 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         // OpenRouter has no user-facing AI settings — fixed defaults only.
         // Temperature / tokens prefs are local-GGUF settings.
         final boolean localProvider = MglaAiChatService.PROVIDER_LOCAL.equals(chat.provider);
-        final float temperature = localProvider ? prefs().getFloat("ai_chat_temperature", .7f) : 0.7f;
+        if (localProvider) {
+            MglaLocalChatRuntime.ensureLocalDefaults();
+        }
+        final float temperature = localProvider ? MglaLocalChatRuntime.temperature() : 0.7f;
         // OpenRouter output cap is per-model (Ultra table) inside MglaAiChatService.
         final int maxTokens = localProvider
-                ? prefs().getInt("ai_chat_max_tokens", 1024)
+                ? MglaLocalChatRuntime.maxTokens()
                 : MglaAiLimits.budgetFor(chat.model).outputTokens;
         request = MglaAiChatService.send(
                 chat.provider, chat.model, chat.messages, imagesForRequest,
@@ -795,9 +927,18 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                 maxTokens,
                 new MglaAiChatService.Callback() {
                     @Override
+                    public void onStatus(String status) {
+                        if (streamedBubble != null && streamedText.length() == 0 && !TextUtils.isEmpty(status)) {
+                            streamedBubble.setText(status);
+                        }
+                    }
+
+                    @Override
                     public void onDelta(String token) {
                         streamedText += token;
                         if (streamedBubble != null) {
+                            // Plain while streaming so unfinished fences/lists don't glitch;
+                            // full Markdown is applied in finishRequest().
                             streamedBubble.setText(streamedText);
                         }
                         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
@@ -810,8 +951,12 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
 
                     @Override
                     public void onError(String error) {
+                        String msg = TextUtils.isEmpty(error) ? "Не удалось получить ответ" : error;
                         if (streamedText.length() == 0) {
-                            streamedText = "Ошибка: " + error;
+                            streamedText = "Ошибка: " + msg;
+                        } else if (!streamedText.contains(msg)) {
+                            // Mid-stream failures used to leave a silent partial answer.
+                            streamedText = streamedText + "\n\n⚠️ " + msg;
                         }
                         if (streamedBubble != null) {
                             streamedBubble.setText(streamedText);
@@ -828,17 +973,34 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (!chat.messages.isEmpty()) {
             chat.messages.get(chat.messages.size() - 1).text = streamedText;
         }
+        if (streamedBubble != null && !TextUtils.isEmpty(streamedText)
+                && !streamedText.startsWith("Ошибка:")) {
+            applyAssistantMarkdown(streamedBubble, streamedText);
+        } else if (streamedBubble != null) {
+            streamedBubble.setText(streamedText);
+        }
         request = null;
         if (send != null) {
             send.setText("➤");
         }
         MglaAiChatStorage.save(currentAccount, chat);
         updateQuotaCounter();
+        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
 
     private void stopRequest() {
         if (request != null) {
             request.cancel();
+        }
+        MglaLocalChatRuntime.abortActive();
+        // Finalize partial answer with Markdown if the user aborted mid-stream.
+        if (streamedBubble != null && !TextUtils.isEmpty(streamedText)
+                && !streamedText.startsWith("Ошибка:")) {
+            if (chat != null && !chat.messages.isEmpty()) {
+                chat.messages.get(chat.messages.size() - 1).text = streamedText;
+            }
+            applyAssistantMarkdown(streamedBubble, streamedText);
+            MglaAiChatStorage.save(currentAccount, chat);
         }
         request = null;
         if (send != null) {
@@ -864,11 +1026,15 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         final boolean local = MglaSubscription.canUseLocalModels();
         if (!openRouter && local) {
             chat.provider = MglaAiChatService.PROVIDER_LOCAL;
+            MglaLocalChatRuntime.ensureLocalDefaults();
             prefs().edit().putString("ai_chat_provider", chat.provider).apply();
             MglaAiChatStorage.save(currentAccount, chat);
             updateAttachVisibility();
             updateProvider();
             updateSettingsMenuVisibility();
+            if (chat.messages.isEmpty()) {
+                renderChat(false);
+            }
             return;
         }
         if (openRouter && !local) {
@@ -888,11 +1054,17 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                 .setTitle("Провайдер")
                 .setItems(new String[]{"OpenRouter", "Локальная GGUF"}, (d, n) -> {
                     chat.provider = n == 0 ? MglaAiChatService.PROVIDER_OPENROUTER : MglaAiChatService.PROVIDER_LOCAL;
+                    if (n == 1) {
+                        MglaLocalChatRuntime.ensureLocalDefaults();
+                    }
                     prefs().edit().putString("ai_chat_provider", chat.provider).apply();
                     MglaAiChatStorage.save(currentAccount, chat);
                     updateAttachVisibility();
                     updateProvider();
                     updateSettingsMenuVisibility();
+                    if (chat.messages.isEmpty()) {
+                        renderChat(false);
+                    }
                     if (n == 0) {
                         chooseOpenRouterModel();
                     }
@@ -905,6 +1077,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     private final MglaGlobalMusicBar.VisibilityListener musicBarVisibilityListener = visible -> {
         if (composer != null) {
             updateComposerInset(lastKeyboardHeight);
+            syncComposerWidthToMusicIsland();
         }
     };
 
@@ -1034,7 +1207,9 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (provider == null || chat == null) {
             return;
         }
+        updateModelRamMenu();
         if (MglaAiChatService.PROVIDER_LOCAL.equals(chat.provider)) {
+            MglaLocalChatRuntime.ensureLocalDefaults();
             provider.setText("⌁  Локальная модель");
             return;
         }
@@ -1063,6 +1238,139 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             // OpenRouter: no AI settings entry at all.
             overflowMenu.setSubItemShown(MENU_SETTINGS, false);
         }
+        updateModelRamMenu();
+    }
+
+    private void styleModelRamButton() {
+        if (modelRamMenuItem == null) {
+            return;
+        }
+        int accent = Theme.getColor(Theme.key_featuredStickers_addButton);
+        int onAccent = Theme.getColor(Theme.key_featuredStickers_buttonText);
+        if (ColorUtils.calculateLuminance(accent) > 0.55f && ColorUtils.calculateLuminance(onAccent) > 0.55f) {
+            onAccent = 0xFF17212B;
+        } else if (ColorUtils.calculateLuminance(accent) < 0.35f && ColorUtils.calculateLuminance(onAccent) < 0.35f) {
+            onAccent = Color.WHITE;
+        }
+        int pressed = ColorUtils.blendARGB(accent, Color.BLACK, 0.18f);
+        TextView tv = modelRamMenuItem.getTextView();
+        if (tv != null) {
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            tv.setTypeface(AndroidUtilities.bold());
+            tv.setTextColor(onAccent);
+            tv.setPadding(dp(14), dp(6), dp(14), dp(6));
+            tv.setIncludeFontPadding(false);
+            tv.setMinHeight(dp(28));
+            tv.setGravity(Gravity.CENTER);
+            tv.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(16), accent, pressed));
+        }
+        // Drop default action-bar ripples so the oval reads as a pill.
+        modelRamMenuItem.setBackground(null);
+        modelRamMenuItem.setPadding(dp(4), dp(8), dp(4), dp(8));
+    }
+
+    private void updateModelRamMenu() {
+        if (modelRamMenuItem == null) {
+            return;
+        }
+        final boolean local = chat != null
+                && MglaAiChatService.PROVIDER_LOCAL.equals(chat.provider)
+                && MglaSubscription.canUseLocalModels();
+        if (!local) {
+            modelRamMenuItem.setVisibility(View.GONE);
+            return;
+        }
+        modelRamMenuItem.setVisibility(View.VISIBLE);
+        styleModelRamButton();
+        if (MglaLocalChatRuntime.isUnloading()) {
+            modelRamMenuItem.setText("Выгрузка…");
+            modelRamMenuItem.setEnabled(false);
+            return;
+        }
+        if (MglaLocalChatRuntime.isLoading()) {
+            modelRamMenuItem.setText("Загрузка…");
+            modelRamMenuItem.setEnabled(false);
+            return;
+        }
+        modelRamMenuItem.setEnabled(true);
+        Context ctx = getParentActivity() != null ? getParentActivity() : ApplicationLoader.applicationContext;
+        if (MglaLocalChatRuntime.isSelectedModelLoaded(ctx)) {
+            modelRamMenuItem.setText("Выгрузить модель");
+        } else {
+            modelRamMenuItem.setText("Загрузить модель");
+        }
+    }
+
+    private void onModelRamMenuClick() {
+        if (chat == null || !MglaAiChatService.PROVIDER_LOCAL.equals(chat.provider)) {
+            return;
+        }
+        Context ctx = getParentActivity() != null ? getParentActivity() : ApplicationLoader.applicationContext;
+        if (MglaLocalChatRuntime.isBusy()) {
+            return;
+        }
+        if (MglaLocalChatRuntime.isSelectedModelLoaded(ctx)) {
+            // Cancel in-flight reply so native free isn't blocked behind complete().
+            if (request != null) {
+                request.cancel();
+                request = null;
+                send.setText("➤");
+            }
+            updateModelRamMenu();
+            modelRamMenuItem.setText("Выгрузка…");
+            modelRamMenuItem.setEnabled(false);
+            MglaLocalChatRuntime.unloadAsync(() -> {
+                updateModelRamMenu();
+                if (getParentActivity() != null) {
+                    BulletinFactory.of(MglaAiChatActivity.this)
+                            .createSimpleBulletin(R.raw.info, "Модель выгружена из памяти")
+                            .show();
+                }
+            });
+            return;
+        }
+        if (MglaLocalModelsManager.getRunnableModel(ctx) == null) {
+            if (getParentActivity() != null) {
+                new AlertDialog.Builder(getParentActivity())
+                        .setTitle("Локальная модель")
+                        .setMessage("Сначала скачайте и выберите GGUF в настройках локальной модели.")
+                        .setPositiveButton("OK", null)
+                        .show();
+            }
+            return;
+        }
+        updateModelRamMenu();
+        MglaLocalChatRuntime.loadAsync(new MglaLocalChatRuntime.LoadCallback() {
+            @Override
+            public void onProgress(String status) {
+                if (modelRamMenuItem != null) {
+                    modelRamMenuItem.setText("Загрузка…");
+                    modelRamMenuItem.setEnabled(false);
+                }
+            }
+
+            @Override
+            public void onReady() {
+                updateModelRamMenu();
+                if (getParentActivity() != null) {
+                    BulletinFactory.of(MglaAiChatActivity.this)
+                            .createSimpleBulletin(R.raw.contact_check, "Модель загружена в память")
+                            .show();
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                updateModelRamMenu();
+                if (getParentActivity() != null) {
+                    new AlertDialog.Builder(getParentActivity())
+                            .setTitle("Не удалось загрузить")
+                            .setMessage(message)
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
+            }
+        });
     }
 
     private String shortModel(String s) {
@@ -1231,21 +1539,30 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (c == null) {
             return;
         }
+        MglaLocalChatRuntime.ensureLocalDefaults();
         LinearLayout form = new LinearLayout(c);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(24), dp(4), dp(24), dp(6));
-        EditText temperature = settingField(c, form, "Температура (0–2)", String.valueOf(prefs().getFloat("ai_chat_temperature", .7f)), "0.7");
-        EditText tokens = settingField(c, form, "Максимум токенов ответа", String.valueOf(prefs().getInt("ai_chat_max_tokens", 1024)), "1024");
-        EditText context = settingField(c, form, "Контекст", String.valueOf(prefs().getInt("ai_local_context", 2048)), "2048");
-        EditText threads = settingField(c, form, "Потоки CPU", String.valueOf(prefs().getInt("ai_local_threads", Math.max(1, Runtime.getRuntime().availableProcessors() - 1))), "4");
-        EditText unload = settingField(c, form, "Выгружать модель через, сек.", String.valueOf(prefs().getInt("ai_local_unload_seconds", 120)), "120");
-        new AlertDialog.Builder(c).setTitle("Настройки локальной модели").setView(form).setNegativeButton("Отмена", null).setPositiveButton("Сохранить", (d, w) -> {
+        EditText temperature = settingField(c, form, "Температура (0 = точнее)", String.valueOf(MglaLocalChatRuntime.temperature()), String.valueOf(MglaLocalChatRuntime.DEFAULT_TEMPERATURE));
+        EditText tokens = settingField(c, form, "Макс. токенов ответа", String.valueOf(MglaLocalChatRuntime.maxTokens()), String.valueOf(MglaLocalChatRuntime.DEFAULT_MAX_TOKENS));
+        EditText context = settingField(c, form, "Контекст (256–2048)", String.valueOf(MglaLocalChatRuntime.contextTokens()), String.valueOf(MglaLocalChatRuntime.DEFAULT_CONTEXT));
+        EditText threads = settingField(c, form, "Потоки CPU (1–2)", String.valueOf(MglaLocalChatRuntime.threads()), String.valueOf(MglaLocalChatRuntime.defaultThreads()));
+        EditText unload = settingField(c, form, "Автовыгрузка, сек.", String.valueOf(prefs().getInt("ai_local_unload_seconds", MglaLocalChatRuntime.DEFAULT_UNLOAD_SECONDS)), String.valueOf(MglaLocalChatRuntime.DEFAULT_UNLOAD_SECONDS));
+        new AlertDialog.Builder(c).setTitle("Настройки локальной модели").setView(form)
+                .setNeutralButton("Сброс", (d, w) -> {
+                    MglaLocalChatRuntime.resetLocalDefaults();
+                    if (getParentActivity() != null) {
+                        BulletinFactory.of(this).createSimpleBulletin(R.raw.info, "Рекомендуемые настройки применены").show();
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сохранить", (d, w) -> {
             try {
                 prefs().edit()
-                        .putFloat("ai_chat_temperature", Math.max(0, Math.min(2, Float.parseFloat(temperature.getText().toString()))))
-                        .putInt("ai_chat_max_tokens", Math.max(32, Math.min(4096, Integer.parseInt(tokens.getText().toString()))))
-                        .putInt("ai_local_context", Math.max(512, Math.min(8192, Integer.parseInt(context.getText().toString()))))
-                        .putInt("ai_local_threads", Math.max(1, Math.min(8, Integer.parseInt(threads.getText().toString()))))
+                        .putFloat("ai_chat_temperature", Math.max(0, Math.min(1.0f, Float.parseFloat(temperature.getText().toString()))))
+                        .putInt("ai_chat_max_tokens", Math.max(16, Math.min(256, Integer.parseInt(tokens.getText().toString()))))
+                        .putInt("ai_local_context", Math.max(256, Math.min(2048, Integer.parseInt(context.getText().toString()))))
+                        .putInt("ai_local_threads", Math.max(1, Math.min(2, Integer.parseInt(threads.getText().toString()))))
                         .putInt("ai_local_unload_seconds", Math.max(15, Math.min(3600, Integer.parseInt(unload.getText().toString()))))
                         .apply();
             } catch (Throwable ignore) {

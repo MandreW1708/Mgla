@@ -62,4 +62,4 @@ target_include_directories(mglallama PRIVATE
         ${MGLA_GGML_ROOT}/src
         ${MGLA_GGML_ROOT}/src/ggml-cpu)
 target_link_options(mglallama PRIVATE "-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384" "-Wl,--gc-sections" "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/mgla_whisper_exports.map")
-target_link_libraries(mglallama log android atomic)
+target_link_libraries(mglallama log android atomic m)

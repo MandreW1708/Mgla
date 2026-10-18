@@ -3,86 +3,386 @@ package org.telegram.messenger;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.text.TextUtils;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Lifecycle and safety gate for the on-device llama.cpp runtime. */
+/**
+ * Lifecycle gate for the on-device llama.cpp runtime.
+ * Model must be loaded explicitly via {@link #loadAsync} before {@link #stream}.
+ */
 public final class MglaLocalChatRuntime {
     private static final String PREFS = "mgla_config";
     private static final Object LOCK = new Object();
     private static long handle;
     private static String loadedPath;
-    private static long lastUse;
-    private static Runnable unloadTask;
+    private static final AtomicBoolean loading = new AtomicBoolean(false);
+    private static final AtomicBoolean unloading = new AtomicBoolean(false);
 
-    private MglaLocalChatRuntime() { }
+    /** Tuned for phone-sized instruct GGUF (Qwen2.5 0.5B / SmolLM2, etc.). */
+    public static final float DEFAULT_TEMPERATURE = 0f; // greedy — стабильнее на 0.5B
+    public static final int DEFAULT_MAX_TOKENS = 128;
+    public static final int DEFAULT_CONTEXT = 512;
+    public static final int DEFAULT_UNLOAD_SECONDS = 300;
+    private static final int DEFAULTS_VERSION = 4;
+
+    public interface LoadCallback {
+        void onProgress(String status);
+
+        void onReady();
+
+        void onError(String message);
+    }
+
+    private MglaLocalChatRuntime() {
+    }
+
+    public static int defaultThreads() {
+        // 1–2 threads: fewer hangs from oversubscription on mid-range phones.
+        return Math.min(2, Math.max(1, Runtime.getRuntime().availableProcessors() > 2 ? 2 : 1));
+    }
+
+    /**
+     * Force-apply phone-friendly local inference defaults once per version.
+     * Fixes empty replies from too-hot sampling / oversized context on tiny models.
+     */
+    public static void ensureLocalDefaults() {
+        SharedPreferences p = prefs();
+        if (p.getInt("ai_local_defaults_ver", 0) >= DEFAULTS_VERSION) {
+            return;
+        }
+        p.edit()
+                .putFloat("ai_chat_temperature", DEFAULT_TEMPERATURE)
+                .putInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)
+                .putInt("ai_local_context", DEFAULT_CONTEXT)
+                .putInt("ai_local_threads", defaultThreads())
+                .putInt("ai_local_unload_seconds", DEFAULT_UNLOAD_SECONDS)
+                .putInt("ai_local_defaults_ver", DEFAULTS_VERSION)
+                .apply();
+    }
+
+    public static void resetLocalDefaults() {
+        prefs().edit()
+                .putFloat("ai_chat_temperature", DEFAULT_TEMPERATURE)
+                .putInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)
+                .putInt("ai_local_context", DEFAULT_CONTEXT)
+                .putInt("ai_local_threads", defaultThreads())
+                .putInt("ai_local_unload_seconds", DEFAULT_UNLOAD_SECONDS)
+                .putInt("ai_local_defaults_ver", DEFAULTS_VERSION)
+                .apply();
+    }
+
+    public static float temperature() {
+        ensureLocalDefaults();
+        return Math.max(0f, Math.min(1.0f, prefs().getFloat("ai_chat_temperature", DEFAULT_TEMPERATURE)));
+    }
+
+    public static int maxTokens() {
+        ensureLocalDefaults();
+        return Math.max(16, Math.min(256, prefs().getInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)));
+    }
+
+    public static int contextTokens() {
+        ensureLocalDefaults();
+        return Math.max(256, Math.min(2048, prefs().getInt("ai_local_context", DEFAULT_CONTEXT)));
+    }
+
+    public static int threads() {
+        ensureLocalDefaults();
+        return Math.max(1, Math.min(2, prefs().getInt("ai_local_threads", defaultThreads())));
+    }
+
+    /** Abort in-flight native generate for the currently loaded handle (if any). */
+    public static void abortActive() {
+        long h;
+        synchronized (LOCK) {
+            h = handle;
+        }
+        if (h != 0) {
+            MglaLlamaNative.abort(h);
+        }
+    }
+
+    public static boolean isLoaded() {
+        synchronized (LOCK) {
+            return handle != 0 && loadedPath != null;
+        }
+    }
+
+    public static boolean isLoading() {
+        return loading.get();
+    }
+
+    public static boolean isUnloading() {
+        return unloading.get();
+    }
+
+    public static boolean isBusy() {
+        return loading.get() || unloading.get();
+    }
+
+    /** Absolute path of the model currently mapped in RAM, or null. */
+    public static String loadedPath() {
+        synchronized (LOCK) {
+            return loadedPath;
+        }
+    }
+
+    /** True if the currently selected runnable model is already mapped. */
+    public static boolean isSelectedModelLoaded(Context context) {
+        File model = MglaLocalModelsManager.getRunnableModel(context);
+        if (model == null) {
+            return false;
+        }
+        synchronized (LOCK) {
+            return handle != 0 && model.getAbsolutePath().equals(loadedPath);
+        }
+    }
+
+    /**
+     * Load the selected GGUF into RAM on a background thread.
+     * Safe to call when already loaded for the same file (no-op success).
+     */
+    public static void loadAsync(LoadCallback callback) {
+        if (callback == null) {
+            return;
+        }
+        ensureLocalDefaults();
+        if (isBusy()) {
+            AndroidUtilities.runOnUIThread(() -> callback.onProgress(unloading.get() ? "Выгрузка…" : "Уже загружается…"));
+            return;
+        }
+        if (!loading.compareAndSet(false, true)) {
+            AndroidUtilities.runOnUIThread(() -> callback.onProgress("Уже загружается…"));
+            return;
+        }
+        new Thread(() -> {
+            try {
+                Context context = ApplicationLoader.applicationContext;
+                AndroidUtilities.runOnUIThread(() -> callback.onProgress("Проверка модели…"));
+                File model = MglaLocalModelsManager.getRunnableModel(context);
+                if (model == null) {
+                    File raw = MglaLocalModelsManager.getLoadedModel(context);
+                    if (raw != null) {
+                        String unsupported = MglaLocalModelsManager.unsupportedReason(raw);
+                        throw new IllegalStateException(unsupported != null
+                                ? unsupported
+                                : "Выбранная модель не подходит");
+                    }
+                    throw new IllegalStateException("Сначала скачайте и выберите локальную GGUF-модель");
+                }
+                if (!MglaLocalModelsManager.isGgufSupported(context)) {
+                    throw new IllegalStateException("Нужны 64-битный процессор и не менее 4 ГБ ОЗУ");
+                }
+                int ctxTokens = contextTokens();
+                int nThreads = threads();
+                assertEnoughMemory(context, model.length(), ctxTokens);
+
+                long stale = 0;
+                synchronized (LOCK) {
+                    if (handle != 0 && model.getAbsolutePath().equals(loadedPath)) {
+                        loading.set(false);
+                        AndroidUtilities.runOnUIThread(callback::onReady);
+                        return;
+                    }
+                    stale = handle;
+                    handle = 0;
+                    loadedPath = null;
+                }
+                if (stale != 0) {
+                    MglaLlamaNative.abort(stale);
+                    MglaLlamaNative.free(stale);
+                }
+
+                if (!MglaLlamaNative.isAvailable()) {
+                    String libErr = MglaLlamaNative.libraryError();
+                    throw new IllegalStateException(libErr != null
+                            ? ("Нативная библиотека ИИ не загружена: " + libErr)
+                            : "Нативная библиотека ИИ (mglallama) недоступна");
+                }
+
+                AndroidUtilities.runOnUIThread(() -> callback.onProgress("Загрузка в память…"));
+                long h = MglaLlamaNative.load(model.getAbsolutePath(), ctxTokens, nThreads);
+                if (h == 0) {
+                    String detail = MglaLlamaNative.lastError();
+                    throw new IllegalStateException(detail != null && detail.length() > 0
+                            ? detail
+                            : "Не удалось загрузить GGUF-модель");
+                }
+                synchronized (LOCK) {
+                    handle = h;
+                    loadedPath = model.getAbsolutePath();
+                }
+                loading.set(false);
+                AndroidUtilities.runOnUIThread(callback::onReady);
+            } catch (Throwable e) {
+                FileLog.e(e);
+                loading.set(false);
+                String msg = !TextUtils.isEmpty(e.getMessage()) ? e.getMessage() : "Ошибка загрузки модели";
+                AndroidUtilities.runOnUIThread(() -> callback.onError(msg));
+            }
+        }, "MglaLocalLoad").start();
+    }
+
+    /**
+     * Free native weights on a background thread — never call {@link #unload()} on the UI thread
+     * (llama_model_free of a non-mmap GGUF can stall for seconds and ANR the app).
+     */
+    public static void unloadAsync(Runnable onDone) {
+        long h;
+        synchronized (LOCK) {
+            h = handle;
+            handle = 0;
+            loadedPath = null;
+        }
+        if (h == 0) {
+            if (onDone != null) {
+                AndroidUtilities.runOnUIThread(onDone);
+            }
+            return;
+        }
+        unloading.set(true);
+        MglaLlamaNative.abort(h);
+        new Thread(() -> {
+            try {
+                MglaLlamaNative.free(h);
+            } catch (Throwable e) {
+                FileLog.e(e);
+            } finally {
+                unloading.set(false);
+                if (onDone != null) {
+                    AndroidUtilities.runOnUIThread(onDone);
+                }
+            }
+        }, "MglaLocalUnload").start();
+    }
+
+    /** @deprecated Prefer {@link #unloadAsync}; kept for callers that already run off the UI thread. */
+    public static void unload() {
+        unloadAsync(null);
+    }
 
     public static void stream(ArrayList<MglaAiChatStorage.Message> messages, float temperature, int maxTokens, MglaAiChatService.Request request, MglaAiChatService.Callback callback) {
+        ensureLocalDefaults();
         Context context = ApplicationLoader.applicationContext;
-        File model = MglaLocalModelsManager.getLoadedModel(context);
-        if (model == null) throw new IllegalStateException("Сначала скачайте и выберите локальную GGUF-модель");
-        if (!MglaLocalModelsManager.isGgufSupported(context)) throw new IllegalStateException("Для локальной модели нужны 64-битный процессор и не менее 4 ГБ ОЗУ");
-        int contextTokens = prefs().getInt("ai_local_context", 2048);
-        int threads = Math.max(1, Math.min(6, prefs().getInt("ai_local_threads", Math.max(1, Runtime.getRuntime().availableProcessors() - 1))));
-        assertEnoughMemory(context, model.length(), contextTokens);
+        File model = MglaLocalModelsManager.getRunnableModel(context);
+        if (model == null) {
+            throw new IllegalStateException("Сначала скачайте и выберите локальную GGUF-модель");
+        }
+        final long h;
         synchronized (LOCK) {
             if (handle == 0 || !model.getAbsolutePath().equals(loadedPath)) {
-                unloadLocked();
-                handle = MglaLlamaNative.load(model.getAbsolutePath(), contextTokens, threads);
-                if (handle == 0) throw new IllegalStateException("Не удалось загрузить GGUF-модель");
-                loadedPath = model.getAbsolutePath();
+                throw new IllegalStateException("Сначала нажмите «Загрузить модель» в шапке чата");
             }
+            h = handle;
         }
-        String prompt = buildPrompt(messages);
-        String answer = MglaLlamaNative.complete(handle, prompt, Math.max(16, Math.min(2048, maxTokens)), temperature);
-        if (request.isCancelled()) return;
-        if (TextUtils.isEmpty(answer)) throw new IllegalStateException("Локальная модель вернула пустой ответ");
-        // JNI completes off the UI thread.  Drip compact chunks so the renderer remains smooth on long replies.
-        long delay = 0;
-        for (int i = 0; i < answer.length() && !request.isCancelled(); i += 18) {
-            String part = answer.substring(i, Math.min(answer.length(), i + 18));
-            final long chunkDelay = delay;
-            AndroidUtilities.runOnUIThread(() -> { if (!request.isCancelled()) callback.onDelta(part); }, chunkDelay);
-            delay += 18;
+        request.bindLocalHandle(h);
+
+        // Trailing empty assistant stub (UI placeholder) must not enter the prompt.
+        ArrayList<MglaAiChatStorage.Message> forPrompt = new ArrayList<>(messages.size());
+        for (int i = 0; i < messages.size(); i++) {
+            MglaAiChatStorage.Message m = messages.get(i);
+            if (m == null || TextUtils.isEmpty(m.text)) {
+                continue;
+            }
+            forPrompt.add(m);
         }
-        lastUse = System.currentTimeMillis();
-        scheduleUnload();
-        final long completeDelay = delay;
-        if (!request.isCancelled()) AndroidUtilities.runOnUIThread(() -> { if (!request.isCancelled()) callback.onComplete(); }, completeDelay);
+        String prompt = buildPrompt(forPrompt);
+        FileLog.d("MglaLocal prompt chars=" + prompt.length() + " msgs=" + forPrompt.size());
+
+        float temp = Math.max(0f, Math.min(0.8f, temperature));
+        int tokens = Math.max(16, Math.min(256, maxTokens));
+        final AtomicBoolean gotToken = new AtomicBoolean(false);
+
+        int generated = MglaLlamaNative.generate(h, prompt, tokens, temp, new MglaLlamaNative.TokenSink() {
+            @Override
+            public void onPhase(String phase) {
+                if (request.isCancelled()) {
+                    return;
+                }
+                final String label = "prompt".equals(phase) ? "Читаю запрос…" : "Пишу ответ…";
+                FileLog.d("MglaLocal phase=" + phase);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (!request.isCancelled() && !gotToken.get()) {
+                        callback.onStatus(label);
+                    }
+                });
+            }
+
+            @Override
+            public boolean onToken(String piece) {
+                if (request.isCancelled()) {
+                    MglaLlamaNative.abort(h);
+                    return false;
+                }
+                if (TextUtils.isEmpty(piece)) {
+                    return true;
+                }
+                gotToken.set(true);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (!request.isCancelled()) {
+                        callback.onDelta(piece);
+                    }
+                });
+                return true;
+            }
+        });
+
+        if (request.isCancelled()) {
+            return;
+        }
+        if (generated < 0 || !gotToken.get()) {
+            String detail = MglaLlamaNative.lastError();
+            throw new IllegalStateException(!TextUtils.isEmpty(detail)
+                    ? detail
+                    : "Локальная модель вернула пустой ответ");
+        }
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!request.isCancelled()) {
+                callback.onComplete();
+            }
+        });
     }
 
     private static void assertEnoughMemory(Context context, long modelBytes, int contextTokens) {
         ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
         ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        if (am != null) am.getMemoryInfo(info);
-        // Quantized weights plus KV/cache and a conservative headroom for Telegram itself.
-        long required = modelBytes + Math.max(384L * 1024 * 1024, contextTokens * 192L * 1024) + 256L * 1024 * 1024;
-        if (info.availMem > 0 && info.availMem < required) throw new IllegalStateException("Недостаточно свободной памяти для этой модели. Освободите память или уменьшите контекст.");
+        if (am != null) {
+            am.getMemoryInfo(info);
+        }
+        long required = modelBytes + Math.max(256L * 1024 * 1024, contextTokens * 192L * 1024) + 192L * 1024 * 1024;
+        if (info.availMem > 0 && info.availMem < required) {
+            throw new IllegalStateException("Недостаточно свободной памяти для этой модели. Освободите память или уменьшите контекст.");
+        }
     }
 
+    /**
+     * ChatML — нужен Qwen2.5 / SmolLM2 Instruct. Старый «Пользователь:/Ассистент:»
+     * часто давал мгновенный EOS и пустой ответ.
+     */
     private static String buildPrompt(ArrayList<MglaAiChatStorage.Message> messages) {
-        StringBuilder p = new StringBuilder("Ты полезный ассистент. Отвечай на языке пользователя.\n\n");
-        int start = Math.max(0, messages.size() - 18);
+        StringBuilder p = new StringBuilder();
+        p.append("<|im_start|>system\n")
+                .append("Ты полезный ассистент. Отвечай кратко на языке пользователя.")
+                .append("<|im_end|>\n");
+        int start = Math.max(0, messages.size() - 12);
         for (int i = start; i < messages.size(); i++) {
             MglaAiChatStorage.Message m = messages.get(i);
-            p.append("assistant".equals(m.role) ? "Ассистент: " : "Пользователь: ").append(m.text).append('\n');
+            if (TextUtils.isEmpty(m.text)) {
+                continue;
+            }
+            boolean assistant = "assistant".equals(m.role);
+            p.append("<|im_start|>").append(assistant ? "assistant" : "user").append('\n')
+                    .append(m.text.trim())
+                    .append("<|im_end|>\n");
         }
-        return p.append("Ассистент: ").toString();
+        p.append("<|im_start|>assistant\n");
+        return p.toString();
     }
 
-    private static void scheduleUnload() {
-        synchronized (LOCK) {
-            if (unloadTask != null) AndroidUtilities.cancelRunOnUIThread(unloadTask);
-            int seconds = Math.max(15, Math.min(3600, prefs().getInt("ai_local_unload_seconds", 120)));
-            unloadTask = () -> { synchronized (LOCK) { if (System.currentTimeMillis() - lastUse >= seconds * 1000L) unloadLocked(); } };
-            AndroidUtilities.runOnUIThread(unloadTask, seconds * 1000L);
-        }
+    private static SharedPreferences prefs() {
+        return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
-
-    public static void unload() { synchronized (LOCK) { unloadLocked(); } }
-    private static void unloadLocked() { if (handle != 0) MglaLlamaNative.free(handle); handle = 0; loadedPath = null; }
-    private static SharedPreferences prefs() { return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
 }

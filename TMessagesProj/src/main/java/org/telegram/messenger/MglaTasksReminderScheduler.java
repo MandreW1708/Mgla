@@ -65,8 +65,13 @@ public class MglaTasksReminderScheduler {
             long now = System.currentTimeMillis();
             ArrayList<MglaTask> allTasks = storage.getAllTasksForScheduling();
             for (MglaTask task : allTasks) {
-                if (!task.done && task.remindAt > now) {
-                    schedule(task);
+                if (!task.done && task.remindAt > 0) {
+                    if (task.remindAt <= now && task.hasRepeat()) {
+                        advanceToNextOccurrence(storage, task, now);
+                    }
+                    if (task.remindAt > now) {
+                        schedule(task);
+                    }
                 }
             }
         });
@@ -80,7 +85,22 @@ public class MglaTasksReminderScheduler {
                 return;
             }
             showNotification(task);
+            if (task.hasRepeat()) {
+                advanceToNextOccurrence(storage, task, System.currentTimeMillis());
+                schedule(task);
+            }
         });
+    }
+
+    private static void advanceToNextOccurrence(MglaTasksStorage storage, MglaTask task, long now) {
+        long next = MglaTaskRepeat.nextOccurrenceAfter(task, now);
+        if (next <= 0) {
+            return;
+        }
+        long offset = task.remindAt > 0 ? task.dueAt - task.remindAt : 0;
+        task.dueAt = next;
+        task.remindAt = task.hasReminder() ? next - offset : 0;
+        storage.saveTask(task);
     }
 
     private static PendingIntent buildPendingIntent(Context context, long taskId) {
