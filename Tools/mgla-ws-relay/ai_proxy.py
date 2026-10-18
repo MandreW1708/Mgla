@@ -577,12 +577,52 @@ def _limits_for_model(plan_id: str, model_id: str) -> tuple[int, int]:
     return OPENROUTER_MAX_INPUT_CHARS, OPENROUTER_MAX_OUTPUT_TOKENS
 
 
+def _model_queue_for_plan(
+    plan_id: str,
+    preferred_model: str | None,
+    exclude_ultra: bool = False,
+) -> list[str]:
+    """Build the fallback chain. Ultra may use every plan's models (Ultra first)."""
+    if plan_id == PLAN_PREMIUM_ULTRA:
+        models: list[str] = []
+        tiers = (PLAN_PREMIUM_PLUS, PLAN_FREE) if exclude_ultra else (
+            PLAN_PREMIUM_ULTRA,
+            PLAN_PREMIUM_PLUS,
+            PLAN_FREE,
+        )
+        for pid in tiers:
+            chunk = list(get_models(pid))
+            if pid == PLAN_PREMIUM_ULTRA and not chunk:
+                chunk = list(DEFAULT_ULTRA_MODELS)
+            for m in chunk:
+                if m not in models:
+                    models.append(m)
+    else:
+        models = list(get_models(plan_id))
+        if not models and plan_id == PLAN_PREMIUM_ULTRA:
+            models = list(DEFAULT_ULTRA_MODELS)
+    if preferred_model:
+        preferred = preferred_model.strip()
+        if preferred in models:
+            models = [preferred] + [m for m in models if m != preferred]
+        elif preferred:
+            # Explicit pick from another plan (Ultra subscriber using Free/Plus model).
+            owner = plan_for_model(preferred)
+            if owner == PLAN_PREMIUM_ULTRA and exclude_ultra:
+                pass
+            elif owner or plan_id == PLAN_PREMIUM_ULTRA:
+                models = [preferred] + [m for m in models if m != preferred]
+    return models
+
+
 def call_openrouter(
     message: str,
     lang: str,
     preferred_model: str | None = None,
     plan_id: str | None = None,
-) -> str:
+    exclude_ultra: bool = False,
+) -> tuple[str, str]:
+    """Returns (content, model_id_used)."""
     resolved = PLAN_FREE
     if isinstance(plan_id, str) and plan_id.strip() in PLAN_IDS_ALL:
         resolved = plan_id.strip()
@@ -593,27 +633,27 @@ def call_openrouter(
             resolved = found
         # Unknown model id → stay on free and ignore preferred (legacy safety).
     plan_id = resolved
-    api_key = api_key_for_plan(plan_id)
-    if not api_key:
-        env_name = {
-            PLAN_PREMIUM_PLUS: "OPENROUTER_API_KEY_PREMIUM_PLUS",
-            PLAN_PREMIUM_ULTRA: "OPENROUTER_API_KEY_PREMIUM_ULTRA",
-        }.get(plan_id, "OPENROUTER_API_KEY")
-        raise RuntimeError(f"{env_name} is not set")
-    models = list(get_models(plan_id))
-    if not models and plan_id == PLAN_PREMIUM_ULTRA:
-        models = list(DEFAULT_ULTRA_MODELS)
+    models = _model_queue_for_plan(plan_id, preferred_model, exclude_ultra=exclude_ultra)
     if not models:
         raise RuntimeError(f"no models configured for plan {plan_id}")
-    if preferred_model:
-        preferred = preferred_model.strip()
-        if preferred in models:
-            models = [preferred] + [m for m in models if m != preferred]
     system_prompt = _ai_system_prompt(lang)
     seed = random.getrandbits(63)
     failures = []
     for i, model in enumerate(models):
-        in_chars, out_tokens = _limits_for_model(plan_id, model)
+        owner = plan_for_model(model) or plan_id
+        api_key = api_key_for_plan(owner)
+        if not api_key:
+            env_name = {
+                PLAN_PREMIUM_PLUS: "OPENROUTER_API_KEY_PREMIUM_PLUS",
+                PLAN_PREMIUM_ULTRA: "OPENROUTER_API_KEY_PREMIUM_ULTRA",
+            }.get(owner, "OPENROUTER_API_KEY")
+            failures.append(f"{model}: {env_name} is not set")
+            if i < len(models) - 1:
+                continue
+            raise RuntimeError(f"{env_name} is not set")
+        # Limits: Ultra table only for true Ultra catalog models.
+        limit_plan = PLAN_PREMIUM_ULTRA if owner == PLAN_PREMIUM_ULTRA else owner
+        in_chars, out_tokens = _limits_for_model(limit_plan, model)
         clipped = _clip_openrouter_input(message, in_chars)
         body = {
             "model": model,
@@ -639,7 +679,7 @@ def call_openrouter(
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-                return _extract_openrouter_content(payload)
+                return _extract_openrouter_content(payload), model
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")[:500]
             failures.append(f"{model}: HTTP {e.code}")
@@ -653,7 +693,7 @@ def call_openrouter(
             failures.append(f"{model}: {e}")
             if i < len(models) - 1:
                 continue
-    raise RuntimeError("?????? ???????????? ???????????????????? (" + "; ".join(failures) + ")")
+    raise RuntimeError("все модели недоступны (" + "; ".join(failures) + ")")
 
 
 def _extract_gemini_text(payload: dict) -> str:
@@ -1160,6 +1200,7 @@ class Handler(BaseHTTPRequestHandler):
             client_plan = client_plan.strip() or None
         else:
             client_plan = None
+        exclude_ultra = bool(raw.get("exclude_ultra"))
         if not isinstance(message, str) or not message.strip():
             self._reply(400, b'{"error":"message required"}')
             return
@@ -1168,17 +1209,28 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(413, b'{"error":"message too long"}')
             return
         try:
-            content = call_openrouter(
+            content, used_model = call_openrouter(
                 message.strip(),
                 lang if isinstance(lang, str) else "Russian",
                 preferred_model,
                 client_plan,
+                exclude_ultra=exclude_ultra,
             )
         except RuntimeError as e:
             log.warning("chat failed: %s", e)
             self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
-        self._reply(200, json.dumps({"content": content}, ensure_ascii=False).encode("utf-8"))
+        self._reply(
+            200,
+            json.dumps(
+                {
+                    "content": content,
+                    "model": used_model,
+                    "ultra": (plan_for_model(used_model) == PLAN_PREMIUM_ULTRA),
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+        )
 
     def _post_gemini(self):
         if not self._check_token():

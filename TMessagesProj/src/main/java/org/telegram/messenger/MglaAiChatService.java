@@ -36,9 +36,9 @@ public final class MglaAiChatService {
     public static final String STATUS_DOWN = "down";
     private static final String URL_CHAT = "https://openrouter.ai/api/v1/chat/completions";
     private static final String PREFS = "mgla_config";
-    private static final String KEY_MODELS_CACHE = "ai_openrouter_models_cache_v2";
-    private static final String KEY_MODELS_CACHE_AT = "ai_openrouter_models_cache_at_v2";
-    private static final String KEY_MODELS_CACHE_PLAN = "ai_openrouter_models_cache_plan_v2";
+    private static final String KEY_MODELS_CACHE = "ai_openrouter_models_cache_v3";
+    private static final String KEY_MODELS_CACHE_AT = "ai_openrouter_models_cache_at_v3";
+    private static final String KEY_MODELS_CACHE_PLAN = "ai_openrouter_models_cache_plan_v3";
     private static final long MODELS_CACHE_TTL_MS = 5L * 60L * 1000L;
     public static final String[] FALLBACK_MODELS = {
             "nvidia/nemotron-3-super-120b-a12b:free",
@@ -59,11 +59,22 @@ public final class MglaAiChatService {
         /** up / degraded / down */
         public final String status;
         public final boolean available;
+        /** From Premium Ultra catalog — show ★ and count toward 20/day. */
+        public final boolean ultra;
+        public final String sourcePlan;
 
         public ModelInfo(String id, String status) {
+            this(id, status, false, "");
+        }
+
+        public ModelInfo(String id, String status, boolean ultra, String sourcePlan) {
             this.id = id;
             this.status = normalizeStatus(status);
             this.available = !STATUS_DOWN.equals(this.status);
+            this.ultra = ultra || MglaAiLimits.isUltraCatalogModel(id);
+            this.sourcePlan = !TextUtils.isEmpty(sourcePlan)
+                    ? sourcePlan
+                    : (this.ultra ? MglaSubscription.PLAN_PREMIUM_ULTRA : MglaSubscription.PLAN_FREE);
         }
 
         public ModelInfo(String id, boolean available) {
@@ -130,8 +141,8 @@ public final class MglaAiChatService {
                     if (imagePaths != null && !imagePaths.isEmpty() && !MglaSubscription.canAttachMedia()) {
                         throw new Exception("Вложения доступны только на Premium Ultra");
                     }
-                    if (!MglaAiLimits.canSendCloudRequest()) {
-                        throw new Exception("Дневной лимит запросов исчерпан (20/день на Ultra)");
+                    if (!MglaAiLimits.canSendCloudRequest(model)) {
+                        throw new Exception("Дневной лимит Ultra-моделей исчерпан (20/день). Выберите модель без ★.");
                     }
                     MglaAiLimits.ModelBudget budget = MglaAiLimits.budgetFor(model);
                     int capped = Math.min(Math.max(32, maxTokens), budget.outputTokens);
@@ -273,7 +284,7 @@ public final class MglaAiChatService {
         ArrayList<ModelInfo> out = new ArrayList<>();
         for (String m : FALLBACK_MODELS) {
             String status = m.contains("lightning") ? STATUS_DEGRADED : STATUS_UP;
-            out.add(new ModelInfo(m, status));
+            out.add(new ModelInfo(m, status, false, MglaSubscription.PLAN_FREE));
         }
         return out;
     }
@@ -301,7 +312,7 @@ public final class MglaAiChatService {
         }
         try {
             JSONArray arr = new JSONArray(raw);
-            ArrayList<ModelInfo> out = parseModelsArray(arr);
+            ArrayList<ModelInfo> out = parseModelsArray(arr, false, "");
             return out.isEmpty() ? null : out;
         } catch (Throwable ignore) {
             return null;
@@ -323,6 +334,8 @@ public final class MglaAiChatService {
                 o.put("id", m.id);
                 o.put("status", m.status);
                 o.put("available", m.available);
+                o.put("ultra", m.ultra);
+                o.put("plan", m.sourcePlan);
                 arr.put(o);
             } catch (Throwable ignore) {
                 arr.put(m.id);
@@ -349,25 +362,46 @@ public final class MglaAiChatService {
             throw new Exception("Хаба моделей: HTTP " + response.code);
         }
         JSONObject json = new JSONObject(response.body);
-        JSONArray arr = null;
         JSONObject plans = json.optJSONObject("plans");
-        if (plans != null) {
-            JSONObject entry = plans.optJSONObject(plan);
-            if (entry != null) {
-                arr = entry.optJSONArray("models");
+        ArrayList<ModelInfo> out;
+        if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(plan) && plans != null) {
+            // Ultra sees Ultra ★ first, then Plus, then Free (deduped).
+            out = new ArrayList<>();
+            java.util.HashSet<String> seen = new java.util.HashSet<>();
+            appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_ULTRA, true);
+            appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS, false);
+            appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE, false);
+        } else {
+            JSONArray arr = null;
+            if (plans != null) {
+                JSONObject entry = plans.optJSONObject(plan);
+                if (entry != null) {
+                    arr = entry.optJSONArray("models");
+                }
             }
+            if (arr == null || arr.length() == 0) {
+                arr = json.optJSONArray("models");
+            }
+            out = parseModelsArray(arr, false, plan);
         }
-        if (arr == null || arr.length() == 0) {
-            arr = json.optJSONArray("models");
-        }
-        if (arr == null || arr.length() == 0) {
-            return null;
-        }
-        ArrayList<ModelInfo> out = parseModelsArray(arr);
-        return out.isEmpty() ? null : out;
+        return out == null || out.isEmpty() ? null : out;
     }
 
-    private static ArrayList<ModelInfo> parseModelsArray(JSONArray arr) {
+    private static void appendPlanModels(ArrayList<ModelInfo> out, java.util.HashSet<String> seen,
+                                         JSONObject plans, String planId, boolean ultra) {
+        JSONObject entry = plans.optJSONObject(planId);
+        if (entry == null) {
+            return;
+        }
+        ArrayList<ModelInfo> chunk = parseModelsArray(entry.optJSONArray("models"), ultra, planId);
+        for (ModelInfo info : chunk) {
+            if (seen.add(info.id)) {
+                out.add(info);
+            }
+        }
+    }
+
+    private static ArrayList<ModelInfo> parseModelsArray(JSONArray arr, boolean ultra, String sourcePlan) {
         ArrayList<ModelInfo> out = new ArrayList<>();
         if (arr == null) {
             return out;
@@ -382,17 +416,19 @@ public final class MglaAiChatService {
                     if (TextUtils.isEmpty(status)) {
                         status = o.optBoolean("available", true) ? STATUS_UP : STATUS_DOWN;
                     }
-                    out.add(new ModelInfo(id, status));
+                    boolean isUltra = ultra || o.optBoolean("ultra", false);
+                    String plan = o.optString("plan", sourcePlan);
+                    out.add(new ModelInfo(id, status, isUltra, plan));
                 }
             } else if (item instanceof String) {
                 String id = ((String) item).trim();
                 if (!TextUtils.isEmpty(id)) {
-                    out.add(new ModelInfo(id, STATUS_UP));
+                    out.add(new ModelInfo(id, STATUS_UP, ultra, sourcePlan));
                 }
             } else {
                 String id = arr.optString(i, "").trim();
                 if (!TextUtils.isEmpty(id)) {
-                    out.add(new ModelInfo(id, STATUS_UP));
+                    out.add(new ModelInfo(id, STATUS_UP, ultra, sourcePlan));
                 }
             }
         }
@@ -452,7 +488,7 @@ public final class MglaAiChatService {
         } finally { conn.disconnect(); request.connection = null; }
         if (!request.isCancelled()) {
             reportModelSuccess(model);
-            MglaAiLimits.consumeCloudRequest();
+            MglaAiLimits.consumeCloudRequest(model);
             AndroidUtilities.runOnUIThread(callback::onComplete);
         }
     }
@@ -462,12 +498,18 @@ public final class MglaAiChatService {
         JSONObject body = new JSONObject();
         body.put("message", transcript);
         body.put("lang", "Russian");
-        String plan = MglaSubscription.openRouterPlanId();
+        // Ultra subscribers: send ultra so hub may fall back across all plans.
+        // Explicit Free/Plus pick: send that model's owning plan for the right API key.
+        String plan = resolveRequestPlan(model);
         if (!TextUtils.isEmpty(plan)) {
             body.put("plan", plan);
         }
         if (!TextUtils.isEmpty(model)) {
             body.put("model", model);
+        } else if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(MglaSubscription.getPlanId())
+                && MglaAiLimits.remainingToday() <= 0) {
+            // Auto with exhausted ★ quota — hub must skip Ultra catalog models.
+            body.put("exclude_ultra", true);
         }
         MglaHubHttp.Response response = MglaHubHttp.post(
                 "/mgla-ai/v1/chat",
@@ -486,6 +528,10 @@ public final class MglaAiChatService {
         if (TextUtils.isEmpty(text)) {
             throw new Exception("пустой ответ хаба");
         }
+        String usedModel = MglaHubHttp.extractJsonStringField(response.body, "model");
+        if (TextUtils.isEmpty(usedModel)) {
+            usedModel = model;
+        }
         long delay = 0;
         for (int i = 0; i < text.length(); i += 18) {
             final String part = text.substring(i, Math.min(text.length(), i + 18));
@@ -496,14 +542,38 @@ public final class MglaAiChatService {
             }, delay);
             delay += 18;
         }
-        reportModelSuccess(model);
-        MglaAiLimits.consumeCloudRequest();
+        reportModelSuccess(usedModel);
+        MglaAiLimits.consumeCloudRequest(usedModel);
         final long completeDelay = delay;
         AndroidUtilities.runOnUIThread(() -> {
             if (!request.isCancelled()) {
                 callback.onComplete();
             }
         }, completeDelay);
+    }
+
+    /** Plan bucket for hub key selection. */
+    private static String resolveRequestPlan(String model) {
+        if (MglaAiLimits.isUltraCatalogModel(model)) {
+            return MglaSubscription.PLAN_PREMIUM_ULTRA;
+        }
+        if (TextUtils.isEmpty(model)) {
+            // Auto: Ultra may try every tier; Plus stays on plus list.
+            return MglaSubscription.openRouterPlanId();
+        }
+        // Non-ultra explicit pick under Ultra sub → free/plus key via owning plan.
+        if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(MglaSubscription.getPlanId())) {
+            ArrayList<ModelInfo> cached = peekCachedOpenRouterModels();
+            if (cached != null) {
+                for (ModelInfo info : cached) {
+                    if (model.equals(info.id) && !TextUtils.isEmpty(info.sourcePlan)) {
+                        return info.sourcePlan;
+                    }
+                }
+            }
+            return MglaSubscription.PLAN_FREE;
+        }
+        return MglaSubscription.openRouterPlanId();
     }
 
     /** Build hub transcript and silently keep only the recent tail within the input budget. */

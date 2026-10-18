@@ -166,15 +166,16 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                         finishFragment();
                     }
                 } else if (id == MENU_QUOTA) {
-                    if (MglaAiLimits.hasDailyQuota()) {
+                    if (MglaAiLimits.hasDailyQuotaUi()) {
                         AndroidUtilities.runOnUIThread(() -> {
                             if (getParentActivity() == null) {
                                 return;
                             }
                             new AlertDialog.Builder(getParentActivity())
-                                    .setTitle("Лимит Ultra")
+                                    .setTitle("Лимит Ultra ★")
                                     .setMessage("Сегодня: " + MglaAiLimits.usedToday() + " из "
-                                            + MglaAiLimits.ULTRA_DAILY_REQUESTS + " облачных запросов.")
+                                            + MglaAiLimits.ULTRA_DAILY_REQUESTS
+                                            + " запросов к моделям ★.\nМодели без звёздочки без дневного лимита.")
                                     .setPositiveButton("OK", null)
                                     .show();
                         });
@@ -414,7 +415,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (quotaMenuItem == null) {
             return;
         }
-        if (!MglaAiLimits.hasDailyQuota()) {
+        if (!MglaAiLimits.hasDailyQuotaUi()) {
             quotaMenuItem.setVisibility(View.GONE);
             return;
         }
@@ -747,12 +748,13 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         }
         if (chat != null
                 && MglaAiChatService.PROVIDER_OPENROUTER.equals(chat.provider)
-                && !MglaAiLimits.canSendCloudRequest()) {
+                && !MglaAiLimits.canSendCloudRequest(chat.model)) {
             if (getParentActivity() != null) {
                 new AlertDialog.Builder(getParentActivity())
                         .setTitle("Лимит Ultra")
-                        .setMessage("Исчерпан дневной лимит: "
-                                + MglaAiLimits.ULTRA_DAILY_REQUESTS + " облачных запросов в сутки.")
+                        .setMessage("Исчерпан дневной лимит моделей ★: "
+                                + MglaAiLimits.ULTRA_DAILY_REQUESTS
+                                + " запросов в сутки. Модели без звёздочки доступны без лимита.")
                         .setPositiveButton("OK", null)
                         .show();
             }
@@ -986,6 +988,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             boolean current = chat != null && !TextUtils.isEmpty(chat.model) && chat.model.equals(info.id);
             labels[i + 1] = MglaAiChatService.statusDot(info.status)
                     + shortModel(info.id)
+                    + (info.ultra ? "  ★" : "")
                     + (current ? "  ✓" : "");
         }
         AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity())
@@ -1041,7 +1044,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         }
         String status = TextUtils.isEmpty(selectedModelStatus) ? "⚪  "
                 : MglaAiChatService.statusDot(selectedModelStatus);
-        provider.setText(status + shortModel(chat.model) + " ▾");
+        String star = MglaAiLimits.isUltraCatalogModel(chat.model) ? " ★" : "";
+        provider.setText(status + shortModel(chat.model) + star + " ▾");
     }
 
     private void updateSettingsMenuVisibility() {
