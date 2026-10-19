@@ -55,6 +55,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     public static final int PLAN_PREMIUM = 0;
     public static final int PLAN_PLUS = 1;
     public static final int PLAN_ULTRA = 2;
+    /** Bundle: open on a specific plan tab ({@link #PLAN_PREMIUM}..{@link #PLAN_ULTRA}). */
+    public static final String ARG_INITIAL_PLAN = "initial_plan";
 
     public static final int FEATURE_ANIMATIONS = 0;
     public static final int FEATURE_TASKS = 1;
@@ -134,6 +136,12 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         int activePlan = activePlan();
         if (activePlan >= PLAN_PREMIUM && activePlan <= PLAN_ULTRA) {
             selectedPlanIndex = activePlan;
+        }
+        if (getArguments() != null && getArguments().containsKey(ARG_INITIAL_PLAN)) {
+            int initial = getArguments().getInt(ARG_INITIAL_PLAN, -1);
+            if (initial >= PLAN_PREMIUM && initial <= PLAN_ULTRA) {
+                selectedPlanIndex = initial;
+            }
         }
 
         accentStrokePaint.setStyle(Paint.Style.STROKE);

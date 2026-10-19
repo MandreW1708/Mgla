@@ -66,13 +66,17 @@ CONNECT_TIMEOUT_ULTRA = 8.0
 WS_PING_INTERVAL = 25.0
 WS_PING_TIMEOUT = 45.0
 TCP_BUF = 512 * 1024
-TCP_BUF_ULTRA = 1024 * 1024
+TCP_BUF_ULTRA = 2 * 1024 * 1024
 MAX_WS_SIZE = 32 * 1024 * 1024
 # Soft capacity: standard clients share SOFT_CAP - ULTRA_RESERVED slots.
-# Ultra always accepted (best-effort QoS until a dedicated Ultra relay exists).
+# Ultra always accepted (best-effort QoS). On mglahub set MGLA_WS_ULTRA_ONLY=1
+# so this node is a dedicated Ultra path and never serves free/premium clients.
 SOFT_CAP = int(os.environ.get("MGLA_WS_SOFT_CAP", "220"))
 ULTRA_RESERVED = int(os.environ.get("MGLA_WS_ULTRA_RESERVED", "40"))
 STANDARD_WAIT_SEC = float(os.environ.get("MGLA_WS_STANDARD_WAIT_SEC", "6"))
+ULTRA_ONLY = os.environ.get("MGLA_WS_ULTRA_ONLY", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
 
 _slot_lock: Optional[asyncio.Lock] = None
 _active_standard = 0
@@ -453,7 +457,14 @@ async def pipe_tcp_to_ws(reader: asyncio.StreamReader, ws, received: list, ultra
 
 async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str, ultra: bool = False) -> bool:
     """Re-encrypt the telegram-facing stream onto local MTProxy. Returns False to fall back."""
-    if Cipher is None or len(MTPROXY_SECRET) != 16 or len(first) < 64:
+    if Cipher is None:
+        LOG.warning("%s mtproxy skip: cryptography not installed", peer)
+        return False
+    if len(MTPROXY_SECRET) != 16:
+        LOG.warning("%s mtproxy skip: secret missing/invalid (len=%s)", peer, len(MTPROXY_SECRET))
+        return False
+    if len(first) < 64:
+        LOG.warning("%s mtproxy skip: init packet too short (%s)", peer, len(first))
         return False
     sniffed = dc_index_from_init(first)
     if sniffed is None:
@@ -610,6 +621,10 @@ async def handler(ws):
         LOG.warning("%s missing X-Mgla-Client path=%s (allowing valid token)", peer, path)
 
     plan, ultra = parse_priority(headers)
+    if ULTRA_ONLY and not ultra:
+        LOG.info("%s reject ultra-only plan=%s path=%s", peer, plan, path)
+        await ws.close(code=1008, reason="ultra only")
+        return
 
     dc = resolve_dc(path)
     if dc is None:
@@ -707,10 +722,12 @@ async def main() -> None:
     else:
         LOG.warning("MGLA_WEB_PROXY_SECRET missing — media falls back to kws/raw")
     LOG.info(
-        "qos soft_cap=%s ultra_reserved=%s standard_wait=%.1fs (X-Mgla-Plan / X-Mgla-Priority)",
+        "qos soft_cap=%s ultra_reserved=%s standard_wait=%.1fs ultra_only=%s "
+        "(X-Mgla-Plan / X-Mgla-Priority)",
         SOFT_CAP,
         ULTRA_RESERVED,
         STANDARD_WAIT_SEC,
+        int(ULTRA_ONLY),
     )
 
     async with websockets.serve(

@@ -51,10 +51,17 @@ public final class MglaWsBypass {
     /** Сколько подряд тиков монитора должны видеть stall после порога. */
     private static final int STALL_CONFIRM_TICKS = 2;
     private static final int STALL_CONFIRM_TICKS_ULTRA = 3;
+    /**
+     * How often to measure relay handshake RTT while auto-bypass is on.
+     * 30 min: cheap enough (one TLS+WS open/close) but fresh for the settings UI.
+     */
+    private static final long PING_INTERVAL_MS = 30 * 60_000L;
+    private static final long PING_TIMEOUT_MS = 8_000L;
 
     private boolean bypassPriority() {
         try {
-            return MglaSubscription.hasBypassPriority();
+            // Dedicated Ultra path always gets max stickiness / faster WEB→WS return.
+            return MglaWsConfig.isUltraBypassEnabled() || MglaSubscription.hasBypassPriority();
         } catch (Throwable ignored) {
             return false;
         }
@@ -86,6 +93,12 @@ public final class MglaWsBypass {
     private DispatchQueue monitorQueue;
     private boolean monitorScheduled;
     private final Runnable monitorRunnable = this::monitorTick;
+
+    /** Last successful relay RTT in ms; {@code -1} if never measured / last attempt failed. */
+    private volatile long lastPingMs = -1L;
+    private volatile long lastPingAtElapsed;
+    private volatile boolean pingInFlight;
+    private volatile String lastPingHost = "";
 
     private MglaWsBypass() {
     }
@@ -155,6 +168,7 @@ public final class MglaWsBypass {
             sessionStartElapsed = SystemClock.elapsedRealtime();
             lastError = null;
             scheduleMonitor();
+            requestPing(true);
         } else {
             MglaBypassVpnGuard.noteUserDisabled(MglaBypassVpnGuard.MODE_WS);
             if (proxyApplied) {
@@ -261,6 +275,58 @@ public final class MglaWsBypass {
         notifyChanged();
     }
 
+    /**
+     * After Ultra-обход host switch (mglabot ↔ mglahub): hot-reconnect upstream
+     * without tearing down the local MTProto listener (keeps Telegram port stable).
+     */
+    public synchronized void onRelayHostChanged() {
+        if (!MglaWsConfig.isEnabled() || !proxyApplied) {
+            notifyChanged();
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            notifyChanged();
+            return;
+        }
+        FileLog.d("MglaWsBypass: relay host changed -> " + MglaWsConfig.getRelayHost());
+        invalidatePing();
+        // Prefer hot reconnect: same local port, drop only upstream bridges.
+        if (isServerRunning()) {
+            WsBypassCore.getInstance().reconnectUpstream();
+        } else {
+            String err = startEngine();
+            if (err != null) {
+                lastError = err;
+                FileLog.e("MglaWsBypass: reconnect after host change failed: " + err);
+                notifyChanged();
+                return;
+            }
+        }
+        // Force WS route and clear switch cooldown so we don't sit on WEB after a host flip.
+        long now = SystemClock.elapsedRealtime();
+        route = Route.WS;
+        routeSinceElapsed = now;
+        lastConnectedElapsed = now;
+        lastWsProbeElapsed = now;
+        lastSwitchElapsed = 0;
+        stallConfirmTicks = 0;
+        writeBypassToMainConfig();
+        replaceBypassProxyInList();
+        ConnectionsManager.setProxySettings(true, buildActiveSettings());
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            try {
+                if (UserConfig.getInstance(a).isClientActivated()) {
+                    ConnectionsManager.getInstance(a).checkConnection();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        lastError = null;
+        scheduleMonitor();
+        requestPing(true);
+        notifyChanged();
+    }
+
     public Route getRoute() {
         return route;
     }
@@ -329,12 +395,93 @@ public final class MglaWsBypass {
         }
         try {
             checkRoute();
+            maybeRefreshPing();
         } catch (Throwable e) {
             FileLog.e(e);
         }
         if (proxyApplied) {
             scheduleMonitor();
         }
+    }
+
+    private void invalidatePing() {
+        lastPingMs = -1L;
+        lastPingAtElapsed = 0;
+        lastPingHost = "";
+    }
+
+    /** Schedule a ping if stale (or never measured). Safe to call from UI. */
+    public void maybeRefreshPing() {
+        if (!MglaWsConfig.isRelayConfigured()) {
+            return;
+        }
+        String host = MglaWsConfig.getRelayHost();
+        long now = SystemClock.elapsedRealtime();
+        if (lastPingAtElapsed > 0
+                && host != null && host.equalsIgnoreCase(lastPingHost)
+                && now - lastPingAtElapsed < PING_INTERVAL_MS) {
+            return;
+        }
+        requestPing(false);
+    }
+
+    /** Force or soft-schedule a background relay RTT measurement. */
+    public void requestPing(boolean force) {
+        if (!MglaWsConfig.isRelayConfigured()) {
+            return;
+        }
+        if (force) {
+            lastPingAtElapsed = 0;
+        }
+        if (pingInFlight) {
+            return;
+        }
+        if (monitorQueue == null) {
+            monitorQueue = new DispatchQueue("mglaAutoBypass");
+        }
+        pingInFlight = true;
+        notifyChanged();
+        monitorQueue.postRunnable(() -> {
+            long rtt = -1L;
+            String host = "";
+            try {
+                host = MglaWsConfig.getRelayHost();
+                rtt = WsBypassCore.getInstance().probeRelayRttMs(PING_TIMEOUT_MS);
+            } catch (Throwable e) {
+                FileLog.e(e);
+            } finally {
+                long now = SystemClock.elapsedRealtime();
+                lastPingMs = rtt;
+                lastPingHost = host == null ? "" : host;
+                // Success: next auto-sample in 30 min. Failure: retry in 5 min.
+                lastPingAtElapsed = rtt >= 0 ? now : now - (PING_INTERVAL_MS - 5 * 60_000L);
+                pingInFlight = false;
+                notifyChanged();
+            }
+        });
+    }
+
+    /** {@code -1} if unknown / last probe failed. */
+    public long getLastPingMs() {
+        return lastPingMs;
+    }
+
+    public boolean isPingInFlight() {
+        return pingInFlight;
+    }
+
+    public String getPingText() {
+        if (pingInFlight && lastPingMs < 0) {
+            return "…";
+        }
+        if (lastPingMs < 0) {
+            return "—";
+        }
+        String text = lastPingMs + " мс";
+        if (pingInFlight) {
+            text += "…";
+        }
+        return text;
     }
 
     private void checkRoute() {

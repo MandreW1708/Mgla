@@ -61,13 +61,17 @@ public final class WsBypassCore {
 
     private static final long WS_ROUTE_DEADLINE_MS = 18_000L;
     private static final long RELAY_ATTEMPT_MS = 12_000L;
-    private static final long RELAY_ATTEMPT_ULTRA_MS = 18_000L;
+    /** Soft Ultra QoS on shared relay / dedicated Ultra path. */
+    private static final long RELAY_ATTEMPT_ULTRA_MS = 14_000L;
     private static final long FAIL_BACKOFF_MS = 3_000L;
     private static final int FAILS_BEFORE_BACKOFF = 2;
     private static final int MAX_DIRECT_ATTEMPTS = 6;
     private static final int SOCK_RCVBUF = 256 * 1024;
     private static final int SOCK_SNDBUF = 512 * 1024;
+    private static final int SOCK_RCVBUF_ULTRA = 512 * 1024;
+    private static final int SOCK_SNDBUF_ULTRA = 1024 * 1024;
     private static final int RECV_CHUNK = 64 * 1024;
+    private static final int RECV_CHUNK_ULTRA = 128 * 1024;
     private static final int ACCEPT_TIMEOUT_MS = 1_000;
     private static final int HANDSHAKE_READ_TIMEOUT_MS = 10_000;
     private static final int LISTEN_BACKLOG = 64;
@@ -193,13 +197,11 @@ public final class WsBypassCore {
 
                 lastUpstreamOkAtMs = 0L;
                 lastUpstreamFailAtMs = 0L;
-                synchronized (failLock) {
-                    failUntilMs.clear();
-                    failStreak.clear();
-                }
+                clearFailState();
                 running = true;
-                final long generation = nextBridgeGeneration();
-                Thread accept = new Thread(() -> acceptLoop(generation), "mgla-ws-accept");
+                nextBridgeGeneration();
+                // Accept loop must survive generation bumps (Ultra ↔ normal host switch).
+                Thread accept = new Thread(this::acceptLoop, "mgla-ws-accept");
                 accept.setDaemon(true);
                 acceptThread = accept;
                 accept.start();
@@ -220,6 +222,32 @@ public final class WsBypassCore {
     public void stop() {
         synchronized (lifecycleLock) {
             stopLocked();
+        }
+    }
+
+    /**
+     * Hot-switch upstream relay host without tearing down the local MTProto listener.
+     * Drops live bridges so Telegram reconnects through the new host immediately.
+     */
+    public void reconnectUpstream() {
+        synchronized (lifecycleLock) {
+            if (!running) {
+                return;
+            }
+            clearFailState();
+            lastUpstreamOkAtMs = 0L;
+            lastUpstreamFailAtMs = 0L;
+            invalidateBridgeGeneration();
+            closeAllTracked();
+            FileLog.d("MglaWsBypass: upstream reconnect (host=" + MglaWsConfig.getRelayHost() + ")");
+        }
+    }
+
+    private void clearFailState() {
+        synchronized (failLock) {
+            failUntilMs.clear();
+            failStreak.clear();
+            preferredDomain.clear();
         }
     }
 
@@ -267,8 +295,10 @@ public final class WsBypassCore {
         port = 0;
     }
 
-    private void acceptLoop(long generation) {
-        while (running && isBridgeGenerationCurrent(generation)) {
+    private void acceptLoop() {
+        // Keep accepting while running. Bridge generation only invalidates in-flight
+        // bridges (e.g. Ultra↔normal host switch) — never kills this loop.
+        while (running) {
             ServerSocket srv = listener;
             if (srv == null) {
                 break;
@@ -280,14 +310,12 @@ public final class WsBypassCore {
                 } catch (SocketTimeoutException e) {
                     continue;
                 }
-                if (!isBridgeGenerationCurrent(generation)) {
-                    closeQuietly(conn);
-                    break;
-                }
+                final long generation = currentBridgeGeneration();
+                boolean ultraPath = MglaWsConfig.isUltraBypassEnabled();
                 try {
                     conn.setTcpNoDelay(true);
-                    conn.setReceiveBufferSize(SOCK_RCVBUF);
-                    conn.setSendBufferSize(SOCK_SNDBUF);
+                    conn.setReceiveBufferSize(ultraPath ? SOCK_RCVBUF_ULTRA : SOCK_RCVBUF);
+                    conn.setSendBufferSize(ultraPath ? SOCK_SNDBUF_ULTRA : SOCK_SNDBUF);
                 } catch (Throwable ignored) {
                 }
                 if (!trackIfGenerationCurrent(conn, generation)) {
@@ -449,19 +477,23 @@ public final class WsBypassCore {
         if (bypassPlan != null && !bypassPlan.isEmpty()) {
             headers.put("X-Mgla-Plan", bypassPlan);
         }
-        boolean priority = MglaSubscription.hasBypassPriority();
+        boolean ultraPath = MglaWsConfig.isUltraBypassEnabled();
+        boolean priority = ultraPath || MglaSubscription.hasBypassPriority();
         if (priority) {
             headers.put("X-Mgla-Priority", "1");
         }
+        if (ultraPath) {
+            // Force Ultra plan on dedicated hub (rejects non-ultra).
+            headers.put("X-Mgla-Plan", MglaSubscription.PLAN_PREMIUM_ULTRA);
+        }
         dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : "")
-            + " plan=" + bypassPlan + (priority ? " prio" : ""));
+            + " plan=" + bypassPlan + (ultraPath ? " ultra-path" : (priority ? " prio" : "")));
+        // Ultra (shared QoS or dedicated hub path): longer budget for stable media bridges.
         long attemptMs = priority ? RELAY_ATTEMPT_ULTRA_MS : RELAY_ATTEMPT_MS;
         long attemptDeadline = Math.min(deadlineNanos,
             System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(attemptMs));
-        // Pin only the known default host; custom hosts rely on system CAs + hostname verify.
-        String[] pins = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)
-            ? new String[]{MglaWsConfig.RELAY_SPKI_SHA256_BASE64}
-            : null;
+        // Pin known relay/hub hosts; custom hosts rely on system CAs + hostname verify.
+        String[] pins = MglaWsConfig.getRelaySpkiPins(host);
         RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
             () -> isBridgeGenerationCurrent(generation), pins);
         dbg("101 OK via relay " + host);
@@ -470,14 +502,24 @@ public final class WsBypassCore {
 
     /** Blocking check that the relay accepts a WebSocket upgrade; does not touch running bridges. */
     public boolean probeRelay(long timeoutMs) {
+        return probeRelayRttMs(timeoutMs) >= 0;
+    }
+
+    /**
+     * One-shot TLS+WS handshake RTT to the active relay host.
+     * @return milliseconds on success, or {@code -1} on failure.
+     */
+    public long probeRelayRttMs(long timeoutMs) {
         RawWebSocket ws = null;
+        long t0 = System.nanoTime();
         try {
             ws = connectRelay(2, false,
                 System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs), currentBridgeGeneration());
-            return true;
+            long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+            return Math.max(1L, ms);
         } catch (Throwable e) {
             dbg("relay probe failed: " + e.getMessage());
-            return false;
+            return -1L;
         } finally {
             if (ws != null) {
                 try {
@@ -570,10 +612,11 @@ public final class WsBypassCore {
             AtomicBoolean done = new AtomicBoolean(false);
             int connId = CONN_SEQ.incrementAndGet();
 
+            final int chunkSize = MglaWsConfig.isUltraBypassEnabled() ? RECV_CHUNK_ULTRA : RECV_CHUNK;
             Thread up = new Thread(() -> {
                 try {
                     InputStream in = client.getInputStream();
-                    byte[] buf = new byte[RECV_CHUNK];
+                    byte[] buf = new byte[chunkSize];
                     while (!done.get()) {
                         int n = in.read(buf);
                         if (n <= 0) {

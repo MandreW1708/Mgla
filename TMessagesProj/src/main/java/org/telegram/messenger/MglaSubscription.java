@@ -99,12 +99,32 @@ public final class MglaSubscription {
                 if (unlockedAi) {
                     MglaMainTabsConfig.ensureAiTabIncluded();
                 }
+                enforceUltraBypassEligibility();
                 NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.mglaMainTabsChanged);
             } catch (Throwable e) {
                 FileLog.e(e);
             }
         });
+    }
+
+    /**
+     * Ultra-обход is install-wide: turn it off and reconnect to the standard
+     * relay when no account still has Ultra.
+     */
+    public static void enforceUltraBypassEligibility() {
+        try {
+            if (hasUltraOnAnyAccount()) {
+                return;
+            }
+            if (!org.telegram.utils.wsbypass.MglaWsConfig.isUltraBypassPrefEnabled()) {
+                return;
+            }
+            org.telegram.utils.wsbypass.MglaWsConfig.setUltraBypassEnabled(false);
+            org.telegram.utils.wsbypass.MglaWsBypass.getInstance().onRelayHostChanged();
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
     }
 
     /**

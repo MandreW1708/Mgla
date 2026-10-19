@@ -3,10 +3,17 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ImageSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -16,6 +23,7 @@ import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaFeatureFlags;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -31,6 +39,7 @@ import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.dpi.MglaDpiConfig;
 import org.telegram.utils.dpi.MglaDpiStrategies;
 import org.telegram.utils.wsbypass.MglaWsBypass;
+import org.telegram.utils.wsbypass.MglaWsConfig;
 import org.telegram.utils.wsbypass.WsBypassCore;
 
 /**
@@ -42,9 +51,11 @@ import org.telegram.utils.wsbypass.WsBypassCore;
 public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private TextCheckCell wsMasterCell;
+    private TextCheckCell wsUltraCell;
     private TextView wsStatusValue;
     private TextSettingsCell wsTelegramCell;
     private TextSettingsCell wsProxyCell;
+    private TextSettingsCell wsPingCell;
     private TextSettingsCell wsUptimeCell;
 
     private TextCheckCell dpiMasterCell;
@@ -133,7 +144,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
 
         wsMasterCell = new TextCheckCell(context);
         wsMasterCell.setBackground(null);
-        wsMasterCell.setTextAndCheck("Авто-обход", MglaWsBypass.getInstance().isEnabled(), false);
+        wsMasterCell.setTextAndCheck("Авто-обход", MglaWsBypass.getInstance().isEnabled(), true);
         wsMasterCell.setOnClickListener(v -> {
             boolean newVal = !wsMasterCell.isChecked();
             if (newVal && !MglaFeatureFlags.isAllowed("ws_enabled")) {
@@ -145,9 +156,54 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             if (!mgr.setEnabled(newVal) && newVal) {
                 showError("Не удалось включить авто-обход", mgr.getLastError());
             }
+            if (!newVal && MglaWsConfig.isUltraBypassPrefEnabled()) {
+                MglaWsConfig.setUltraBypassEnabled(false);
+            }
             refreshDynamic();
         });
         wsBlock.addView(wsMasterCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        wsBlock.addView(MglaUi.createDivider(context));
+
+        wsUltraCell = new TextCheckCell(context);
+        wsUltraCell.setBackground(null);
+        wsUltraCell.setTextAndCheck(ultraBypassLabel(context), MglaWsConfig.isUltraBypassEnabled(), false);
+        wsUltraCell.setOnClickListener(v -> {
+            if (!MglaSubscription.hasUltraOnAnyAccount()) {
+                wsUltraCell.setChecked(false);
+                BulletinFactory.of(this).createSimpleBulletin(
+                    R.raw.star_premium_2,
+                    "Ultra-обход доступен только с подпиской Ultra",
+                    "Оформить",
+                    () -> {
+                        Bundle args = new Bundle();
+                        args.putInt(MglaPremiumActivity.ARG_INITIAL_PLAN, MglaPremiumActivity.PLAN_ULTRA);
+                        presentFragment(new MglaPremiumActivity(args));
+                    }
+                ).show();
+                return;
+            }
+            boolean newVal = !wsUltraCell.isChecked();
+            MglaWsConfig.setUltraBypassEnabled(newVal);
+            MglaWsBypass mgr = MglaWsBypass.getInstance();
+            if (newVal && !mgr.isEnabled()) {
+                if (!MglaFeatureFlags.isAllowed("ws_enabled")) {
+                    MglaWsConfig.setUltraBypassEnabled(false);
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
+                    refreshDynamic();
+                    return;
+                }
+                if (!mgr.setEnabled(true)) {
+                    MglaWsConfig.setUltraBypassEnabled(false);
+                    showError("Не удалось включить Ultra-обход", mgr.getLastError());
+                    refreshDynamic();
+                    return;
+                }
+            } else if (mgr.isEnabled()) {
+                mgr.onRelayHostChanged();
+            }
+            refreshDynamic();
+        });
+        wsBlock.addView(wsUltraCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         wsBlock.addView(MglaUi.createDivider(context));
         wsBlock.addView(createStatusRow(context, status -> wsStatusValue = status),
             LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -156,10 +212,20 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         wsBlock.addView(MglaUi.createDivider(context));
         wsProxyCell = createStatCell(context, wsBlock, "Маршрут");
         wsBlock.addView(MglaUi.createDivider(context));
+        wsPingCell = createStatCell(context, wsBlock, "Пинг");
+        wsPingCell.setOnClickListener(v -> {
+            if (!MglaWsConfig.isRelayConfigured()) {
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Релей не настроен").show();
+                return;
+            }
+            MglaWsBypass.getInstance().requestPing(true);
+            refreshDynamic();
+        });
+        wsBlock.addView(MglaUi.createDivider(context));
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
         TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Основной маршрут — WebSocket-релей. Если он не подключается, обход сам переходит на резервный WEB proxy и периодически пробует вернуться на основной. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
+        wsInfo.setText("Основной маршрут — WebSocket-релей. Ultra-обход направляет трафик на выделенный сервер только для подписчиков Ultra. Пинг обновляется раз в 30 мин (нажмите чтобы обновить). Если релей не подключается, обход сам переходит на резервный WEB proxy. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
         rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
@@ -338,10 +404,25 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         return cell;
     }
 
+    private static CharSequence ultraBypassLabel(Context context) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  Ultra-обход");
+        Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+            Theme.getColor(Theme.key_premiumGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
+    }
+
     private void refreshDynamic() {
         MglaWsBypass ws = MglaWsBypass.getInstance();
         if (wsMasterCell != null) {
             wsMasterCell.setChecked(ws.isEnabled());
+        }
+        if (wsUltraCell != null) {
+            boolean ultraOn = MglaWsConfig.isUltraBypassEnabled();
+            wsUltraCell.setTextAndCheck(ultraBypassLabel(wsUltraCell.getContext()), ultraOn, false);
         }
         if (wsStatusValue != null) {
             wsStatusValue.setText(ws.getStatusText());
@@ -355,11 +436,18 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
                 routeText = "—";
             } else if (ws.getRoute() == MglaWsBypass.Route.WEB) {
                 routeText = "WEB proxy (резерв)";
+            } else if (MglaWsConfig.isUltraBypassEnabled()) {
+                routeText = "Ultra · " + MglaWsConfig.getRelayHost();
             } else {
                 routeText = ws.isServerRunning() && ws.getPort() > 0
                     ? "WS · " + WsBypassCore.LOCAL_PROXY_HOST + ":" + ws.getPort() : "WS";
             }
             wsProxyCell.setValue(routeText, false);
+        }
+        if (wsPingCell != null) {
+            wsPingCell.setValue(ws.getPingText(), false);
+            // Soft refresh when opening/viewing the screen if the sample is stale.
+            ws.maybeRefreshPing();
         }
         if (wsUptimeCell != null) {
             wsUptimeCell.setValue(formatUptime(ws.getUptimeSeconds()), false);

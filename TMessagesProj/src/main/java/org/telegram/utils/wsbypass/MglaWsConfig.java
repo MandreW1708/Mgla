@@ -11,8 +11,8 @@ import org.telegram.messenger.BuildConfig;
  * Настройки WS-обхода и хаба (статистика).
  * <p>
  * Обход: {@link #getRelayHost()} → обычно {@code mglabot.mooo.com} ({@code /apiws}).
- * Статистика: напрямую {@link #getHubHost()} → {@code mglahub.mooo.com} ({@code /mgla-stats/}),
- * либо через релей {@code /mgla-ai/v1/stats-batch}, если обход включён.
+ * Ultra-обход: тот же path на {@link #getHubHost()} ({@code mglahub.mooo.com}), только для Ultra.
+ * Статистика: напрямую хаб ({@code /mgla-stats/}), либо через релей {@code /mgla-ai/v1/stats-batch}.
  * Хосты/токены — из {@code BuildConfig} / {@code local.properties}, prefs могут переопределить.
  */
 public final class MglaWsConfig {
@@ -34,6 +34,7 @@ public final class MglaWsConfig {
     public static final String HUB_SPKI_SHA256_BASE64 = "whkC3sYvKrHQgAVj2Xx2/QfBEH9DHCEPyyOw5sqI/3E=";
 
     private static final String PREF_ENABLED = "ws_enabled";
+    private static final String PREF_ULTRA_BYPASS = "ws_ultra_bypass";
     private static final String PREF_PORT = "ws_port";
     private static final String PREF_SECRET = "ws_secret";
     private static final String PREF_RELAY_HOST = "ws_relay_host";
@@ -67,6 +68,34 @@ public final class MglaWsConfig {
         getPrefs().edit().putBoolean(PREF_ENABLED, enabled).apply();
     }
 
+    /**
+     * Raw Ultra-обход preference (ignores subscription). Prefer {@link #isUltraBypassEnabled()}.
+     */
+    public static boolean isUltraBypassPrefEnabled() {
+        return getPrefs().getBoolean(PREF_ULTRA_BYPASS, false);
+    }
+
+    /**
+     * Ultra path via mglahub: preference on and at least one account has Ultra.
+     * Clears the preference automatically when Ultra is gone.
+     */
+    public static boolean isUltraBypassEnabled() {
+        if (!org.telegram.messenger.MglaSubscription.hasUltraOnAnyAccount()) {
+            if (isUltraBypassPrefEnabled()) {
+                getPrefs().edit().putBoolean(PREF_ULTRA_BYPASS, false).apply();
+            }
+            return false;
+        }
+        return isUltraBypassPrefEnabled();
+    }
+
+    public static void setUltraBypassEnabled(boolean enabled) {
+        if (enabled && !org.telegram.messenger.MglaSubscription.hasUltraOnAnyAccount()) {
+            enabled = false;
+        }
+        getPrefs().edit().putBoolean(PREF_ULTRA_BYPASS, enabled).apply();
+    }
+
     public static int getPort() {
         return getPrefs().getInt(PREF_PORT, 0);
     }
@@ -93,12 +122,31 @@ public final class MglaWsConfig {
     }
 
     public static String getRelayHost() {
+        if (isUltraBypassEnabled()) {
+            return getHubHost();
+        }
         String override = getPrefs().getString(PREF_RELAY_HOST, null);
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
         }
         String fromBuild = BuildConfig.MGLA_WS_RELAY_HOST;
         return TextUtils.isEmpty(fromBuild) ? DEFAULT_RELAY_HOST : fromBuild.trim();
+    }
+
+    /** TLS pin for the host returned by {@link #getRelayHost()}, or null for system CAs. */
+    public static String[] getRelaySpkiPins(String host) {
+        if (TextUtils.isEmpty(host)) {
+            return null;
+        }
+        if (DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
+            return new String[]{RELAY_SPKI_SHA256_BASE64};
+        }
+        String hub = getHubHost();
+        if (DEFAULT_HUB_HOST.equalsIgnoreCase(host)
+                || (!TextUtils.isEmpty(hub) && hub.equalsIgnoreCase(host))) {
+            return new String[]{HUB_SPKI_SHA256_BASE64};
+        }
+        return null;
     }
 
     public static void setRelayHost(String host) {
