@@ -64,6 +64,8 @@ public final class WsBypassCore {
     /** Soft Ultra QoS on shared relay / dedicated Ultra path. */
     private static final long RELAY_ATTEMPT_ULTRA_MS = 14_000L;
     private static final long FAIL_BACKOFF_MS = 3_000L;
+    /** Ultra path: shorter shared backoff so one account's blip doesn't stall the others. */
+    private static final long FAIL_BACKOFF_ULTRA_MS = 1_200L;
     private static final int FAILS_BEFORE_BACKOFF = 2;
     private static final int MAX_DIRECT_ATTEMPTS = 6;
     private static final int SOCK_RCVBUF = 256 * 1024;
@@ -739,7 +741,9 @@ public final class WsBypassCore {
             int streak = (prev == null ? 0 : prev) + 1;
             failStreak.put(dcKey, streak);
             if (streak >= FAILS_BEFORE_BACKOFF) {
-                failUntilMs.put(dcKey, SystemClock.elapsedRealtime() + FAIL_BACKOFF_MS);
+                long backoff = MglaWsConfig.isUltraBypassEnabled()
+                    ? FAIL_BACKOFF_ULTRA_MS : FAIL_BACKOFF_MS;
+                failUntilMs.put(dcKey, SystemClock.elapsedRealtime() + backoff);
             }
         }
     }

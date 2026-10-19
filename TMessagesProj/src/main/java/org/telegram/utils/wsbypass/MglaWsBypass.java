@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 import android.os.SystemClock;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.DispatchQueue;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
@@ -57,6 +58,13 @@ public final class MglaWsBypass {
      */
     private static final long PING_INTERVAL_MS = 30 * 60_000L;
     private static final long PING_TIMEOUT_MS = 8_000L;
+    /**
+     * How often to poke accounts stuck in Connecting while another account is already online.
+     * Without this, {@link #bestConnectionState()} hides secondary-account stalls.
+     * Non-selected accounts often sit in native {@code networkPaused} after switch —
+     * {@link ConnectionsManager#checkConnection()} alone does not wake them.
+     */
+    private static final long ACCOUNT_NUDGE_INTERVAL_MS = 8_000L;
 
     private boolean bypassPriority() {
         try {
@@ -74,7 +82,33 @@ public final class MglaWsBypass {
     }
 
     public static void initOnAppStart() {
-        getInstance().startOnAppLaunch();
+        MglaWsBypass inst = getInstance();
+        inst.startOnAppLaunch();
+        inst.registerAccountObserver();
+    }
+
+    private boolean accountObserverRegistered;
+
+    private void registerAccountObserver() {
+        if (accountObserverRegistered) {
+            return;
+        }
+        accountObserverRegistered = true;
+        try {
+            NotificationCenter.getGlobalInstance().addObserver((id, account, args) -> {
+                if (id != NotificationCenter.activeAccountChanged) {
+                    return;
+                }
+                if (!MglaWsConfig.isEnabled() || !proxyApplied) {
+                    return;
+                }
+                // Spare account just became selected — full wake through bypass.
+                wakeAllAccounts();
+            }, NotificationCenter.activeAccountChanged);
+        } catch (Throwable e) {
+            FileLog.e(e);
+            accountObserverRegistered = false;
+        }
     }
 
     private volatile boolean proxyApplied;
@@ -99,6 +133,7 @@ public final class MglaWsBypass {
     private volatile long lastPingAtElapsed;
     private volatile boolean pingInFlight;
     private volatile String lastPingHost = "";
+    private volatile long lastAccountNudgeElapsed;
 
     private MglaWsBypass() {
     }
@@ -126,6 +161,8 @@ public final class MglaWsBypass {
         resetRoute();
         writeBypassToMainConfig();
         addBypassProxyToList();
+        ConnectionsManager.setProxySettings(true, buildActiveSettings());
+        wakeAllAccounts();
         proxyApplied = true;
         sessionStartElapsed = SystemClock.elapsedRealtime();
         scheduleMonitor();
@@ -151,6 +188,8 @@ public final class MglaWsBypass {
                 return true;
             }
             if (proxyApplied && isServerRunning()) {
+                // Already on — still wake every account (multi-account cold connect).
+                wakeAllAccounts();
                 notifyChanged();
                 return true;
             }
@@ -164,6 +203,7 @@ public final class MglaWsBypass {
             writeBypassToMainConfig();
             addBypassProxyToList();
             ConnectionsManager.setProxySettings(true, buildActiveSettings());
+            wakeAllAccounts();
             proxyApplied = true;
             sessionStartElapsed = SystemClock.elapsedRealtime();
             lastError = null;
@@ -212,6 +252,7 @@ public final class MglaWsBypass {
             return;
         }
         if (proxyApplied && isServerRunning()) {
+            wakeAllAccounts();
             notifyChanged();
             return;
         }
@@ -233,6 +274,7 @@ public final class MglaWsBypass {
         writeBypassToMainConfig();
         addBypassProxyToList();
         ConnectionsManager.setProxySettings(true, buildActiveSettings());
+        wakeAllAccounts();
         proxyApplied = true;
         sessionStartElapsed = SystemClock.elapsedRealtime();
         lastError = null;
@@ -270,6 +312,7 @@ public final class MglaWsBypass {
             writeBypassToMainConfig();
             replaceBypassProxyInList();
             ConnectionsManager.setProxySettings(true, buildActiveSettings());
+            wakeAllAccounts();
         }
         scheduleMonitor();
         notifyChanged();
@@ -313,14 +356,7 @@ public final class MglaWsBypass {
         writeBypassToMainConfig();
         replaceBypassProxyInList();
         ConnectionsManager.setProxySettings(true, buildActiveSettings());
-        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-            try {
-                if (UserConfig.getInstance(a).isClientActivated()) {
-                    ConnectionsManager.getInstance(a).checkConnection();
-                }
-            } catch (Throwable ignored) {
-            }
-        }
+        wakeAllAccounts();
         lastError = null;
         scheduleMonitor();
         requestPing(true);
@@ -372,6 +408,7 @@ public final class MglaWsBypass {
         writeBypassToMainConfig();
         replaceBypassProxyInList();
         ConnectionsManager.setProxySettings(true, buildActiveSettings());
+        wakeAllAccounts();
         notifyChanged();
     }
 
@@ -395,12 +432,117 @@ public final class MglaWsBypass {
         }
         try {
             checkRoute();
+            nudgeStuckAccounts();
             maybeRefreshPing();
         } catch (Throwable e) {
             FileLog.e(e);
         }
         if (proxyApplied) {
             scheduleMonitor();
+        }
+    }
+
+    /**
+     * Wake one account through the bypass proxy.
+     * Must {@link ConnectionsManager#resumeNetworkMaybe()} first: after account switch
+     * Telegram parks non-selected accounts ({@code networkPaused}); checkConnection alone
+     * does not unpause, so the 3rd/spare account stays offline forever.
+     */
+    private void wakeAccount(int account) {
+        try {
+            if (!UserConfig.getInstance(account).isClientActivated()) {
+                return;
+            }
+            ConnectionsManager cm = ConnectionsManager.getInstance(account);
+            // Selected + UI visible: full resume (clears pause timeout).
+            if (account == UserConfig.selectedAccount && !ApplicationLoader.mainInterfacePaused) {
+                cm.setAppPaused(false, false);
+            } else {
+                // Background / spare: soft wake without fighting LaunchActivity pause counters.
+                cm.resumeNetworkMaybe();
+            }
+            cm.checkConnection();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Push resume + {@link ConnectionsManager#checkConnection()} to every activated account.
+     * Needed after proxy/host changes: native proxy is install-wide, but each account
+     * reconnects independently and secondary accounts often stay paused/Connecting.
+     */
+    private void wakeAllAccounts() {
+        lastAccountNudgeElapsed = SystemClock.elapsedRealtime();
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            wakeAccount(a);
+        }
+    }
+
+    private static boolean isStuckState(int state) {
+        return state == ConnectionsManager.ConnectionStateConnecting
+                || state == ConnectionsManager.ConnectionStateConnectingToProxy
+                || state == ConnectionsManager.ConnectionStateWaitingForNetwork;
+    }
+
+    /**
+     * Keep poking accounts that are not Connected — including spare ones that Telegram
+     * left in {@code networkPaused} after a switch. Without resumeNetworkMaybe they never
+     * open bridges through the local WS proxy.
+     */
+    private void nudgeStuckAccounts() {
+        long now = SystemClock.elapsedRealtime();
+        if (lastAccountNudgeElapsed > 0 && now - lastAccountNudgeElapsed < ACCOUNT_NUDGE_INTERVAL_MS) {
+            return;
+        }
+        boolean anyStuck = false;
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            try {
+                if (!UserConfig.getInstance(a).isClientActivated()) {
+                    continue;
+                }
+                if (isStuckState(ConnectionsManager.getInstance(a).getConnectionState())) {
+                    anyStuck = true;
+                    break;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (!anyStuck) {
+            return;
+        }
+        lastAccountNudgeElapsed = now;
+        // Re-push proxy if anyone is stuck on "Connecting to proxy" (native lost settings).
+        boolean needsProxyPush = false;
+        int nudged = 0;
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            try {
+                if (!UserConfig.getInstance(a).isClientActivated()) {
+                    continue;
+                }
+                int state = ConnectionsManager.getInstance(a).getConnectionState();
+                if (state == ConnectionsManager.ConnectionStateConnectingToProxy) {
+                    needsProxyPush = true;
+                }
+                if (isStuckState(state)
+                        || state != ConnectionsManager.ConnectionStateConnected
+                        && state != ConnectionsManager.ConnectionStateUpdating) {
+                    // Always soft-wake non-connected accounts (3rd spare often sits paused).
+                    wakeAccount(a);
+                    nudged++;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (needsProxyPush) {
+            try {
+                ConnectionsManager.setProxySettings(true, buildActiveSettings());
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        }
+        if (nudged > 0) {
+            FileLog.d("MglaWsBypass: nudged " + nudged + " stuck account(s)"
+                + (needsProxyPush ? " +proxy" : ""));
         }
     }
 
