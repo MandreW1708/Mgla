@@ -437,14 +437,12 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (attachButton == null) {
             return;
         }
-        boolean show = chat != null
-                && MglaAiChatService.PROVIDER_OPENROUTER.equals(chat.provider)
-                && MglaSubscription.canAttachMedia();
-        attachButton.setVisibility(show ? View.VISIBLE : View.GONE);
+        // Media attach disabled for all subscription plans.
+        attachButton.setVisibility(View.GONE);
         if (input != null) {
             FrameLayout.LayoutParams ilp = (FrameLayout.LayoutParams) input.getLayoutParams();
             if (ilp != null) {
-                int left = show ? dp(36) : 0;
+                int left = 0;
                 int right = dp(34 + 6);
                 if (ilp.leftMargin != left || ilp.rightMargin != right) {
                     ilp.leftMargin = left;
@@ -453,10 +451,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                 }
             }
         }
-        if (!show) {
-            attachedPhotos.clear();
-            updateAttachmentBadge();
-        }
+        attachedPhotos.clear();
+        updateAttachmentBadge();
     }
 
     private void updateQuotaCounter() {

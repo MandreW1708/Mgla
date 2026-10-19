@@ -249,14 +249,23 @@ public final class MglaUpdateChecker {
     /** HUB: напрямую на хаб; RELAY: HTTPS на релей; WEB: через туннель WEB proxy к релею. */
     public enum Channel { HUB, RELAY, WEB }
 
-    /** Авто-обход сейчас держит резервный WEB proxy (WS-релей недоступен). */
+    /**
+     * Авто-обход на резервном WEB proxy mglabot (туннель обновлений).
+     * Ultra WEB на mglahub сюда не входит — у хаба нет mgla-upd туннеля.
+     */
     private static boolean isWebRouteActive() {
         try {
             MglaWsBypass bypass = MglaWsBypass.getInstance();
-            return bypass.isProxyApplied()
-                && bypass.getRoute() == MglaWsBypass.Route.WEB
-                && MglaWsConfig.isWebUpdateTunnelConfigured()
-                && WebProxyTransport.isSupported();
+            if (!bypass.isProxyApplied()
+                || bypass.getRoute() != MglaWsBypass.Route.WEB
+                || !MglaWsConfig.isWebUpdateTunnelConfigured()
+                || !WebProxyTransport.isSupported()) {
+                return false;
+            }
+            String webHost = MglaWsConfig.getWebProxyHost();
+            String updateHost = MglaWsConfig.getWebUpdateProxyHost();
+            return !TextUtils.isEmpty(webHost)
+                && webHost.equalsIgnoreCase(updateHost);
         } catch (Throwable e) {
             return false;
         }
@@ -298,7 +307,7 @@ public final class MglaUpdateChecker {
         static UpdateConnection open(Channel channel, String path) throws Exception {
             if (channel == Channel.WEB) {
                 int port = WebProxyTransport.acquireUpdateTunnel(
-                    MglaWsConfig.getWebProxyHost(), MglaWsConfig.getWebUpdateSecret());
+                    MglaWsConfig.getWebUpdateProxyHost(), MglaWsConfig.getWebUpdateSecret());
                 if (port <= 0) {
                     throw new IOException("WEB proxy недоступен");
                 }

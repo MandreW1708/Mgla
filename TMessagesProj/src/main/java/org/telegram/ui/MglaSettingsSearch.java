@@ -209,6 +209,9 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1019, "Автопауза", hub, general, generalIcon, generalScreen, "Автопауза", "general/autopause"));
         l.add(new Entry(1030, "Элементы меню сообщения", hub, chats, chatsIcon, chatsScreen, "Элементы меню сообщения", "chats/message-menu"));
         l.add(new Entry(1031, "Время с секундами", hub, chats, chatsIcon, chatsScreen, "Время с секундами", "chats/time-seconds"));
+        l.add(new Entry(1032, "Автоперевод чатов", hub, chats, chatsIcon, chatsScreen, "Автоперевод чатов", "chats/auto-translate"));
+        l.add(new Entry(1033, "Переводчик", hub, chats, chatsIcon, chatsScreen, "Переводчик Google Яндекс", "chats/auto-translate-provider"));
+        l.add(new Entry(1034, "Язык перевода", hub, chats, chatsIcon, chatsScreen, "Язык перевода чатов", "chats/auto-translate-lang"));
         l.add(new Entry(1032, "Количество недавних стикеров", hub, chats, chatsIcon, chatsScreen, "Количество недавних стикеров", "chats/recent-stickers"));
         l.add(new Entry(1033, "Убрать время на стикерах", hub, chats, chatsIcon, chatsScreen, "Убрать время на стикерах", "chats/hide-sticker-time"));
         l.add(new Entry(1034, "Исходящее сообщение", hub, chats, chatsIcon, chatsScreen, "Исходящее сообщение", "chats/double-tap-out"));

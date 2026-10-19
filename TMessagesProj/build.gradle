@@ -151,6 +151,8 @@ android {
         def mglaWebProxyHost = getProps("MGLA_WEB_PROXY_HOST")
         def mglaWebProxySecret = getProps("MGLA_WEB_PROXY_SECRET")
         def mglaWebUpdateSecret = getProps("MGLA_WEB_UPDATE_SECRET")
+        def mglaUltraWebProxyHost = getProps("MGLA_ULTRA_WEB_PROXY_HOST")
+        def mglaUltraWebProxySecret = getProps("MGLA_ULTRA_WEB_PROXY_SECRET")
 
         buildConfigField "int", "APP_ID", (appId != null && !appId.isEmpty()) ? appId : "12345"
         buildConfigField "String", "APP_HASH", "\"" + ((appHash != null && !appHash.isEmpty()) ? appHash : "dummy") + "\""
@@ -163,6 +165,8 @@ android {
         buildConfigField "String", "MGLA_WEB_PROXY_HOST", "\"" + ((mglaWebProxyHost != null && !mglaWebProxyHost.isEmpty()) ? mglaWebProxyHost : "mglabot.mooo.com/tgweb") + "\""
         buildConfigField "String", "MGLA_WEB_PROXY_SECRET", "\"" + ((mglaWebProxySecret != null && !mglaWebProxySecret.isEmpty()) ? mglaWebProxySecret : "") + "\""
         buildConfigField "String", "MGLA_WEB_UPDATE_SECRET", "\"" + ((mglaWebUpdateSecret != null && !mglaWebUpdateSecret.isEmpty()) ? mglaWebUpdateSecret : "") + "\""
+        buildConfigField "String", "MGLA_ULTRA_WEB_PROXY_HOST", "\"" + ((mglaUltraWebProxyHost != null && !mglaUltraWebProxyHost.isEmpty()) ? mglaUltraWebProxyHost : "mglahub.mooo.com/tgweb") + "\""
+        buildConfigField "String", "MGLA_ULTRA_WEB_PROXY_SECRET", "\"" + ((mglaUltraWebProxySecret != null && !mglaUltraWebProxySecret.isEmpty()) ? mglaUltraWebProxySecret : "") + "\""
 
         manifestPlaceholders = [mapsApiKey: (mapsKey != null && !mapsKey.isEmpty()) ? mapsKey : ""]
 

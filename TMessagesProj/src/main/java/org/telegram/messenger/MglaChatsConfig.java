@@ -2,6 +2,7 @@ package org.telegram.messenger;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.text.TextUtils;
 
 import androidx.core.math.MathUtils;
 
@@ -104,6 +105,83 @@ public class MglaChatsConfig {
     }
 
     public static final String PREF_CHAT_TIME_SECONDS = "chat_time_seconds";
+
+    /** Auto-translate entire chats (Mgla subscription), independent of Telegram Premium. */
+    public static final String PREF_AUTO_TRANSLATE_ENABLED = "auto_translate_enabled";
+    public static final String PREF_AUTO_TRANSLATE_PROVIDER = "auto_translate_provider";
+    public static final String PREF_AUTO_TRANSLATE_TARGET_LANG = "auto_translate_target_lang";
+    public static final String PROVIDER_GOOGLE = "google";
+    public static final String PROVIDER_YANDEX = "yandex";
+
+    public static boolean isAutoTranslateEnabled() {
+        return getPrefs().getBoolean(PREF_AUTO_TRANSLATE_ENABLED, false);
+    }
+
+    /** Enabled in settings and allowed by the current Mgla plan (not Free). */
+    public static boolean isAutoTranslateActive() {
+        return isAutoTranslateEnabled() && MglaSubscription.canUseAutoTranslate();
+    }
+
+    public static void setAutoTranslateEnabled(boolean enabled) {
+        getPrefs().edit().putBoolean(PREF_AUTO_TRANSLATE_ENABLED, enabled).apply();
+    }
+
+    public static String getAutoTranslateProvider() {
+        String p = getPrefs().getString(PREF_AUTO_TRANSLATE_PROVIDER, PROVIDER_GOOGLE);
+        if (PROVIDER_YANDEX.equals(p)) {
+            return PROVIDER_YANDEX;
+        }
+        return PROVIDER_GOOGLE;
+    }
+
+    public static void setAutoTranslateProvider(String provider) {
+        if (!PROVIDER_YANDEX.equals(provider)) {
+            provider = PROVIDER_GOOGLE;
+        }
+        getPrefs().edit().putString(PREF_AUTO_TRANSLATE_PROVIDER, provider).apply();
+    }
+
+    public static String getAutoTranslateProviderTitle() {
+        return PROVIDER_YANDEX.equals(getAutoTranslateProvider()) ? "Яндекс Переводчик" : "Google Переводчик";
+    }
+
+    public static String getAutoTranslateTargetLang() {
+        String lang = getPrefs().getString(PREF_AUTO_TRANSLATE_TARGET_LANG, null);
+        if (TextUtils.isEmpty(lang)) {
+            try {
+                lang = LocaleController.getInstance().getCurrentLocaleInfo().pluralLangCode;
+            } catch (Throwable ignore) {
+                lang = "ru";
+            }
+        }
+        if (lang != null && lang.contains("-")) {
+            lang = lang.substring(0, lang.indexOf('-'));
+        }
+        if ("nb".equals(lang)) {
+            lang = "no";
+        }
+        return lang != null ? lang : "ru";
+    }
+
+    public static void setAutoTranslateTargetLang(String lang) {
+        if (TextUtils.isEmpty(lang)) {
+            return;
+        }
+        if (lang.contains("-")) {
+            lang = lang.substring(0, lang.indexOf('-'));
+        }
+        if ("nb".equals(lang)) {
+            lang = "no";
+        }
+        getPrefs().edit().putString(PREF_AUTO_TRANSLATE_TARGET_LANG, lang).apply();
+    }
+
+    public static String getAutoTranslateTargetLangTitle() {
+        String code = getAutoTranslateTargetLang();
+        String name = org.telegram.ui.Components.TranslateAlert2.capitalFirst(
+                org.telegram.ui.Components.TranslateAlert2.languageName(code));
+        return !TextUtils.isEmpty(name) ? name : code;
+    }
 
     public static boolean isChatTimeSecondsEnabled() {
         if (!MglaFeatureFlags.isAllowed(PREF_CHAT_TIME_SECONDS)) {

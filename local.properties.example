@@ -19,3 +19,10 @@ MGLA_WS_RELAY_TOKEN=
 # Stats panel on mglahub (optional; AI does NOT use this — AI goes via MGLA_WS_RELAY_HOST)
 MGLA_HUB_HOST=mglahub.mooo.com
 MGLA_HUB_TOKEN=
+
+# WEB fallback: mglabot for normal auto-bypass; separate Ultra proxy on mglahub
+MGLA_WEB_PROXY_HOST=mglabot.mooo.com/tgweb
+MGLA_WEB_PROXY_SECRET=
+MGLA_WEB_UPDATE_SECRET=
+MGLA_ULTRA_WEB_PROXY_HOST=mglahub.mooo.com/tgweb
+MGLA_ULTRA_WEB_PROXY_SECRET=

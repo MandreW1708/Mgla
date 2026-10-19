@@ -242,9 +242,14 @@ public final class MglaSubscription {
         return PLAN_PREMIUM_PLUS.equals(plan) || PLAN_PREMIUM_ULTRA.equals(plan);
     }
 
-    /** Ultra only — attach images to OpenRouter. */
+    /** Media attachments in AI chat are disabled for all plans. */
     public static boolean canAttachMedia() {
-        return PLAN_PREMIUM_ULTRA.equals(getPlanId());
+        return false;
+    }
+
+    /** Auto-translate of entire chats — any paid Mgla plan (not Free). */
+    public static boolean canUseAutoTranslate() {
+        return !PLAN_FREE.equals(getPlanId());
     }
 
     /**

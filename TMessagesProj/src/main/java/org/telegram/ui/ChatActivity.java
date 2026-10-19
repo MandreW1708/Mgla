@@ -189,6 +189,7 @@ import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaEditHistoryStorage;
 import org.telegram.messenger.MglaDeletedStorage;
 import org.telegram.messenger.MglaChatsConfig;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.R;
@@ -10092,7 +10093,20 @@ public class ChatActivity extends BaseFragment implements
         translateButton = new TranslateButton(getContext(), this, themeDelegate) {
             @Override
             protected void onButtonClick() {
-                if (getUserConfig().isPremium() || currentChat != null && currentChat.autotranslation) {
+                // Mgla auto-translate (any paid plan) takes over when enabled in Чаты → Базовое.
+                if (MglaChatsConfig.isAutoTranslateEnabled()) {
+                    if (!MglaSubscription.canUseAutoTranslate()) {
+                        BulletinFactory.of(ChatActivity.this).createSimpleBulletin(
+                                R.raw.star_premium_2,
+                                "Автоперевод чатов доступен с любой подпиской Mgla Premium",
+                                "Перейти",
+                                () -> presentFragment(new MglaPremiumActivity())
+                        ).show();
+                        updateTopPanel(true);
+                        return;
+                    }
+                    getMessagesController().getTranslateController().toggleTranslatingDialog(getDialogId());
+                } else if (getUserConfig().isPremium() || currentChat != null && currentChat.autotranslation) {
                     getMessagesController().getTranslateController().toggleTranslatingDialog(getDialogId());
                 } else {
                     MessagesController.getNotificationsSettings(currentAccount).edit().putInt("dialog_show_translate_count" + getDialogId(), 14).commit();
@@ -29781,8 +29795,9 @@ public class ChatActivity extends BaseFragment implements
         }
 
         boolean showRestartTopic = !isInPreviewMode() && forumTopic != null && forumTopic.closed && !forumTopic.hidden && ChatObject.canManageTopic(currentAccount, currentChat, forumTopic);
+        final boolean mglaTranslate = MglaChatsConfig.isAutoTranslateActive();
         boolean showTranslate = (
-            getUserConfig().isPremium() || currentChat != null && currentChat.autotranslation ?
+            mglaTranslate || getUserConfig().isPremium() || currentChat != null && currentChat.autotranslation ?
                 getMessagesController().getTranslateController().isDialogTranslatable(getDialogId()) && !getMessagesController().getTranslateController().isTranslateDialogHidden(getDialogId()) :
                 !getMessagesController().premiumFeaturesBlocked() && preferences.getInt("dialog_show_translate_count" + did, 5) <= 0
         ) || DEBUG_TOP_PANELS;

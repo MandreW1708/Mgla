@@ -195,20 +195,48 @@ public final class MglaWsConfig {
         }
     }
 
-    /** Адрес запасного WEB proxy в форме {@code host/path} (без https://). */
+    /**
+     * Адрес запасного WEB proxy в форме {@code host/path} (без https://).
+     * Ultra-обход → отдельный proxy на хабе; обычный авто-обход → mglabot.
+     */
     public static String getWebProxyHost() {
+        if (isUltraBypassEnabled()) {
+            String ultra = BuildConfig.MGLA_ULTRA_WEB_PROXY_HOST;
+            if (!TextUtils.isEmpty(ultra)) {
+                return ultra.trim();
+            }
+            String hub = getHubHost();
+            if (!TextUtils.isEmpty(hub)) {
+                return hub.trim() + "/tgweb";
+            }
+        }
         String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
         return fromBuild == null ? "" : fromBuild.trim();
     }
 
     /** Секрет WEB proxy: 32 hex (как в profiles.json tproxy-server). */
     public static String getWebProxySecret() {
+        if (isUltraBypassEnabled()) {
+            String ultra = BuildConfig.MGLA_ULTRA_WEB_PROXY_SECRET;
+            if (!TextUtils.isEmpty(ultra)) {
+                return ultra.trim().toLowerCase(java.util.Locale.US);
+            }
+        }
         String fromBuild = BuildConfig.MGLA_WEB_PROXY_SECRET;
         return fromBuild == null ? "" : fromBuild.trim().toLowerCase(java.util.Locale.US);
     }
 
     public static boolean isWebProxyConfigured() {
         return !TextUtils.isEmpty(getWebProxyHost()) && !TextUtils.isEmpty(getWebProxySecret());
+    }
+
+    /**
+     * Хост WEB proxy для туннеля обновлений (всегда mglabot — туннель mgla-upd там).
+     * Не путать с {@link #getWebProxyHost()} для Telegram-трафика Ultra.
+     */
+    public static String getWebUpdateProxyHost() {
+        String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
+        return fromBuild == null ? "" : fromBuild.trim();
     }
 
     /** Секрет профиля mgla-upd tproxy-server: туннель к эндпоинтам обновлений через WEB proxy. */
@@ -218,7 +246,7 @@ public final class MglaWsConfig {
     }
 
     public static boolean isWebUpdateTunnelConfigured() {
-        return !TextUtils.isEmpty(getWebProxyHost()) && !TextUtils.isEmpty(getWebUpdateSecret())
+        return !TextUtils.isEmpty(getWebUpdateProxyHost()) && !TextUtils.isEmpty(getWebUpdateSecret())
             && !TextUtils.isEmpty(getRelayToken());
     }
 

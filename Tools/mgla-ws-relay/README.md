@@ -147,7 +147,12 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 (`ProxySettings.Type.WEB` → `WebProxyTransport` → системный WebView) и раз в ~8 минут
 проверяет, не ожил ли релей.
 
-Сервер (тот же `mglabot.mooo.com`, отдельный домен не нужен):
+Два независимых WEB proxy (разные секреты):
+
+| Режим | Хост | Секрет в клиенте |
+|-------|------|------------------|
+| Обычный авто-обход | `mglabot.mooo.com/tgweb` | `MGLA_WEB_PROXY_SECRET` |
+| Ultra-обход | `mglahub.mooo.com/tgweb` | `MGLA_ULTRA_WEB_PROXY_SECRET` |
 
 ```text
 nginx :443 location ^~ /tgweb/ → 127.0.0.1:8090 tproxy-server → 127.0.0.1:2398 official MTProxy
@@ -156,6 +161,14 @@ nginx :443 location ^~ /tgweb/ → 127.0.0.1:8090 tproxy-server → 127.0.0.1:23
 Установка / переустановка (root, идемпотентно):
 
 ```bash
+# mglabot
+bash /opt/mgla-ws-relay/deploy-web-proxy.sh
+
+# mglahub (Ultra) — свой nginx site, MTProxy уже поднят для media
+HOSTNAME_PUBLIC=mglahub.mooo.com \
+NGINX_SITE=/etc/nginx/sites-enabled/mglahub \
+PUBLIC_UPSTREAM=http://127.0.0.1:8767 \
+SKIP_MTPROXY=1 \
 bash /opt/mgla-ws-relay/deploy-web-proxy.sh
 ```
 
@@ -172,7 +185,9 @@ decoy = бот на `127.0.0.1:8080`), юниты `mgla-mtproxy`, `mgla-tproxy`,
 
 ```properties
 MGLA_WEB_PROXY_HOST=mglabot.mooo.com/tgweb
-MGLA_WEB_PROXY_SECRET=<32 hex>
+MGLA_WEB_PROXY_SECRET=<32 hex с mglabot>
+MGLA_ULTRA_WEB_PROXY_HOST=mglahub.mooo.com/tgweb
+MGLA_ULTRA_WEB_PROXY_SECRET=<32 hex с mglahub>
 ```
 
 Проверка:

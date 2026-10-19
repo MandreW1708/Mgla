@@ -43,8 +43,17 @@ public final class MglaInternalProxy {
             if (!TextUtils.isEmpty(upd) && secretEquals(secret, upd)) {
                 return true;
             }
-            // Любой webproxy на наш хост /tgweb — тоже внутренний.
-            if (addressLower.startsWith("mglabot.mooo.com/") || addressLower.equals("mglabot.mooo.com")) {
+            // Любой webproxy на наши хосты /tgweb — тоже внутренний.
+            if (addressLower.startsWith("mglabot.mooo.com/") || addressLower.equals("mglabot.mooo.com")
+                    || addressLower.startsWith("mglahub.mooo.com/") || addressLower.equals("mglahub.mooo.com")) {
+                return true;
+            }
+            String ultraHost = null;
+            try {
+                ultraHost = org.telegram.messenger.BuildConfig.MGLA_ULTRA_WEB_PROXY_HOST;
+            } catch (Throwable ignored) {
+            }
+            if (!TextUtils.isEmpty(ultraHost) && addressLower.equals(ultraHost.trim().toLowerCase(Locale.US))) {
                 return true;
             }
             return false;

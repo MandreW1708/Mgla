@@ -91,10 +91,16 @@ public class TranslateController extends BaseController {
     }
 
     public boolean isFeatureAvailable() {
+        if (MglaChatsConfig.isAutoTranslateActive()) {
+            return true;
+        }
         return isChatTranslateEnabled() && UserConfig.getInstance(currentAccount).isPremium();
     }
 
     public boolean isFeatureAvailable(long dialogId) {
+        if (MglaChatsConfig.isAutoTranslateActive()) {
+            return true;
+        }
         if (!isChatTranslateEnabled()) {
             return false;
         }
@@ -263,6 +269,15 @@ public class TranslateController extends BaseController {
     }
 
     public String getDialogTranslateTo(long dialogId) {
+        if (MglaChatsConfig.isAutoTranslateActive()) {
+            String mgla = MglaChatsConfig.getAutoTranslateTargetLang();
+            if (!TextUtils.isEmpty(mgla)) {
+                if ("nb".equals(mgla)) {
+                    mgla = "no";
+                }
+                return mgla;
+            }
+        }
         String lang = translateDialogLanguage.get(dialogId);
         if (lang == null) {
             lang = TranslateAlert2.getToLanguage();
@@ -1103,22 +1118,37 @@ public class TranslateController extends BaseController {
                 }
 
                 final String method = getMessagesController().translationsAutoEnabled;
-                if ("alternative".equals(method) || "system".equals(method)) {
+                // Mgla chat auto-translate: always use our Google/Yandex backends.
+                if (MglaChatsConfig.isAutoTranslateActive() || "alternative".equals(method) || "system".equals(method)) {
                     final String toLanguage = pendingTranslation1.language;
+                    final boolean useMgla = MglaChatsConfig.isAutoTranslateActive();
                     for (int i = 0; i < pendingTranslation1.messageIds.size(); ++i) {
                         final int id = pendingTranslation1.messageIds.get(i);
                         final Utilities.Callback4<Boolean, Integer, TLRPC.TL_textWithEntities, String> _callback = pendingTranslation1.callbacks.get(i);
                         final String _text = pendingTranslation1.messageTexts.get(i).text;
-                        TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, rateLimit) -> {
-                            if (result != null) {
-                                final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
-                                resultWithEntities.text = result;
-                                _callback.run(isTranscription, id, resultWithEntities, toLanguage);
-                            } else {
-                                toggleTranslatingDialog(dialogId, false);
-                                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
-                            }
-                        });
+                        if (useMgla) {
+                            MglaTranslateHelper.translate(_text, null, toLanguage, (result, rateLimit) -> {
+                                if (result != null) {
+                                    final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
+                                    resultWithEntities.text = result;
+                                    _callback.run(isTranscription, id, resultWithEntities, toLanguage);
+                                } else {
+                                    toggleTranslatingDialog(dialogId, false);
+                                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
+                                }
+                            });
+                        } else {
+                            TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, rateLimit) -> {
+                                if (result != null) {
+                                    final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
+                                    resultWithEntities.text = result;
+                                    _callback.run(isTranscription, id, resultWithEntities, toLanguage);
+                                } else {
+                                    toggleTranslatingDialog(dialogId, false);
+                                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
+                                }
+                            });
+                        }
                     }
                     return;
                 }/* else if ("system".equals(method)) {
@@ -1774,6 +1804,16 @@ public class TranslateController extends BaseController {
     }
 
     private boolean isLanguageRestricted(String lng) {
+        // Mgla auto-translate: skip chats already in the chosen target language.
+        if (MglaChatsConfig.isAutoTranslateActive()) {
+            String target = MglaChatsConfig.getAutoTranslateTargetLang();
+            if (TextUtils.isEmpty(lng) || TextUtils.isEmpty(target)) {
+                return false;
+            }
+            String a = lng.contains("-") ? lng.substring(0, lng.indexOf('-')) : lng;
+            String b = target.contains("-") ? target.substring(0, target.indexOf('-')) : target;
+            return TextUtils.equals(a, b);
+        }
         if (getUserConfig().isPremium()) {
             return RestrictedLanguagesSelectActivity.getRestrictedLanguages().contains(lng);
         }

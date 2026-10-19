@@ -21,8 +21,10 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaChatsConfig;
 import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.MglaHiddenChats;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.TranslateController;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -35,6 +37,9 @@ import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.SeekBarView;
+import org.telegram.ui.Components.TranslateAlert2;
+
+import java.util.ArrayList;
 
 public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
 
@@ -105,6 +110,50 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
             notifyTimeFormatChanged();
         });
         basicBlock.addView(timeCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        basicBlock.addView(MglaUi.createDivider(context));
+
+        TextCheckCell autoTranslateCell = new TextCheckCell(context);
+        autoTranslateCell.setBackground(null);
+        autoTranslateCell.setTextAndCheck("Автоперевод чатов", MglaChatsConfig.isAutoTranslateEnabled(), false);
+        autoTranslateCell.setOnClickListener(v -> {
+            if (!MglaSubscription.canUseAutoTranslate()) {
+                autoTranslateCell.setChecked(false);
+                showAutoTranslateUpsell();
+                return;
+            }
+            boolean enabled = !MglaChatsConfig.isAutoTranslateEnabled();
+            MglaChatsConfig.setAutoTranslateEnabled(enabled);
+            autoTranslateCell.setChecked(enabled);
+            if (enabled) {
+                TranslateAlert2.setToLanguage(MglaChatsConfig.getAutoTranslateTargetLang());
+            }
+        });
+        basicBlock.addView(autoTranslateCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        basicBlock.addView(MglaUi.createDivider(context));
+
+        TextView[] providerValueRef = new TextView[1];
+        addSelectRow(basicBlock, "Переводчик", MglaChatsConfig.getAutoTranslateProviderTitle(),
+                () -> {
+                    if (!MglaSubscription.canUseAutoTranslate()) {
+                        showAutoTranslateUpsell();
+                        return;
+                    }
+                    showAutoTranslateProviderDialog(providerValueRef[0]);
+                }, providerValueRef);
+
+        basicBlock.addView(MglaUi.createDivider(context));
+
+        TextView[] langValueRef = new TextView[1];
+        addSelectRow(basicBlock, "Язык перевода", MglaChatsConfig.getAutoTranslateTargetLangTitle(),
+                () -> {
+                    if (!MglaSubscription.canUseAutoTranslate()) {
+                        showAutoTranslateUpsell();
+                        return;
+                    }
+                    showAutoTranslateLanguageDialog(langValueRef[0]);
+                }, langValueRef);
 
         rootLayout.addView(basicBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
@@ -538,5 +587,50 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
         for (int account = 0; account < UserConfig.MAX_ACCOUNT_COUNT; account++) {
             NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_MESSAGE_TEXT);
         }
+    }
+
+    private void showAutoTranslateUpsell() {
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.star_premium_2,
+                "Автоперевод чатов доступен с любой подпиской Mgla Premium",
+                "Перейти",
+                () -> presentFragment(new MglaPremiumActivity())
+        ).show();
+    }
+
+    private void showAutoTranslateProviderDialog(TextView valueView) {
+        String[] titles = new String[]{"Google Переводчик", "Яндекс Переводчик"};
+        String[] ids = new String[]{MglaChatsConfig.PROVIDER_GOOGLE, MglaChatsConfig.PROVIDER_YANDEX};
+        new AlertDialog.Builder(getParentActivity())
+                .setTitle("Переводчик")
+                .setItems(titles, (d, which) -> {
+                    MglaChatsConfig.setAutoTranslateProvider(ids[which]);
+                    if (valueView != null) {
+                        valueView.setText(MglaChatsConfig.getAutoTranslateProviderTitle());
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void showAutoTranslateLanguageDialog(TextView valueView) {
+        ArrayList<TranslateController.Language> languages = TranslateController.getLanguages();
+        CharSequence[] items = new CharSequence[languages.size()];
+        for (int i = 0; i < languages.size(); i++) {
+            TranslateController.Language lng = languages.get(i);
+            items[i] = lng.displayName != null ? lng.displayName : lng.code;
+        }
+        new AlertDialog.Builder(getParentActivity())
+                .setTitle("Язык перевода")
+                .setItems(items, (d, which) -> {
+                    TranslateController.Language lng = languages.get(which);
+                    MglaChatsConfig.setAutoTranslateTargetLang(lng.code);
+                    TranslateAlert2.setToLanguage(lng.code);
+                    if (valueView != null) {
+                        valueView.setText(MglaChatsConfig.getAutoTranslateTargetLangTitle());
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 }

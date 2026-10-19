@@ -16,9 +16,12 @@ ADMIN_LISTEN="127.0.0.1:8091"
 PUBLIC_UPSTREAM="${PUBLIC_UPSTREAM:-http://127.0.0.1:8080}"
 CARRIER_MODE="${CARRIER_MODE:-websocket-lanes}"
 ENV_FILE=/opt/mgla-ws-relay/env
-NGINX_SITE=/etc/nginx/sites-enabled/mglabot
+# mglabot: sites-enabled/mglabot; Ultra hub: sites-enabled/mglahub
+NGINX_SITE="${NGINX_SITE:-/etc/nginx/sites-enabled/mglabot}"
 SRC=/opt/tproxy-server
 GO_VERSION=1.22.12
+# Set SKIP_MTPROXY=1 when official MTProxy already runs on :2398 (e.g. mglahub).
+SKIP_MTPROXY="${SKIP_MTPROXY:-0}"
 
 if [[ "${EUID}" -ne 0 ]]; then
 	echo "run as root" >&2
@@ -44,13 +47,17 @@ if [[ ! -f "$SRC/go.mod" ]]; then
 fi
 
 # ---- official MTProxy (build + proxy-secret/proxy-multi.conf)
-bash "$SRC/deploy/install-mtproxy.sh"
-install -d -o root -g mtproxy -m 0750 /etc/mtproxy
-umask 077
-printf 'MTPROXY_SECRET=%s\n' "$secret" > /etc/mtproxy/mtproxy.env
-chown root:mtproxy /etc/mtproxy/mtproxy.env
-chmod 0640 /etc/mtproxy/mtproxy.env
-umask 022
+if [[ "$SKIP_MTPROXY" == "1" ]] && ss -lntp 2>/dev/null | grep -qE ':2398\b'; then
+	echo "SKIP_MTPROXY=1 and :2398 already listening — reusing existing MTProxy"
+else
+	bash "$SRC/deploy/install-mtproxy.sh"
+	install -d -o root -g mtproxy -m 0750 /etc/mtproxy
+	umask 077
+	printf 'MTPROXY_SECRET=%s\n' "$secret" > /etc/mtproxy/mtproxy.env
+	chown root:mtproxy /etc/mtproxy/mtproxy.env
+	chmod 0640 /etc/mtproxy/mtproxy.env
+	umask 022
+fi
 
 # ---- Go toolchain
 need_go=1
@@ -80,6 +87,7 @@ else
 		-e 's/"tdesktop-web-proxy-bridge-v2\\n"/"mgla-web-proxy-bridge-v2\\n"/' \
 		"$SRC/internal/config/config.go"
 fi
+rm -rf /tmp/tproxy-server
 (cd "$SRC" && GOFLAGS=-trimpath go build -o /tmp/tproxy-server ./cmd/tproxy-server)
 install -m 0755 /tmp/tproxy-server /usr/local/bin/tproxy-server
 rm -f /tmp/tproxy-server
@@ -144,6 +152,10 @@ strip_fw < "$SRC/deploy/mtproxy.service" > /etc/systemd/system/mgla-mtproxy.serv
 strip_fw < "$SRC/deploy/tproxy-server.service" \
 	| sed -e 's/mtproxy\.service/mgla-mtproxy.service/g' \
 	> /etc/systemd/system/mgla-tproxy.service
+if [[ "$SKIP_MTPROXY" == "1" ]]; then
+	# Reuse stock/official mtproxy.service already bound on :2398.
+	sed -i 's/mgla-mtproxy\.service/mtproxy.service/g' /etc/systemd/system/mgla-tproxy.service
+fi
 sed -e 's/mtproxy\.service/mgla-mtproxy.service/g' "$SRC/deploy/refresh-mtproxy-config.sh" \
 	> /usr/local/sbin/mgla-refresh-mtproxy-config.sh
 chmod 0755 /usr/local/sbin/mgla-refresh-mtproxy-config.sh
@@ -172,16 +184,29 @@ EOF
 
 ufw status | grep -qE '^(2398|8888|8090|8091)/' && { echo "UFW exposes a backend port, refusing" >&2; exit 1; }
 
+# Stock tproxy-server (random base_path / :8080) conflicts with mgla-tproxy on hub.
+if systemctl list-unit-files tproxy-server.service >/dev/null 2>&1; then
+	systemctl disable --now tproxy-server.service >/dev/null 2>&1 || true
+fi
+
 systemctl daemon-reload
-systemctl enable --now mgla-mtproxy.service
-systemctl restart mgla-mtproxy.service
+if [[ "$SKIP_MTPROXY" == "1" ]] && ss -lntp 2>/dev/null | grep -qE ':2398\b'; then
+	echo "keeping existing MTProxy on :2398"
+else
+	systemctl enable --now mgla-mtproxy.service
+	systemctl restart mgla-mtproxy.service
+	systemctl enable --now mgla-refresh-mtproxy-config.timer
+fi
 systemctl enable --now mgla-tproxy.service
 systemctl restart mgla-tproxy.service
-systemctl enable --now mgla-refresh-mtproxy-config.timer
 
-# ---- nginx: prefix location inside the existing mglabot server block
+# ---- nginx: prefix location inside the existing HTTPS server block
+if [[ ! -f "$NGINX_SITE" ]]; then
+	echo "nginx site missing: $NGINX_SITE" >&2
+	exit 1
+fi
 if ! grep -q "location \^~ /$BASE_PATH/" "$NGINX_SITE"; then
-	cp "$NGINX_SITE" "/root/mglabot.nginx.bak.$(date +%Y%m%d%H%M%S)"
+	cp "$NGINX_SITE" "/root/nginx-webproxy.bak.$(date +%Y%m%d%H%M%S)"
 	block="$(mktemp)"
 	cat > "$block" <<EOF
     # Telegram WEB proxy (tproxy-server). X-Forwarded-For must be a single address.
@@ -202,14 +227,23 @@ if ! grep -q "location \^~ /$BASE_PATH/" "$NGINX_SITE"; then
 
 EOF
 	python3 - "$NGINX_SITE" "$block" <<'PY'
-import sys
+import re, sys
 path, block_path = sys.argv[1], sys.argv[2]
 text = open(path).read()
 block = open(block_path).read()
-marker = "    listen 443 ssl; # managed by Certbot"
-if marker not in text:
-    sys.exit("listen 443 marker not found in nginx site")
-text = text.replace(marker, block + marker, 1)
+# Prefer Certbot-marked listen; else first "listen 443 ssl" inside a server block.
+markers = [
+    "    listen 443 ssl; # managed by Certbot",
+    "    listen 443 ssl;",
+]
+replaced = False
+for marker in markers:
+    if marker in text:
+        text = text.replace(marker, block + marker, 1)
+        replaced = True
+        break
+if not replaced:
+    sys.exit("listen 443 ssl marker not found in nginx site")
 if "map $http_upgrade $mgla_tgweb_connection" not in text:
     text = ("map $http_upgrade $mgla_tgweb_connection {\n    default upgrade;\n    ''      \"\";\n}\n\n") + text
 open(path, "w").write(text)

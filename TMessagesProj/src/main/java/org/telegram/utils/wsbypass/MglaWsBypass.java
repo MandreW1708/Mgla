@@ -43,15 +43,17 @@ public final class MglaWsBypass {
      * Пока маршрут Connected/Updating, переключений нет (иначе лишний reconnect Telegram).
      */
     private static final long WEB_RETRY_WS_MS = 12 * 60_000L;
-    /** Ultra: быстрее возвращаемся на WS с WEB. */
-    private static final long WEB_RETRY_WS_ULTRA_MS = 3 * 60_000L;
+    /** Ultra: не дёргаем WEB↔WS часто — лучше держаться за выделенный релей. */
+    private static final long WEB_RETRY_WS_ULTRA_MS = 10 * 60_000L;
     private static final long WS_PROBE_TIMEOUT_MS = 8_000L;
     private static final long WS_PROBE_TIMEOUT_ULTRA_MS = 12_000L;
     /** Минимальная пауза между любыми сменами маршрута. */
     private static final long ROUTE_SWITCH_COOLDOWN_MS = 2 * 60_000L;
+    /** Ultra: ещё дольше не прыгаем между маршрутами. */
+    private static final long ROUTE_SWITCH_COOLDOWN_ULTRA_MS = 5 * 60_000L;
     /** Сколько подряд тиков монитора должны видеть stall после порога. */
     private static final int STALL_CONFIRM_TICKS = 2;
-    private static final int STALL_CONFIRM_TICKS_ULTRA = 3;
+    private static final int STALL_CONFIRM_TICKS_ULTRA = 4;
     /**
      * How often to measure relay handshake RTT while auto-bypass is on.
      * 30 min: cheap enough (one TLS+WS open/close) but fresh for the settings UI.
@@ -59,12 +61,11 @@ public final class MglaWsBypass {
     private static final long PING_INTERVAL_MS = 30 * 60_000L;
     private static final long PING_TIMEOUT_MS = 8_000L;
     /**
-     * How often to poke accounts stuck in Connecting while another account is already online.
-     * Without this, {@link #bestConnectionState()} hides secondary-account stalls.
-     * Non-selected accounts often sit in native {@code networkPaused} after switch —
-     * {@link ConnectionsManager#checkConnection()} alone does not wake them.
+     * Soft poke for the selected account only when it is stuck Connecting.
+     * Aggressive multi-account wake + setProxySettings caused reconnect storms on Ultra.
      */
-    private static final long ACCOUNT_NUDGE_INTERVAL_MS = 8_000L;
+    private static final long ACCOUNT_NUDGE_INTERVAL_MS = 25_000L;
+    private static final long PROXY_REPUSH_COOLDOWN_MS = 5 * 60_000L;
 
     private boolean bypassPriority() {
         try {
@@ -134,6 +135,7 @@ public final class MglaWsBypass {
     private volatile boolean pingInFlight;
     private volatile String lastPingHost = "";
     private volatile long lastAccountNudgeElapsed;
+    private volatile long lastProxyRepushElapsed;
 
     private MglaWsBypass() {
     }
@@ -448,17 +450,16 @@ public final class MglaWsBypass {
      * Telegram parks non-selected accounts ({@code networkPaused}); checkConnection alone
      * does not unpause, so the 3rd/spare account stays offline forever.
      */
-    private void wakeAccount(int account) {
+    private void wakeAccount(int account, boolean fullResume) {
         try {
             if (!UserConfig.getInstance(account).isClientActivated()) {
                 return;
             }
             ConnectionsManager cm = ConnectionsManager.getInstance(account);
-            // Selected + UI visible: full resume (clears pause timeout).
-            if (account == UserConfig.selectedAccount && !ApplicationLoader.mainInterfacePaused) {
+            if (fullResume && account == UserConfig.selectedAccount
+                    && !ApplicationLoader.mainInterfacePaused) {
                 cm.setAppPaused(false, false);
             } else {
-                // Background / spare: soft wake without fighting LaunchActivity pause counters.
                 cm.resumeNetworkMaybe();
             }
             cm.checkConnection();
@@ -467,82 +468,56 @@ public final class MglaWsBypass {
     }
 
     /**
-     * Push resume + {@link ConnectionsManager#checkConnection()} to every activated account.
-     * Needed after proxy/host changes: native proxy is install-wide, but each account
-     * reconnects independently and secondary accounts often stay paused/Connecting.
+     * One-shot wake after proxy/host/account events. Do not call from the periodic monitor.
      */
     private void wakeAllAccounts() {
         lastAccountNudgeElapsed = SystemClock.elapsedRealtime();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-            wakeAccount(a);
+            wakeAccount(a, a == UserConfig.selectedAccount);
         }
     }
 
-    private static boolean isStuckState(int state) {
+    private static boolean isActivelyConnecting(int state) {
         return state == ConnectionsManager.ConnectionStateConnecting
-                || state == ConnectionsManager.ConnectionStateConnectingToProxy
-                || state == ConnectionsManager.ConnectionStateWaitingForNetwork;
+                || state == ConnectionsManager.ConnectionStateConnectingToProxy;
     }
 
     /**
-     * Keep poking accounts that are not Connected — including spare ones that Telegram
-     * left in {@code networkPaused} after a switch. Without resumeNetworkMaybe they never
-     * open bridges through the local WS proxy.
+     * Gentle periodic help for the selected account only.
+     * Do not wake background/spare accounts every few seconds and never spam
+     * {@link ConnectionsManager#setProxySettings} — that reconnects every account and
+     * looks like Ultra "constantly losing connection".
      */
     private void nudgeStuckAccounts() {
         long now = SystemClock.elapsedRealtime();
         if (lastAccountNudgeElapsed > 0 && now - lastAccountNudgeElapsed < ACCOUNT_NUDGE_INTERVAL_MS) {
             return;
         }
-        boolean anyStuck = false;
-        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-            try {
-                if (!UserConfig.getInstance(a).isClientActivated()) {
-                    continue;
-                }
-                if (isStuckState(ConnectionsManager.getInstance(a).getConnectionState())) {
-                    anyStuck = true;
-                    break;
-                }
-            } catch (Throwable ignored) {
+        int selected = UserConfig.selectedAccount;
+        int selectedState;
+        try {
+            if (!UserConfig.getInstance(selected).isClientActivated()) {
+                return;
             }
+            selectedState = ConnectionsManager.getInstance(selected).getConnectionState();
+        } catch (Throwable ignored) {
+            return;
         }
-        if (!anyStuck) {
+        if (!isActivelyConnecting(selectedState)) {
             return;
         }
         lastAccountNudgeElapsed = now;
-        // Re-push proxy if anyone is stuck on "Connecting to proxy" (native lost settings).
-        boolean needsProxyPush = false;
-        int nudged = 0;
-        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-            try {
-                if (!UserConfig.getInstance(a).isClientActivated()) {
-                    continue;
-                }
-                int state = ConnectionsManager.getInstance(a).getConnectionState();
-                if (state == ConnectionsManager.ConnectionStateConnectingToProxy) {
-                    needsProxyPush = true;
-                }
-                if (isStuckState(state)
-                        || state != ConnectionsManager.ConnectionStateConnected
-                        && state != ConnectionsManager.ConnectionStateUpdating) {
-                    // Always soft-wake non-connected accounts (3rd spare often sits paused).
-                    wakeAccount(a);
-                    nudged++;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-        if (needsProxyPush) {
+        wakeAccount(selected, true);
+
+        if (selectedState == ConnectionsManager.ConnectionStateConnectingToProxy
+                && (lastProxyRepushElapsed <= 0 || now - lastProxyRepushElapsed >= PROXY_REPUSH_COOLDOWN_MS)) {
+            lastProxyRepushElapsed = now;
             try {
                 ConnectionsManager.setProxySettings(true, buildActiveSettings());
+                FileLog.d("MglaWsBypass: proxy re-push (selected stuck on ConnectingToProxy)");
             } catch (Throwable e) {
                 FileLog.e(e);
             }
-        }
-        if (nudged > 0) {
-            FileLog.d("MglaWsBypass: nudged " + nudged + " stuck account(s)"
-                + (needsProxyPush ? " +proxy" : ""));
         }
     }
 
@@ -644,11 +619,17 @@ public final class MglaWsBypass {
             stallConfirmTicks = 0;
             return;
         }
-        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < ROUTE_SWITCH_COOLDOWN_MS) {
+        boolean priority = bypassPriority();
+        boolean ultraPath = false;
+        try {
+            ultraPath = MglaWsConfig.isUltraBypassEnabled();
+        } catch (Throwable ignored) {
+        }
+        long cooldown = ultraPath ? ROUTE_SWITCH_COOLDOWN_ULTRA_MS : ROUTE_SWITCH_COOLDOWN_MS;
+        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < cooldown) {
             return;
         }
 
-        boolean priority = bypassPriority();
         boolean connecting = state == ConnectionsManager.ConnectionStateConnecting
             || state == ConnectionsManager.ConnectionStateConnectingToProxy;
         long stalledFor = now - Math.max(lastConnectedElapsed, routeSinceElapsed);
@@ -664,6 +645,7 @@ public final class MglaWsBypass {
         }
 
         if (route == Route.WS) {
+            // Ultra: тот же резервный WEB, но на своём proxy (mglahub), не на mglabot.
             if (stallConfirmTicks < stallTicksNeeded || !isWebFallbackAvailable()) {
                 return;
             }
@@ -673,7 +655,7 @@ public final class MglaWsBypass {
                 return;
             }
             switchRoute(Route.WEB, "ws stalled " + (stalledFor / 1000) + "s"
-                + (priority ? " (ultra)" : ""));
+                + (ultraPath ? " (ultra)" : (priority ? " (prio)" : "")));
             return;
         }
 

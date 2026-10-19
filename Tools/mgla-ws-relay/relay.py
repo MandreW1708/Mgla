@@ -62,9 +62,9 @@ DC_MEDIA: Dict[int, list] = {
 _silent_until: Dict[tuple, float] = {}
 CONNECT_TIMEOUT = 6.0
 CONNECT_TIMEOUT_ULTRA = 8.0
-# Keepalive: slightly longer pong wait so brief mobile radio blips don't tear the bridge.
-WS_PING_INTERVAL = 25.0
-WS_PING_TIMEOUT = 45.0
+# Keepalive: longer pong wait so brief mobile radio blips / hub lag don't tear Ultra bridges.
+WS_PING_INTERVAL = 30.0
+WS_PING_TIMEOUT = 90.0
 TCP_BUF = 512 * 1024
 TCP_BUF_ULTRA = 2 * 1024 * 1024
 MAX_WS_SIZE = 32 * 1024 * 1024
