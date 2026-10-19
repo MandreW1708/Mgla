@@ -70,10 +70,11 @@ public final class WsBypassCore {
     private static final int MAX_DIRECT_ATTEMPTS = 6;
     private static final int SOCK_RCVBUF = 256 * 1024;
     private static final int SOCK_SNDBUF = 512 * 1024;
-    private static final int SOCK_RCVBUF_ULTRA = 512 * 1024;
-    private static final int SOCK_SNDBUF_ULTRA = 1024 * 1024;
+    /** Match hub Ultra TCP buffers so local MTProto↔WS bridge is not the bottleneck. */
+    private static final int SOCK_RCVBUF_ULTRA = 1024 * 1024;
+    private static final int SOCK_SNDBUF_ULTRA = 2 * 1024 * 1024;
     private static final int RECV_CHUNK = 64 * 1024;
-    private static final int RECV_CHUNK_ULTRA = 128 * 1024;
+    private static final int RECV_CHUNK_ULTRA = 256 * 1024;
     private static final int ACCEPT_TIMEOUT_MS = 1_000;
     private static final int HANDSHAKE_READ_TIMEOUT_MS = 10_000;
     private static final int LISTEN_BACKLOG = 64;
@@ -614,7 +615,8 @@ public final class WsBypassCore {
             AtomicBoolean done = new AtomicBoolean(false);
             int connId = CONN_SEQ.incrementAndGet();
 
-            final int chunkSize = MglaWsConfig.isUltraBypassEnabled() ? RECV_CHUNK_ULTRA : RECV_CHUNK;
+            final boolean ultraPath = MglaWsConfig.isUltraBypassEnabled();
+            final int chunkSize = ultraPath ? RECV_CHUNK_ULTRA : RECV_CHUNK;
             Thread up = new Thread(() -> {
                 try {
                     InputStream in = client.getInputStream();
@@ -628,7 +630,27 @@ public final class WsBypassCore {
                         byte[] plain = cipherUpdate(ctx.cltDec, chunk);
                         byte[] data = cipherUpdate(ctx.tgEnc, plain);
                         if (data != null && data.length > 0) {
-                            ws.send(data);
+                            // Ultra: coalesce WS frames while the local socket still has more
+                            // bytes queued; flush at end of burst so chat latency stays low.
+                            if (ultraPath) {
+                                ws.send(data, true);
+                                int queued = 0;
+                                try {
+                                    queued = in.available();
+                                } catch (Throwable ignored) {
+                                }
+                                if (queued <= 0) {
+                                    ws.flushPending();
+                                }
+                            } else {
+                                ws.send(data);
+                            }
+                        }
+                    }
+                    if (ultraPath) {
+                        try {
+                            ws.flushPending();
+                        } catch (Throwable ignored) {
                         }
                     }
                 } catch (Throwable e) {
@@ -653,10 +675,24 @@ public final class WsBypassCore {
                         byte[] outBuf = cipherUpdate(ctx.cltEnc, plain);
                         if (outBuf != null && outBuf.length > 0) {
                             out.write(outBuf);
-                            out.flush();
+                            // Ultra downloads: flush only when the WS side has nothing more
+                            // ready yet — fewer syscalls, same interactive feel.
+                            if (ultraPath) {
+                                int more = 0;
+                                try {
+                                    more = ws.pendingReadableHint();
+                                } catch (Throwable ignored) {
+                                }
+                                if (more <= 0) {
+                                    out.flush();
+                                }
+                            } else {
+                                out.flush();
+                            }
                             markBridgeOk(generation);
                         }
                     }
+                    out.flush();
                 } catch (Throwable e) {
                     dbg("down#" + connId + " " + e.getMessage());
                 }

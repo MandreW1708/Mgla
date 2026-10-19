@@ -51,6 +51,10 @@ public final class RawWebSocket {
 
     private static final int DEFAULT_RCVBUF = 256 * 1024;
     private static final int DEFAULT_SNDBUF = 512 * 1024;
+    private static final int ULTRA_RCVBUF = 1024 * 1024;
+    private static final int ULTRA_SNDBUF = 2 * 1024 * 1024;
+    /** Coalesce Ultra WS writes up to this many bytes before forcing a flush. */
+    private static final int ULTRA_COALESCE_BYTES = 64 * 1024;
     private static final int MAX_HTTP_HEADER_LINE_BYTES = 8 * 1024;
     private static final int MAX_HTTP_HEADER_BYTES = 64 * 1024;
     private static final long MAX_WS_FRAME_BYTES = 16L * 1024L * 1024L;
@@ -75,17 +79,21 @@ public final class RawWebSocket {
     private final InputStream reader;
     private final OutputStream writer;
     private final int timeoutSec;
+    private final boolean coalesceWrites;
     private final Object lock = new Object();
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private volatile long lastIoMs = System.currentTimeMillis();
     private boolean fragmentedMessageOpen;
     private long fragmentedMessageBytes;
+    private int unflushedBytes;
 
-    private RawWebSocket(Socket sock, InputStream reader, OutputStream writer, int timeoutSec) {
+    private RawWebSocket(Socket sock, InputStream reader, OutputStream writer, int timeoutSec,
+                         boolean coalesceWrites) {
         this.sock = sock;
         this.reader = reader;
         this.writer = writer;
         this.timeoutSec = timeoutSec;
+        this.coalesceWrites = coalesceWrites;
     }
 
     public static RawWebSocket connect(String connectHost, String sniHost, int timeoutSec) throws IOException {
@@ -212,7 +220,8 @@ public final class RawWebSocket {
             wrapped.setSoTimeout(IDLE_READ_TIMEOUT_MS);
             int timeoutSec = Math.max(1, (int) Math.min(Integer.MAX_VALUE,
                     TimeUnit.NANOSECONDS.toSeconds(Math.max(1L, deadlineNanos - System.nanoTime()))));
-            RawWebSocket result = new RawWebSocket(wrapped, in, out, timeoutSec);
+            boolean ultra = isUltraPath();
+            RawWebSocket result = new RawWebSocket(wrapped, in, out, timeoutSec, ultra);
             success = true;
             return result;
         } finally {
@@ -234,8 +243,9 @@ public final class RawWebSocket {
             try {
                 try { s.setTcpNoDelay(true); } catch (Exception ignored) {}
                 try {
-                    s.setReceiveBufferSize(DEFAULT_RCVBUF);
-                    s.setSendBufferSize(DEFAULT_SNDBUF);
+                    boolean ultra = isUltraPath();
+                    s.setReceiveBufferSize(ultra ? ULTRA_RCVBUF : DEFAULT_RCVBUF);
+                    s.setSendBufferSize(ultra ? ULTRA_SNDBUF : DEFAULT_SNDBUF);
                 } catch (Exception ignored) {}
                 try { s.setKeepAlive(true); } catch (Exception ignored) {}
                 s.connect(new InetSocketAddress(address, 443), remainingMillis(deadlineNanos));
@@ -332,12 +342,59 @@ public final class RawWebSocket {
     }
 
     public void send(byte[] payload) throws IOException {
+        send(payload, false);
+    }
+
+    /**
+     * @param deferFlush if true (Ultra bulk path), may delay flush until
+     *                   {@link #flushPending()} or coalesce threshold — keeps chat
+     *                   latency when the caller flushes at end of each local burst.
+     */
+    public void send(byte[] payload, boolean deferFlush) throws IOException {
         synchronized (lock) {
             if (closed.get()) throw new IOException("websocket closed");
             byte[] frame = buildFrame(OPCODE_BINARY, payload, true);
             writer.write(frame);
-            writer.flush();
+            unflushedBytes += frame.length;
             lastIoMs = System.currentTimeMillis();
+            boolean shouldFlush = !deferFlush || !coalesceWrites
+                || unflushedBytes >= ULTRA_COALESCE_BYTES;
+            if (shouldFlush) {
+                writer.flush();
+                unflushedBytes = 0;
+            }
+        }
+    }
+
+    /** Flush any writes deferred by {@link #send(byte[], boolean)}. */
+    public void flushPending() throws IOException {
+        synchronized (lock) {
+            if (closed.get()) throw new IOException("websocket closed");
+            if (unflushedBytes > 0) {
+                writer.flush();
+                unflushedBytes = 0;
+                lastIoMs = System.currentTimeMillis();
+            }
+        }
+    }
+
+    /**
+     * Best-effort hint that more WS payload may already be buffered in the socket.
+     * Used by Ultra down-bridge to avoid flushing the local MTProto socket every frame.
+     */
+    public int pendingReadableHint() {
+        try {
+            return reader.available();
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private static boolean isUltraPath() {
+        try {
+            return MglaWsConfig.isUltraBypassEnabled();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 

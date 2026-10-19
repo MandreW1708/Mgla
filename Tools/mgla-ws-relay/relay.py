@@ -66,7 +66,11 @@ CONNECT_TIMEOUT_ULTRA = 8.0
 WS_PING_INTERVAL = 30.0
 WS_PING_TIMEOUT = 90.0
 TCP_BUF = 512 * 1024
-TCP_BUF_ULTRA = 2 * 1024 * 1024
+# Needs net.core.rmem_max/wmem_max >= this (see deploy sysctl on hub).
+TCP_BUF_ULTRA = 4 * 1024 * 1024
+# Drain TCP write buffer only after this much is queued (Ultra throughput).
+TCP_DRAIN_WATERMARK = 256 * 1024
+TCP_DRAIN_WATERMARK_ULTRA = 1024 * 1024
 MAX_WS_SIZE = 32 * 1024 * 1024
 # Soft capacity: standard clients share SOFT_CAP - ULTRA_RESERVED slots.
 # Ultra always accepted (best-effort QoS). On mglahub set MGLA_WS_ULTRA_ONLY=1
@@ -419,14 +423,31 @@ async def open_mtproxy(ultra: bool = False):
     return reader, writer
 
 
-async def pipe_ws_to_tcp(ws, writer: asyncio.StreamWriter) -> None:
+async def _write_tcp(writer: asyncio.StreamWriter, data: bytes, ultra: bool) -> None:
+    """Write without draining every tiny frame — keeps Ultra bulk transfers saturated."""
+    writer.write(data)
+    watermark = TCP_DRAIN_WATERMARK_ULTRA if ultra else TCP_DRAIN_WATERMARK
+    transport = writer.transport
+    pending = 0
+    try:
+        pending = transport.get_write_buffer_size() if transport is not None else 0
+    except Exception:
+        pending = 0
+    if pending >= watermark:
+        await writer.drain()
+
+
+async def pipe_ws_to_tcp(ws, writer: asyncio.StreamWriter, ultra: bool = False) -> None:
     try:
         async for message in ws:
             data = message.encode("utf-8") if isinstance(message, str) else message
             if not data:
                 continue
-            writer.write(data)
+            await _write_tcp(writer, data, ultra)
+        try:
             await writer.drain()
+        except Exception:
+            pass
     except Exception as e:
         LOG.debug("ws->tcp end: %s", e)
     finally:
@@ -509,8 +530,11 @@ async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str, 
                     continue
                 plain = ws_to_plain.update(data)
                 out = plain_to_mt.update(plain)
-                writer.write(out)
+                await _write_tcp(writer, out, ultra)
+            try:
                 await writer.drain()
+            except Exception:
+                pass
         except Exception as e:
             LOG.debug("%s mtproxy up end: %s", peer, e)
         finally:
@@ -699,7 +723,7 @@ async def handler(ws):
 
         received = [0]
         started = time.monotonic()
-        up = asyncio.create_task(pipe_ws_to_tcp(ws, writer))
+        up = asyncio.create_task(pipe_ws_to_tcp(ws, writer, ultra=ultra))
         down = asyncio.create_task(pipe_tcp_to_ws(reader, ws, received, ultra=ultra))
         done, pending = await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
@@ -730,6 +754,8 @@ async def main() -> None:
         int(ULTRA_ONLY),
     )
 
+    # Larger inbound queue on Ultra-only hub so media bursts don't stall the bridge.
+    ws_queue = 256 if ULTRA_ONLY else 96
     async with websockets.serve(
         handler,
         LISTEN_HOST,
@@ -739,7 +765,7 @@ async def main() -> None:
         ping_interval=WS_PING_INTERVAL,
         ping_timeout=WS_PING_TIMEOUT,
         compression=None,
-        max_queue=64,
+        max_queue=ws_queue,
     ):
         LOG.info("listening on %s:%s", LISTEN_HOST, LISTEN_PORT)
         await asyncio.Future()
