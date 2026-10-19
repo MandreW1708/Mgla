@@ -412,7 +412,12 @@ bool Connection::isSuspended() {
 }
 
 bool Connection::isMediaConnectionType(ConnectionType type) {
-    return (type & ConnectionTypeGenericMedia) != 0 || (type & ConnectionTypeDownload) != 0;
+    // Upload (voice / video notes / file parts) must use media addresses + negative
+    // DC index so MTProxy / WS-bypass middle-ends route them correctly. Without
+    // this, photos may work via GenericMedia while voice/circles hang on Ultra.
+    return (type & ConnectionTypeGenericMedia) != 0
+           || (type & ConnectionTypeDownload) != 0
+           || (type & ConnectionTypeUpload) != 0;
 }
 
 void Connection::setHasUsefullData() {

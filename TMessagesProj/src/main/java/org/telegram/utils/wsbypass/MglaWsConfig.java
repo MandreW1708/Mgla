@@ -154,10 +154,18 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Токен WS-релея: короткоживущий JWT установки ({@link org.telegram.messenger.MglaAuth}),
-     * иначе legacy из prefs / BuildConfig.
+     * Токен текущего обхода:
+     * <ul>
+     *   <li>Ultra → JWT / {@code MGLA_HUB_TOKEN} (mglahub)</li>
+     *   <li>обычный → JWT / {@code MGLA_WS_RELAY_TOKEN} (mglabot)</li>
+     * </ul>
+     * Using the bot token against the hub (or vice versa) causes auth failures and
+     * looks like “Ultra constantly disconnects”.
      */
     public static String getRelayToken() {
+        if (isUltraBypassEnabled()) {
+            return getHubToken();
+        }
         try {
             String session = org.telegram.messenger.MglaAuth.getAccessToken();
             if (!TextUtils.isEmpty(session)) {

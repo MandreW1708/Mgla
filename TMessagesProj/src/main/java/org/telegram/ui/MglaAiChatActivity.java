@@ -412,7 +412,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         box.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         TextView body = new TextView(c);
-        body.setText("На Free раздел закрыт. Premium — локальные модели, Premium+ — облачные, Ultra — медиа и всё остальное.");
+        body.setText("На Free раздел закрыт. Premium — только локальные модели. Premium+ — локальные + облачные Free/Premium+. Ultra — локальные + Free/Premium+/Ultra.");
         body.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         body.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         body.setGravity(Gravity.CENTER);
@@ -1118,19 +1118,15 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             return;
         }
         modelPickerOpen = true;
-        ArrayList<MglaAiChatService.ModelInfo> cached = MglaAiChatService.peekCachedOpenRouterModels();
-        final boolean hasCache = cached != null && !cached.isEmpty();
-        final AlertDialog progress = hasCache ? null
-                : new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
-        if (progress != null) {
-            progress.setCanCancel(true);
-            progress.setOnCancelListener(d -> modelPickerOpen = false);
-            progress.show();
-        }
+        // Always load from hub — never show the old hardcoded FALLBACK list.
+        final AlertDialog progress = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+        progress.setCanCancel(true);
+        progress.setOnCancelListener(d -> modelPickerOpen = false);
+        progress.show();
         MglaAiChatService.fetchOpenRouterModels(new MglaAiChatService.ModelsCallback() {
             @Override
             public void onResult(ArrayList<MglaAiChatService.ModelInfo> models) {
-                if (progress != null && progress.isShowing()) {
+                if (progress.isShowing()) {
                     progress.dismiss();
                 }
                 if (getParentActivity() == null || models == null || models.isEmpty()) {
@@ -1142,7 +1138,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
 
             @Override
             public void onError(String message) {
-                if (progress != null && progress.isShowing()) {
+                if (progress.isShowing()) {
                     progress.dismiss();
                 }
                 modelPickerOpen = false;
@@ -1156,7 +1152,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                         .setNegativeButton("Провайдер…", (d, w) -> chooseProvider())
                         .show();
             }
-        });
+        }, true);
     }
 
     private void showOpenRouterModelPicker(ArrayList<MglaAiChatService.ModelInfo> models) {

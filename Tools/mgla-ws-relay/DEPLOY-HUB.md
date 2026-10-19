@@ -100,6 +100,25 @@ sudo cp /opt/mgla-ws-relay/nginx-mglahub.conf /etc/nginx/sites-available/mglahub
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+## Ultra-обход: ИИ напрямую на хабе
+
+Клиент с включённым Ultra ходит на `mglahub` не только за `/apiws`, но и за
+`/mgla-ai/*` (модели, OpenRouter, Gemini), а features/stats/updates/auth —
+нативными путями хаба (`/mgla-config`, `/mgla-stats`, …).
+
+На хабе должен работать тот же `ai_proxy.py`, что на боте:
+
+```bash
+# ключи Plus/Ultra + entitlements localhost
+# openrouter_models.json из админки
+systemctl enable --now mgla-ai-proxy   # :8768
+# nginx location /mgla-ai/ → 127.0.0.1:8768
+sudo systemctl restart mgla-stats      # dual-push моделей: local + mglabot
+# mgla-ws-relay (:8766) не трогать без нужды
+```
+
+Обычный обход по-прежнему: Telegram + `/mgla-ai/*` через **mglabot**.
+
 ## Подписки (Premium / Premium+ / Ultra) — только mglahub
 
 База подписчиков живёт **только на mglahub** в SQLite `stats.db`, таблица `subscriptions`.

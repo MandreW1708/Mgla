@@ -6,7 +6,9 @@ import android.content.SharedPreferences;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.LiteMode;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.UserConfig;
 
 public class MglaGlassConfig {
 
@@ -97,7 +99,9 @@ public class MglaGlassConfig {
     private static boolean cacheLoaded;
     private static int glassDarkeningLevel = 100;
     private static boolean md3PredictiveBack;
+    /** Cached style for {@link #styleCachedForAccount}; reloaded on account switch. */
     private static int predictiveBackStyle = PREDICTIVE_BACK_DEFAULT;
+    private static int styleCachedForAccount = Integer.MIN_VALUE;
     private static boolean md3Switches;
     private static boolean editedIcon;
     private static boolean customNotificationIcon = true;
@@ -122,13 +126,7 @@ public class MglaGlassConfig {
         }
         SharedPreferences p = getPrefs();
         glassDarkeningLevel = p.getInt(PREF_GLASS_DARKENING_LEVEL, 100);
-        md3PredictiveBack = p.getBoolean(PREF_MD3_PREDICTIVE_BACK, false);
-        if (p.contains(PREF_PREDICTIVE_BACK_STYLE)) {
-            predictiveBackStyle = clampPredictiveBackStyle(p.getInt(PREF_PREDICTIVE_BACK_STYLE, PREDICTIVE_BACK_DEFAULT));
-        } else {
-            predictiveBackStyle = md3PredictiveBack ? PREDICTIVE_BACK_MD3 : PREDICTIVE_BACK_DEFAULT;
-        }
-        md3PredictiveBack = predictiveBackStyle == PREDICTIVE_BACK_MD3;
+        // Predictive back style is per-account — loaded in ensurePredictiveBackStyle().
         md3Switches = p.getBoolean(PREF_MD3_SWITCHES, false);
         editedIcon = p.getBoolean(PREF_EDITED_ICON, false);
         cleanHeader = p.getBoolean(PREF_CLEAN_HEADER, false);
@@ -269,23 +267,130 @@ public class MglaGlassConfig {
         setPredictiveBackStyle(enabled ? PREDICTIVE_BACK_MD3 : PREDICTIVE_BACK_DEFAULT);
     }
 
-    public static int getPredictiveBackStyle() {
-        ensureCache();
-        return predictiveBackStyle;
+    /** Styles from «Поверхность» onward require any paid Mgla plan. */
+    public static boolean isPremiumPredictiveBackStyle(int style) {
+        return clampPredictiveBackStyle(style) >= PREDICTIVE_BACK_SURFACE;
     }
 
-    public static void setPredictiveBackStyle(int style) {
+    private static String predictiveBackStyleKey(long userId) {
+        return PREF_PREDICTIVE_BACK_STYLE + "_" + userId;
+    }
+
+    private static long currentUserId() {
+        UserConfig uc = UserConfig.getInstance(UserConfig.selectedAccount);
+        if (uc == null || !uc.isClientActivated()) {
+            return 0L;
+        }
+        return uc.getClientUserId();
+    }
+
+    /** Load (and migrate legacy global) style for the currently selected account. */
+    private static void ensurePredictiveBackStyle() {
         ensureCache();
+        int account = UserConfig.selectedAccount;
+        if (styleCachedForAccount == account) {
+            return;
+        }
+        styleCachedForAccount = account;
+        predictiveBackStyle = readStyleForAccount(account);
+        md3PredictiveBack = predictiveBackStyle == PREDICTIVE_BACK_MD3;
+    }
+
+    private static int readStyleForAccount(int account) {
+        if (account < 0 || account >= UserConfig.MAX_ACCOUNT_COUNT) {
+            return PREDICTIVE_BACK_DEFAULT;
+        }
+        UserConfig uc = UserConfig.getInstance(account);
+        if (uc == null || !uc.isClientActivated()) {
+            return PREDICTIVE_BACK_DEFAULT;
+        }
+        long userId = uc.getClientUserId();
+        if (userId <= 0) {
+            return PREDICTIVE_BACK_DEFAULT;
+        }
+        SharedPreferences p = getPrefs();
+        String key = predictiveBackStyleKey(userId);
+        if (p.contains(key)) {
+            return clampPredictiveBackStyle(p.getInt(key, PREDICTIVE_BACK_DEFAULT));
+        }
+        // One-shot migrate from install-wide keys into this account.
+        int legacy = PREDICTIVE_BACK_DEFAULT;
+        if (p.contains(PREF_PREDICTIVE_BACK_STYLE)) {
+            legacy = clampPredictiveBackStyle(p.getInt(PREF_PREDICTIVE_BACK_STYLE, PREDICTIVE_BACK_DEFAULT));
+        } else if (p.getBoolean(PREF_MD3_PREDICTIVE_BACK, false)) {
+            legacy = PREDICTIVE_BACK_MD3;
+        }
+        p.edit().putInt(key, legacy).apply();
+        return legacy;
+    }
+
+    /**
+     * Effective style for animations on the current account: premium styles
+     * fall back to default when this account has no subscription.
+     */
+    public static int getPredictiveBackStyle() {
+        ensurePredictiveBackStyle();
+        int style = clampPredictiveBackStyle(predictiveBackStyle);
+        if (isPremiumPredictiveBackStyle(style) && !MglaSubscription.canUsePremiumAnimations()) {
+            return PREDICTIVE_BACK_DEFAULT;
+        }
+        return style;
+    }
+
+    /** Persist style for the currently selected account only. */
+    public static void setPredictiveBackStyle(int style) {
+        ensurePredictiveBackStyle();
         style = clampPredictiveBackStyle(style);
+        if (isPremiumPredictiveBackStyle(style) && !MglaSubscription.canUsePremiumAnimations()) {
+            return;
+        }
+        long userId = currentUserId();
+        if (userId <= 0) {
+            return;
+        }
         if (predictiveBackStyle == style) {
             return;
         }
         predictiveBackStyle = style;
         md3PredictiveBack = style == PREDICTIVE_BACK_MD3;
         getPrefs().edit()
-                .putInt(PREF_PREDICTIVE_BACK_STYLE, style)
-                .putBoolean(PREF_MD3_PREDICTIVE_BACK, md3PredictiveBack)
+                .putInt(predictiveBackStyleKey(userId), style)
                 .apply();
+    }
+
+    /** Drop sticky premium style for the current account after plan expiry. */
+    public static void clearPremiumBackStyleIfUnauthorized() {
+        clearPremiumBackStyleForUser(currentUserId());
+    }
+
+    /** Drop sticky premium style for a specific Telegram user (plan revoked). */
+    public static void clearPremiumBackStyleForUser(long userId) {
+        if (userId <= 0) {
+            return;
+        }
+        if (!MglaSubscription.PLAN_FREE.equals(MglaSubscription.getPlanIdForUser(userId))) {
+            return;
+        }
+        SharedPreferences p = getPrefs();
+        String key = predictiveBackStyleKey(userId);
+        int style = PREDICTIVE_BACK_DEFAULT;
+        if (p.contains(key)) {
+            style = clampPredictiveBackStyle(p.getInt(key, PREDICTIVE_BACK_DEFAULT));
+        } else if (p.contains(PREF_PREDICTIVE_BACK_STYLE)) {
+            style = clampPredictiveBackStyle(p.getInt(PREF_PREDICTIVE_BACK_STYLE, PREDICTIVE_BACK_DEFAULT));
+        }
+        if (!isPremiumPredictiveBackStyle(style)) {
+            return;
+        }
+        p.edit().putInt(key, PREDICTIVE_BACK_DEFAULT).apply();
+        if (currentUserId() == userId) {
+            predictiveBackStyle = PREDICTIVE_BACK_DEFAULT;
+            md3PredictiveBack = false;
+            styleCachedForAccount = UserConfig.selectedAccount;
+        } else {
+            // Force reload if that account becomes selected later.
+            styleCachedForAccount = Integer.MIN_VALUE;
+        }
     }
 
     public static boolean isPredictiveBackSpatial() {

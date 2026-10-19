@@ -6,14 +6,15 @@ import androidx.annotation.Nullable;
 
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.LauncherIconController.LauncherIcon;
 
 /**
  * Maps launcher icons to built-in Mgla themes (with locked wallpapers + accent palettes).
  * <p>
- * Free for everyone: Основная → Фирм. amoled / Фирм. темная.
- * Other icon themes are available now; Premium gating can be re-enabled later.
+ * «Применить тему под иконку» is Premium (any paid plan on any account — install-wide).
+ * When entitlement is lost, auto-apply turns off and the theme resets to Фирм. темная.
  */
 public final class MglaIconThemes {
 
@@ -132,19 +133,16 @@ public final class MglaIconThemes {
                 || icon == LauncherIcon.GIRLS;
     }
 
-    /**
-     * Until Mgla Premium ships, every icon theme is available to everyone.
-     * Keep this hook so Premium can gate non-DEFAULT icons later.
-     */
     public static boolean isThemeFree(LauncherIcon icon) {
         return hasThemeOffer(icon);
     }
 
     public static boolean canApplyTheme(LauncherIcon icon) {
-        return hasThemeOffer(icon);
+        return hasThemeOffer(icon) && MglaSubscription.canUseIconThemes();
     }
 
-    public static boolean isAutoApplyEnabled() {
+    /** Raw preference — may stay true after plan expiry until {@link #clearIfUnauthorized()}. */
+    public static boolean isAutoApplyPrefEnabled() {
         if (autoApplyCached == null) {
             SharedPreferences p = ApplicationLoader.applicationContext.getSharedPreferences(PREFS, 0);
             autoApplyCached = p.getBoolean(PREF_AUTO_APPLY_ICON_THEME, false);
@@ -152,7 +150,15 @@ public final class MglaIconThemes {
         return autoApplyCached;
     }
 
+    /** Auto-apply is on and at least one account still has a paid plan. */
+    public static boolean isAutoApplyEnabled() {
+        return isAutoApplyPrefEnabled() && MglaSubscription.canUseIconThemes();
+    }
+
     public static void setAutoApplyEnabled(boolean enabled) {
+        if (enabled && !MglaSubscription.canUseIconThemes()) {
+            enabled = false;
+        }
         if (autoApplyCached != null && autoApplyCached == enabled) {
             return;
         }
@@ -164,6 +170,42 @@ public final class MglaIconThemes {
         if (enabled) {
             // Persist theme for the currently selected icon right away.
             applyThemeForIconQuiet(getCurrentIcon());
+        }
+    }
+
+    /**
+     * When no account has a paid plan: turn off auto-apply and, if it was on,
+     * reset the active theme to Фирм. темная.
+     */
+    public static void clearIfUnauthorized() {
+        if (MglaSubscription.canUseIconThemes()) {
+            return;
+        }
+        boolean wasAuto = isAutoApplyPrefEnabled();
+        if (wasAuto) {
+            autoApplyCached = false;
+            ApplicationLoader.applicationContext.getSharedPreferences(PREFS, 0)
+                    .edit()
+                    .putBoolean(PREF_AUTO_APPLY_ICON_THEME, false)
+                    .commit();
+            applyStandardDarkTheme();
+        }
+    }
+
+    /** Фирм. темная — default after Premium icon-theme entitlement is gone. */
+    public static void applyStandardDarkTheme() {
+        try {
+            Theme.ThemeInfo info = Theme.getTheme(Theme.MGLA_THEME_DARK);
+            if (info == null) {
+                return;
+            }
+            Theme.applyTheme(info, true, false);
+            Theme.setCurrentNightTheme(info);
+            MessagesController.getGlobalMainSettings().edit()
+                    .putString("theme", info.getKey())
+                    .putString("nighttheme", info.getKey())
+                    .commit();
+        } catch (Throwable ignore) {
         }
     }
 

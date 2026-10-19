@@ -68,7 +68,8 @@ public class MglaMemoryExtractor {
     }
 
     private static void runTick() {
-        if (!MglaMemoryConfig.isEnabled() || MglaMemoryConfig.watchedCount() == 0 || running) {
+        if (!MglaMemoryConfig.isActive() || !MglaMemoryConfig.isToggleOn()
+                || MglaMemoryConfig.watchedCount() == 0 || running) {
             return;
         }
         running = true;
@@ -77,9 +78,12 @@ public class MglaMemoryExtractor {
                 if (!UserConfig.getInstance(account).isClientActivated()) {
                     continue;
                 }
+                if (!MglaMemoryConfig.isEnabledForAccount(account)) {
+                    continue;
+                }
                 ArrayList<Long> watched = MglaMemoryConfig.watchedForAccount(account);
                 for (long uid : watched) {
-                    if (!MglaMemoryConfig.isEnabled()) {
+                    if (!MglaMemoryConfig.isEnabledForAccount(account)) {
                         break;
                     }
                     try {

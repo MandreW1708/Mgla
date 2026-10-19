@@ -37,6 +37,7 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -176,6 +177,15 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         subtitle.setGravity(Gravity.CENTER);
         block.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 16));
         block.addView(accentButton(context, "Включить память", () -> {
+            if (!org.telegram.messenger.MglaSubscription.canUseLiveMemory()) {
+                BulletinFactory.of(this).createSimpleBulletin(
+                        R.raw.star_premium_2,
+                        "Живая память доступна с любой подпиской Mgla Premium",
+                        "Оформить",
+                        () -> presentFragment(new MglaPremiumActivity())
+                ).show();
+                return;
+            }
             MglaMemoryConfig.setEnabled(true);
             MglaMemoryExtractor.kick();
             rootLayout.removeAllViews();

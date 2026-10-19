@@ -79,9 +79,12 @@ WS_PING_TIMEOUT = 90.0
 TCP_BUF = 512 * 1024
 # Needs net.core.rmem_max/wmem_max >= this (see deploy sysctl on hub).
 TCP_BUF_ULTRA = 4 * 1024 * 1024
-# Drain TCP write buffer only after this much is queued (Ultra throughput).
-TCP_DRAIN_WATERMARK = 256 * 1024
-TCP_DRAIN_WATERMARK_ULTRA = 1024 * 1024
+# Drain TCP write buffer only after this much is queued (throughput hint).
+# Keep Ultra watermark modest: large delays break MTProto upload RPCs
+# ("file loads but never sends") because the last chunks sit un-drained
+# while the client waits for a server ack that never arrives.
+TCP_DRAIN_WATERMARK = 64 * 1024
+TCP_DRAIN_WATERMARK_ULTRA = 128 * 1024
 MAX_WS_SIZE = 32 * 1024 * 1024
 # Soft capacity: standard clients share SOFT_CAP - ULTRA_RESERVED slots.
 # Ultra always accepted (best-effort QoS). On mglahub set MGLA_WS_ULTRA_ONLY=1
@@ -545,10 +548,19 @@ async def open_mtproxy(ultra: bool = False):
     return reader, writer
 
 
-async def _write_tcp(writer: asyncio.StreamWriter, data: bytes, ultra: bool) -> None:
-    """Write without draining every tiny frame — keeps Ultra bulk transfers saturated."""
+async def _write_tcp(
+    writer: asyncio.StreamWriter,
+    data: bytes,
+    ultra: bool,
+    *,
+    force_drain: bool = False,
+) -> None:
+    """Write to Telegram/MTProxy. force_drain=True for media uploads / RPC paths."""
     writer.write(data)
-    watermark = TCP_DRAIN_WATERMARK_ULTRA if ultra else TCP_DRAIN_WATERMARK
+    if force_drain or not ultra:
+        await writer.drain()
+        return
+    watermark = TCP_DRAIN_WATERMARK_ULTRA
     transport = writer.transport
     pending = 0
     try:
@@ -560,12 +572,13 @@ async def _write_tcp(writer: asyncio.StreamWriter, data: bytes, ultra: bool) -> 
 
 
 async def pipe_ws_to_tcp(ws, writer: asyncio.StreamWriter, ultra: bool = False) -> None:
+    # Main DC is RPC-heavy (sendMessage / sendMedia). Always drain so acks flow.
     try:
         async for message in ws:
             data = message.encode("utf-8") if isinstance(message, str) else message
             if not data:
                 continue
-            await _write_tcp(writer, data, ultra)
+            await _write_tcp(writer, data, ultra, force_drain=True)
         try:
             await writer.drain()
         except Exception:
@@ -645,6 +658,8 @@ async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str, 
     received = [0]
 
     async def up():
+        # Always drain: media uploads are request/response. Coalesced writes
+        # leave the last FileSavePart chunk buffered and the send never finishes.
         try:
             async for message in ws:
                 data = message.encode("utf-8") if isinstance(message, str) else message
@@ -652,7 +667,7 @@ async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str, 
                     continue
                 plain = ws_to_plain.update(data)
                 out = plain_to_mt.update(plain)
-                await _write_tcp(writer, out, ultra)
+                await _write_tcp(writer, out, ultra, force_drain=True)
             try:
                 await writer.drain()
             except Exception:
@@ -808,25 +823,41 @@ async def handler(ws):
 
         LOG.info("%s open dc=%s media=%s plan=%s ultra=%s", peer, dc, int(media), plan, int(ultra))
 
-        # Media: official MTProxy middle-end routing (strong path).
-        if media:
-            if await bridge_via_mtproxy(ws, first, dc, True, peer, ultra=ultra):
+        # Prefer local MTProxy middle-end:
+        # - media=1 (downloads / GenericMedia)
+        # - Ultra media=0 too: voice/circles/uploads use ConnectionTypeUpload which
+        #   is NOT flagged as media in tgnet, so they hit this path. Raw DC IP
+        #   races from the hub are flaky; MTProxy handles proxy_for ±dc.
+        prefer_mtproxy = media or ultra
+        if prefer_mtproxy:
+            if await bridge_via_mtproxy(ws, first, dc, media, peer, ultra=ultra):
                 return
-            # Fallback: race kws hosts, then raw IP.
-            try:
-                upstream, host = await race_kws(dc, True)
-                LOG.info("%s connected dc=%s media=1 via %s", peer, dc, host)
-                await upstream.send(first)
-                received = [0]
-                up = asyncio.create_task(pipe_ws(ws, upstream))
-                down = asyncio.create_task(pipe_ws(upstream, ws, received))
-                done, pending = await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
-                for t in pending:
-                    t.cancel()
-                LOG.info("%s closed dc=%s media=1 via %s bytes=%s", peer, dc, host, received[0])
-                return
-            except Exception as e:
-                LOG.warning("%s kws media failed: %s", peer, e)
+            if media:
+                # Fallback: race kws hosts, then raw IP.
+                try:
+                    upstream, host = await race_kws(dc, True)
+                    LOG.info("%s connected dc=%s media=1 via %s", peer, dc, host)
+                    await upstream.send(first)
+                    received = [0]
+                    up = asyncio.create_task(pipe_ws(ws, upstream))
+                    down = asyncio.create_task(pipe_ws(upstream, ws, received))
+                    done, pending = await asyncio.wait(
+                        {up, down}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for t in pending:
+                        t.cancel()
+                    LOG.info(
+                        "%s closed dc=%s media=1 via %s bytes=%s",
+                        peer, dc, host, received[0],
+                    )
+                    return
+                except Exception as e:
+                    LOG.warning("%s kws media failed: %s", peer, e)
+            else:
+                LOG.warning(
+                    "%s ultra mtproxy failed for media=0 — falling back to raw DC",
+                    peer,
+                )
 
         try:
             reader, writer, ip = await open_dc(dc, media, ultra=ultra)

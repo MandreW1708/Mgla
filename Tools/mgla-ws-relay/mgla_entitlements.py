@@ -59,11 +59,17 @@ def best_plan(plans: Iterable[str]) -> str:
 
 
 def clamp_plan(claimed: Optional[str], hub_plan: Optional[str]) -> str:
-    """Never allow a client claim above the hub-verified plan."""
+    """Never allow a client claim above the hub-verified plan.
+
+    Explicit lower claims are kept (e.g. utilities always request {@code free}
+    even when the subscriber is Premium+ / Ultra). Missing claim → hub plan.
+    """
     hub = normalize_plan(hub_plan)
+    if claimed is None or (isinstance(claimed, str) and not claimed.strip()):
+        return hub
     claim = normalize_plan(claimed)
     if plan_rank(claim) <= plan_rank(hub):
-        return claim if claim != PLAN_FREE or hub == PLAN_FREE else hub
+        return claim
     return hub
 
 

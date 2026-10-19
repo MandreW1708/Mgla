@@ -3855,6 +3855,20 @@ public class ChatActivity extends BaseFragment implements
                         BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
                         return;
                     }
+                    if (!org.telegram.messenger.MglaSubscription.canUseLiveMemoryForAccount(currentAccount)) {
+                        BulletinFactory.of(ChatActivity.this).createSimpleBulletin(
+                                R.raw.star_premium_2,
+                                "Живая память доступна с любой подпиской Mgla Premium",
+                                "Оформить",
+                                () -> presentFragment(new MglaPremiumActivity())
+                        ).show();
+                        return;
+                    }
+                    if (!org.telegram.messenger.MglaMemoryConfig.isToggleOn()) {
+                        BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.info,
+                                "Сначала включите живую память в настройках Mgla").show();
+                        return;
+                    }
                     boolean watched = org.telegram.messenger.MglaMemoryConfig.isWatched(currentAccount, dialog_id);
                     org.telegram.messenger.MglaMemoryConfig.toggleWatched(currentAccount, dialog_id);
                     if (!watched) {
@@ -34352,7 +34366,8 @@ public class ChatActivity extends BaseFragment implements
                 break;
             }
             case OPTION_REMIND: {
-                if (selectedObject == null || selectedObject.messageOwner == null || getContext() == null) {
+                if (selectedObject == null || selectedObject.messageOwner == null || getContext() == null
+                        || !org.telegram.messenger.MglaSubscription.canUseTasks()) {
                     break;
                 }
                 final MessageObject remindMessage = selectedObject;
@@ -47650,7 +47665,9 @@ public class ChatActivity extends BaseFragment implements
                 }
             }
         }
-        if (selectedObject != null && !selectedObject.isSending() && selectedObject.messageOwner != null && !options.contains(OPTION_REMIND)) {
+        if (selectedObject != null && !selectedObject.isSending() && selectedObject.messageOwner != null
+                && !options.contains(OPTION_REMIND)
+                && org.telegram.messenger.MglaSubscription.canUseTasks()) {
             items.add("Напомнить…");
             options.add(OPTION_REMIND);
             icons.add(R.drawable.outline_message_time_24);

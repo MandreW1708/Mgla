@@ -95,13 +95,29 @@ public final class MglaMainTabsConfig {
         return filterEntitledTabs(order);
     }
 
-    /** Free plan: AI tab is not available at all. */
+    /** Free plan: AI and Tasks tabs are not available. */
     public static boolean isTabAllowed(TabId id) {
-        return id != TabId.AI || MglaSubscription.canAccessAiSection();
+        if (id == TabId.AI) {
+            return MglaSubscription.canAccessAiSection();
+        }
+        if (id == TabId.TASKS) {
+            return MglaSubscription.canUseTasks();
+        }
+        return true;
     }
 
     private static ArrayList<TabId> filterEntitledTabs(ArrayList<TabId> order) {
-        if (order == null || order.isEmpty() || MglaSubscription.canAccessAiSection()) {
+        if (order == null || order.isEmpty()) {
+            return order;
+        }
+        boolean needsFilter = false;
+        for (int i = 0; i < order.size(); i++) {
+            if (!isTabAllowed(order.get(i))) {
+                needsFilter = true;
+                break;
+            }
+        }
+        if (!needsFilter) {
             return order;
         }
         ArrayList<TabId> out = new ArrayList<>(order.size());

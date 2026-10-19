@@ -2981,7 +2981,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             .add(NotificationCenter.communitySwitchedCollapsed)
             .add(NotificationCenter.appConfigUpdated)
             .add(NotificationCenter.activeAuctionsUpdated)
-            .addGlobal(NotificationCenter.mglaLocalModelRamChanged);
+            .addGlobal(NotificationCenter.mglaLocalModelRamChanged)
+            .addGlobal(NotificationCenter.mglaSubscriptionHintChanged);
 
         if (initialDialogsType == DIALOGS_TYPE_DEFAULT) {
             observersGroup.add(NotificationCenter.chatlistFolderUpdate);
@@ -6135,6 +6136,25 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
         if (isInPreviewMode()) {
             dialogsHintCellVisible = false;
+        } else if (folderId == 0 && communityId == 0 && org.telegram.messenger.MglaSubscription.shouldShowExpiryWarning()) {
+            dialogsHintCellVisible = true;
+            dialogsHintCell.setOnClickListener(v -> {
+                presentFragment(new MglaPremiumActivity());
+            });
+            String planLabel = org.telegram.messenger.MglaSubscription.currentPlanLabel();
+            String until = org.telegram.messenger.MglaSubscription.formatExpiresAt(
+                    org.telegram.messenger.MglaSubscription.getExpiresAtMs());
+            String title = TextUtils.isEmpty(planLabel)
+                    ? "Подписка скоро закончится"
+                    : (planLabel + " скоро закончится");
+            String subtitle = TextUtils.isEmpty(until)
+                    ? "Премиальные функции отключатся. Нажмите, чтобы продлить, или закройте уведомление."
+                    : ("До " + until + ". Премиальные функции отключатся. Нажмите, чтобы продлить, или закройте уведомление.");
+            dialogsHintCell.setText(title, subtitle);
+            dialogsHintCell.setOnCloseListener(v -> {
+                org.telegram.messenger.MglaSubscription.dismissExpiryWarning();
+                updateDialogsHint();
+            });
         } else if (folderId == 0 && communityId == 0 && org.telegram.messenger.MglaLocalChatRuntime.shouldShowRamWarning()) {
             // Local GGUF still mapped after leaving the AI tab — visible on the main chats list.
             dialogsHintCellVisible = true;
@@ -11241,7 +11261,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             updateDialogsHint();
         } else if (id == NotificationCenter.activeAuctionsUpdated) {
             updateDialogsHint();
-        } else if (id == NotificationCenter.mglaLocalModelRamChanged) {
+        } else if (id == NotificationCenter.mglaLocalModelRamChanged
+                || id == NotificationCenter.mglaSubscriptionHintChanged) {
             updateDialogsHint();
         }
     }

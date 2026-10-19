@@ -50,17 +50,51 @@ public class MglaMemoryConfig {
         return ApplicationLoader.applicationContext.getSharedPreferences(MglaChatDna.PREFS, Context.MODE_PRIVATE);
     }
 
-    /** Функция доступна (фичефлаг + локальный выключатель). */
+    /** Функция доступна по фичефлагу хаба (не путать с подпиской). */
     public static boolean isActive() {
         return MglaFeatureFlags.isAllowed(FEATURE_ID);
     }
 
+    /** Сырой переключатель в настройках (по умолчанию выкл). */
+    public static boolean isToggleOn() {
+        return prefs().getBoolean(KEY_ENABLED, false);
+    }
+
+    /**
+     * Живая память реально работает на текущем аккаунте:
+     * фичефлаг + переключатель + любая платная подписка на этом аккаунте.
+     */
     public static boolean isEnabled() {
-        return isActive() && prefs().getBoolean(KEY_ENABLED, false);
+        return isEnabledForAccount(UserConfig.selectedAccount);
+    }
+
+    public static boolean isEnabledForAccount(int account) {
+        return isActive()
+                && isToggleOn()
+                && MglaSubscription.canUseLiveMemoryForAccount(account);
     }
 
     public static void setEnabled(boolean enabled) {
+        if (enabled && !MglaSubscription.canUseLiveMemory()) {
+            enabled = false;
+        }
         prefs().edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    /**
+     * Сбрасывает переключатель, если ни на одном аккаунте нет платной подписки
+     * (глобальный pref не должен оставаться «Вкл» только для Free).
+     */
+    public static void clearIfUnauthorized() {
+        if (!isToggleOn()) {
+            return;
+        }
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            if (MglaSubscription.canUseLiveMemoryForAccount(a)) {
+                return;
+            }
+        }
+        prefs().edit().putBoolean(KEY_ENABLED, false).apply();
     }
 
     public static String getProvider() {

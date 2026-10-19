@@ -43,17 +43,17 @@ public final class MglaWsBypass {
      * Пока маршрут Connected/Updating, переключений нет (иначе лишний reconnect Telegram).
      */
     private static final long WEB_RETRY_WS_MS = 12 * 60_000L;
-    /** Ultra: не дёргаем WEB↔WS часто — лучше держаться за выделенный релей. */
-    private static final long WEB_RETRY_WS_ULTRA_MS = 10 * 60_000L;
+    /** Ultra: быстрее возвращаемся на выделенный WS, если WEB ещё не Connected. */
+    private static final long WEB_RETRY_WS_ULTRA_MS = 75_000L;
     private static final long WS_PROBE_TIMEOUT_MS = 8_000L;
-    private static final long WS_PROBE_TIMEOUT_ULTRA_MS = 12_000L;
+    private static final long WS_PROBE_TIMEOUT_ULTRA_MS = 10_000L;
     /** Минимальная пауза между любыми сменами маршрута. */
     private static final long ROUTE_SWITCH_COOLDOWN_MS = 2 * 60_000L;
-    /** Ultra: ещё дольше не прыгаем между маршрутами. */
-    private static final long ROUTE_SWITCH_COOLDOWN_ULTRA_MS = 5 * 60_000L;
+    /** Ultra host is dedicated — allow quicker WS↔WEB recovery than shared bot. */
+    private static final long ROUTE_SWITCH_COOLDOWN_ULTRA_MS = 40_000L;
     /** Сколько подряд тиков монитора должны видеть stall после порога. */
     private static final int STALL_CONFIRM_TICKS = 2;
-    private static final int STALL_CONFIRM_TICKS_ULTRA = 4;
+    private static final int STALL_CONFIRM_TICKS_ULTRA = 2;
     /**
      * How often to measure relay handshake RTT while auto-bypass is on.
      * 30 min: cheap enough (one TLS+WS open/close) but fresh for the settings UI.
@@ -321,8 +321,9 @@ public final class MglaWsBypass {
     }
 
     /**
-     * After Ultra-обход host switch (mglabot ↔ mglahub): hot-reconnect upstream
-     * without tearing down the local MTProto listener (keeps Telegram port stable).
+     * After Ultra-обход host switch (mglabot ↔ mglahub): hard-cut upstream and
+     * reconnect immediately on the new host without tearing down the local
+     * MTProto listener (keeps Telegram port stable).
      */
     public synchronized void onRelayHostChanged() {
         if (!MglaWsConfig.isEnabled() || !proxyApplied) {
@@ -333,9 +334,19 @@ public final class MglaWsBypass {
             notifyChanged();
             return;
         }
-        FileLog.d("MglaWsBypass: relay host changed -> " + MglaWsConfig.getRelayHost());
+        final String newHost = MglaWsConfig.getRelayHost();
+        FileLog.d("MglaWsBypass: hard host switch -> " + newHost
+                + " ultra=" + MglaWsConfig.isUltraBypassEnabled());
         invalidatePing();
-        // Prefer hot reconnect: same local port, drop only upstream bridges.
+        // Leave WEB immediately — Ultra WEB and bot WEB are different proxies.
+        long now = SystemClock.elapsedRealtime();
+        route = Route.WS;
+        routeSinceElapsed = now;
+        lastConnectedElapsed = now;
+        lastWsProbeElapsed = now;
+        lastSwitchElapsed = 0; // no cooldown after intentional host flip
+        stallConfirmTicks = 0;
+        // Drop every upstream bridge now so Telegram cannot keep talking to the old host.
         if (isServerRunning()) {
             WsBypassCore.getInstance().reconnectUpstream();
         } else {
@@ -347,22 +358,29 @@ public final class MglaWsBypass {
                 return;
             }
         }
-        // Force WS route and clear switch cooldown so we don't sit on WEB after a host flip.
-        long now = SystemClock.elapsedRealtime();
-        route = Route.WS;
-        routeSinceElapsed = now;
-        lastConnectedElapsed = now;
-        lastWsProbeElapsed = now;
-        lastSwitchElapsed = 0;
-        stallConfirmTicks = 0;
         writeBypassToMainConfig();
         replaceBypassProxyInList();
+        // Push new proxy settings twice: first cut, second after bridges re-arm.
         ConnectionsManager.setProxySettings(true, buildActiveSettings());
         wakeAllAccounts();
         lastError = null;
         scheduleMonitor();
         requestPing(true);
         notifyChanged();
+        // Second wake shortly after — new WS handshake usually finishes in <1s.
+        if (monitorQueue != null) {
+            monitorQueue.postRunnable(() -> {
+                try {
+                    if (!MglaWsConfig.isEnabled() || !proxyApplied) {
+                        return;
+                    }
+                    ConnectionsManager.setProxySettings(true, buildActiveSettings());
+                    wakeAllAccounts();
+                } catch (Throwable e) {
+                    FileLog.e(e);
+                }
+            }, 400);
+        }
     }
 
     public Route getRoute() {
@@ -389,7 +407,9 @@ public final class MglaWsBypass {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < ROUTE_SWITCH_COOLDOWN_MS) {
+        long cooldown = MglaWsConfig.isUltraBypassEnabled()
+                ? ROUTE_SWITCH_COOLDOWN_ULTRA_MS : ROUTE_SWITCH_COOLDOWN_MS;
+        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < cooldown) {
             FileLog.d("MglaWsBypass: skip route " + route + " -> " + target
                 + " (cooldown, " + reason + ")");
             return;

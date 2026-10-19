@@ -182,6 +182,10 @@ public final class MglaAuth {
             if (!MglaWsConfig.isEnabled()) {
                 return false;
             }
+            // Ultra → native /mgla-auth on mglahub (not bot /mgla-ai/v1/auth/*).
+            if (MglaWsConfig.isUltraBypassEnabled()) {
+                return false;
+            }
             if (TextUtils.isEmpty(MglaWsConfig.getRelayHost())) {
                 return false;
             }

@@ -8,10 +8,15 @@ import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ImageSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -27,6 +32,7 @@ import androidx.annotation.Nullable;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.MglaMemoryConfig;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
@@ -62,6 +68,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     public boolean onFragmentCreate() {
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.dpiBypassChanged);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaSubscriptionHintChanged);
         return super.onFragmentCreate();
     }
 
@@ -69,12 +76,14 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     public void onFragmentDestroy() {
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.dpiBypassChanged);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaSubscriptionHintChanged);
         super.onFragmentDestroy();
     }
 
     @Override
     public void onResume() {
         super.onResume();
+        MglaMemoryConfig.clearIfUnauthorized();
         updateMemoryCell();
         updateDpiBypassCell();
     }
@@ -83,7 +92,9 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.dpiBypassChanged) {
             updateDpiBypassCell();
-        } else if (id == NotificationCenter.mglaHeaderSettingsChanged) {
+        } else if (id == NotificationCenter.mglaHeaderSettingsChanged
+                || id == NotificationCenter.mglaSubscriptionHintChanged) {
+            MglaMemoryConfig.clearIfUnauthorized();
             updateMemoryCell();
         }
     }
@@ -102,6 +113,10 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         if (!MglaMemoryConfig.isActive()) {
             return;
         }
+        if (!MglaSubscription.canUseLiveMemory()) {
+            showLiveMemoryUpsell();
+            return;
+        }
         if (!MglaMemoryConfig.isEnabled()) {
             BulletinFactory.of(this).createSimpleBulletin(R.raw.info,
                 "Сначала включите живую память в разделе «Искусственный интеллект»").show();
@@ -111,6 +126,15 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             return;
         }
         presentFragment(new MglaMemoryActivity());
+    }
+
+    private void showLiveMemoryUpsell() {
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.star_premium_2,
+                "Живая память доступна с любой подпиской Mgla Premium",
+                "Оформить",
+                () -> presentFragment(new MglaPremiumActivity())
+        ).show();
     }
 
     private void updateMemoryCell() {
@@ -126,19 +150,29 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         if (!allowed) {
             return;
         }
-        boolean on = MglaMemoryConfig.isEnabled();
+        boolean unlocked = MglaSubscription.canUseLiveMemory();
+        boolean on = unlocked && MglaMemoryConfig.isEnabled();
         memoryCell.set(
             IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
-            R.drawable.msg_saved, "Живая память", null,
-            memoryStatusLabel(), false, "alpha"
+            R.drawable.msg_saved, liveMemoryPremiumLabel(getContext()), null,
+            on ? "Вкл" : "Выкл", false, "alpha"
         );
+        // Без подписки (и при выкл.) пункт выглядит неактивным; клик → upsell / включение.
         memoryCell.setAlpha(on ? 1f : 0.4f);
         memoryCell.setEnabled(true);
         memoryCell.setClickable(true);
     }
 
-    private static String memoryStatusLabel() {
-        return MglaMemoryConfig.isEnabled() ? "Вкл" : "Выкл";
+    /** Gold premium star to the left of «Живая память». */
+    private static CharSequence liveMemoryPremiumLabel(Context context) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  Живая память");
+        Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+                Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
     }
 
     private static String bypassStatusLabel() {
@@ -203,8 +237,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         memoryDivider = MglaUi.createDivider(context);
         mainBlock.addView(memoryDivider);
         memoryCell = addMenuItem(mainBlock, this::openMemory,
-            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.msg_saved, "Живая память",
-            memoryStatusLabel(), "alpha");
+            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.msg_saved,
+            liveMemoryPremiumLabel(context), "Выкл", "alpha");
         updateMemoryCell();
         rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 

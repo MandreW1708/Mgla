@@ -1,8 +1,16 @@
 package org.telegram.ui;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+
 import android.content.Context;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ImageSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -11,12 +19,14 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
 public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
@@ -77,15 +87,28 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
     private void fillCommon(Context context, LinearLayout rootLayout) {
         LinearLayout block = MglaUi.createBlock(context, "Анимация назад");
 
+        MglaGlassConfig.clearPremiumBackStyleIfUnauthorized();
+        final boolean unlocked = MglaSubscription.canUsePremiumAnimations();
         final int[] styles = MglaGlassConfig.PREDICTIVE_BACK_STYLES;
         final RadioCell[] styleCells = new RadioCell[styles.length];
         final int currentStyle = MglaGlassConfig.getPredictiveBackStyle();
         for (int i = 0; i < styles.length; i++) {
             final int style = styles[i];
+            final boolean premium = MglaGlassConfig.isPremiumPredictiveBackStyle(style);
             RadioCell cell = new RadioCell(context);
             cell.setBackground(null);
-            cell.setText(MglaGlassConfig.getPredictiveBackStyleTitle(style), currentStyle == style, false);
+            CharSequence title = premium
+                    ? premiumAnimLabel(context, MglaGlassConfig.getPredictiveBackStyleTitle(style))
+                    : MglaGlassConfig.getPredictiveBackStyleTitle(style);
+            cell.setText(title, currentStyle == style, false);
+            if (premium && !unlocked) {
+                cell.setAlpha(0.4f);
+            }
             cell.setOnClickListener(v -> {
+                if (premium && !MglaSubscription.canUsePremiumAnimations()) {
+                    showPremiumAnimUpsell();
+                    return;
+                }
                 MglaGlassConfig.setPredictiveBackStyle(style);
                 for (int j = 0; j < styleCells.length; j++) {
                     styleCells[j].setChecked(styles[j] == style, true);
@@ -233,9 +256,31 @@ public class MglaAnimationSettingsActivity extends MglaBaseSettingsActivity {
     @Override
     public void onResume() {
         super.onResume();
+        MglaGlassConfig.clearPremiumBackStyleIfUnauthorized();
         if (textAnimationCell != null) {
             textAnimationCell.setTextAndValue("Анимация текста", MglaTextAnimConfig.getSummary(), false);
         }
+    }
+
+    private void showPremiumAnimUpsell() {
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.star_premium_2,
+                "Эта анимация доступна с любой подпиской Mgla Premium",
+                "Оформить",
+                () -> presentFragment(new MglaPremiumActivity())
+        ).show();
+    }
+
+    /** Gold premium star to the left of the animation title. */
+    private static CharSequence premiumAnimLabel(Context context, String title) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  " + title);
+        Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+                Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
     }
 
     public static String getTitleForType(int type) {

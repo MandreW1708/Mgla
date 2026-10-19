@@ -96,7 +96,7 @@ public class GeminiTranscriber {
         }
 
         boolean isVideo = mimeType.startsWith("video");
-        if (MglaHubHttp.isConfigured()) {
+        if (MglaHubHttp.shouldProxyAi()) {
             return callGeminiViaHub(apiKey, model, mimeType, base64Audio);
         }
 

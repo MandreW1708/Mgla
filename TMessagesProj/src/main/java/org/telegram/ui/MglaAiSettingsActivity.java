@@ -6,6 +6,12 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
+import android.graphics.drawable.Drawable;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ImageSpan;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -21,6 +27,7 @@ import org.telegram.messenger.MglaChatDna;
 import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaMemoryExtractor;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -83,18 +90,23 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
     @Override
     public boolean onFragmentCreate() {
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaSubscriptionHintChanged);
         return super.onFragmentCreate();
     }
 
     @Override
     public void onFragmentDestroy() {
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaSubscriptionHintChanged);
         super.onFragmentDestroy();
     }
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
-        if (id == NotificationCenter.mglaHeaderSettingsChanged && listView != null && listView.getAdapter() != null) {
+        if ((id == NotificationCenter.mglaHeaderSettingsChanged
+                || id == NotificationCenter.mglaSubscriptionHintChanged)
+                && listView != null && listView.getAdapter() != null) {
+            MglaMemoryConfig.clearIfUnauthorized();
             listView.getAdapter().notifyDataSetChanged();
         }
     }
@@ -170,25 +182,45 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
                     return;
                 }
+                if (!MglaSubscription.canUseLiveMemory()) {
+                    showLiveMemoryUpsell();
+                    return;
+                }
                 showMemoryProviderDialog(context);
             } else if (position == ROW_MEMORY_INTERVAL) {
                 if (!MglaMemoryConfig.isActive()) {
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
                     return;
                 }
+                if (!MglaSubscription.canUseLiveMemory()) {
+                    showLiveMemoryUpsell();
+                    return;
+                }
                 showMemoryIntervalDialog(context);
+            } else if (position == ROW_MEMORY_LIMIT) {
+                if (!MglaSubscription.canUseLiveMemory()) {
+                    showLiveMemoryUpsell();
+                }
             } else if (position == ROW_MEMORY_ENABLED) {
                 if (!MglaMemoryConfig.isActive()) {
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
                     return;
                 }
-                boolean enabled = !MglaMemoryConfig.isEnabled();
+                if (!MglaSubscription.canUseLiveMemory()) {
+                    MglaMemoryConfig.setEnabled(false);
+                    if (view instanceof TextCheckCell) {
+                        ((TextCheckCell) view).setChecked(false);
+                    }
+                    showLiveMemoryUpsell();
+                    return;
+                }
+                boolean enabled = !MglaMemoryConfig.isToggleOn();
                 MglaMemoryConfig.setEnabled(enabled);
                 if (enabled) {
                     MglaMemoryExtractor.kick();
                 }
                 if (view instanceof TextCheckCell) {
-                    ((TextCheckCell) view).setChecked(enabled);
+                    ((TextCheckCell) view).setChecked(MglaMemoryConfig.isEnabled());
                 }
                 if (listView != null && listView.getAdapter() != null) {
                     listView.getAdapter().notifyItemChanged(ROW_MEMORY_LIMIT);
@@ -329,12 +361,35 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
     @Override
     public void onResume() {
         super.onResume();
+        MglaMemoryConfig.clearIfUnauthorized();
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyItemChanged(ROW_AI_EDITOR_LIMIT);
             if (MglaMemoryConfig.isActive()) {
+                listView.getAdapter().notifyItemChanged(ROW_MEMORY_ENABLED);
                 listView.getAdapter().notifyItemChanged(ROW_MEMORY_LIMIT);
             }
         }
+    }
+
+    private void showLiveMemoryUpsell() {
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.star_premium_2,
+                "Живая память доступна с любой подпиской Mgla Premium",
+                "Оформить",
+                () -> presentFragment(new MglaPremiumActivity())
+        ).show();
+    }
+
+    /** Gold premium star to the left of «Включить живую память». */
+    private static CharSequence liveMemoryToggleLabel(Context context) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  Включить живую память");
+        Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+                Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
     }
 
     /** Прокрутка к переключателю живой памяти и подсветка строки. */
@@ -380,7 +435,7 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             return position == ROW_AI_ENABLED || position == ROW_AI_SUMMARY || position == ROW_AI_RETELL || position == ROW_AI_EDITOR || position == ROW_AI_TRANSCRIBE || position == ROW_PROVIDER_BASIC || position == ROW_PROVIDER_GEMINI || position == ROW_DNA_TOPICS || position == ROW_DNA_MODELS
-                || position == ROW_MEMORY_ENABLED || position == ROW_MEMORY_PROVIDER || position == ROW_MEMORY_INTERVAL;
+                || position == ROW_MEMORY_ENABLED || position == ROW_MEMORY_PROVIDER || position == ROW_MEMORY_INTERVAL || position == ROW_MEMORY_LIMIT;
         }
 
         @Override
@@ -428,6 +483,12 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            // Сброс alpha после recycle (блок памяти без подписки — 0.4f).
+            if (position != ROW_MEMORY_HEADER && position != ROW_MEMORY_ENABLED
+                    && position != ROW_MEMORY_PROVIDER && position != ROW_MEMORY_INTERVAL
+                    && position != ROW_MEMORY_LIMIT) {
+                holder.itemView.setAlpha(1f);
+            }
             if (position == ROW_AI_EDITOR_LIMIT) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                 cell.setTextAndValue("Лимит запросов к AI", AiAssistant.getUsageLabel(), false);
@@ -446,18 +507,29 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
                 cell.setCanDisable(false);
             } else if (position == ROW_MEMORY_PROVIDER) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("Провайдер памяти", MglaMemoryConfig.getProviderTitle(), false);
+                boolean unlocked = MglaSubscription.canUseLiveMemory();
+                cell.setTextAndValue("Провайдер памяти",
+                    unlocked ? MglaMemoryConfig.getProviderTitle() : "—", false);
                 cell.setCanDisable(false);
+                cell.setAlpha(unlocked ? 1f : 0.4f);
             } else if (position == ROW_MEMORY_INTERVAL) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("Интервал обновления", MglaMemoryConfig.getIntervalTitle(), false);
+                boolean unlocked = MglaSubscription.canUseLiveMemory();
+                cell.setTextAndValue("Интервал обновления",
+                    unlocked ? MglaMemoryConfig.getIntervalTitle() : "—", false);
                 cell.setCanDisable(false);
+                cell.setAlpha(unlocked ? 1f : 0.4f);
             } else if (position == ROW_MEMORY_LIMIT) {
                 TextSettingsCell cell = (TextSettingsCell) holder.itemView;
+                boolean unlocked = MglaSubscription.canUseLiveMemory();
                 cell.setTextAndValue("Лимит запросов памяти",
-                    MglaMemoryConfig.getUsedToday() + "/" + MglaMemoryConfig.AI_DAILY_LIMIT
-                        + " (сброс " + MglaMemoryConfig.getResetInLabel() + ")", false);
+                    unlocked
+                        ? (MglaMemoryConfig.getUsedToday() + "/" + MglaMemoryConfig.AI_DAILY_LIMIT
+                            + " (сброс " + MglaMemoryConfig.getResetInLabel() + ")")
+                        : "—",
+                    false);
                 cell.setCanDisable(false);
+                cell.setAlpha(unlocked ? 1f : 0.4f);
             } else if (holder.itemView instanceof HeaderCell) {
                 String headerText = "Провайдер AI";
                 if (position == ROW_DNA_HEADER) {
@@ -467,7 +539,10 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
                 } else if (position == ROW_MEMORY_HEADER) {
                     headerText = "Живая память";
                 }
-                ((HeaderCell) holder.itemView).setText(headerText);
+                HeaderCell header = (HeaderCell) holder.itemView;
+                header.setText(headerText);
+                header.setAlpha(position == ROW_MEMORY_HEADER && !MglaSubscription.canUseLiveMemory()
+                        ? 0.4f : 1f);
             } else if (holder.itemView instanceof RadioCell) {
                 RadioCell cell = (RadioCell) holder.itemView;
                 String provider = prefs.getString("ai_provider", "openrouter");
@@ -496,8 +571,12 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
                             org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor") && prefs.getBoolean("ai_editor", true), false);
                         break;
                     case ROW_MEMORY_ENABLED:
-                        cell.setTextAndCheck("Включить живую память",
-                            MglaMemoryConfig.isActive() && MglaMemoryConfig.isEnabled(), true);
+                        MglaMemoryConfig.clearIfUnauthorized();
+                        boolean unlocked = MglaSubscription.canUseLiveMemory();
+                        // Без подписки переключатель всегда выкл и блок выглядит неактивным.
+                        cell.setTextAndCheck(liveMemoryToggleLabel(context),
+                            unlocked && MglaMemoryConfig.isEnabled(), true);
+                        cell.setAlpha(unlocked ? 1f : 0.4f);
                         break;
                 }
             }

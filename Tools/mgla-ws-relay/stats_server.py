@@ -517,8 +517,15 @@ class Store:
                 )
 
 
+_push_status_lock = threading.Lock()
+_last_push_status = {"ok": None, "msg": "", "at": 0.0}
+
+
 def push_models_to_bot(models=None, plans=None):
-    """Push OpenRouter model lists (all plans) to mglabot. Returns (ok, message)."""
+    """Push OpenRouter model lists (all plans) to mglabot. Returns (ok, message).
+
+    Does not touch hub WS/relay — HTTPS only to MGLA_BOT_AI_URL.
+    """
     if not BOT_AI_URL:
         return False, "MGLA_BOT_AI_URL не задан"
     if not HUB_SYNC_TOKEN:
@@ -537,7 +544,7 @@ def push_models_to_bot(models=None, plans=None):
     }
     hub_admin.validate_plans_disjoint(plans)
     free_models = list(plans.get(hub_admin.PLAN_FREE) or [])
-    url = BOT_AI_URL + "/mgla-ai/v1/admin/models"
+    url = BOT_AI_URL.rstrip("/") + "/mgla-ai/v1/admin/models"
     body = json.dumps(
         {
             # Legacy field: free plan only (old bots).
@@ -557,7 +564,8 @@ def push_models_to_bot(models=None, plans=None):
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        # Short timeout: never stall the hub admin / entitlements threads.
+        with urllib.request.urlopen(req, timeout=8) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             if resp.status != 200:
                 return False, f"mglabot HTTP {resp.status}: {raw[:200]}"
@@ -565,8 +573,114 @@ def push_models_to_bot(models=None, plans=None):
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")[:300]
         return False, f"mglabot HTTP {e.code}: {err}"
-    except (urllib.error.URLError, TimeoutError) as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         return False, f"mglabot недоступен: {e}"
+
+
+def _push_models_http(url: str, plans: dict, free_models: list, sync_token: str):
+    """POST plan catalogs to an ai_proxy admin endpoint. Returns (ok, message)."""
+    body = json.dumps(
+        {
+            "models": free_models,
+            "plans": plans,
+            "aliases": dict(hub_admin.PLAN_MODELS_ALIAS),
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Mgla-Sync-Token": sync_token,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            if resp.status != 200:
+                return False, f"HTTP {resp.status}: {raw[:200]}"
+            return True, "ok"
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="replace")[:300]
+        return False, f"HTTP {e.code}: {err}"
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return False, str(e)
+
+
+def write_local_models_file(plans: dict):
+    """Persist catalogs for hub-local ai_proxy cold start."""
+    path = os.environ.get(
+        "MGLA_OPENROUTER_MODELS_FILE", "/opt/mgla-ws-relay/openrouter_models.json"
+    )
+    payload = {
+        pid: list(plans.get(pid) or [])
+        for pid in hub_admin.PLANS_WITH_MODEL_LISTS
+    }
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    except OSError:
+        log.exception("failed to write %s", path)
+
+
+def push_models_to_bot_async(models=None, plans=None):
+    """Save path: return to admin immediately; push in a daemon thread.
+
+    Pushes to:
+      1) local hub ai_proxy (127.0.0.1:8768) — Ultra clients hit this directly
+      2) mglabot ai_proxy — normal bypass clients
+
+    Avoids blocking hub HTTP (features/entitlements/Ultra WS) while waiting.
+    """
+    snapshot = None
+    if plans is not None:
+        snapshot = {
+            pid: list(plans.get(pid) or [])
+            for pid in hub_admin.PLANS_WITH_MODEL_LISTS
+        }
+    free_only = list(models) if models is not None else None
+
+    def worker():
+        try:
+            if snapshot is not None:
+                write_local_models_file(snapshot)
+            # Always refresh local Ultra AI proxy first (same process machine).
+            local_ok, local_msg = False, "skip"
+            if HUB_SYNC_TOKEN:
+                plans_body = snapshot
+                if plans_body is None:
+                    free = list(free_only) if free_only is not None else []
+                    plans_body = {
+                        hub_admin.PLAN_FREE: free,
+                        hub_admin.PLAN_PREMIUM_PLUS: [],
+                        hub_admin.PLAN_PREMIUM_ULTRA: [],
+                    }
+                free_models = list(plans_body.get(hub_admin.PLAN_FREE) or [])
+                local_ok, local_msg = _push_models_http(
+                    "http://127.0.0.1:8768/mgla-ai/v1/admin/models",
+                    plans_body,
+                    free_models,
+                    HUB_SYNC_TOKEN,
+                )
+            ok, msg = push_models_to_bot(models=free_only, plans=snapshot)
+            summary = f"local={local_ok}/{local_msg}; bot={ok}/{msg}"
+            with _push_status_lock:
+                _last_push_status["ok"] = bool(local_ok or ok)
+                _last_push_status["msg"] = summary
+                _last_push_status["at"] = time.time()
+            log.info("async model push %s", summary)
+        except Exception as e:
+            log.exception("async model push failed")
+            with _push_status_lock:
+                _last_push_status["ok"] = False
+                _last_push_status["msg"] = str(e)
+                _last_push_status["at"] = time.time()
+
+    threading.Thread(target=worker, name="mgla-push-models", daemon=True).start()
 
 
 def _short(v, limit=64):
@@ -962,24 +1076,20 @@ class Handler(BaseHTTPRequestHandler):
                         raw_text,
                         allow_empty=(plan_id != hub_admin.PLAN_FREE),
                     )
+                # Persist first; push never blocks hub WS / entitlements.
                 self.store.set_all_plan_models(plans)
-                ok, msg = push_models_to_bot(plans=plans)
-                if ok:
-                    self._redirect(hub_admin.flash_redirect(ok="планы сохранены; " + msg))
-                else:
-                    self._redirect(
-                        hub_admin.flash_redirect(
-                            ok="планы сохранены на хабе",
-                            err="push: " + msg,
-                        )
+                push_models_to_bot_async(plans=plans)
+                self._redirect(
+                    hub_admin.flash_redirect(
+                        ok="планы сохранены; push на mglabot запущен в фоне"
                     )
+                )
             elif action == "push_models":
                 plans = self.store.get_all_plan_models()
-                ok, msg = push_models_to_bot(plans=plans)
-                if ok:
-                    self._redirect(hub_admin.flash_redirect(ok=msg))
-                else:
-                    self._redirect(hub_admin.flash_redirect(err=msg))
+                push_models_to_bot_async(plans=plans)
+                self._redirect(
+                    hub_admin.flash_redirect(ok="push на mglabot запущен в фоне")
+                )
             else:
                 self._redirect(hub_admin.flash_redirect(err="неизвестное действие"))
         except (ValueError, TypeError) as e:

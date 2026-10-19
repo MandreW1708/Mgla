@@ -118,7 +118,7 @@ public class MglaMemoryAi {
         String model = MglaMemoryConfig.prefs().getString("ai_transcribe_model", "gemini-2.0-flash");
         String fullPrompt = systemPrompt + "\n\n" + userText;
         String text;
-        if (MglaHubHttp.isConfigured()) {
+        if (MglaHubHttp.shouldProxyAi()) {
             String hubJson = "{\"api_key\":\"" + MglaChatDna.escapeJson(apiKey) + "\",\"model\":\""
                 + MglaChatDna.escapeJson(model) + "\",\"text\":\"" + MglaChatDna.escapeJson(fullPrompt) + "\"}";
             MglaHubHttp.Response response = MglaHubHttp.post(
@@ -160,16 +160,27 @@ public class MglaMemoryAi {
     // ——— OpenRouter ———
 
     private static String callOpenRouter(String systemPrompt, String userText, int maxTokens, double temperature) throws Exception {
-        if (MglaHubHttp.isConfigured()) {
+        if (MglaHubHttp.shouldProxyAi()) {
             String lang = "ru";
             try {
                 lang = org.telegram.messenger.LocaleController.getInstance().getCurrentLocaleInfo().shortName;
             } catch (Throwable ignore) {
             }
-            String json = "{\"message\":\"" + MglaChatDna.escapeJson(systemPrompt + "\n\n" + userText)
-                + "\",\"lang\":\"" + lang + "\"}";
+            // Always Free catalog — memory OpenRouter/auto must not use Plus/Ultra models.
+            StringBuilder json = new StringBuilder(256);
+            json.append("{\"message\":\"").append(MglaChatDna.escapeJson(systemPrompt + "\n\n" + userText))
+                    .append("\",\"lang\":\"").append(MglaChatDna.escapeJson(lang))
+                    .append("\",\"plan\":\"free\"");
+            try {
+                long tgId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
+                if (tgId > 0) {
+                    json.append(",\"tg_id\":").append(tgId);
+                }
+            } catch (Throwable ignored) {
+            }
+            json.append('}');
             MglaHubHttp.Response response = MglaHubHttp.post(
-                "/mgla-ai/v1/chat", json.getBytes(StandardCharsets.UTF_8), 30_000, 90_000);
+                "/mgla-ai/v1/chat", json.toString().getBytes(StandardCharsets.UTF_8), 30_000, 90_000);
             if (response.code != 200) {
                 return null;
             }

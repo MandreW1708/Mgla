@@ -31,6 +31,9 @@ public final class MglaSubscription {
     private static final String KEY_PLAN_LEGACY = "mgla_subscription_plan";
     private static final String KEY_PLAN_PREFIX = "mgla_subscription_plan_";
     private static final String KEY_EXPIRES_PREFIX = "mgla_subscription_expires_";
+    /** Last expiry timestamp for which the «ending soon» chats hint was dismissed. */
+    private static final String KEY_EXPIRY_WARN_DISMISSED_PREFIX = "mgla_sub_expiry_warn_dismissed_";
+    private static final long EXPIRY_WARN_WINDOW_MS = 24L * 60L * 60L * 1000L;
 
     private MglaSubscription() {
     }
@@ -99,6 +102,63 @@ public final class MglaSubscription {
             return 0L;
         }
         return getExpiresAtMs(uc.getClientUserId());
+    }
+
+    /**
+     * Show the DialogsActivity hint when a paid plan ends within 24 hours
+     * and the user hasn't dismissed it for this expiry timestamp.
+     */
+    public static boolean shouldShowExpiryWarning() {
+        UserConfig uc = UserConfig.getInstance(UserConfig.selectedAccount);
+        if (uc == null || !uc.isClientActivated()) {
+            return false;
+        }
+        long userId = uc.getClientUserId();
+        String plan = getPlanIdForUser(userId);
+        if (PLAN_FREE.equals(plan)) {
+            return false;
+        }
+        long expiresAt = getExpiresAtMs(userId);
+        if (expiresAt <= 0L) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (expiresAt <= now || expiresAt - now > EXPIRY_WARN_WINDOW_MS) {
+            return false;
+        }
+        SharedPreferences p = prefs();
+        if (p == null) {
+            return true;
+        }
+        long dismissedFor = p.getLong(KEY_EXPIRY_WARN_DISMISSED_PREFIX + userId, 0L);
+        return dismissedFor != expiresAt;
+    }
+
+    public static void dismissExpiryWarning() {
+        UserConfig uc = UserConfig.getInstance(UserConfig.selectedAccount);
+        if (uc == null || !uc.isClientActivated()) {
+            return;
+        }
+        long userId = uc.getClientUserId();
+        long expiresAt = getExpiresAtMs(userId);
+        if (expiresAt <= 0L) {
+            return;
+        }
+        SharedPreferences p = prefs();
+        if (p != null) {
+            p.edit().putLong(KEY_EXPIRY_WARN_DISMISSED_PREFIX + userId, expiresAt).apply();
+        }
+        notifySubscriptionHintChanged();
+    }
+
+    public static void notifySubscriptionHintChanged() {
+        AndroidUtilities.runOnUIThread(() ->
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaSubscriptionHintChanged));
+    }
+
+    /** Human-readable plan label for the current account, e.g. «Premium+». */
+    public static String currentPlanLabel() {
+        return labelForPlan(getPlanId());
     }
 
     /** Local date-time string for UI (device timezone), or empty. */
@@ -189,9 +249,14 @@ public final class MglaSubscription {
                 enforceUltraBypassEligibility();
                 if (lostPaid) {
                     MglaChatsConfig.clearAutoTranslateIfUnauthorized();
+                    MglaMemoryConfig.clearIfUnauthorized();
+                    org.telegram.ui.MglaGlassConfig.clearPremiumBackStyleForUser(userId);
+                    org.telegram.ui.MglaIconThemes.clearIfUnauthorized();
                 }
                 NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.mglaMainTabsChanged);
+                NotificationCenter.getGlobalInstance()
+                        .postNotificationName(NotificationCenter.mglaSubscriptionHintChanged);
             } catch (Throwable e) {
                 FileLog.e(e);
             }
@@ -210,12 +275,18 @@ public final class MglaSubscription {
         }
         p.edit().putString(key, PLAN_FREE).remove(KEY_EXPIRES_PREFIX + userId).apply();
         syncPremiumController(userId, PLAN_FREE, 0L);
+        final long revokedUserId = userId;
         AndroidUtilities.runOnUIThread(() -> {
             try {
                 enforceUltraBypassEligibility();
                 MglaChatsConfig.clearAutoTranslateIfUnauthorized();
+                MglaMemoryConfig.clearIfUnauthorized();
+                org.telegram.ui.MglaGlassConfig.clearPremiumBackStyleForUser(revokedUserId);
+                org.telegram.ui.MglaIconThemes.clearIfUnauthorized();
                 NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.mglaMainTabsChanged);
+                NotificationCenter.getGlobalInstance()
+                        .postNotificationName(NotificationCenter.mglaSubscriptionHintChanged);
             } catch (Throwable e) {
                 FileLog.e(e);
             }
@@ -359,6 +430,11 @@ public final class MglaSubscription {
         return !PLAN_FREE.equals(getPlanId());
     }
 
+    /** Задачи / «Напомнить…» — any paid Mgla plan on the current account. */
+    public static boolean canUseTasks() {
+        return !PLAN_FREE.equals(getPlanId());
+    }
+
     /** Premium / Plus / Ultra — local GGUF. */
     public static boolean canUseLocalModels() {
         String plan = getPlanId();
@@ -381,6 +457,39 @@ public final class MglaSubscription {
     /** Auto-translate of entire chats — any paid Mgla plan (not Free). */
     public static boolean canUseAutoTranslate() {
         return !PLAN_FREE.equals(getPlanId());
+    }
+
+    /** Живая память — any paid Mgla plan on the currently selected account. */
+    public static boolean canUseLiveMemory() {
+        return canUseLiveMemoryForAccount(UserConfig.selectedAccount);
+    }
+
+    /** Живая память for a specific account (extractor / per-dialog gates). */
+    public static boolean canUseLiveMemoryForAccount(int account) {
+        return !PLAN_FREE.equals(getPlanIdForAccount(account));
+    }
+
+    /** Premium back animations (Поверхность and later) — any paid plan. */
+    public static boolean canUsePremiumAnimations() {
+        return !PLAN_FREE.equals(getPlanId());
+    }
+
+    /** True if any activated account has a paid plan (install-wide features). */
+    public static boolean hasPaidOnAnyAccount() {
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            if (!PLAN_FREE.equals(getPlanIdForAccount(a))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * «Применить тему под иконку» — any paid plan on any account
+     * (theme is install-wide, same as Ultra bypass entitlement scope).
+     */
+    public static boolean canUseIconThemes() {
+        return hasPaidOnAnyAccount();
     }
 
     /**

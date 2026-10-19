@@ -236,7 +236,7 @@ public class AiAssistant {
     }
 
     private String callOpenRouter(String userMessage) throws Exception {
-        if (MglaHubHttp.isConfigured()) {
+        if (MglaHubHttp.shouldProxyAi()) {
             return callHubOpenRouter(userMessage);
         }
         long seed = System.nanoTime() ^ (long)(Math.random() * Long.MAX_VALUE);
@@ -318,10 +318,24 @@ public class AiAssistant {
     }
 
     private String callHubOpenRouter(String userMessage) throws Exception {
-        String json = "{\"message\":\"" + escapeJson(userMessage) + "\",\"lang\":\"" + escapeJson(getClientLangName()) + "\"}";
+        // Always Free catalog + key — utilities («Базовый») stay on Free models
+        // even for Premium / Premium+ / Ultra subscribers (10/day client quota).
+        StringBuilder json = new StringBuilder(192);
+        json.append("{\"message\":\"").append(escapeJson(userMessage))
+                .append("\",\"lang\":\"").append(escapeJson(getClientLangName()))
+                .append("\",\"plan\":\"free\"");
+        try {
+            long tgId = org.telegram.messenger.UserConfig.getInstance(
+                    org.telegram.messenger.UserConfig.selectedAccount).getClientUserId();
+            if (tgId > 0) {
+                json.append(",\"tg_id\":").append(tgId);
+            }
+        } catch (Throwable ignored) {
+        }
+        json.append('}');
         MglaHubHttp.Response response = MglaHubHttp.post(
             "/mgla-ai/v1/chat",
-            json.getBytes(StandardCharsets.UTF_8),
+            json.toString().getBytes(StandardCharsets.UTF_8),
             30_000,
             90_000
         );
@@ -389,7 +403,7 @@ public class AiAssistant {
         String systemPrompt = getSystemPrompt();
         String fullPrompt = systemPrompt + "\n\n" + userMessage;
 
-        if (MglaHubHttp.isConfigured()) {
+        if (MglaHubHttp.shouldProxyAi()) {
             return callHubGemini(apiKey, model, fullPrompt);
         }
 

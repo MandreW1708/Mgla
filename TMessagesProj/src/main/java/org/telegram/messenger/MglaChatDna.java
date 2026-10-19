@@ -365,7 +365,7 @@ public class MglaChatDna {
                 + "\nВыдели 4 главные темы этого разговора, каждая тема — 1-3 слова. "
                 + "Ответ строго в формате:\n1. тема\n2. тема\n3. тема\n4. тема";
             String text;
-            if (MglaHubHttp.isConfigured()) {
+            if (MglaHubHttp.shouldProxyAi()) {
                 String hubJson = "{\"api_key\":\"" + escapeJson(apiKey) + "\",\"model\":\"" + escapeJson(model)
                     + "\",\"text\":\"" + escapeJson(prompt) + "\"}";
                 MglaHubHttp.Response response = MglaHubHttp.post(

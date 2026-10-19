@@ -231,6 +231,24 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         listView.setPadding(0, 0, 0, islandBottomInset() + dp(72));
         listAdapter = new TasksAdapter();
         listView.setAdapter(listAdapter);
+        listView.setOnItemClickListener((view, position) -> {
+            if (position >= 0 && position < rows.size()) {
+                Row row = rows.get(position);
+                if (row.type == ROW_TASK && row.task != null) {
+                    openTaskDetails(row.task);
+                }
+            }
+        });
+        listView.setOnItemLongClickListener((view, position) -> {
+            if (position >= 0 && position < rows.size()) {
+                Row row = rows.get(position);
+                if (row.type == ROW_TASK && row.task != null) {
+                    showTaskOptions(row.task);
+                    return true;
+                }
+            }
+            return false;
+        });
         listPage.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         emptyView = new LinearLayout(context);
@@ -274,6 +292,18 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         dayListView.setPadding(0, 0, 0, islandBottomInset() + dp(72));
         dayAdapter = new DayTasksAdapter();
         dayListView.setAdapter(dayAdapter);
+        dayListView.setOnItemClickListener((view, position) -> {
+            if (position >= 0 && position < dayTasks.size()) {
+                openTaskDetails(dayTasks.get(position));
+            }
+        });
+        dayListView.setOnItemLongClickListener((view, position) -> {
+            if (position >= 0 && position < dayTasks.size()) {
+                showTaskOptions(dayTasks.get(position));
+                return true;
+            }
+            return false;
+        });
         dayListContainer.addView(dayListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         dayEmptyView = new TextView(context);
         dayEmptyView.setText("Нет задач на этот день");
@@ -662,8 +692,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             items.add("Открыть сообщение");
             actions.add(0);
         }
-        items.add("Удалить");
+        items.add("Изменить");
         actions.add(1);
+        items.add("Удалить");
+        actions.add(2);
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
         builder.setTitle(task.title);
         builder.setItems(items.toArray(new CharSequence[0]), (d, which) -> {
@@ -671,6 +703,8 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             if (action == 0) {
                 openLinkedMessage(task);
             } else if (action == 1) {
+                openTaskEditor(task);
+            } else if (action == 2) {
                 MglaTasksStorage.getInstance().deleteTask(task.id);
                 MglaTasksReminderScheduler.cancel(task.id);
             }
@@ -699,19 +733,6 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             if (viewType == ROW_TASK) {
                 MglaTaskCell cell = new MglaTaskCell(context);
                 cell.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                cell.setOnClickListener(v -> {
-                    MglaTask task = cell.getTask();
-                    if (task != null) {
-                        openTaskDetails(task);
-                    }
-                });
-                cell.setOnLongClickListener(v -> {
-                    MglaTask task = cell.getTask();
-                    if (task != null) {
-                        showTaskOptions(task);
-                    }
-                    return true;
-                });
                 cell.setOnOpenClickListener(v -> {
                     MglaTask task = cell.getTask();
                     if (task != null) {
@@ -781,19 +802,6 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             MglaTaskCell cell = new MglaTaskCell(parent.getContext());
             cell.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            cell.setOnClickListener(v -> {
-                MglaTask task = cell.getTask();
-                if (task != null) {
-                    openTaskDetails(task);
-                }
-            });
-            cell.setOnLongClickListener(v -> {
-                MglaTask task = cell.getTask();
-                if (task != null) {
-                    showTaskOptions(task);
-                }
-                return true;
-            });
             cell.setOnOpenClickListener(v -> {
                 MglaTask task = cell.getTask();
                 if (task != null) {

@@ -20,7 +20,11 @@ Admin (hub → bot sync, not for clients):
 
 Subscription plan ids (stable for future billing):
   free | premium | premium_plus | premium_ultra
-  (premium has no own models — same list + key as free)
+  Cloud catalogs in the AI chat tab:
+    premium       — none (local GGUF only)
+    premium_plus  — Premium+ + Free
+    premium_ultra — Ultra + Premium+ + Free
+  Utility features (editor / summary / …, provider «Базовый») always use Free.
 API keys (mglabot env only):
   OPENROUTER_API_KEY                 — free + premium
   OPENROUTER_API_KEY_PREMIUM_PLUS    — Premium+
@@ -153,8 +157,10 @@ PLAN_PREMIUM_ULTRA = "premium_ultra"
 PLAN_IDS = (PLAN_FREE, PLAN_PREMIUM_PLUS, PLAN_PREMIUM_ULTRA)
 # All plans exposed to clients (includes aliases).
 PLAN_IDS_ALL = (PLAN_FREE, PLAN_PREMIUM, PLAN_PREMIUM_PLUS, PLAN_PREMIUM_ULTRA)
+# Premium has no cloud catalog in the AI tab. Alias kept only for admin UI /
+# key lookup when an explicit Free utility request needs the free OpenRouter key.
 PLAN_MODELS_ALIAS = {
-    PLAN_PREMIUM: PLAN_FREE,  # Premium → same models + key as Free
+    PLAN_PREMIUM: PLAN_FREE,
 }
 PLAN_LABELS = {
     PLAN_FREE: "Free",
@@ -349,7 +355,7 @@ def resolve_models_plan(plan_id: str) -> str:
 
 
 def models_with_availability(plan_id: str = PLAN_FREE) -> list[dict]:
-    """Fast: no outbound OpenRouter calls — status from crowd reports only."""
+    """Own catalog for plan_id only (no inheritance). Crowd status, no OpenRouter probes."""
     source = resolve_models_plan(plan_id)
     out: list[dict] = []
     for model_id in get_models(source):
@@ -360,10 +366,48 @@ def models_with_availability(plan_id: str = PLAN_FREE) -> list[dict]:
                 "status": status,
                 "available": status != "down",
                 "reporters": crowd_unique_reporters(model_id),
-                "plan": plan_id,
+                "plan": source,
+                "ultra": source == PLAN_PREMIUM_ULTRA,
                 "models_from": source if source != plan_id else plan_id,
             }
         )
+    return out
+
+
+def plan_model_inheritance(plan_id: str) -> tuple[str, ...]:
+    """Owning catalogs allowed for this plan in the AI chat (highest tier first).
+
+    Hard rules:
+      free           → Free
+      premium        → none (local GGUF only)
+      premium_plus   → Premium+ + Free
+      premium_ultra  → Ultra + Premium+ + Free
+    Utilities request plan=free explicitly and therefore only see Free.
+    """
+    pid = plan_id if isinstance(plan_id, str) else PLAN_FREE
+    if pid == PLAN_PREMIUM_ULTRA:
+        return (PLAN_PREMIUM_ULTRA, PLAN_PREMIUM_PLUS, PLAN_FREE)
+    if pid == PLAN_PREMIUM_PLUS:
+        return (PLAN_PREMIUM_PLUS, PLAN_FREE)
+    if pid == PLAN_PREMIUM:
+        return ()
+    return (PLAN_FREE,)
+
+
+def effective_models_with_availability(plan_id: str = PLAN_FREE) -> list[dict]:
+    """Picker list for a subscriber (see plan_model_inheritance)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for source in plan_model_inheritance(plan_id):
+        for entry in models_with_availability(source):
+            mid = entry.get("id") or ""
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            item = dict(entry)
+            item["plan"] = source
+            item["ultra"] = source == PLAN_PREMIUM_ULTRA
+            out.append(item)
     return out
 
 
@@ -609,36 +653,24 @@ def _model_queue_for_plan(
     preferred_model: str | None,
     exclude_ultra: bool = False,
 ) -> list[str]:
-    """Build the fallback chain. Ultra may use every plan's models (Ultra first)."""
-    if plan_id == PLAN_PREMIUM_ULTRA:
-        models: list[str] = []
-        tiers = (PLAN_PREMIUM_PLUS, PLAN_FREE) if exclude_ultra else (
-            PLAN_PREMIUM_ULTRA,
-            PLAN_PREMIUM_PLUS,
-            PLAN_FREE,
-        )
-        for pid in tiers:
-            chunk = list(get_models(pid))
-            if pid == PLAN_PREMIUM_ULTRA and not chunk:
-                chunk = list(DEFAULT_ULTRA_MODELS)
-            for m in chunk:
-                if m not in models:
-                    models.append(m)
+    """Build the fallback chain from plan_model_inheritance only (hard allowlist)."""
+    models: list[str] = []
+    if exclude_ultra and plan_id == PLAN_PREMIUM_ULTRA:
+        tiers = (PLAN_PREMIUM_PLUS, PLAN_FREE)
     else:
-        models = list(get_models(plan_id))
-        if not models and plan_id == PLAN_PREMIUM_ULTRA:
-            models = list(DEFAULT_ULTRA_MODELS)
+        tiers = plan_model_inheritance(plan_id)
+    for pid in tiers:
+        chunk = list(get_models(pid))
+        if pid == PLAN_PREMIUM_ULTRA and not chunk:
+            chunk = list(DEFAULT_ULTRA_MODELS)
+        for m in chunk:
+            if m not in models:
+                models.append(m)
     if preferred_model:
         preferred = preferred_model.strip()
         if preferred in models:
             models = [preferred] + [m for m in models if m != preferred]
-        elif preferred:
-            # Explicit pick from another plan (Ultra subscriber using Free/Plus model).
-            owner = plan_for_model(preferred)
-            if owner == PLAN_PREMIUM_ULTRA and exclude_ultra:
-                pass
-            elif owner or plan_id == PLAN_PREMIUM_ULTRA:
-                models = [preferred] + [m for m in models if m != preferred]
+        # Never inject a model outside the plan's allowlist.
     return models
 
 
@@ -835,17 +867,22 @@ def fetch_hub_plan(tg_ids: list[int]) -> str:
     return plan
 
 
-def plan_allows_model(hub_plan: str, model_id: str | None) -> bool:
-    """Whether hub_plan may use model_id (by catalog ownership)."""
-    import mgla_entitlements
+def plan_allows_model(
+    access_plan: str,
+    model_id: str | None,
+) -> bool:
+    """Whether access_plan may use model_id (hard catalog allowlist).
 
+    {@code access_plan} is the clamped request plan (may be {@code free} for
+    utilities even when the subscriber is paid).
+    """
     if not model_id:
-        return True
-    owner = plan_for_model(model_id) or PLAN_FREE
-    # premium aliases free catalog
-    if owner == PLAN_FREE:
-        return True
-    return mgla_entitlements.plan_rank(hub_plan) >= mgla_entitlements.plan_rank(owner)
+        # Auto / empty: allowed only if the plan has at least one cloud catalog.
+        return bool(plan_model_inheritance(access_plan))
+    owner = plan_for_model(model_id)
+    if not owner:
+        return False
+    return owner in plan_model_inheritance(access_plan)
 
 
 def proxy_hub_update_check(body_bytes: bytes) -> tuple[int, bytes]:
@@ -1015,15 +1052,18 @@ class Handler(BaseHTTPRequestHandler):
     def _get_models(self):
         if not self._check_token():
             return
-        # `models` stays free-tier only so current clients keep working.
+        # Top-level `models` stays free-only for legacy clients.
         free_models = models_with_availability(PLAN_FREE)
         plans_payload = {}
         for plan_id in PLAN_IDS_ALL:
             source = resolve_models_plan(plan_id)
+            # `models` = what a subscriber of this plan may pick (inherited).
+            # `own` = admin catalog for this tier only (no lower-tier bleed).
             entry = {
                 "id": plan_id,
                 "label": PLAN_LABELS.get(plan_id, plan_id),
-                "models": models_with_availability(plan_id),
+                "models": effective_models_with_availability(plan_id),
+                "own": models_with_availability(source),
             }
             if source != plan_id:
                 entry["models_from"] = source
@@ -1040,6 +1080,12 @@ class Handler(BaseHTTPRequestHandler):
                     "models": free_models,
                     "plans": plans_payload,
                     "aliases": dict(PLAN_MODELS_ALIAS),
+                    "inheritance": {
+                        PLAN_FREE: list(plan_model_inheritance(PLAN_FREE)),
+                        PLAN_PREMIUM: list(plan_model_inheritance(PLAN_PREMIUM)),
+                        PLAN_PREMIUM_PLUS: list(plan_model_inheritance(PLAN_PREMIUM_PLUS)),
+                        PLAN_PREMIUM_ULTRA: list(plan_model_inheritance(PLAN_PREMIUM_ULTRA)),
+                    },
                 },
                 ensure_ascii=False,
             ).encode("utf-8"),
@@ -1306,9 +1352,12 @@ class Handler(BaseHTTPRequestHandler):
 
         tg_ids = mgla_entitlements.parse_tg_ids(raw.get("tg_id"), raw.get("tg_ids"))
         hub_plan = fetch_hub_plan(tg_ids)
-        # Never elevate above hub-verified subscription.
+        # Never elevate above hub-verified subscription; explicit free claim stays free
+        # (utilities / «Базовый»), so Premium subscribers can still use Free tools.
         effective_plan = mgla_entitlements.clamp_plan(client_plan, hub_plan)
-        if preferred_model and not plan_allows_model(hub_plan, preferred_model):
+        # Allowlist is against the clamped request plan (not raw hub), so a paid
+        # user may request Free utilities, but cannot pick Ultra models on Plus.
+        if preferred_model and not plan_allows_model(effective_plan, preferred_model):
             self._reply(403, b'{"error":"model not allowed for subscription"}')
             return
         if exclude_ultra and hub_plan != PLAN_PREMIUM_ULTRA:
@@ -1332,8 +1381,7 @@ class Handler(BaseHTTPRequestHandler):
             log.warning("chat failed: %s", e)
             self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
-        # Defense in depth: drop ultra-key result if hub plan cannot use that model.
-        if not plan_allows_model(hub_plan, used_model):
+        if not plan_allows_model(effective_plan, used_model):
             self._reply(403, b'{"error":"model not allowed for subscription"}')
             return
         self._reply(

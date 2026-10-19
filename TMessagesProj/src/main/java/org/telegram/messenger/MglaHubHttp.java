@@ -1,5 +1,7 @@
 package org.telegram.messenger;
 
+import android.text.TextUtils;
+
 import org.telegram.utils.wsbypass.MglaWsConfig;
 
 import java.io.ByteArrayOutputStream;
@@ -14,11 +16,13 @@ import java.util.Base64;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * HTTPS к ИИ-прокси на том же хосте, что и WS-обход ({@code mglabot.mooo.com}).
- * OpenRouter/Gemini с телефона не вызываются напрямую — только через этот прокси.
- * <p>
- * Статистика ({@link MglaStats}) при включённом обходе тоже идёт через этот хост
- * ({@code /mgla-ai/v1/stats-batch} → mglahub), иначе напрямую на хаб.
+ * HTTPS к ИИ-прокси на хосте текущего обхода:
+ * <ul>
+ *   <li>обычный обход → {@code mglabot.mooo.com/mgla-ai/…}</li>
+ *   <li>Ultra-обход → {@code mglahub.mooo.com/mgla-ai/…}</li>
+ *   <li>обход выключен / на паузе (VPN) → не использовать; вызывающий бьёт в Gemini/OpenRouter напрямую</li>
+ * </ul>
+ * Features/stats/updates при Ultra — нативные пути хаба (см. {@link MglaRemoteConfig}).
  */
 public final class MglaHubHttp {
 
@@ -35,9 +39,24 @@ public final class MglaHubHttp {
     private MglaHubHttp() {
     }
 
-    /** ИИ-прокси доступен, если настроен WS-релей (тот же хост/токен). */
+    /** В сборке есть хост/токен релея (не значит, что обход сейчас включён). */
     public static boolean isConfigured() {
         return MglaWsConfig.isRelayConfigured();
+    }
+
+    /**
+     * Gemini / OpenRouter через обход: обычный → mglabot, Ultra → mglahub.
+     * {@code false} если обход выключен или на паузе из‑за VPN — тогда напрямую к API.
+     */
+    public static boolean shouldProxyAi() {
+        try {
+            if (!MglaWsConfig.isEnabled() || !MglaWsConfig.isRelayConfigured()) {
+                return false;
+            }
+            return !VpnMonitor.getInstance().isVpnActive();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static Response get(String path, int connectTimeoutMs, int readTimeoutMs) throws Exception {
@@ -49,6 +68,7 @@ public final class MglaHubHttp {
     }
 
     private static Response request(String method, String path, byte[] jsonBody, int connectTimeoutMs, int readTimeoutMs) throws Exception {
+        // Ultra → hub host; normal bypass → mglabot. Same /mgla-ai paths on both.
         String host = MglaWsConfig.getRelayHost();
         String normalized = path.startsWith("/") ? path : ("/" + path);
         URL url = new URL("https://" + host + normalized);
@@ -65,8 +85,9 @@ public final class MglaHubHttp {
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             }
             conn.connect();
-            if (MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
-                verifyRelayPin(conn.getServerCertificates());
+            String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+            if (pins != null && pins.length > 0) {
+                verifySpkiPin(conn.getServerCertificates(), pins[0]);
             }
             if (hasBody) {
                 try (OutputStream os = conn.getOutputStream()) {
@@ -116,13 +137,16 @@ public final class MglaHubHttp {
             .replace("\\\\", "\\");
     }
 
-    private static void verifyRelayPin(Certificate[] chain) throws Exception {
+    private static void verifySpkiPin(Certificate[] chain, String expectedBase64) throws Exception {
         if (chain == null || chain.length == 0) {
             throw new SecurityException("no certificate");
         }
+        if (TextUtils.isEmpty(expectedBase64)) {
+            return;
+        }
         byte[] spki = chain[0].getPublicKey().getEncoded();
         String actual = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki));
-        if (!MglaWsConfig.RELAY_SPKI_SHA256_BASE64.equals(actual)) {
+        if (!expectedBase64.equals(actual)) {
             throw new SecurityException("SPKI pin mismatch");
         }
     }

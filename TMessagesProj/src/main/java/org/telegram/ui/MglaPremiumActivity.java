@@ -321,26 +321,11 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         premiumButtonView = new PremiumButtonView(context, dp(14), false, getResourceProvider()) {
             @Override
             protected void dispatchDraw(Canvas canvas) {
+                // Flat solid fill — no gradient rim / highlight frames on the edges.
                 AndroidUtilities.rectTmp.set(0, 0, getMeasuredWidth(), getMeasuredHeight());
-                if (buttonShader != null) {
-                    matrix.reset();
-                    matrix.setTranslate(-getMeasuredWidth() * 0.15f * progress, 0);
-                    buttonShader.setLocalMatrix(matrix);
-                    accentButtonPaint.setShader(buttonShader);
-                }
+                accentButtonPaint.setShader(null);
+                accentButtonPaint.setColor(accent.mid);
                 canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(14), dp(14), accentButtonPaint);
-
-                Paint highlight = new Paint(Paint.ANTI_ALIAS_FLAG);
-                highlight.setShader(new LinearGradient(0, 0, 0, getMeasuredHeight(),
-                        new int[]{0x55FFFFFF, 0x00FFFFFF}, new float[]{0f, 0.55f}, Shader.TileMode.CLAMP));
-                canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(14), dp(14), highlight);
-
-                Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-                rim.setStyle(Paint.Style.STROKE);
-                rim.setStrokeWidth(dp(1.2f));
-                rim.setColor(ColorUtils.setAlphaComponent(accent.light, 160));
-                AndroidUtilities.rectTmp.inset(dp(0.6f), dp(0.6f));
-                canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(13), dp(13), rim);
 
                 drawGradient = false;
                 for (int i = 0; i < getChildCount(); i++) {
@@ -760,33 +745,24 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 case TYPE_FEATURE:
                     view = new PremiumFeatureCell(context) {
                         private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                        private final Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                        private final Paint framePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
                         {
                             cardPaint.setColor(COLOR_CARD);
+                            framePaint.setStyle(Paint.Style.STROKE);
+                            framePaint.setStrokeWidth(dp(1));
                         }
 
                         @Override
                         protected void dispatchDraw(Canvas canvas) {
-                            boolean first = getParent() instanceof RecyclerView
-                                    && ((RecyclerView) getParent()).getChildAdapterPosition(this) == featuresStartRow;
-                            boolean last = getParent() instanceof RecyclerView
-                                    && ((RecyclerView) getParent()).getChildAdapterPosition(this) == featuresEndRow - 1;
-                            float topR = first ? dp(18) : 0;
-                            float bottomR = last ? dp(18) : 0;
-                            float[] radii = new float[]{topR, topR, topR, topR, bottomR, bottomR, bottomR, bottomR};
+                            // Every feature is its own framed card (no first/last-only border).
+                            final float cardR = dp(16);
                             Path path = new Path();
-                            AndroidUtilities.rectTmp.set(dp(12), 0, getWidth() - dp(12), getHeight());
-                            path.addRoundRect(AndroidUtilities.rectTmp, radii, Path.Direction.CW);
+                            AndroidUtilities.rectTmp.set(dp(12), dp(4), getWidth() - dp(12), getHeight() - dp(4));
+                            path.addRoundRect(AndroidUtilities.rectTmp, cardR, cardR, Path.Direction.CW);
                             canvas.drawPath(path, cardPaint);
-
-                            if (first || last) {
-                                Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-                                stroke.setStyle(Paint.Style.STROKE);
-                                stroke.setStrokeWidth(dp(1));
-                                stroke.setColor(accent.stroke);
-                                canvas.drawPath(path, stroke);
-                            }
+                            framePaint.setColor(accent.stroke);
+                            canvas.drawPath(path, framePaint);
 
                             final float r = dp(10);
                             AndroidUtilities.rectTmp.set(imageView.getLeft(), imageView.getTop(), imageView.getRight(), imageView.getBottom());
@@ -800,11 +776,6 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                             canvas.drawRoundRect(AndroidUtilities.rectTmp, r, r, accentStrokePaint);
 
                             super.dispatchDraw(canvas);
-
-                            if (drawDivider) {
-                                dividerPaint.setColor(accent.divider);
-                                canvas.drawRect(dp(74), getMeasuredHeight() - 1, getMeasuredWidth() - dp(24), getMeasuredHeight(), dividerPaint);
-                            }
                         }
                     };
                     break;
@@ -823,7 +794,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             if (position >= featuresStartRow && position < featuresEndRow) {
                 PremiumFeatureCell cell = (PremiumFeatureCell) holder.itemView;
-                cell.setData(premiumFeatures.get(position - featuresStartRow), position != featuresEndRow - 1);
+                cell.setData(premiumFeatures.get(position - featuresStartRow), false);
                 cell.nextIcon.setVisibility(View.GONE);
                 cell.setBackgroundColor(Color.TRANSPARENT);
                 cell.title.setTextColor(COLOR_TEXT);

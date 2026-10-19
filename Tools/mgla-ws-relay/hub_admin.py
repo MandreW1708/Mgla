@@ -476,11 +476,11 @@ form.inline {{ display:inline; margin:0; }}
 
   <div class="card">
     <h2>🤖 OpenRouter — модели по планам</h2>
-    <p class="sub">Отдельные списки: Free / Premium+ / Premium Ultra (без пересечений).
-      План <code>premium</code> своих нейросетей не имеет — те же модели, что Free.
-      Источник правды на хабе; при сохранении пушится на mglabot (<code>{bot_hint}</code>).
-      API-ключи только в env на mglabot. Plan id: <code>free</code>, <code>premium</code>,
-      <code>premium_plus</code>, <code>premium_ultra</code>.</p>
+    <p class="sub">Отдельные списки без пересечений id: Free / Premium+ / Premium Ultra.
+      В клиенте наследование: <b>Ultra</b> видит все три списка, <b>Premium+</b> — свои + Free,
+      <b>Premium</b> = Free. Источник правды на хабе; сохранение пишет в БД сразу, push на
+      mglabot (<code>{bot_hint}</code>) идёт в фоне и не трогает WS-обход на хабе.
+      API-ключи только в env на mglabot.</p>
     <form method="post" action="/admin">
       {csrf_field}
       <input type="hidden" name="action" value="save_models">

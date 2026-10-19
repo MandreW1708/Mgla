@@ -36,17 +36,12 @@ public final class MglaAiChatService {
     public static final String STATUS_DOWN = "down";
     private static final String URL_CHAT = "https://openrouter.ai/api/v1/chat/completions";
     private static final String PREFS = "mgla_config";
-    private static final String KEY_MODELS_CACHE = "ai_openrouter_models_cache_v3";
-    private static final String KEY_MODELS_CACHE_AT = "ai_openrouter_models_cache_at_v3";
-    private static final String KEY_MODELS_CACHE_PLAN = "ai_openrouter_models_cache_plan_v3";
+    private static final String KEY_MODELS_CACHE = "ai_openrouter_models_cache_v5";
+    private static final String KEY_MODELS_CACHE_AT = "ai_openrouter_models_cache_at_v5";
+    private static final String KEY_MODELS_CACHE_PLAN = "ai_openrouter_models_cache_plan_v5";
     private static final long MODELS_CACHE_TTL_MS = 5L * 60L * 1000L;
-    public static final String[] FALLBACK_MODELS = {
-            "nvidia/nemotron-3-super-120b-a12b:free",
-            "nvidia/nemotron-3-ultra-550b-a55b:free",
-            "nvidia/nemotron-3.5-lightning:free",
-            "nex-agi/nex-n2.5-pro:free",
-            "google/gemma-4-31b-it:free"
-    };
+    /** Last-resort id only for direct OpenRouter HTTP when model string is empty — never for the picker. */
+    private static final String DIRECT_OPENROUTER_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 
     public interface Callback {
         void onDelta(String text);
@@ -240,11 +235,16 @@ public final class MglaAiChatService {
         return readCachedModels(false);
     }
 
-    /**
-     * Models from mglabot. Cache-first so the picker opens immediately;
-     * network refresh updates the cache for the next open (single callback).
-     */
+    /** Hub catalog only — never invents hardcoded models. */
     public static void fetchOpenRouterModels(ModelsCallback callback) {
+        fetchOpenRouterModels(callback, false);
+    }
+
+    /**
+     * Models from mglabot (source of truth = hub admin lists + plan inheritance).
+     * @param forceNetwork if true, ignore TTL cache and always hit the server (picker).
+     */
+    public static void fetchOpenRouterModels(ModelsCallback callback, boolean forceNetwork) {
         if (callback == null) {
             return;
         }
@@ -252,54 +252,47 @@ public final class MglaAiChatService {
             AndroidUtilities.runOnUIThread(() -> callback.onError("Облачные модели доступны с Premium+ и Ultra"));
             return;
         }
-        ArrayList<ModelInfo> cached = readCachedModels(false);
-        if (cached != null && !cached.isEmpty()) {
-            final ArrayList<ModelInfo> instant = cached;
-            AndroidUtilities.runOnUIThread(() -> callback.onResult(instant));
-            new Thread(() -> {
-                try {
-                    ArrayList<ModelInfo> remote = downloadModelsFromHub();
-                    if (remote != null && !remote.isEmpty()) {
-                        writeCachedModels(remote);
+        if (!forceNetwork) {
+            ArrayList<ModelInfo> cached = readCachedModels(false);
+            if (cached != null && !cached.isEmpty()) {
+                final ArrayList<ModelInfo> instant = cached;
+                AndroidUtilities.runOnUIThread(() -> callback.onResult(instant));
+                new Thread(() -> {
+                    try {
+                        ArrayList<ModelInfo> remote = downloadModelsFromHub();
+                        if (remote != null && !remote.isEmpty()) {
+                            writeCachedModels(remote);
+                        }
+                    } catch (Throwable e) {
+                        FileLog.e(e);
                     }
-                } catch (Throwable e) {
-                    FileLog.e(e);
-                }
-            }, "MglaAiModelsRefresh").start();
-            return;
+                }, "MglaAiModelsRefresh").start();
+                return;
+            }
         }
         new Thread(() -> {
             try {
                 ArrayList<ModelInfo> remote = downloadModelsFromHub();
                 if (remote == null || remote.isEmpty()) {
-                    remote = fallbackModelsList();
+                    throw new Exception("Сервер вернул пустой список моделей");
                 }
                 writeCachedModels(remote);
                 final ArrayList<ModelInfo> result = remote;
                 AndroidUtilities.runOnUIThread(() -> callback.onResult(result));
             } catch (Throwable e) {
                 FileLog.e(e);
-                ArrayList<ModelInfo> fallback = fallbackModelsList();
-                final ArrayList<ModelInfo> result = fallback;
                 final String error = !TextUtils.isEmpty(e.getMessage()) ? e.getMessage() : "Не удалось загрузить модели";
+                // Stale hub cache (any age) only if network failed — still never use hardcoded lists.
+                ArrayList<ModelInfo> stale = readCachedModels(true);
                 AndroidUtilities.runOnUIThread(() -> {
-                    if (result.isEmpty()) {
-                        callback.onError(error);
+                    if (stale != null && !stale.isEmpty()) {
+                        callback.onResult(stale);
                     } else {
-                        callback.onResult(result);
+                        callback.onError(error);
                     }
                 });
             }
         }, "MglaAiModels").start();
-    }
-
-    private static ArrayList<ModelInfo> fallbackModelsList() {
-        ArrayList<ModelInfo> out = new ArrayList<>();
-        for (String m : FALLBACK_MODELS) {
-            String status = m.contains("lightning") ? STATUS_DEGRADED : STATUS_UP;
-            out.add(new ModelInfo(m, status, false, MglaSubscription.PLAN_FREE));
-        }
-        return out;
     }
 
     private static SharedPreferences modelsPrefs() {
@@ -325,7 +318,7 @@ public final class MglaAiChatService {
         }
         try {
             JSONArray arr = new JSONArray(raw);
-            ArrayList<ModelInfo> out = parseModelsArray(arr, false, "");
+            ArrayList<ModelInfo> out = parseModelsArray(arr, "");
             return out.isEmpty() ? null : out;
         } catch (Throwable ignore) {
             return null;
@@ -376,37 +369,34 @@ public final class MglaAiChatService {
         }
         JSONObject json = new JSONObject(response.body);
         JSONObject plans = json.optJSONObject("plans");
-        ArrayList<ModelInfo> out;
-        if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(plan) && plans != null) {
-            // Ultra sees Ultra ★ first, then Plus, then Free (deduped).
-            out = new ArrayList<>();
-            java.util.HashSet<String> seen = new java.util.HashSet<>();
-            appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_ULTRA, true);
-            appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS, false);
-            appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE, false);
-        } else {
-            JSONArray arr = null;
-            if (plans != null) {
-                JSONObject entry = plans.optJSONObject(plan);
-                if (entry != null) {
-                    arr = entry.optJSONArray("models");
-                }
+        ArrayList<ModelInfo> out = new ArrayList<>();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        if (plans != null) {
+            if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(plan)) {
+                // Prefer server-merged plans.ultra.models; also fold Plus/Free for old bots.
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_ULTRA);
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS);
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE);
+            } else if (MglaSubscription.PLAN_PREMIUM_PLUS.equals(plan)) {
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS);
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE);
+            } else {
+                appendPlanModels(out, seen, plans, plan);
             }
-            if (arr == null || arr.length() == 0) {
-                arr = json.optJSONArray("models");
-            }
-            out = parseModelsArray(arr, false, plan);
+        }
+        if (out.isEmpty()) {
+            out = parseModelsArray(json.optJSONArray("models"), MglaSubscription.PLAN_FREE);
         }
         return out == null || out.isEmpty() ? null : out;
     }
 
     private static void appendPlanModels(ArrayList<ModelInfo> out, java.util.HashSet<String> seen,
-                                         JSONObject plans, String planId, boolean ultra) {
+                                         JSONObject plans, String planId) {
         JSONObject entry = plans.optJSONObject(planId);
         if (entry == null) {
             return;
         }
-        ArrayList<ModelInfo> chunk = parseModelsArray(entry.optJSONArray("models"), ultra, planId);
+        ArrayList<ModelInfo> chunk = parseModelsArray(entry.optJSONArray("models"), planId);
         for (ModelInfo info : chunk) {
             if (seen.add(info.id)) {
                 out.add(info);
@@ -414,11 +404,12 @@ public final class MglaAiChatService {
         }
     }
 
-    private static ArrayList<ModelInfo> parseModelsArray(JSONArray arr, boolean ultra, String sourcePlan) {
+    private static ArrayList<ModelInfo> parseModelsArray(JSONArray arr, String sourcePlan) {
         ArrayList<ModelInfo> out = new ArrayList<>();
         if (arr == null) {
             return out;
         }
+        final boolean sourceIsUltra = MglaSubscription.PLAN_PREMIUM_ULTRA.equals(sourcePlan);
         for (int i = 0; i < arr.length(); i++) {
             Object item = arr.opt(i);
             if (item instanceof JSONObject) {
@@ -429,19 +420,21 @@ public final class MglaAiChatService {
                     if (TextUtils.isEmpty(status)) {
                         status = o.optBoolean("available", true) ? STATUS_UP : STATUS_DOWN;
                     }
-                    boolean isUltra = ultra || o.optBoolean("ultra", false);
                     String plan = o.optString("plan", sourcePlan);
+                    boolean isUltra = o.has("ultra")
+                            ? o.optBoolean("ultra")
+                            : MglaSubscription.PLAN_PREMIUM_ULTRA.equals(plan) || sourceIsUltra;
                     out.add(new ModelInfo(id, status, isUltra, plan));
                 }
             } else if (item instanceof String) {
                 String id = ((String) item).trim();
                 if (!TextUtils.isEmpty(id)) {
-                    out.add(new ModelInfo(id, STATUS_UP, ultra, sourcePlan));
+                    out.add(new ModelInfo(id, STATUS_UP, sourceIsUltra, sourcePlan));
                 }
             } else {
                 String id = arr.optString(i, "").trim();
                 if (!TextUtils.isEmpty(id)) {
-                    out.add(new ModelInfo(id, STATUS_UP, ultra, sourcePlan));
+                    out.add(new ModelInfo(id, STATUS_UP, sourceIsUltra, sourcePlan));
                 }
             }
         }
@@ -455,15 +448,15 @@ public final class MglaAiChatService {
 
     private static void streamOpenRouter(String model, ArrayList<MglaAiChatStorage.Message> messages, ArrayList<String> imagePaths, float temperature, int maxTokens, Request request, Callback callback) throws Exception {
         if (TextUtils.isEmpty(BuildConfig.OPENROUTER_API_KEY)) {
-            if (MglaHubHttp.isConfigured()) {
+            if (MglaHubHttp.shouldProxyAi()) {
                 streamOpenRouterViaHub(model, messages, request, callback);
                 return;
             }
             throw new Exception("Для чата OpenRouter нужен ключ в конфигурации сборки");
         }
         JSONObject body = new JSONObject();
-        // Direct OpenRouter path has no auto-fallback list — use first free model if empty.
-        body.put("model", TextUtils.isEmpty(model) ? FALLBACK_MODELS[0] : model);
+        // Direct OpenRouter path has no hub auto-fallback — pick a stable free id if empty.
+        body.put("model", TextUtils.isEmpty(model) ? DIRECT_OPENROUTER_DEFAULT_MODEL : model);
         body.put("stream", true);
         body.put("temperature", Math.max(0f, Math.min(2f, temperature)));
         MglaAiLimits.ModelBudget budget = MglaAiLimits.budgetFor(model);

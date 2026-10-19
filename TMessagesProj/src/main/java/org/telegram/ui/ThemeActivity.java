@@ -23,6 +23,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
 import android.location.Address;
 import android.location.Geocoder;
@@ -32,8 +34,11 @@ import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.TextUtils;
+import android.text.style.ImageSpan;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -59,6 +64,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
@@ -468,6 +474,11 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void onApplyIconThemeToggled() {
+        if (!MglaSubscription.canUseIconThemes()) {
+            MglaIconThemes.setAutoApplyEnabled(false);
+            showApplyIconThemeUpsell();
+            return;
+        }
         boolean enabled = !MglaIconThemes.isAutoApplyEnabled();
         MglaIconThemes.setAutoApplyEnabled(enabled);
         if (enabled) {
@@ -479,6 +490,27 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             } catch (Throwable ignore) {
             }
         }
+    }
+
+    private void showApplyIconThemeUpsell() {
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.star_premium_2,
+                "Темы под иконку доступны с любой подпиской Mgla Premium",
+                "Оформить",
+                () -> presentFragment(new MglaPremiumActivity())
+        ).show();
+    }
+
+    /** Gold premium star to the left of «Применить тему под иконку». */
+    private CharSequence applyIconThemeLabel() {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  " + getString(R.string.ApplyIconTheme));
+        Drawable star = getContext().getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+                Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
     }
 
     private boolean setBubbleRadius(int size, boolean layout) {
@@ -1148,7 +1180,10 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             } else if (position == applyIconThemeRow) {
                 onApplyIconThemeToggled();
                 if (view instanceof TextCheckCell) {
-                    ((TextCheckCell) view).setChecked(MglaIconThemes.isAutoApplyEnabled());
+                    TextCheckCell cell = (TextCheckCell) view;
+                    boolean unlocked = MglaSubscription.canUseIconThemes();
+                    cell.setChecked(unlocked && MglaIconThemes.isAutoApplyEnabled());
+                    cell.setAlpha(unlocked ? 1f : 0.4f);
                 }
             } else if (position == backgroundRow) {
                 presentFragment(new WallpapersListActivity(WallpapersListActivity.TYPE_ALL));
@@ -2633,6 +2668,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 }
                 case TYPE_TEXT_CHECK: {
                     TextCheckCell textCheckCell = (TextCheckCell) holder.itemView;
+                    textCheckCell.setAlpha(1f);
                     if (position == scheduleLocationRow) {
                         textCheckCell.setTextAndCheck(getString("AutoNightLocation", R.string.AutoNightLocation), Theme.autoNightScheduleByLocation, true);
                     } else if (position == enableAnimationsRow) {
@@ -2658,7 +2694,11 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     } else if (position == chatBlurRow) {
                         textCheckCell.setTextAndCheck(getString("BlurInChat", R.string.BlurInChat), SharedConfig.chatBlurEnabled(), true);
                     } else if (position == applyIconThemeRow) {
-                        textCheckCell.setTextAndCheck(getString(R.string.ApplyIconTheme), MglaIconThemes.isAutoApplyEnabled(), false);
+                        MglaIconThemes.clearIfUnauthorized();
+                        boolean unlocked = MglaSubscription.canUseIconThemes();
+                        textCheckCell.setTextAndCheck(applyIconThemeLabel(),
+                                unlocked && MglaIconThemes.isAutoApplyEnabled(), false);
+                        textCheckCell.setAlpha(unlocked ? 1f : 0.4f);
                     }
                     break;
                 }
