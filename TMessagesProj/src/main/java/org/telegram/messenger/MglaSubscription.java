@@ -6,14 +6,18 @@ import android.text.TextUtils;
 
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Iterator;
+import java.util.Locale;
+import java.util.TimeZone;
 
 /**
- * Mgla subscription entitlements for the AI tab and OpenRouter.
+ * Mgla subscription entitlements for the AI tab, translate, Ultra bypass, OpenRouter.
  * Plan ids match hub {@code free|premium|premium_plus|premium_ultra}.
  * <p>
- * Entitlements are per Telegram user id (account), not per install/device.
- * Hub {@code plans} map in the features response is the source of truth.
+ * Source of truth: hub {@code plans} + {@code expires} (Unix ms UTC) from features poll.
+ * Local paid grants without a future expiry are rejected.
  */
 public final class MglaSubscription {
 
@@ -26,6 +30,7 @@ public final class MglaSubscription {
     /** Legacy single-key plan (pre per-account). Migrated on first read. */
     private static final String KEY_PLAN_LEGACY = "mgla_subscription_plan";
     private static final String KEY_PLAN_PREFIX = "mgla_subscription_plan_";
+    private static final String KEY_EXPIRES_PREFIX = "mgla_subscription_expires_";
 
     private MglaSubscription() {
     }
@@ -55,28 +60,92 @@ public final class MglaSubscription {
             return PLAN_FREE;
         }
         String key = KEY_PLAN_PREFIX + userId;
+        String plan;
         if (p.contains(key)) {
-            return normalize(p.getString(key, PLAN_FREE));
+            plan = normalize(p.getString(key, PLAN_FREE));
+        } else if (p.contains(KEY_PLAN_LEGACY)) {
+            plan = normalize(p.getString(KEY_PLAN_LEGACY, PLAN_FREE));
+            p.edit().putString(key, plan).remove(KEY_PLAN_LEGACY).apply();
+        } else {
+            return PLAN_FREE;
         }
-        // One-shot migrate legacy device-wide plan onto this user if present.
-        if (p.contains(KEY_PLAN_LEGACY)) {
-            String legacy = normalize(p.getString(KEY_PLAN_LEGACY, PLAN_FREE));
-            p.edit().putString(key, legacy).remove(KEY_PLAN_LEGACY).apply();
-            return legacy;
+        if (PLAN_FREE.equals(plan)) {
+            return PLAN_FREE;
         }
-        return PLAN_FREE;
+        long expiresAt = p.getLong(KEY_EXPIRES_PREFIX + userId, 0L);
+        if (expiresAt <= 0L || expiresAt <= System.currentTimeMillis()) {
+            clearLocalGrant(userId);
+            return PLAN_FREE;
+        }
+        return plan;
     }
 
+    /** Unix ms UTC when the paid plan ends; 0 if free / unknown. */
+    public static long getExpiresAtMs(long userId) {
+        if (userId <= 0 || PLAN_FREE.equals(getPlanIdForUser(userId))) {
+            return 0L;
+        }
+        SharedPreferences p = prefs();
+        if (p == null) {
+            return 0L;
+        }
+        long expiresAt = p.getLong(KEY_EXPIRES_PREFIX + userId, 0L);
+        return expiresAt > System.currentTimeMillis() ? expiresAt : 0L;
+    }
+
+    public static long getExpiresAtMs() {
+        UserConfig uc = UserConfig.getInstance(UserConfig.selectedAccount);
+        if (uc == null || !uc.isClientActivated()) {
+            return 0L;
+        }
+        return getExpiresAtMs(uc.getClientUserId());
+    }
+
+    /** Local date-time string for UI (device timezone), or empty. */
+    public static String formatExpiresAt(long expiresAtMs) {
+        if (expiresAtMs <= 0L) {
+            return "";
+        }
+        try {
+            SimpleDateFormat fmt = new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault());
+            return fmt.format(new Date(expiresAtMs));
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /** UTC string for diagnostics. */
+    public static String formatExpiresAtUtc(long expiresAtMs) {
+        if (expiresAtMs <= 0L) {
+            return "";
+        }
+        try {
+            SimpleDateFormat fmt = new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.US);
+            fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+            return fmt.format(new Date(expiresAtMs)) + " UTC";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /**
+     * Clears local entitlements to Free. Paid grants must come from hub sync
+     * via {@link #applyFromFeaturesJson(String)}.
+     */
     public static void setPlanId(String planId) {
         int account = UserConfig.selectedAccount;
         UserConfig uc = UserConfig.getInstance(account);
         if (uc == null || !uc.isClientActivated()) {
             return;
         }
-        setPlanIdForUser(uc.getClientUserId(), planId);
+        if (!PLAN_FREE.equals(normalize(planId))) {
+            // Local paid activation is disabled — only hub can grant.
+            return;
+        }
+        setPlanIdForUser(uc.getClientUserId(), PLAN_FREE, 0L);
     }
 
-    public static void setPlanIdForUser(long userId, String planId) {
+    public static void setPlanIdForUser(long userId, String planId, long expiresAtMs) {
         if (userId <= 0) {
             return;
         }
@@ -85,21 +154,66 @@ public final class MglaSubscription {
             return;
         }
         String next = normalize(planId);
+        long expires = expiresAtMs;
+        if (!PLAN_FREE.equals(next)) {
+            if (expires <= 0L || expires <= System.currentTimeMillis()) {
+                next = PLAN_FREE;
+                expires = 0L;
+            }
+        } else {
+            expires = 0L;
+        }
         String key = KEY_PLAN_PREFIX + userId;
+        String expKey = KEY_EXPIRES_PREFIX + userId;
         String prev = normalize(p.getString(key, PLAN_FREE));
-        if (next.equals(prev) && p.contains(key)) {
-            syncPremiumController(userId, next);
+        long prevExp = p.getLong(expKey, 0L);
+        if (next.equals(prev) && prevExp == expires && p.contains(key)) {
+            syncPremiumController(userId, next, expires);
             return;
         }
         final boolean unlockedAi = PLAN_FREE.equals(prev) && !PLAN_FREE.equals(next);
-        p.edit().putString(key, next).remove(KEY_PLAN_LEGACY).apply();
-        syncPremiumController(userId, next);
+        final boolean lostPaid = !PLAN_FREE.equals(prev) && PLAN_FREE.equals(next);
+        SharedPreferences.Editor ed = p.edit().putString(key, next).remove(KEY_PLAN_LEGACY);
+        if (expires > 0L) {
+            ed.putLong(expKey, expires);
+        } else {
+            ed.remove(expKey);
+        }
+        ed.apply();
+        syncPremiumController(userId, next, expires);
         AndroidUtilities.runOnUIThread(() -> {
             try {
                 if (unlockedAi) {
                     MglaMainTabsConfig.ensureAiTabIncluded();
                 }
                 enforceUltraBypassEligibility();
+                if (lostPaid) {
+                    MglaChatsConfig.clearAutoTranslateIfUnauthorized();
+                }
+                NotificationCenter.getGlobalInstance()
+                        .postNotificationName(NotificationCenter.mglaMainTabsChanged);
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
+    private static void clearLocalGrant(long userId) {
+        SharedPreferences p = prefs();
+        if (p == null) {
+            return;
+        }
+        String key = KEY_PLAN_PREFIX + userId;
+        String prev = normalize(p.getString(key, PLAN_FREE));
+        if (PLAN_FREE.equals(prev) && !p.contains(KEY_EXPIRES_PREFIX + userId)) {
+            return;
+        }
+        p.edit().putString(key, PLAN_FREE).remove(KEY_EXPIRES_PREFIX + userId).apply();
+        syncPremiumController(userId, PLAN_FREE, 0L);
+        AndroidUtilities.runOnUIThread(() -> {
+            try {
+                enforceUltraBypassEligibility();
+                MglaChatsConfig.clearAutoTranslateIfUnauthorized();
                 NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.mglaMainTabsChanged);
             } catch (Throwable e) {
@@ -128,8 +242,7 @@ public final class MglaSubscription {
     }
 
     /**
-     * Apply hub features payload. Prefer {@code plans} (per tg_id). Fallback to
-     * legacy single {@code plan} for the selected account only.
+     * Apply hub features payload. Prefer {@code plans} + {@code expires} (per tg_id).
      */
     public static void applyFromFeaturesJson(String body) {
         if (TextUtils.isEmpty(body)) {
@@ -138,6 +251,7 @@ public final class MglaSubscription {
         try {
             JSONObject root = new JSONObject(body);
             JSONObject plans = root.optJSONObject("plans");
+            JSONObject expires = root.optJSONObject("expires");
             if (plans != null) {
                 Iterator<String> keys = plans.keys();
                 while (keys.hasNext()) {
@@ -154,12 +268,29 @@ public final class MglaSubscription {
                     if (userId <= 0) {
                         continue;
                     }
-                    setPlanIdForUser(userId, plans.optString(key, PLAN_FREE));
+                    String plan = normalize(plans.optString(key, PLAN_FREE));
+                    long expMs = 0L;
+                    if (expires != null && expires.has(key)) {
+                        expMs = expires.optLong(key, 0L);
+                    }
+                    setPlanIdForUser(userId, plan, expMs);
                 }
                 return;
             }
             if (root.has("plan")) {
-                setPlanId(root.optString("plan", PLAN_FREE));
+                String plan = normalize(root.optString("plan", PLAN_FREE));
+                long expMs = 0L;
+                if (expires != null) {
+                    // Legacy single-account: use first expires value if present.
+                    Iterator<String> it = expires.keys();
+                    if (it.hasNext()) {
+                        expMs = expires.optLong(it.next(), 0L);
+                    }
+                }
+                UserConfig uc = UserConfig.getInstance(UserConfig.selectedAccount);
+                if (uc != null && uc.isClientActivated()) {
+                    setPlanIdForUser(uc.getClientUserId(), plan, expMs);
+                }
             }
         } catch (Throwable ignore) {
         }
@@ -281,10 +412,10 @@ public final class MglaSubscription {
     }
 
     /** Keep MglaPremiumController UI state in sync with hub entitlements. */
-    private static void syncPremiumController(long userId, String planId) {
+    private static void syncPremiumController(long userId, String planId, long expiresAtMs) {
         try {
             String plan = normalize(planId);
-            if (PLAN_FREE.equals(plan)) {
+            if (PLAN_FREE.equals(plan) || expiresAtMs <= 0L) {
                 MglaPremiumController.revoke(userId);
                 return;
             }
@@ -294,7 +425,7 @@ public final class MglaSubscription {
             } else if (PLAN_PREMIUM_ULTRA.equals(plan)) {
                 mapped = MglaPremiumController.PLAN_ULTRA;
             }
-            MglaPremiumController.grant(userId, mapped, MglaPremiumController.EXPIRES_LIFETIME);
+            MglaPremiumController.grant(userId, mapped, expiresAtMs);
         } catch (Throwable e) {
             FileLog.e(e);
         }

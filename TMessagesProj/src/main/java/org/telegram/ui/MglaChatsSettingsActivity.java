@@ -5,8 +5,13 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ImageSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -113,18 +118,24 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
 
         basicBlock.addView(MglaUi.createDivider(context));
 
+        // Free users must see the toggle OFF (pref alone can be stale after expired trials).
+        MglaChatsConfig.clearAutoTranslateIfUnauthorized();
         TextCheckCell autoTranslateCell = new TextCheckCell(context);
         autoTranslateCell.setBackground(null);
-        autoTranslateCell.setTextAndCheck("Автоперевод чатов", MglaChatsConfig.isAutoTranslateEnabled(), false);
+        autoTranslateCell.setTextAndCheck(
+                autoTranslatePremiumLabel(context),
+                MglaChatsConfig.isAutoTranslateActive(),
+                false);
         autoTranslateCell.setOnClickListener(v -> {
             if (!MglaSubscription.canUseAutoTranslate()) {
+                MglaChatsConfig.setAutoTranslateEnabled(false);
                 autoTranslateCell.setChecked(false);
                 showAutoTranslateUpsell();
                 return;
             }
             boolean enabled = !MglaChatsConfig.isAutoTranslateEnabled();
             MglaChatsConfig.setAutoTranslateEnabled(enabled);
-            autoTranslateCell.setChecked(enabled);
+            autoTranslateCell.setChecked(MglaChatsConfig.isAutoTranslateActive());
             if (enabled) {
                 TranslateAlert2.setToLanguage(MglaChatsConfig.getAutoTranslateTargetLang());
             }
@@ -587,6 +598,18 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
         for (int account = 0; account < UserConfig.MAX_ACCOUNT_COUNT; account++) {
             NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_MESSAGE_TEXT);
         }
+    }
+
+    /** Premium star to the left of the auto-translate title (same pattern as Ultra-обход). */
+    private static CharSequence autoTranslatePremiumLabel(Context context) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  Автоперевод чатов");
+        Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+                Theme.getColor(Theme.key_premiumGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
     }
 
     private void showAutoTranslateUpsell() {

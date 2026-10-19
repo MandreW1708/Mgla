@@ -6,6 +6,7 @@
 - POST /mgla-updates/v1/check ??? in-app update check
 - GET  /mgla-updates/v1/apk ??? download published APK
 - GET/POST /admin ??? feature flags + OpenRouter model list (Basic Auth)
+- GET/POST /admin/subscriptions ??? paid plans / duration / expiry (Basic Auth)
 - GET/POST /admin/updates ??? publish APK + changelog (Basic Auth)
 - POST /mgla-ai/v1/* ??? legacy AI proxy (production clients use mglabot)
 
@@ -13,6 +14,7 @@ Standard library only. Clients authenticate with X-Mgla-Token (MGLA_WS_TOKEN on 
 """
 
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -30,6 +32,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import hub_admin
 import hub_updates
+import mgla_entitlements
 import mgla_token
 import stats_report
 
@@ -43,6 +46,12 @@ REPORT_PASSWORD = os.environ.get("MGLA_STATS_REPORT_PASSWORD", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 HUB_SYNC_TOKEN = os.environ.get("MGLA_HUB_SYNC_TOKEN", "").strip()
 BOT_AI_URL = os.environ.get("MGLA_BOT_AI_URL", "").strip().rstrip("/")
+# Optional separate token for server→hub entitlements (defaults to sync / ws token).
+ENTITLEMENTS_TOKEN = (
+    os.environ.get("MGLA_HUB_ENTITLEMENTS_TOKEN", "").strip()
+    or HUB_SYNC_TOKEN
+    or TOKEN
+)
 
 MAX_BODY = 256 * 1024
 MAX_AI_BODY = 32 * 1024
@@ -120,9 +129,43 @@ CREATE TABLE IF NOT EXISTS ai_config (
 CREATE TABLE IF NOT EXISTS subscriptions (
     tg_id INTEGER PRIMARY KEY,
     plan TEXT NOT NULL,
+    duration_days INTEGER NOT NULL,
+    starts_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 """
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_str() -> str:
+    return _utc_now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_utc(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(raw[:19] if fmt != "%Y-%m-%d" else raw[:10], fmt).replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            continue
+    return None
+
+
+def _expires_to_ms(value: str | None) -> int:
+    dt = _parse_utc(value)
+    if dt is None:
+        return 0
+    return int(dt.timestamp() * 1000)
 
 
 class Store:
@@ -271,49 +314,141 @@ class Store:
                 """CREATE TABLE IF NOT EXISTS subscriptions (
                     tg_id INTEGER PRIMARY KEY,
                     plan TEXT NOT NULL,
+                    duration_days INTEGER NOT NULL DEFAULT 30,
+                    starts_at TEXT NOT NULL DEFAULT '',
+                    expires_at TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 )"""
             )
+            cols = {
+                row[1]
+                for row in self._db.execute("PRAGMA table_info(subscriptions)").fetchall()
+            }
+            if "duration_days" not in cols:
+                self._db.execute(
+                    "ALTER TABLE subscriptions ADD COLUMN duration_days INTEGER NOT NULL DEFAULT 30"
+                )
+            if "starts_at" not in cols:
+                self._db.execute(
+                    "ALTER TABLE subscriptions ADD COLUMN starts_at TEXT NOT NULL DEFAULT ''"
+                )
+            if "expires_at" not in cols:
+                self._db.execute(
+                    "ALTER TABLE subscriptions ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''"
+                )
+            # Legacy rows without a real expiry are insecure — expire immediately
+            # so only admin-issued timed grants remain active.
+            now = _utc_now_str()
+            self._db.execute(
+                """UPDATE subscriptions
+                   SET duration_days = COALESCE(NULLIF(duration_days, 0), 30),
+                       starts_at = CASE
+                         WHEN starts_at IS NULL OR starts_at = '' THEN COALESCE(updated_at, ?)
+                         ELSE starts_at END,
+                       expires_at = CASE
+                         WHEN expires_at IS NULL OR expires_at = '' THEN ?
+                         ELSE expires_at END
+                   WHERE expires_at IS NULL OR expires_at = '' OR starts_at IS NULL OR starts_at = ''""",
+                (now, now),
+            )
+
+    def purge_expired_subscriptions(self) -> int:
+        """Delete expired grants. Returns number of removed rows."""
+        self.ensure_subscriptions_table()
+        now = _utc_now_str()
+        with self._lock, self._db:
+            cur = self._db.execute(
+                "DELETE FROM subscriptions WHERE expires_at IS NULL OR expires_at = '' OR expires_at <= ?",
+                (now,),
+            )
+            return cur.rowcount or 0
 
     def plans_by_user(self, tg_ids) -> dict:
-        """Per-account plan map: {tg_id:int -> plan:str}. Missing rows = free."""
-        self.ensure_subscriptions_table()
+        """Per-account plan map: {tg_id:int -> plan:str}. Missing/expired = free."""
+        self.purge_expired_subscriptions()
         out = {int(x): hub_admin.PLAN_FREE for x in (tg_ids or ())}
         if not out:
             return out
         placeholders = ",".join("?" * len(out))
+        now = _utc_now_str()
         with self._lock:
             rows = self._db.execute(
-                f"SELECT tg_id, plan FROM subscriptions WHERE tg_id IN ({placeholders})",
-                tuple(out.keys()),
+                f"""SELECT tg_id, plan FROM subscriptions
+                    WHERE tg_id IN ({placeholders}) AND expires_at > ?""",
+                tuple(out.keys()) + (now,),
             ).fetchall()
         for tg_id, plan in rows:
             out[int(tg_id)] = hub_admin.normalize_plan(plan)
         return out
+
+    def subscription_entitlements(self, tg_ids) -> tuple:
+        """Return (plans_by_user, expires_ms_by_user, durations_by_user)."""
+        self.purge_expired_subscriptions()
+        plans = {int(x): hub_admin.PLAN_FREE for x in (tg_ids or ())}
+        expires: dict = {}
+        durations: dict = {}
+        if not plans:
+            return plans, expires, durations
+        placeholders = ",".join("?" * len(plans))
+        now = _utc_now_str()
+        with self._lock:
+            rows = self._db.execute(
+                f"""SELECT tg_id, plan, duration_days, expires_at FROM subscriptions
+                    WHERE tg_id IN ({placeholders}) AND expires_at > ?""",
+                tuple(plans.keys()) + (now,),
+            ).fetchall()
+        for tg_id, plan, duration_days, expires_at in rows:
+            tid = int(tg_id)
+            plans[tid] = hub_admin.normalize_plan(plan)
+            ms = _expires_to_ms(expires_at)
+            if ms > 0:
+                expires[tid] = ms
+            try:
+                durations[tid] = int(duration_days)
+            except (TypeError, ValueError):
+                durations[tid] = 30
+        return plans, expires, durations
 
     def plan_for_users(self, tg_ids) -> str:
         """Highest active plan among the given Telegram accounts (legacy single field)."""
         return hub_admin.best_plan(self.plans_by_user(tg_ids).values())
 
     def list_subscriptions(self):
-        self.ensure_subscriptions_table()
+        """Active subscriptions only: (tg_id, plan, duration_days, starts_at, expires_at, updated_at)."""
+        self.purge_expired_subscriptions()
+        now = _utc_now_str()
         with self._lock:
             return self._db.execute(
-                "SELECT tg_id, plan, updated_at FROM subscriptions ORDER BY updated_at DESC, tg_id"
+                """SELECT tg_id, plan, duration_days, starts_at, expires_at, updated_at
+                   FROM subscriptions
+                   WHERE expires_at > ?
+                   ORDER BY expires_at ASC, tg_id""",
+                (now,),
             ).fetchall()
 
-    def set_subscription(self, tg_id: int, plan: str):
+    def set_subscription(self, tg_id: int, plan: str, duration_days: int = 30):
+        """Grant/replace a paid plan for tg_id for N days from now (UTC)."""
         self.ensure_subscriptions_table()
         plan = hub_admin.normalize_plan(plan)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        duration_days = hub_admin.normalize_duration_days(duration_days)
+        now_dt = _utc_now()
+        now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        expires = (now_dt + timedelta(days=duration_days)).strftime("%Y-%m-%d %H:%M:%S")
         with self._lock, self._db:
             if plan == hub_admin.PLAN_FREE:
                 self._db.execute("DELETE FROM subscriptions WHERE tg_id = ?", (tg_id,))
             else:
                 self._db.execute(
-                    """INSERT INTO subscriptions(tg_id, plan, updated_at) VALUES(?,?,?)
-                       ON CONFLICT(tg_id) DO UPDATE SET plan=excluded.plan, updated_at=excluded.updated_at""",
-                    (tg_id, plan, now),
+                    """INSERT INTO subscriptions(
+                           tg_id, plan, duration_days, starts_at, expires_at, updated_at
+                       ) VALUES(?,?,?,?,?,?)
+                       ON CONFLICT(tg_id) DO UPDATE SET
+                           plan=excluded.plan,
+                           duration_days=excluded.duration_days,
+                           starts_at=excluded.starts_at,
+                           expires_at=excluded.expires_at,
+                           updated_at=excluded.updated_at""",
+                    (tg_id, plan, duration_days, now, expires, now),
                 )
 
     def remove_subscription(self, tg_id: int):
@@ -659,6 +794,8 @@ class Handler(BaseHTTPRequestHandler):
             self._report(parse_qs(url.query))
         elif path in ("/admin", "/mgla-admin", "/control"):
             self._admin_get(parse_qs(url.query))
+        elif path in ("/admin/subscriptions", "/mgla-admin/subscriptions"):
+            self._admin_subscriptions_get(parse_qs(url.query))
         elif path in ("/admin/updates", "/mgla-admin/updates"):
             self._admin_updates_get(parse_qs(url.query))
         elif path == "/mgla-updates/v1/apk":
@@ -752,6 +889,7 @@ class Handler(BaseHTTPRequestHandler):
                 flash_ok=flash_ok,
                 flash_err=flash_err,
                 bot_url=BOT_AI_URL,
+                csrf=self._admin_csrf_token(),
             ).encode("utf-8")
         except Exception:
             log.exception("admin render failed")
@@ -779,6 +917,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         form = self._read_form_body()
         if form is None:
+            return
+        if not self._admin_csrf_ok(form):
+            self._redirect(hub_admin.flash_redirect(err="CSRF: обновите страницу и повторите"))
             return
         action = (form.get("action") or [""])[0]
         try:
@@ -839,26 +980,6 @@ class Handler(BaseHTTPRequestHandler):
                     self._redirect(hub_admin.flash_redirect(ok=msg))
                 else:
                     self._redirect(hub_admin.flash_redirect(err=msg))
-            elif action == "subscription_set":
-                tg_id = int((form.get("tg_id") or ["0"])[0])
-                plan = (form.get("plan") or [""])[0].strip()
-                if tg_id <= 0:
-                    raise ValueError("bad tg_id")
-                plan = hub_admin.normalize_plan(plan)
-                if plan == hub_admin.PLAN_FREE:
-                    raise ValueError("choose a paid plan")
-                self.store.set_subscription(tg_id, plan)
-                self._redirect(
-                    hub_admin.flash_redirect(
-                        ok=f"подписка {tg_id} → {plan}"
-                    )
-                )
-            elif action == "subscription_remove":
-                tg_id = int((form.get("tg_id") or ["0"])[0])
-                if tg_id <= 0:
-                    raise ValueError("bad tg_id")
-                self.store.remove_subscription(tg_id)
-                self._redirect(hub_admin.flash_redirect(ok=f"подписка снята с {tg_id}"))
             else:
                 self._redirect(hub_admin.flash_redirect(err="неизвестное действие"))
         except (ValueError, TypeError) as e:
@@ -866,6 +987,92 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.Error:
             log.exception("admin post failed")
             self._redirect(hub_admin.flash_redirect(err="ошибка БД"))
+
+    def _admin_subscriptions_get(self, query):
+        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+            return
+        flash_ok = unquote(query.get("ok", [""])[0] or "")
+        flash_err = unquote(query.get("err", [""])[0] or "")
+        try:
+            removed = self.store.purge_expired_subscriptions()
+            body = hub_admin.render_subscriptions_html(
+                subscriptions=self.store.list_subscriptions(),
+                flash_ok=flash_ok,
+                flash_err=flash_err,
+                purged=removed,
+                csrf=self._admin_csrf_token(),
+            ).encode("utf-8")
+        except sqlite3.Error:
+            log.exception("admin subscriptions failed")
+            self._reply(500)
+            return
+        self._html_reply(body)
+
+    def _admin_subscriptions_post(self):
+        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+            return
+        form = self._read_form_body()
+        if form is None:
+            return
+        if not self._admin_csrf_ok(form):
+            self._redirect(
+                hub_admin.flash_redirect(
+                    err="CSRF: обновите страницу и повторите",
+                    path="/admin/subscriptions",
+                )
+            )
+            return
+        action = (form.get("action") or [""])[0]
+        try:
+            if action == "subscription_set":
+                tg_id = int((form.get("tg_id") or ["0"])[0])
+                plan = (form.get("plan") or [""])[0].strip()
+                duration_raw = (form.get("duration_days") or ["30"])[0]
+                if tg_id <= 0:
+                    raise ValueError("укажите Telegram ID")
+                plan = hub_admin.normalize_plan(plan)
+                if plan == hub_admin.PLAN_FREE:
+                    raise ValueError("выберите платный план")
+                duration_days = hub_admin.normalize_duration_days(duration_raw)
+                self.store.set_subscription(tg_id, plan, duration_days)
+                expires = ""
+                for row in self.store.list_subscriptions():
+                    if int(row[0]) == tg_id:
+                        expires = row[4]
+                        break
+                self._redirect(
+                    hub_admin.flash_redirect(
+                        ok=f"подписка {tg_id} → {plan} на {duration_days} дн. до {expires} UTC",
+                        path="/admin/subscriptions",
+                    )
+                )
+            elif action == "subscription_remove":
+                tg_id = int((form.get("tg_id") or ["0"])[0])
+                if tg_id <= 0:
+                    raise ValueError("bad tg_id")
+                self.store.remove_subscription(tg_id)
+                self._redirect(
+                    hub_admin.flash_redirect(
+                        ok=f"подписка снята с {tg_id}",
+                        path="/admin/subscriptions",
+                    )
+                )
+            else:
+                self._redirect(
+                    hub_admin.flash_redirect(
+                        err="неизвестное действие",
+                        path="/admin/subscriptions",
+                    )
+                )
+        except (ValueError, TypeError) as e:
+            self._redirect(
+                hub_admin.flash_redirect(err=str(e), path="/admin/subscriptions")
+            )
+        except sqlite3.Error:
+            log.exception("admin subscriptions post failed")
+            self._redirect(
+                hub_admin.flash_redirect(err="ошибка БД", path="/admin/subscriptions")
+            )
 
     def _check_client(self):
         if not mgla_token.client_header_ok(self.headers):
@@ -890,6 +1097,47 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _sync_or_entitlements_token_ok(self) -> bool:
+        """Server-to-server: hub sync token or dedicated entitlements token."""
+        got = (
+            self.headers.get("X-Mgla-Sync-Token")
+            or self.headers.get("X-Mgla-Entitlements-Token")
+            or ""
+        ).strip()
+        if not got:
+            return False
+        for expected in (HUB_SYNC_TOKEN, ENTITLEMENTS_TOKEN):
+            if expected and hmac.compare_digest(got.encode(), expected.encode()):
+                return True
+        return False
+
+    def _request_identity(self) -> tuple[str, str | None]:
+        token = self.headers.get("X-Mgla-Token", "")
+        with self.store._lock:
+            kind, iid = mgla_token.token_identity(token, self.store._db)
+        return kind, iid
+
+    def _admin_csrf_token(self) -> str:
+        """Hourly CSRF token derived from panel password (no server state)."""
+        secret = (REPORT_PASSWORD or "mgla").encode("utf-8")
+        slot = str(int(time.time()) // 3600)
+        return hmac.new(secret, slot.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+    def _admin_csrf_ok(self, form: dict) -> bool:
+        got = (form.get("csrf") or [""])[0].strip()
+        if not got:
+            return False
+        secret = (REPORT_PASSWORD or "mgla").encode("utf-8")
+        for slot in (0, -1):  # current + previous hour
+            candidate = hmac.new(
+                secret,
+                str(int(time.time()) // 3600 + slot).encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()[:32]
+            if hmac.compare_digest(got, candidate):
+                return True
+        return False
+
     def _read_json_body(self, max_len):
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -908,6 +1156,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path.rstrip("/") or "/"
         if path in ("/admin", "/mgla-admin", "/control"):
             self._admin_post()
+        elif path in ("/admin/subscriptions", "/mgla-admin/subscriptions"):
+            self._admin_subscriptions_post()
         elif path in ("/admin/updates", "/mgla-admin/updates"):
             self._admin_updates_post()
         elif path == "/mgla-auth/v1/register":
@@ -918,6 +1168,8 @@ class Handler(BaseHTTPRequestHandler):
             self._post_stats()
         elif path == "/mgla-config/v1/features":
             self._post_features()
+        elif path == "/mgla-config/v1/entitlements":
+            self._post_entitlements()
         elif path == "/mgla-updates/v1/check":
             self._post_update_check()
         elif path == "/mgla-ai/v1/chat":
@@ -1169,6 +1421,9 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("apk download failed")
             return
 
+    def _parse_tg_ids_body(self, raw: dict) -> list:
+        return mgla_entitlements.parse_tg_ids(raw.get("tg_id"), raw.get("tg_ids"))
+
     def _post_features(self):
         if not self._check_token():
             return
@@ -1178,48 +1433,103 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(raw, dict):
             self._reply(400, b'{"error":"bad body"}')
             return
-        tg_ids = []
-        single = raw.get("tg_id")
-        multi = raw.get("tg_ids")
-        if isinstance(single, int) and not isinstance(single, bool) and single > 0:
-            tg_ids.append(single)
-        elif isinstance(single, str) and single.isdigit():
-            tg_ids.append(int(single))
-        if isinstance(multi, list):
-            for item in multi:
-                if isinstance(item, int) and not isinstance(item, bool) and item > 0:
-                    tg_ids.append(item)
-                elif isinstance(item, str) and item.isdigit():
-                    tg_ids.append(int(item))
-        # Deduplicate while preserving order.
-        seen = set()
-        uniq = []
-        for tid in tg_ids:
-            if tid not in seen:
-                seen.add(tid)
-                uniq.append(tid)
+        uniq = self._parse_tg_ids_body(raw)
         if not uniq:
             self._reply(400, b'{"error":"tg_id required"}')
             return
         if len(uniq) > 8:
             self._reply(400, b'{"error":"too many tg_ids"}')
             return
+        kind, iid = self._request_identity()
         try:
+            # Bind install JWT → claimed Telegram accounts (for later entitlements checks).
+            if kind == "jwt" and iid:
+                with self.store._lock:
+                    mgla_entitlements.ensure_accounts_schema(self.store._db)
+                    mgla_entitlements.touch_install_accounts(self.store._db, iid, uniq)
             disabled = self.store.disabled_for_user(uniq)
-            by_user = self.store.plans_by_user(uniq)
+            by_user, expires_by, durations_by = self.store.subscription_entitlements(uniq)
+            # Privacy: JWT clients only get paid details for accounts bound to this install.
+            if kind == "jwt" and iid:
+                with self.store._lock:
+                    owned = set(mgla_entitlements.filter_owned_tg_ids(self.store._db, iid, uniq))
+                for tid in list(by_user.keys()):
+                    if tid not in owned:
+                        by_user[tid] = mgla_entitlements.PLAN_FREE
+                        expires_by.pop(tid, None)
+                        durations_by.pop(tid, None)
             plan = hub_admin.best_plan(by_user.values())
         except sqlite3.Error:
             log.exception("features lookup failed")
             self._reply(500)
             return
-        # plans: per Telegram account (source of truth for client entitlements).
-        # plan: highest among requested ids (compat / summary).
         body = json.dumps(
             {
                 "v": 1,
                 "disabled": disabled,
                 "plan": plan,
                 "plans": {str(tid): p for tid, p in by_user.items()},
+                "expires": {str(tid): ms for tid, ms in expires_by.items()},
+                "durations": {str(tid): days for tid, days in durations_by.items()},
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        self._reply(200, body)
+
+    def _post_entitlements(self):
+        """Server-to-server (and JWT) plan lookup — source of truth for AI / Ultra WS."""
+        s2s = self._sync_or_entitlements_token_ok()
+        if not s2s:
+            if not self._check_token():
+                return
+        raw = self._read_json_body(MAX_BODY)
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        uniq = self._parse_tg_ids_body(raw)
+        if not uniq:
+            self._reply(400, b'{"error":"tg_id required"}')
+            return
+        if len(uniq) > 8:
+            self._reply(400, b'{"error":"too many tg_ids"}')
+            return
+        kind, iid = ("", None)
+        if not s2s:
+            kind, iid = self._request_identity()
+        try:
+            allowed = list(uniq)
+            if not s2s:
+                if kind == "jwt" and iid:
+                    with self.store._lock:
+                        mgla_entitlements.ensure_accounts_schema(self.store._db)
+                        # Soft-bind on entitlements too (AI may race ahead of features).
+                        mgla_entitlements.touch_install_accounts(self.store._db, iid, uniq)
+                        allowed = mgla_entitlements.filter_owned_tg_ids(
+                            self.store._db, iid, uniq
+                        )
+                else:
+                    # Legacy static token without install binding: never elevate.
+                    allowed = []
+            by_user, expires_by, durations_by = self.store.subscription_entitlements(
+                allowed if allowed else []
+            )
+            # Fill free for any requested id that was stripped.
+            for tid in uniq:
+                by_user.setdefault(int(tid), mgla_entitlements.PLAN_FREE)
+            plan = hub_admin.best_plan(by_user.values())
+        except sqlite3.Error:
+            log.exception("entitlements lookup failed")
+            self._reply(500)
+            return
+        body = json.dumps(
+            {
+                "v": 1,
+                "plan": plan,
+                "plans": {str(tid): p for tid, p in by_user.items()},
+                "expires": {str(tid): ms for tid, ms in expires_by.items()},
+                "durations": {str(tid): days for tid, days in durations_by.items()},
             },
             ensure_ascii=False,
         ).encode("utf-8")

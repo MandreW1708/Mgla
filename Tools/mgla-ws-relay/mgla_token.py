@@ -64,7 +64,34 @@ def _b64url_decode(text: str) -> bytes:
 
 def ensure_schema(db: sqlite3.Connection) -> None:
     db.executescript(AUTH_SCHEMA)
-    db.commit()
+    try:
+        import mgla_entitlements
+
+        mgla_entitlements.ensure_accounts_schema(db)
+    except Exception:
+        db.commit()
+    else:
+        db.commit()
+
+
+def token_identity(token: str, db: Optional[sqlite3.Connection] = None) -> tuple[str, Optional[str]]:
+    """Return (\"jwt\", iid) or (\"legacy\", None) or (\"\", None) if invalid."""
+    if not token:
+        return "", None
+    if legacy_token_ok(token):
+        return "legacy", None
+    iid = verify_access_token(token)
+    if not iid:
+        return "", None
+    if db is not None:
+        row = db.execute(
+            "SELECT revoked, expires_at FROM auth_installs WHERE iid = ?", (iid,)
+        ).fetchone()
+        if row is not None:
+            revoked, expires_at = int(row[0]), int(row[1])
+            if revoked or expires_at < int(time.time()):
+                return "", None
+    return "jwt", iid
 
 
 def hash_refresh(token: str) -> str:

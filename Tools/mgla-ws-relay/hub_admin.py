@@ -129,11 +129,38 @@ PLAN_RANK = {
 }
 PLAN_IDS_ALL = (PLAN_FREE, PLAN_PREMIUM, PLAN_PREMIUM_PLUS, PLAN_PREMIUM_ULTRA)
 
+# Admin may grant any whole number of days within this range.
+SUBSCRIPTION_DURATION_MIN_DAYS = 1
+SUBSCRIPTION_DURATION_MAX_DAYS = 3650  # ~10 years
+
 
 def normalize_plan(plan_id: str | None) -> str:
     if isinstance(plan_id, str) and plan_id.strip() in PLAN_RANK:
         return plan_id.strip()
     return PLAN_FREE
+
+
+def normalize_duration_days(raw) -> int:
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"длительность: целое число дней "
+            f"({SUBSCRIPTION_DURATION_MIN_DAYS}…{SUBSCRIPTION_DURATION_MAX_DAYS})"
+        ) from None
+    if days < SUBSCRIPTION_DURATION_MIN_DAYS or days > SUBSCRIPTION_DURATION_MAX_DAYS:
+        raise ValueError(
+            f"длительность: {SUBSCRIPTION_DURATION_MIN_DAYS}…{SUBSCRIPTION_DURATION_MAX_DAYS} дней"
+        )
+    return days
+
+
+def plan_title(plan_id: str | None) -> str:
+    pid = normalize_plan(plan_id)
+    for cand, title, _ in PLAN_CATALOG:
+        if cand == pid:
+            return title
+    return pid
 
 
 def best_plan(plans) -> str:
@@ -213,8 +240,14 @@ def render_admin_html(
     flash_ok: str = "",
     flash_err: str = "",
     bot_url: str = "",
+    csrf: str = "",
 ) -> str:
     """Build the /admin control page."""
+    csrf_field = (
+        f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+        if csrf
+        else ""
+    )
     if models_by_plan is None:
         models_by_plan = {
             PLAN_FREE: list(models or DEFAULT_OPENROUTER_MODELS),
@@ -252,6 +285,7 @@ def render_admin_html(
             f"<td class='num'>{html.escape(created or '')}</td>"
             "<td>"
             f"<form method='post' action='/admin' class='inline'>"
+            f"{csrf_field}"
             "<input type='hidden' name='action' value='deny_remove'>"
             f"<input type='hidden' name='tg_id' value='{tg_id}'>"
             f"<input type='hidden' name='feature' value='{html.escape(feature)}'>"
@@ -263,32 +297,7 @@ def render_admin_html(
     if not deny_rows:
         deny_rows.append("<tr><td colspan='4' class='empty'>Пока нет персональных запретов.</td></tr>")
 
-    plan_options = "".join(
-        f"<option value='{html.escape(pid)}'>{html.escape(title)}</option>"
-        for pid, title, _ in PLAN_CATALOG
-        if pid != PLAN_FREE
-    )
-    sub_rows = []
-    for tg_id, plan, updated in subscriptions:
-        title = next((t for pid, t, _ in PLAN_CATALOG if pid == plan), plan)
-        sub_rows.append(
-            "<tr>"
-            f"<td class='num'>{tg_id}</td>"
-            f"<td class='name'>{html.escape(title)} (<code>{html.escape(plan)}</code>)</td>"
-            f"<td class='num'>{html.escape(updated or '')}</td>"
-            "<td>"
-            f"<form method='post' action='/admin' class='inline'>"
-            "<input type='hidden' name='action' value='subscription_remove'>"
-            f"<input type='hidden' name='tg_id' value='{tg_id}'>"
-            "<button type='submit' class='btn danger'>Снять</button>"
-            "</form>"
-            "</td>"
-            "</tr>"
-        )
-    if not sub_rows:
-        sub_rows.append(
-            "<tr><td colspan='4' class='empty'>Подписчиков пока нет — добавьте Telegram ID ниже.</td></tr>"
-        )
+    active_subs = len(subscriptions or [])
 
     flash = ""
     if flash_ok:
@@ -407,6 +416,7 @@ form.inline {{ display:inline; margin:0; }}
     <div class="nav">
       <a href="/">📊 Статистика</a>
       <a class="on" href="/admin">🚩 Флаги</a>
+      <a href="/admin/subscriptions">💎 Подписка</a>
       <a href="/admin/updates">📦 Обновления</a>
     </div>
   </div>
@@ -416,6 +426,7 @@ form.inline {{ display:inline; margin:0; }}
     <h2>🚩 Feature flags — глобально</h2>
     <p class="sub">Kill-switch выключает функцию у всех клиентов после следующего опроса хаба.</p>
     <form method="post" action="/admin">
+      {csrf_field}
       <input type="hidden" name="action" value="save_globals">
       <div class="table-wrap">
       <table>
@@ -433,6 +444,7 @@ form.inline {{ display:inline; margin:0; }}
     <h2>👤 Feature flags — запрет по Telegram ID</h2>
     <p class="sub">После сохранения функция станет недоступна этому пользователю и выключится, если была включена.</p>
     <form method="post" action="/admin">
+      {csrf_field}
       <input type="hidden" name="action" value="deny_add">
       <div class="row">
         <label class="field">🆔 Telegram ID
@@ -455,30 +467,11 @@ form.inline {{ display:inline; margin:0; }}
   </div>
 
   <div class="card">
-    <h2>💎 Подписки Mgla Premium</h2>
-    <p class="sub">План привязан к Telegram ID аккаунта (не ко всему клиенту). В ответе
-      <code>POST /features</code> — объект <code>plans</code> (tg_id → plan) и сводный
-      <code>plan</code> (лучший среди запрошенных). Без записи — Free, вкладка ИИ скрыта.</p>
-    <form method="post" action="/admin">
-      <input type="hidden" name="action" value="subscription_set">
-      <div class="row">
-        <label class="field">🆔 Telegram ID
-          <input type="number" name="tg_id" required min="1" step="1" placeholder="123456789">
-        </label>
-        <label class="field">📦 План
-          <select name="plan">{plan_options}</select>
-        </label>
-        <button class="btn" type="submit">💾 Выдать план</button>
-      </div>
-    </form>
-    <div class="table-wrap" style="margin-top:16px">
-    <table>
-      <thead><tr><th>tg_id</th><th>План</th><th>Когда</th><th></th></tr></thead>
-      <tbody>
-        {"".join(sub_rows)}
-      </tbody>
-    </table>
-    </div>
+    <h2>💎 Подписка</h2>
+    <p class="sub">Выдача платных планов (Premium / Premium+ / Ultra) на произвольное
+      число дней и дата окончания — в отдельном разделе.
+      Сейчас активных подписок: <b>{active_subs}</b>.</p>
+    <p><a class="btn" href="/admin/subscriptions">Открыть раздел «Подписка»</a></p>
   </div>
 
   <div class="card">
@@ -489,6 +482,7 @@ form.inline {{ display:inline; margin:0; }}
       API-ключи только в env на mglabot. Plan id: <code>free</code>, <code>premium</code>,
       <code>premium_plus</code>, <code>premium_ultra</code>.</p>
     <form method="post" action="/admin">
+      {csrf_field}
       <input type="hidden" name="action" value="save_models">
       {_render_plan_textareas(models_by_plan)}
       <div class="row">
@@ -496,6 +490,7 @@ form.inline {{ display:inline; margin:0; }}
       </div>
     </form>
     <form method="post" action="/admin" style="margin-top:10px">
+      {csrf_field}
       <input type="hidden" name="action" value="push_models">
       <button class="btn secondary" type="submit">🔁 Повторить push на mglabot</button>
     </form>
@@ -544,13 +539,223 @@ def _render_plan_textareas(models_by_plan: dict) -> str:
     return "".join(blocks)
 
 
-def flash_redirect(ok: str = "", err: str = "") -> str:
+def flash_redirect(ok: str = "", err: str = "", path: str = "/admin") -> str:
     parts = []
     if ok:
         parts.append("ok=" + quote(ok, safe=""))
     if err:
         parts.append("err=" + quote(err, safe=""))
-    return "/admin" + (("?" + "&".join(parts)) if parts else "")
+    base = path if path.startswith("/") else "/admin"
+    return base + (("?" + "&".join(parts)) if parts else "")
+
+
+def render_subscriptions_html(
+    *,
+    subscriptions: Sequence[Tuple] | None = None,
+    flash_ok: str = "",
+    flash_err: str = "",
+    purged: int = 0,
+    csrf: str = "",
+) -> str:
+    """Dedicated /admin/subscriptions page — grant/revoke timed paid plans."""
+    if subscriptions is None:
+        subscriptions = []
+    csrf_field = (
+        f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+        if csrf
+        else ""
+    )
+    plan_options = "".join(
+        f"<option value='{html.escape(pid)}'>{html.escape(title)}</option>"
+        for pid, title, _ in PLAN_CATALOG
+        if pid != PLAN_FREE
+    )
+    sub_rows = []
+    for row in subscriptions:
+        # (tg_id, plan, duration_days, starts_at, expires_at, updated_at)
+        if len(row) < 6:
+            continue
+        tg_id, plan, duration_days, starts_at, expires_at, updated = row[:6]
+        title = plan_title(plan)
+        sub_rows.append(
+            "<tr>"
+            f"<td class='num'>{int(tg_id)}</td>"
+            f"<td class='name'>{html.escape(title)}<br><code>{html.escape(str(plan))}</code></td>"
+            f"<td class='num'>{int(duration_days) if duration_days else '—'}</td>"
+            f"<td class='num'>{html.escape(starts_at or '')}</td>"
+            f"<td class='num'><b>{html.escape(expires_at or '')}</b></td>"
+            f"<td class='num'>{html.escape(updated or '')}</td>"
+            "<td>"
+            "<form method='post' action='/admin/subscriptions' class='inline'>"
+            f"{csrf_field}"
+            "<input type='hidden' name='action' value='subscription_remove'>"
+            f"<input type='hidden' name='tg_id' value='{int(tg_id)}'>"
+            "<button type='submit' class='btn danger'>Снять</button>"
+            "</form>"
+            "</td>"
+            "</tr>"
+        )
+    if not sub_rows:
+        sub_rows.append(
+            "<tr><td colspan='7' class='empty'>Активных подписок нет — выдайте план ниже.</td></tr>"
+        )
+
+    flash = ""
+    if purged and not flash_ok:
+        flash += (
+            f"<div class='flash ok'>Снято просроченных: {int(purged)}</div>"
+        )
+    if flash_ok:
+        flash += f"<div class='flash ok'>{html.escape(flash_ok)}</div>"
+    if flash_err:
+        flash += f"<div class='flash err'>{html.escape(flash_err)}</div>"
+
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Mgla Hub — Подписка</title>
+<style>
+:root {{
+  --bg0:#050304; --bg1:#100a0c; --card:#1a1014; --line:#3d2a32;
+  --text:#f3e9ec; --muted:#b09aa2; --accent:#8b1e3f; --accent-hi:#c23b5f;
+  --danger:#b33a4a; --radius:16px;
+}}
+* {{ box-sizing:border-box; }}
+body {{
+  margin:0; color:var(--text);
+  font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
+  background:
+    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
+  min-height:100vh;
+}}
+.wrap {{ width:100%; max-width:1040px; margin:0 auto; padding:24px 16px 64px; }}
+.hero {{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:18px; }}
+.brand {{ display:flex; gap:12px; align-items:center; }}
+.logo {{
+  width:48px; height:48px; border-radius:14px;
+  background:linear-gradient(145deg, #c23b5f, #6e152f);
+  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
+}}
+.brand h1 {{ margin:0; font-size:24px; }}
+.brand p {{ margin:2px 0 0; color:var(--muted); font-size:13px; }}
+.nav {{ display:flex; flex-wrap:nowrap; gap:6px; overflow-x:auto; }}
+.nav a {{
+  color:var(--muted); text-decoration:none; padding:8px 11px; border-radius:999px;
+  border:1px solid var(--line); background:rgba(255,255,255,.03); white-space:nowrap; font-size:13px;
+}}
+.nav a.on {{ color:#fff; background:var(--accent); border-color:var(--accent-hi); font-weight:650; }}
+.card {{
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px; margin-top:14px; overflow:hidden;
+}}
+.card h2 {{ margin:0 0 8px; font-size:18px; }}
+.sub {{ color:var(--muted); font-size:13px; margin:0 0 14px; }}
+.row {{ display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }}
+.field {{ display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--muted); min-width:140px; flex:1 1 160px; }}
+.field input, .field select {{
+  background:#120c0f; border:1px solid var(--line); border-radius:10px; color:var(--text);
+  padding:10px 12px; font:inherit;
+}}
+.btn {{
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  background:var(--accent); color:#fff; border:0; border-radius:999px;
+  padding:10px 16px; font:650 13px/1 system-ui; cursor:pointer; text-decoration:none;
+}}
+.btn.danger {{ background:var(--danger); }}
+.btn.secondary {{ background:transparent; border:1px solid var(--line); color:var(--text); }}
+.table-wrap {{ overflow-x:auto; }}
+table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+th, td {{ text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }}
+th {{ color:var(--muted); font-weight:600; font-size:12px; }}
+td.num {{ font-variant-numeric:tabular-nums; white-space:nowrap; }}
+td.empty {{ color:var(--muted); text-align:center; padding:18px; }}
+.flash {{ padding:10px 12px; border-radius:12px; margin:0 0 12px; font-size:13px; }}
+.flash.ok {{ background:rgba(46,160,90,.18); border:1px solid rgba(46,160,90,.35); }}
+.flash.err {{ background:rgba(179,58,74,.18); border:1px solid rgba(179,58,74,.4); }}
+.footer {{ color:var(--muted); font-size:12px; margin-top:18px; }}
+form.inline {{ display:inline; margin:0; }}
+code {{ font-size:12px; opacity:.9; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="brand">
+      <div class="logo">M</div>
+      <div>
+        <h1>💎 Подписка</h1>
+        <p>Ручная выдача планов · срок фиксированный · окончание по UTC</p>
+      </div>
+    </div>
+    <div class="nav">
+      <a href="/">📊 Статистика</a>
+      <a href="/admin">🚩 Флаги</a>
+      <a class="on" href="/admin/subscriptions">💎 Подписка</a>
+      <a href="/admin/updates">📦 Обновления</a>
+    </div>
+  </div>
+  {flash}
+
+  <div class="card">
+    <h2>Выдать / продлить</h2>
+    <p class="sub">
+      Telegram ID аккаунта, план и число дней. Старт — сейчас (UTC), окончание =
+      старт + введённые дни. Повторная выдача <b>заменяет</b> текущую подписку
+      (новый срок с текущего момента). По истечении запись удаляется, клиент
+      получает Free и теряет premium-функции.
+    </p>
+    <form method="post" action="/admin/subscriptions">
+      {csrf_field}
+      <input type="hidden" name="action" value="subscription_set">
+      <div class="row">
+        <label class="field">🆔 Telegram ID
+          <input type="number" name="tg_id" required min="1" step="1" placeholder="123456789">
+        </label>
+        <label class="field">📦 План
+          <select name="plan">{plan_options}</select>
+        </label>
+        <label class="field">⏱️ Дней
+          <input type="number" name="duration_days" required min="1" max="3650" step="1"
+                 value="30" placeholder="30">
+        </label>
+        <button class="btn" type="submit">💾 Выдать</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Активные подписки</h2>
+    <p class="sub">Время указано в UTC. Просроченные снимаются автоматически при открытии
+      страницы и при каждом запросе <code>/mgla-config/v1/features</code>.</p>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>tg_id</th>
+          <th>План</th>
+          <th>Дней</th>
+          <th>Начало (UTC)</th>
+          <th>Окончание (UTC)</th>
+          <th>Обновлено</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {"".join(sub_rows)}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <p class="footer">🔐 Только Basic Auth. Клиентский токен сюда не подходит.</p>
+</div>
+</body>
+</html>
+"""
 
 
 def models_from_json(raw: str, *, allow_empty: bool = True) -> List[str]:

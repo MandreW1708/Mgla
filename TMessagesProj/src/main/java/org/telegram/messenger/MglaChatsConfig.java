@@ -113,17 +113,28 @@ public class MglaChatsConfig {
     public static final String PROVIDER_GOOGLE = "google";
     public static final String PROVIDER_YANDEX = "yandex";
 
+    /** Raw preference — may be true even for Free after an expired trial. Prefer {@link #isAutoTranslateActive()}. */
     public static boolean isAutoTranslateEnabled() {
         return getPrefs().getBoolean(PREF_AUTO_TRANSLATE_ENABLED, false);
     }
 
-    /** Enabled in settings and allowed by the current Mgla plan (not Free). */
+    /** Enabled in settings and allowed by the current Mgla plan (not Free). Default OFF for Free. */
     public static boolean isAutoTranslateActive() {
         return isAutoTranslateEnabled() && MglaSubscription.canUseAutoTranslate();
     }
 
     public static void setAutoTranslateEnabled(boolean enabled) {
+        if (enabled && !MglaSubscription.canUseAutoTranslate()) {
+            enabled = false;
+        }
         getPrefs().edit().putBoolean(PREF_AUTO_TRANSLATE_ENABLED, enabled).apply();
+    }
+
+    /** Drop a sticky ON after plan expiry so Free users never see the toggle lit. */
+    public static void clearAutoTranslateIfUnauthorized() {
+        if (!MglaSubscription.canUseAutoTranslate() && isAutoTranslateEnabled()) {
+            getPrefs().edit().putBoolean(PREF_AUTO_TRANSLATE_ENABLED, false).apply();
+        }
     }
 
     public static String getAutoTranslateProvider() {

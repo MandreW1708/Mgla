@@ -630,6 +630,7 @@ code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
     <div class="nav">
       <a href="/">📊 Статистика</a>
       <a href="/admin">🚩 Флаги</a>
+      <a href="/admin/subscriptions">💎 Подписка</a>
       <a class="on" href="/admin/updates">📦 Обновления</a>
     </div>
   </div>

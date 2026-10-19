@@ -565,6 +565,14 @@ public final class MglaAiChatService {
         if (!TextUtils.isEmpty(plan)) {
             body.put("plan", plan);
         }
+        // Hub verifies subscription by tg_id — plan claim alone cannot elevate.
+        try {
+            long tgId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
+            if (tgId > 0) {
+                body.put("tg_id", tgId);
+            }
+        } catch (Throwable ignored) {
+        }
         if (!TextUtils.isEmpty(model)) {
             body.put("model", model);
         } else if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(MglaSubscription.getPlanId())

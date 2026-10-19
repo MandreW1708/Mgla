@@ -2,6 +2,10 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -12,6 +16,7 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Shader;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -29,6 +34,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaPremiumController;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -113,6 +119,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     private Shader buttonShader;
     private final Matrix matrix = new Matrix();
     private int buttonWidth;
+    private ValueAnimator planSwitchAnimator;
 
     public MglaPremiumActivity() {
         this(null);
@@ -387,6 +394,36 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         return false;
     }
 
+    @Override
+    public void onFragmentDestroy() {
+        if (planSwitchAnimator != null) {
+            planSwitchAnimator.cancel();
+            planSwitchAnimator = null;
+        }
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (premiumButtonView != null) {
+            updateButtonText(false);
+        }
+        if (listView != null && listView.getAdapter() != null) {
+            listView.getAdapter().notifyDataSetChanged();
+        }
+        if (backgroundView != null && backgroundView.subtitleView != null) {
+            int active = activePlan();
+            if (active >= PLAN_PREMIUM) {
+                String until = MglaPremiumController.formatExpiresLabel(currentUserId());
+                backgroundView.subtitleView.setText(TextUtils.isEmpty(until)
+                        ? "На этом аккаунте активен " + MglaPremiumController.planTitle(active) + "."
+                        : "На этом аккаунте активен " + MglaPremiumController.planTitle(active)
+                                + " · " + until + ".");
+            }
+        }
+    }
+
     /** Подписка текущего аккаунта (по user id), не всего клиента. */
     private long currentUserId() {
         return getUserConfig().getClientUserId();
@@ -501,25 +538,138 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         totalGradientHeight = Math.max(1, yOffset);
     }
 
+    private static int logoResForPlan(int plan) {
+        if (plan == PLAN_PLUS) {
+            return R.drawable.mgla_premium_logo_red;
+        }
+        if (plan == PLAN_PREMIUM) {
+            return R.drawable.mgla_premium_logo_blue;
+        }
+        return R.drawable.mgla_premium_logo;
+    }
+
     @SuppressLint("NotifyDataSetChanged")
     private void selectPlan(int index, boolean animated) {
         if (index < 0 || index >= plans.size() || selectedPlanIndex == index) {
             return;
         }
-        selectedPlanIndex = index;
-        applyAccentForPlan(selectedPlanIndex);
-        fillFeaturesForPlan(selectedPlanIndex);
-        updateRows();
-        updateButtonText(animated);
-        if (listView != null && listView.getAdapter() != null) {
-            listView.getAdapter().notifyDataSetChanged();
+        final int fromPlan = selectedPlanIndex;
+        final int toPlan = index;
+        selectedPlanIndex = toPlan;
+
+        if (!animated || backgroundView == null) {
+            applyAccentForPlan(toPlan);
+            fillFeaturesForPlan(toPlan);
+            updateRows();
+            updateButtonText(false);
+            if (backgroundView != null) {
+                backgroundView.setLogo(toPlan, false);
+                backgroundView.updateTabs(false);
+            }
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyDataSetChanged();
+            }
+            if (contentView != null) {
+                contentView.requestLayout();
+            }
+            return;
         }
-        if (backgroundView != null) {
-            backgroundView.updateTabs();
+
+        if (planSwitchAnimator != null) {
+            planSwitchAnimator.cancel();
         }
-        if (contentView != null) {
-            contentView.requestLayout();
-        }
+
+        final PlanPalette from = PlanPalette.forPlan(fromPlan);
+        final PlanPalette to = PlanPalette.forPlan(toPlan);
+        final ArgbEvaluator eval = new ArgbEvaluator();
+
+        // Mid-switch: swap feature list + logo while content is faded.
+        final boolean[] midApplied = {false};
+
+        backgroundView.updateTabs(true);
+        backgroundView.setLogo(toPlan, true);
+
+        planSwitchAnimator = ValueAnimator.ofFloat(0f, 1f);
+        planSwitchAnimator.setDuration(320);
+        planSwitchAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        planSwitchAnimator.addUpdateListener(a -> {
+            float t = (float) a.getAnimatedValue();
+            // Blend accent paints live so icon chips / button / action bar morph.
+            accent = new PlanPalette(
+                    (int) eval.evaluate(t, from.light, to.light),
+                    (int) eval.evaluate(t, from.mid, to.mid),
+                    (int) eval.evaluate(t, from.deep, to.deep),
+                    (int) eval.evaluate(t, from.dark, to.dark),
+                    (int) eval.evaluate(t, from.onAccent, to.onAccent),
+                    (int) eval.evaluate(t, from.textSecondary, to.textSecondary)
+            );
+            iconShader = new LinearGradient(
+                    0, 0, 0, 100,
+                    new int[]{accent.light, accent.mid, accent.deep, accent.dark},
+                    new float[]{0f, 0.35f, 0.7f, 1f},
+                    Shader.TileMode.CLAMP
+            );
+            accentIconPaint.setShader(iconShader);
+            accentStrokePaint.setColor(ColorUtils.setAlphaComponent(accent.light, 90));
+            rebuildButtonShader();
+            if (premiumButtonView != null && premiumButtonView.buttonTextView != null) {
+                premiumButtonView.buttonTextView.setTextColor(accent.onAccent);
+            }
+            updateColors();
+            if (listView != null) {
+                // Fade list out then in around the data swap.
+                float listAlpha = t < 0.45f ? 1f - t / 0.45f : (t - 0.45f) / 0.55f;
+                listView.setAlpha(Utilities.clamp(listAlpha, 1f, 0f));
+                listView.invalidate();
+            }
+            if (premiumButtonView != null) {
+                premiumButtonView.invalidate();
+            }
+            if (contentView != null) {
+                contentView.invalidate();
+            }
+
+            if (!midApplied[0] && t >= 0.45f) {
+                midApplied[0] = true;
+                applyAccentForPlan(toPlan);
+                fillFeaturesForPlan(toPlan);
+                updateRows();
+                updateButtonText(true);
+                if (listView != null && listView.getAdapter() != null) {
+                    listView.getAdapter().notifyDataSetChanged();
+                }
+                if (contentView != null) {
+                    contentView.requestLayout();
+                }
+            }
+        });
+        planSwitchAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (!midApplied[0]) {
+                    applyAccentForPlan(toPlan);
+                    fillFeaturesForPlan(toPlan);
+                    updateRows();
+                    updateButtonText(true);
+                    if (listView != null && listView.getAdapter() != null) {
+                        listView.getAdapter().notifyDataSetChanged();
+                    }
+                }
+                if (listView != null) {
+                    listView.setAlpha(1f);
+                }
+                planSwitchAnimator = null;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                if (listView != null) {
+                    listView.setAlpha(1f);
+                }
+                planSwitchAnimator = null;
+            }
+        });
+        planSwitchAnimator.start();
     }
 
     private void updateButtonText(boolean animated) {
@@ -531,12 +681,17 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         final PlanData plan = plans.get(selectedPlanIndex);
 
         if (active == selectedPlanIndex) {
-            String text = MglaPremiumController.isLifetime(userId)
-                    ? plan.title + " · навсегда"
-                    : "Ваш текущий план";
+            String until = MglaPremiumController.formatExpiresLabel(userId);
+            String text = TextUtils.isEmpty(until)
+                    ? "Ваш текущий план"
+                    : plan.title + " · " + until;
             premiumButtonView.setButton(text, v -> {
+                String msg = TextUtils.isEmpty(until)
+                        ? "Подписка активна на этом аккаунте"
+                        : "Активен до " + MglaSubscription.formatExpiresAt(
+                                MglaPremiumController.getExpiresAt(userId));
                 BulletinFactory.of(this)
-                        .createSimpleBulletin(R.raw.contact_check, "Подписка активна на этом аккаунте")
+                        .createSimpleBulletin(R.raw.contact_check, msg)
                         .show();
             }, animated);
             return;
@@ -551,21 +706,12 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
 
         String text = active >= PLAN_PREMIUM
                 ? "Улучшить до " + plan.title
-                : "Подписаться за " + plan.priceRub + " ₽/мес";
+                : "Подписаться · " + plan.priceRub + " ₽/мес";
         premiumButtonView.setButton(text, v -> {
-            // Until billing ships: activate the selected plan locally so tier gates can be tested.
-            String planId = org.telegram.messenger.MglaSubscription.PLAN_PREMIUM;
-            if (plan.id == PLAN_PLUS) {
-                planId = org.telegram.messenger.MglaSubscription.PLAN_PREMIUM_PLUS;
-            } else if (plan.id == PLAN_ULTRA) {
-                planId = org.telegram.messenger.MglaSubscription.PLAN_PREMIUM_ULTRA;
-            }
-            org.telegram.messenger.MglaSubscription.setPlanId(planId);
             BulletinFactory.of(this)
                     .createSimpleBulletin(
                             R.raw.contact_check,
-                            "Активирован " + org.telegram.messenger.MglaSubscription.labelForPlan(planId)
-                                    + " (тест до оплаты)")
+                            "Оплата в приложении скоро. Сейчас подписку выдаёт администратор.")
                     .show();
         }, animated);
     }
@@ -691,9 +837,11 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 int active = activePlan();
                 String hint;
                 if (active == selectedPlanIndex) {
-                    hint = MglaPremiumController.isLifetime(currentUserId())
-                            ? "На этом аккаунте активен " + plan.title + " навсегда. На других аккаунтах подписка не действует."
-                            : "На этом аккаунте активен " + plan.title + ". На других аккаунтах подписка не действует.";
+                    String until = MglaPremiumController.formatExpiresLabel(currentUserId());
+                    hint = TextUtils.isEmpty(until)
+                            ? "На этом аккаунте активен " + plan.title + ". На других аккаунтах подписка не действует."
+                            : "На этом аккаунте активен " + plan.title + " " + until
+                                    + ". На других аккаунтах подписка не действует.";
                 } else if (plan.id == PLAN_PREMIUM) {
                     hint = "Premium: анимации, задачи, локальные модели, живая память, темы иконок и автоперевод.";
                 } else if (plan.id == PLAN_PLUS) {
@@ -736,6 +884,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         final TextView subtitleView;
         final FrameLayout logoContainer;
         final ImageView logoView;
+        final ImageView logoNextView;
         final LinearLayout tabsRow;
         final ArrayList<PlanTabView> tabViews = new ArrayList<>();
 
@@ -749,10 +898,18 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             addView(logoContainer, LayoutHelper.createLinear(168, 168, Gravity.CENTER_HORIZONTAL));
 
             logoView = new ImageView(context);
-            logoView.setImageResource(R.drawable.mgla_premium_logo);
+            logoView.setImageResource(logoResForPlan(selectedPlanIndex));
             logoView.setScaleType(ImageView.ScaleType.FIT_CENTER);
             logoView.setAdjustViewBounds(true);
             logoContainer.addView(logoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            // Second layer for cross-fade when switching Premium / Premium+ / Ultra icons.
+            logoNextView = new ImageView(context);
+            logoNextView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            logoNextView.setAdjustViewBounds(true);
+            logoNextView.setAlpha(0f);
+            logoNextView.setVisibility(View.GONE);
+            logoContainer.addView(logoNextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
             titleView = new TextView(context);
             titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
@@ -768,8 +925,11 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             subtitleView.setGravity(Gravity.CENTER_HORIZONTAL);
             int active = activePlan();
             if (active >= PLAN_PREMIUM) {
-                subtitleView.setText("На этом аккаунте активен " + MglaPremiumController.planTitle(active)
-                        + (MglaPremiumController.isLifetime(currentUserId()) ? " · навсегда" : "") + ".");
+                String until = MglaPremiumController.formatExpiresLabel(currentUserId());
+                subtitleView.setText(TextUtils.isEmpty(until)
+                        ? "На этом аккаунте активен " + MglaPremiumController.planTitle(active) + "."
+                        : "На этом аккаунте активен " + MglaPremiumController.planTitle(active)
+                                + " · " + until + ".");
             } else {
                 subtitleView.setText("Эксклюзивные возможности Mgla. Выберите свой уровень.");
             }
@@ -797,12 +957,60 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 tabsRow.addView(tab, lp);
                 tabViews.add(tab);
             }
-            updateTabs();
+            updateTabs(false);
         }
 
-        void updateTabs() {
+        void setLogo(int plan, boolean animated) {
+            final int res = logoResForPlan(plan);
+            if (!animated) {
+                logoView.animate().cancel();
+                logoNextView.animate().cancel();
+                logoView.setImageResource(res);
+                logoView.setAlpha(1f);
+                logoView.setScaleX(1f);
+                logoView.setScaleY(1f);
+                logoNextView.setVisibility(View.GONE);
+                logoNextView.setAlpha(0f);
+                return;
+            }
+            logoNextView.setImageResource(res);
+            logoNextView.setVisibility(View.VISIBLE);
+            logoNextView.setAlpha(0f);
+            logoNextView.setScaleX(0.82f);
+            logoNextView.setScaleY(0.82f);
+            logoView.animate().cancel();
+            logoNextView.animate().cancel();
+            logoView.animate()
+                    .alpha(0f)
+                    .scaleX(0.82f)
+                    .scaleY(0.82f)
+                    .setDuration(180)
+                    .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                    .start();
+            logoNextView.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(280)
+                    .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                    .setListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            logoView.setImageResource(res);
+                            logoView.setAlpha(1f);
+                            logoView.setScaleX(1f);
+                            logoView.setScaleY(1f);
+                            logoNextView.setAlpha(0f);
+                            logoNextView.setVisibility(View.GONE);
+                            logoNextView.animate().setListener(null);
+                        }
+                    })
+                    .start();
+        }
+
+        void updateTabs(boolean animated) {
             for (int i = 0; i < tabViews.size(); i++) {
-                tabViews.get(i).setSelected(i == selectedPlanIndex);
+                tabViews.get(i).setSelected(i == selectedPlanIndex, animated);
             }
         }
 
@@ -861,9 +1069,27 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
 
         @Override
         public void setSelected(boolean selected) {
+            setSelected(selected, false);
+        }
+
+        void setSelected(boolean selected, boolean animated) {
+            boolean changed = this.selected != selected;
             this.selected = selected;
-            titleView.setTextColor(selected ? palette.onAccent : 0x99FFFFFF);
-            priceView.setTextColor(selected ? ColorUtils.setAlphaComponent(palette.onAccent, 0xCC) : palette.mid);
+            int titleColor = selected ? palette.onAccent : 0x99FFFFFF;
+            int priceColor = selected ? ColorUtils.setAlphaComponent(palette.onAccent, 0xCC) : palette.mid;
+            titleView.setTextColor(titleColor);
+            priceView.setTextColor(priceColor);
+            if (animated && changed) {
+                animate().cancel();
+                setScaleX(selected ? 0.94f : 1.04f);
+                setScaleY(selected ? 0.94f : 1.04f);
+                animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(220)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                        .start();
+            }
             invalidate();
         }
 

@@ -105,6 +105,10 @@ sudo nginx -t && sudo systemctl reload nginx
 База подписчиков живёт **только на mglahub** в SQLite `stats.db`, таблица `subscriptions`.
 Авто-обход на **mglabot** (`mgla-ws-relay`, mtproxy, tproxy) **не трогать**.
 
+Длительность — **любое целое число дней** (1…3650). По `expires_at` подписка
+снимается сама (и в админке, и в `POST /features`). Клиент показывает окончание
+с точностью до минуты и отключает premium-функции.
+
 ### Что сделать на mglahub
 
 ```bash
@@ -112,46 +116,31 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo cp -a /opt/mgla-ws-relay/stats.db /opt/mgla-ws-relay/stats.db.bak.$(date +%Y%m%d%H%M%S)
 
 # 2) Залить новые файлы хаба (НЕ relay.py / НЕ mtproxy)
-sudo cp stats_server.py hub_admin.py /opt/mgla-ws-relay/
+sudo cp stats_server.py hub_admin.py hub_updates.py /opt/mgla-ws-relay/
 
 # 3) Рестарт ТОЛЬКО stats (подписки + /admin + /features)
 sudo systemctl restart mgla-stats
 sudo systemctl status mgla-stats --no-pager
 
-# Таблица создаётся сама при старте:
-#   CREATE TABLE IF NOT EXISTS subscriptions (
-#     tg_id INTEGER PRIMARY KEY,
-#     plan TEXT NOT NULL,          -- premium | premium_plus | premium_ultra
-#     updated_at TEXT NOT NULL
-#   );
+# Таблица (миграция колонок — при старте):
+#   subscriptions(
+#     tg_id, plan, duration_days, starts_at, expires_at, updated_at
+#   )
 ```
 
 ### Выдать себе Ultra
 
-Вариант A — админка: `https://mglahub.mooo.com/admin`  
-→ блок **«Подписки Mgla Premium»** → Telegram ID → Premium Ultra → Выдать план.
+Админка: `https://mglahub.mooo.com/admin/subscriptions`  
+→ Telegram ID → Premium Ultra → длительность → Выдать.
 
-Вариант B — SQL:
-
-```bash
-sudo sqlite3 /opt/mgla-ws-relay/stats.db \
-  "INSERT INTO subscriptions(tg_id, plan, updated_at)
-   VALUES(1004685048, 'premium_ultra', datetime('now'))
-   ON CONFLICT(tg_id) DO UPDATE SET
-     plan=excluded.plan, updated_at=excluded.updated_at;"
-
-sudo sqlite3 /opt/mgla-ws-relay/stats.db \
-  "SELECT tg_id, plan, updated_at FROM subscriptions WHERE tg_id=1004685048;"
-```
-
-### Проверка ответа features (должен быть plan)
+### Проверка ответа features
 
 ```bash
 curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \
   -H "Content-Type: application/json" \
   -H "X-Mgla-Token: ТОКЕН_ХАБА" \
   -d '{"tg_id":1004685048}'
-# ожидаемо: {"v":1,"disabled":[...],"plan":"premium_ultra"}
+# ожидаемо: plans + expires (unix ms) + durations
 ```
 
 Клиент с включённым обходом ходит через релей-прокси features — релей **только проксирует** тело, таблицу подписок не хранит. Рестарт `mgla-ws-relay` / `mgla-ai-proxy` для подписок **не нужен**.
@@ -161,6 +150,7 @@ curl -s -X POST https://mglahub.mooo.com/mgla-config/v1/features \
 - не рестартить `mgla-ws-relay`, `mgla-mtproxy`, `mgla-tproxy`
 - не менять `env` релея ради подписок
 - не путать `update_supporters` (ранние APK) с `subscriptions` (тарифы)
+- не выдавать план без `expires_at` — клиент отклонит платный доступ без срока
 
 ## Проверка
 

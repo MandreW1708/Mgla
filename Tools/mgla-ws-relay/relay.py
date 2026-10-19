@@ -34,6 +34,17 @@ LISTEN_PORT = int(os.environ.get("MGLA_WS_PORT", "8766"))
 AUTH_TOKEN = os.environ.get("MGLA_WS_TOKEN", "").strip()
 MTPROXY_HOST = os.environ.get("MGLA_MTPROXY_HOST", "127.0.0.1")
 MTPROXY_PORT = int(os.environ.get("MGLA_MTPROXY_PORT", "2398"))
+# Verify Ultra / priority against mglahub subscriptions (never trust client headers alone).
+HUB_ENTITLEMENTS_URL = os.environ.get(
+    "MGLA_HUB_ENTITLEMENTS_URL",
+    "https://mglahub.mooo.com/mgla-config/v1/entitlements",
+).strip()
+HUB_ENTITLEMENTS_TOKEN = (
+    os.environ.get("MGLA_HUB_ENTITLEMENTS_TOKEN", "").strip()
+    or os.environ.get("MGLA_HUB_SYNC_TOKEN", "").strip()
+    or os.environ.get("MGLA_HUB_FEATURES_TOKEN", "").strip()
+    or AUTH_TOKEN
+)
 _secret_hex = (
     os.environ.get("MGLA_WEB_PROXY_SECRET")
     or os.environ.get("MTPROXY_SECRET")
@@ -227,15 +238,126 @@ def client_ok(headers) -> bool:
 
 
 def parse_priority(headers) -> tuple:
-    """Return (plan_id, is_ultra). Client-declared until JWT carries plan."""
+    """Return client-claimed (plan_id, wants_ultra). Always re-verify via hub."""
     plan = _header_get(headers, "X-Mgla-Plan", "x-mgla-plan").strip().lower()
     prio = _header_get(headers, "X-Mgla-Priority", "x-mgla-priority").strip().lower()
     if plan not in ("free", "premium", "premium_plus", "premium_ultra"):
         plan = "free"
-    ultra = plan == "premium_ultra" or prio in ("1", "true", "yes", "ultra")
-    if ultra:
+    wants_ultra = plan == "premium_ultra" or prio in ("1", "true", "yes", "ultra")
+    if wants_ultra:
         plan = "premium_ultra"
-    return plan, ultra
+    return plan, wants_ultra
+
+
+def parse_tg_ids_from_headers(headers) -> list:
+    raw = _header_get(
+        headers,
+        "X-Mgla-Tg-Ids",
+        "x-mgla-tg-ids",
+        "X-Mgla-Tg-Id",
+        "x-mgla-tg-id",
+    )
+    out = []
+    seen = set()
+    for part in (raw or "").replace(";", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            tid = int(part)
+            if tid > 0 and tid not in seen:
+                seen.add(tid)
+                out.append(tid)
+    return out[:8]
+
+
+_entitlements_cache: Dict[str, Tuple[float, str]] = {}
+_ENTITLEMENTS_TTL = 45.0
+
+
+async def fetch_hub_plan(tg_ids: list) -> str:
+    """Best plan among tg_ids from mglahub. Fail-closed → free."""
+    if not tg_ids:
+        return "free"
+    if not HUB_ENTITLEMENTS_URL or not HUB_ENTITLEMENTS_TOKEN:
+        LOG.warning("entitlements not configured — treating as free")
+        return "free"
+    cache_key = ",".join(str(x) for x in sorted(tg_ids))
+    now = time.monotonic()
+    hit = _entitlements_cache.get(cache_key)
+    if hit and now - hit[0] < _ENTITLEMENTS_TTL:
+        return hit[1]
+
+    def _sync_fetch() -> str:
+        import json
+        import urllib.error
+        import urllib.request
+
+        body = json.dumps({"tg_ids": list(tg_ids)}).encode("utf-8")
+        req = urllib.request.Request(
+            HUB_ENTITLEMENTS_URL,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Mgla-Client": "mgla",
+                "X-Mgla-Sync-Token": HUB_ENTITLEMENTS_TOKEN,
+                "X-Mgla-Entitlements-Token": HUB_ENTITLEMENTS_TOKEN,
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception as e:
+            LOG.warning("entitlements fetch failed: %s", e)
+            return "free"
+        plan = "free"
+        if isinstance(payload, dict):
+            p = payload.get("plan")
+            if isinstance(p, str) and p in (
+                "free",
+                "premium",
+                "premium_plus",
+                "premium_ultra",
+            ):
+                plan = p
+            plans = payload.get("plans")
+            if isinstance(plans, dict) and plans:
+                rank = {
+                    "free": 0,
+                    "premium": 1,
+                    "premium_plus": 2,
+                    "premium_ultra": 3,
+                }
+                best, best_r = "free", 0
+                for v in plans.values():
+                    r = rank.get(str(v), 0)
+                    if r > best_r:
+                        best, best_r = str(v), r
+                plan = best
+        return plan
+
+    plan = await asyncio.to_thread(_sync_fetch)
+    _entitlements_cache[cache_key] = (now, plan)
+    return plan
+
+
+async def resolve_verified_plan(headers) -> tuple:
+    """Return (plan, ultra) from hub only. Client X-Mgla-Plan is advisory/logging."""
+    claimed_plan, wants_ultra = parse_priority(headers)
+    tg_ids = parse_tg_ids_from_headers(headers)
+    if not tg_ids:
+        # No account ids → cannot prove a paid plan.
+        if wants_ultra or claimed_plan != "free":
+            LOG.info("paid claim without tg ids (claimed=%s)", claimed_plan)
+        return "free", False
+    hub_plan = await fetch_hub_plan(tg_ids)
+    ultra = hub_plan == "premium_ultra"
+    if wants_ultra and not ultra:
+        LOG.info(
+            "ultra claim rejected hub_plan=%s tg_ids=%s",
+            hub_plan,
+            tg_ids,
+        )
+    return hub_plan, ultra
 
 
 async def acquire_slot(ultra: bool) -> bool:
@@ -644,10 +766,14 @@ async def handler(ws):
         # Token already proved access; do not drop the call if a proxy stripped the marker.
         LOG.warning("%s missing X-Mgla-Client path=%s (allowing valid token)", peer, path)
 
-    plan, ultra = parse_priority(headers)
+    plan, ultra = await resolve_verified_plan(headers)
     if ULTRA_ONLY and not ultra:
         LOG.info("%s reject ultra-only plan=%s path=%s", peer, plan, path)
         await ws.close(code=1008, reason="ultra only")
+        return
+    if not parse_tg_ids_from_headers(headers) and (ultra or ULTRA_ONLY):
+        LOG.info("%s reject missing X-Mgla-Tg-Id for premium path", peer)
+        await ws.close(code=1008, reason="tg id required")
         return
 
     dc = resolve_dc(path)

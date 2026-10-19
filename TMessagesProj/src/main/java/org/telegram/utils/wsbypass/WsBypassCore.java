@@ -4,6 +4,7 @@ import android.os.SystemClock;
 
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MglaSubscription;
+import org.telegram.messenger.UserConfig;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -475,7 +476,12 @@ public final class WsBypassCore {
         headers.put("X-Mgla-Token", token);
         // Stock Telegram и чужие клиенты этот заголовок не шлют — релей их отвергнет.
         headers.put("X-Mgla-Client", "mgla");
-        // Device-wide plan for soft QoS on the relay (Ultra if any account has it).
+        // Account ids — hub verifies paid plan against subscriptions (not client claim).
+        String tgIds = collectActivatedTgIdsCsv();
+        if (tgIds != null && !tgIds.isEmpty()) {
+            headers.put("X-Mgla-Tg-Ids", tgIds);
+        }
+        // Device-wide plan hint (relay clamps to hub entitlements).
         String bypassPlan = MglaSubscription.getDeviceBypassPlan();
         if (bypassPlan != null && !bypassPlan.isEmpty()) {
             headers.put("X-Mgla-Plan", bypassPlan);
@@ -486,7 +492,6 @@ public final class WsBypassCore {
             headers.put("X-Mgla-Priority", "1");
         }
         if (ultraPath) {
-            // Force Ultra plan on dedicated hub (rejects non-ultra).
             headers.put("X-Mgla-Plan", MglaSubscription.PLAN_PREMIUM_ULTRA);
         }
         dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : "")
@@ -583,6 +588,29 @@ public final class WsBypassCore {
             throw last;
         }
         throw new IOException("kws недоступен");
+    }
+
+    /** Comma-separated Telegram user ids of activated accounts (for hub entitlements). */
+    private static String collectActivatedTgIdsCsv() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                UserConfig uc = UserConfig.getInstance(a);
+                if (uc == null || !uc.isClientActivated()) {
+                    continue;
+                }
+                long id = uc.getClientUserId();
+                if (id <= 0) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append(',');
+                }
+                sb.append(id);
+            }
+        } catch (Throwable ignored) {
+        }
+        return sb.toString();
     }
 
     static List<String> wsDomainsForDc(int dc, boolean isMedia) {

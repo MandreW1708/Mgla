@@ -67,6 +67,16 @@ HUB_FEATURES_TOKEN = (
     os.environ.get("MGLA_HUB_FEATURES_TOKEN", "").strip()
     or os.environ.get("MGLA_HUB_CLIENT_TOKEN", "").strip()
 )
+HUB_ENTITLEMENTS_URL = os.environ.get(
+    "MGLA_HUB_ENTITLEMENTS_URL",
+    "https://mglahub.mooo.com/mgla-config/v1/entitlements",
+).strip()
+# Prefer sync token for server→hub entitlements (never trust client plan alone).
+HUB_ENTITLEMENTS_TOKEN = (
+    os.environ.get("MGLA_HUB_ENTITLEMENTS_TOKEN", "").strip()
+    or SYNC_TOKEN
+    or HUB_FEATURES_TOKEN
+)
 HUB_UPDATE_CHECK_URL = os.environ.get(
     "MGLA_HUB_UPDATE_CHECK_URL",
     "https://mglahub.mooo.com/mgla-updates/v1/check",
@@ -753,21 +763,89 @@ def _hub_headers(content_type: str | None = "application/json; charset=utf-8") -
     return headers
 
 
-def proxy_hub_features(body_bytes: bytes) -> tuple[int, bytes]:
-    """Forward the client's features body to mglahub with the hub client token."""
+def proxy_hub_features(body_bytes: bytes, client_token: str | None = None) -> tuple[int, bytes]:
+    """Forward features to mglahub.
+
+    Prefer the caller's JWT so the hub can bind install→tg_id. Fall back to
+    the server hub token for legacy clients.
+    """
     if not HUB_FEATURES_URL or not HUB_FEATURES_TOKEN:
         raise RuntimeError("hub features proxy not configured (MGLA_HUB_FEATURES_TOKEN)")
+    token = (client_token or "").strip() or HUB_FEATURES_TOKEN
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Mgla-Token": token,
+        "X-Mgla-Client": "mgla",
+    }
     req = urllib.request.Request(
         HUB_FEATURES_URL,
         data=body_bytes,
         method="POST",
-        headers=_hub_headers(),
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return int(resp.status), resp.read()
     except urllib.error.HTTPError as e:
         return int(e.code), e.read()
+
+
+_entitlements_cache: dict[str, tuple[float, str]] = {}
+_ENTITLEMENTS_TTL = 45.0
+
+
+def fetch_hub_plan(tg_ids: list[int]) -> str:
+    """Best paid plan among tg_ids according to mglahub subscriptions (cached)."""
+    import mgla_entitlements
+
+    ids = [int(x) for x in tg_ids if isinstance(x, int) and x > 0]
+    if not ids:
+        return PLAN_FREE
+    if not HUB_ENTITLEMENTS_URL or not HUB_ENTITLEMENTS_TOKEN:
+        log.warning("entitlements URL/token missing — treating as free")
+        return PLAN_FREE
+    cache_key = ",".join(str(x) for x in sorted(ids))
+    now = time.time()
+    hit = _entitlements_cache.get(cache_key)
+    if hit and now - hit[0] < _ENTITLEMENTS_TTL:
+        return hit[1]
+    body = json.dumps({"tg_ids": ids}, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Mgla-Client": "mgla",
+        "X-Mgla-Sync-Token": HUB_ENTITLEMENTS_TOKEN,
+        "X-Mgla-Entitlements-Token": HUB_ENTITLEMENTS_TOKEN,
+    }
+    req = urllib.request.Request(
+        HUB_ENTITLEMENTS_URL, data=body, method="POST", headers=headers
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception as e:
+        log.warning("entitlements fetch failed: %s", e)
+        return PLAN_FREE
+    plan = PLAN_FREE
+    if isinstance(payload, dict):
+        plan = mgla_entitlements.normalize_plan(payload.get("plan"))
+        plans = payload.get("plans")
+        if isinstance(plans, dict) and plans:
+            plan = mgla_entitlements.best_plan(plans.values())
+    _entitlements_cache[cache_key] = (now, plan)
+    return plan
+
+
+def plan_allows_model(hub_plan: str, model_id: str | None) -> bool:
+    """Whether hub_plan may use model_id (by catalog ownership)."""
+    import mgla_entitlements
+
+    if not model_id:
+        return True
+    owner = plan_for_model(model_id) or PLAN_FREE
+    # premium aliases free catalog
+    if owner == PLAN_FREE:
+        return True
+    return mgla_entitlements.plan_rank(hub_plan) >= mgla_entitlements.plan_rank(owner)
 
 
 def proxy_hub_update_check(body_bytes: bytes) -> tuple[int, bytes]:
@@ -1138,8 +1216,9 @@ class Handler(BaseHTTPRequestHandler):
         raw = self._read_raw_body(MAX_FEATURES_BODY)
         if raw is None:
             return
+        client_token = (self.headers.get("X-Mgla-Token") or "").strip()
         try:
-            code, body = proxy_hub_features(raw)
+            code, body = proxy_hub_features(raw, client_token=client_token)
         except RuntimeError as e:
             self._reply(503, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
@@ -1223,6 +1302,17 @@ class Handler(BaseHTTPRequestHandler):
         else:
             client_plan = None
         exclude_ultra = bool(raw.get("exclude_ultra"))
+        import mgla_entitlements
+
+        tg_ids = mgla_entitlements.parse_tg_ids(raw.get("tg_id"), raw.get("tg_ids"))
+        hub_plan = fetch_hub_plan(tg_ids)
+        # Never elevate above hub-verified subscription.
+        effective_plan = mgla_entitlements.clamp_plan(client_plan, hub_plan)
+        if preferred_model and not plan_allows_model(hub_plan, preferred_model):
+            self._reply(403, b'{"error":"model not allowed for subscription"}')
+            return
+        if exclude_ultra and hub_plan != PLAN_PREMIUM_ULTRA:
+            exclude_ultra = False
         if not isinstance(message, str) or not message.strip():
             self._reply(400, b'{"error":"message required"}')
             return
@@ -1235,12 +1325,16 @@ class Handler(BaseHTTPRequestHandler):
                 message.strip(),
                 lang if isinstance(lang, str) else "Russian",
                 preferred_model,
-                client_plan,
+                effective_plan,
                 exclude_ultra=exclude_ultra,
             )
         except RuntimeError as e:
             log.warning("chat failed: %s", e)
             self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        # Defense in depth: drop ultra-key result if hub plan cannot use that model.
+        if not plan_allows_model(hub_plan, used_model):
+            self._reply(403, b'{"error":"model not allowed for subscription"}')
             return
         self._reply(
             200,
@@ -1249,6 +1343,7 @@ class Handler(BaseHTTPRequestHandler):
                     "content": content,
                     "model": used_model,
                     "ultra": (plan_for_model(used_model) == PLAN_PREMIUM_ULTRA),
+                    "plan": hub_plan,
                 },
                 ensure_ascii=False,
             ).encode("utf-8"),

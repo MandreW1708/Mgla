@@ -1,11 +1,11 @@
 package org.telegram.messenger;
 
 import android.content.SharedPreferences;
+import android.text.TextUtils;
 
 /**
- * Подписки Mgla Premium привязаны к Telegram user id аккаунта,
- * а не ко всему клиенту / слоту. Другой аккаунт в том же приложении
- * подписку не получает.
+ * UI/state mirror of paid Mgla plans per Telegram user id.
+ * Source of truth is hub → {@link MglaSubscription}; this class caches plan + expiry for the Premium screen.
  */
 public final class MglaPremiumController {
 
@@ -14,18 +14,13 @@ public final class MglaPremiumController {
     public static final int PLAN_PLUS = 1;
     public static final int PLAN_ULTRA = 2;
 
-    /** expiresAt == 0 означает пожизненную подписку. */
+    /** Legacy sentinel — no longer issued by hub (only fixed durations). */
     public static final long EXPIRES_LIFETIME = 0L;
 
     private static final String PREFS = "mgla_premium_subs";
     private static final String KEY_PLAN_PREFIX = "plan_";
     private static final String KEY_EXPIRES_PREFIX = "expires_";
     private static final String KEY_SEEDED = "lifetime_ultra_seeded_v1";
-
-    /** Встроенная база пожизненных подписчиков Premium Ultra. */
-    private static final long[] LIFETIME_ULTRA_USER_IDS = {
-            1004685048L
-    };
 
     private MglaPremiumController() {
     }
@@ -34,18 +29,44 @@ public final class MglaPremiumController {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, 0);
     }
 
-    /** Однократно записывает встроенных lifetime Ultra в prefs. */
+    /**
+     * Clears obsolete built-in lifetime Ultra seed from older builds.
+     * Hub Timed subscriptions are the only source of paid access.
+     */
     public static void ensureSeeded() {
         SharedPreferences p = prefs();
-        if (p.getBoolean(KEY_SEEDED, false)) {
+        if (!p.getBoolean(KEY_SEEDED, false) && !p.contains("lifetime_ultra_cleared_v2")) {
+            // Nothing to clear on fresh installs.
+            p.edit().putBoolean("lifetime_ultra_cleared_v2", true).apply();
             return;
         }
-        SharedPreferences.Editor e = p.edit();
-        for (long userId : LIFETIME_ULTRA_USER_IDS) {
-            e.putInt(KEY_PLAN_PREFIX + userId, PLAN_ULTRA);
-            e.putLong(KEY_EXPIRES_PREFIX + userId, EXPIRES_LIFETIME);
+        if (p.getBoolean("lifetime_ultra_cleared_v2", false)) {
+            return;
         }
-        e.putBoolean(KEY_SEEDED, true);
+        // Drop hardcoded lifetime grants from previous versions.
+        SharedPreferences.Editor e = p.edit();
+        for (String key : p.getAll().keySet()) {
+            if (key != null && (key.startsWith(KEY_PLAN_PREFIX) || key.startsWith(KEY_EXPIRES_PREFIX))) {
+                long userId = 0L;
+                try {
+                    if (key.startsWith(KEY_PLAN_PREFIX)) {
+                        userId = Long.parseLong(key.substring(KEY_PLAN_PREFIX.length()));
+                    } else if (key.startsWith(KEY_EXPIRES_PREFIX)) {
+                        userId = Long.parseLong(key.substring(KEY_EXPIRES_PREFIX.length()));
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+                if (userId == 1004685048L) {
+                    long exp = p.getLong(KEY_EXPIRES_PREFIX + userId, -1L);
+                    if (exp == EXPIRES_LIFETIME) {
+                        e.remove(KEY_PLAN_PREFIX + userId);
+                        e.remove(KEY_EXPIRES_PREFIX + userId);
+                    }
+                }
+            }
+        }
+        e.remove(KEY_SEEDED);
+        e.putBoolean("lifetime_ultra_cleared_v2", true);
         e.apply();
     }
 
@@ -65,9 +86,20 @@ public final class MglaPremiumController {
             return PLAN_NONE;
         }
         ensureSeeded();
-
-        if (isBuiltInLifetimeUltra(userId)) {
-            return PLAN_ULTRA;
+        // Prefer live MglaSubscription (checks hub expiry).
+        try {
+            String planId = MglaSubscription.getPlanIdForUser(userId);
+            if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(planId)) {
+                return PLAN_ULTRA;
+            }
+            if (MglaSubscription.PLAN_PREMIUM_PLUS.equals(planId)) {
+                return PLAN_PLUS;
+            }
+            if (MglaSubscription.PLAN_PREMIUM.equals(planId)) {
+                return PLAN_PREMIUM;
+            }
+            return PLAN_NONE;
+        } catch (Throwable ignored) {
         }
 
         SharedPreferences p = prefs();
@@ -76,7 +108,7 @@ public final class MglaPremiumController {
             return PLAN_NONE;
         }
         long expiresAt = p.getLong(KEY_EXPIRES_PREFIX + userId, EXPIRES_LIFETIME);
-        if (expiresAt != EXPIRES_LIFETIME && expiresAt < System.currentTimeMillis()) {
+        if (expiresAt == EXPIRES_LIFETIME || expiresAt < System.currentTimeMillis()) {
             return PLAN_NONE;
         }
         return plan;
@@ -98,34 +130,40 @@ public final class MglaPremiumController {
         return getPlanForAccount(account) >= minPlan;
     }
 
+    /** Lifetime grants are no longer issued. */
     public static boolean isLifetime(long userId) {
-        if (userId == 0) {
-            return false;
-        }
-        if (isBuiltInLifetimeUltra(userId)) {
-            return true;
-        }
-        ensureSeeded();
-        if (getPlanForUser(userId) == PLAN_NONE) {
-            return false;
-        }
-        return prefs().getLong(KEY_EXPIRES_PREFIX + userId, -1) == EXPIRES_LIFETIME;
+        return false;
     }
 
     public static long getExpiresAt(long userId) {
-        if (isBuiltInLifetimeUltra(userId)) {
-            return EXPIRES_LIFETIME;
+        if (userId == 0) {
+            return -1L;
+        }
+        try {
+            long fromSub = MglaSubscription.getExpiresAtMs(userId);
+            if (fromSub > 0L) {
+                return fromSub;
+            }
+        } catch (Throwable ignored) {
         }
         ensureSeeded();
-        return prefs().getLong(KEY_EXPIRES_PREFIX + userId, -1);
+        long stored = prefs().getLong(KEY_EXPIRES_PREFIX + userId, -1L);
+        if (stored == EXPIRES_LIFETIME || stored <= System.currentTimeMillis()) {
+            return -1L;
+        }
+        return stored;
     }
 
     /**
-     * Выдаёт / обновляет подписку для конкретного user id.
-     * @param expiresAtMs Unix ms; {@link #EXPIRES_LIFETIME} = навсегда
+     * Cache grant from hub sync.
+     * @param expiresAtMs Unix ms UTC; must be in the future (lifetime no longer used)
      */
     public static void grant(long userId, int plan, long expiresAtMs) {
         if (userId == 0 || plan < PLAN_PREMIUM || plan > PLAN_ULTRA) {
+            return;
+        }
+        if (expiresAtMs <= System.currentTimeMillis()) {
+            revoke(userId);
             return;
         }
         prefs().edit()
@@ -135,7 +173,7 @@ public final class MglaPremiumController {
     }
 
     public static void revoke(long userId) {
-        if (userId == 0 || isBuiltInLifetimeUltra(userId)) {
+        if (userId == 0) {
             return;
         }
         prefs().edit()
@@ -155,6 +193,15 @@ public final class MglaPremiumController {
             default:
                 return "";
         }
+    }
+
+    public static String formatExpiresLabel(long userId) {
+        long expiresAt = getExpiresAt(userId);
+        if (expiresAt <= 0L) {
+            return "";
+        }
+        String formatted = MglaSubscription.formatExpiresAt(expiresAt);
+        return TextUtils.isEmpty(formatted) ? "" : ("до " + formatted);
     }
 
     /** Светлый акцент плана (Premium=синий, Plus=красный, Ultra=золотой). */
@@ -213,14 +260,5 @@ public final class MglaPremiumController {
     /** Текст на заливке акцента (белый для синего/красного, тёмный для золота). */
     public static int colorOnAccent(int plan) {
         return plan == PLAN_ULTRA ? 0xFF1A1200 : 0xFFFFFFFF;
-    }
-
-    private static boolean isBuiltInLifetimeUltra(long userId) {
-        for (long id : LIFETIME_ULTRA_USER_IDS) {
-            if (id == userId) {
-                return true;
-            }
-        }
-        return false;
     }
 }
