@@ -61,11 +61,30 @@ DC_MEDIA: Dict[int, list] = {
 
 _silent_until: Dict[tuple, float] = {}
 CONNECT_TIMEOUT = 6.0
+CONNECT_TIMEOUT_ULTRA = 8.0
 # Keepalive: slightly longer pong wait so brief mobile radio blips don't tear the bridge.
 WS_PING_INTERVAL = 25.0
 WS_PING_TIMEOUT = 45.0
 TCP_BUF = 512 * 1024
+TCP_BUF_ULTRA = 1024 * 1024
 MAX_WS_SIZE = 32 * 1024 * 1024
+# Soft capacity: standard clients share SOFT_CAP - ULTRA_RESERVED slots.
+# Ultra always accepted (best-effort QoS until a dedicated Ultra relay exists).
+SOFT_CAP = int(os.environ.get("MGLA_WS_SOFT_CAP", "220"))
+ULTRA_RESERVED = int(os.environ.get("MGLA_WS_ULTRA_RESERVED", "40"))
+STANDARD_WAIT_SEC = float(os.environ.get("MGLA_WS_STANDARD_WAIT_SEC", "6"))
+
+_slot_lock: Optional[asyncio.Lock] = None
+_active_standard = 0
+_active_ultra = 0
+_standard_waiters: list = []  # list of asyncio.Event
+
+
+def _get_slot_lock() -> asyncio.Lock:
+    global _slot_lock
+    if _slot_lock is None:
+        _slot_lock = asyncio.Lock()
+    return _slot_lock
 _PROTO_TAGS = (b"\xef" * 4, b"\xee" * 4, b"\xdd" * 4)
 _RESERVED_FIRST = {0xEF}
 _RESERVED_STARTS = {
@@ -199,6 +218,84 @@ def client_ok(headers) -> bool:
     return got == "mgla" or got.startswith("mgla/")
 
 
+def parse_priority(headers) -> tuple:
+    """Return (plan_id, is_ultra). Client-declared until JWT carries plan."""
+    plan = _header_get(headers, "X-Mgla-Plan", "x-mgla-plan").strip().lower()
+    prio = _header_get(headers, "X-Mgla-Priority", "x-mgla-priority").strip().lower()
+    if plan not in ("free", "premium", "premium_plus", "premium_ultra"):
+        plan = "free"
+    ultra = plan == "premium_ultra" or prio in ("1", "true", "yes", "ultra")
+    if ultra:
+        plan = "premium_ultra"
+    return plan, ultra
+
+
+async def acquire_slot(ultra: bool) -> bool:
+    """Reserve a soft connection slot. Ultra skips the standard cap."""
+    global _active_standard, _active_ultra
+    deadline = time.monotonic() + (0.0 if ultra else STANDARD_WAIT_SEC)
+    while True:
+        async with _get_slot_lock():
+            standard_limit = max(1, SOFT_CAP - ULTRA_RESERVED)
+            if ultra:
+                _active_ultra += 1
+                return True
+            if _active_standard < standard_limit:
+                _active_standard += 1
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            ev = asyncio.Event()
+            _standard_waiters.append(ev)
+        try:
+            remaining = max(0.05, deadline - time.monotonic())
+            await asyncio.wait_for(ev.wait(), timeout=remaining)
+        except asyncio.TimeoutError:
+            async with _get_slot_lock():
+                try:
+                    _standard_waiters.remove(ev)
+                except ValueError:
+                    pass
+            return False
+
+
+async def release_slot(ultra: bool) -> None:
+    global _active_standard, _active_ultra
+    async with _get_slot_lock():
+        if ultra:
+            _active_ultra = max(0, _active_ultra - 1)
+        else:
+            _active_standard = max(0, _active_standard - 1)
+        # Wake one waiting standard client when a slot frees.
+        while _standard_waiters:
+            ev = _standard_waiters.pop(0)
+            ev.set()
+            break
+
+
+def _tune_socket(writer: asyncio.StreamWriter, ultra: bool) -> None:
+    try:
+        sock = writer.get_extra_info("socket")
+        if sock is None:
+            return
+        import socket as _socket
+        sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
+        buf = TCP_BUF_ULTRA if ultra else TCP_BUF
+        try:
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_RCVBUF, buf)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_SNDBUF, buf)
+        except Exception:
+            pass
+        if ultra:
+            try:
+                # Best-effort Linux QoS hint (ignored on other platforms).
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_PRIORITY, 6)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def mark_silent(dc: int, media: bool, ip: str) -> None:
     _silent_until[(dc, int(media), ip)] = time.monotonic() + 180
     LOG.warning("dc %s media=%s %s sent nothing, skipping 3 min", dc, int(media), ip)
@@ -244,21 +341,23 @@ def make_mtproxy_init(proto_tag: bytes, dc_idx: int, secret: bytes) -> bytes:
     return bytes(out)
 
 
-async def open_dc(dc: int, media: bool):
+async def open_dc(dc: int, media: bool, ultra: bool = False):
     ips = list((DC_MEDIA if media else DC_MAIN).get(dc) or DC_MAIN[2])
     now = time.monotonic()
     fresh = [ip for ip in ips if _silent_until.get((dc, int(media), ip), 0) <= now]
+    candidates = fresh or ips
+    timeout = CONNECT_TIMEOUT_ULTRA if ultra else CONNECT_TIMEOUT
+
+    if ultra and len(candidates) > 1:
+        # Race all DC IPs — first successful wins (max speed / priority connect).
+        return await _open_dc_race(dc, media, candidates, timeout)
+
     last = None
-    for ip in fresh or ips:
+    for ip in candidates:
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, 443), timeout=CONNECT_TIMEOUT)
-            try:
-                sock = writer.get_extra_info("socket")
-                if sock is not None:
-                    sock.setsockopt(__import__("socket").IPPROTO_TCP, __import__("socket").TCP_NODELAY, 1)
-            except Exception:
-                pass
+                asyncio.open_connection(ip, 443), timeout=timeout)
+            _tune_socket(writer, ultra)
             return reader, writer, ip
         except Exception as e:
             last = e
@@ -266,15 +365,53 @@ async def open_dc(dc: int, media: bool):
     raise last if last is not None else OSError("no dc address")
 
 
-async def open_mtproxy():
-    reader, writer = await asyncio.wait_for(
-        asyncio.open_connection(MTPROXY_HOST, MTPROXY_PORT), timeout=CONNECT_TIMEOUT)
+async def _open_dc_race(dc: int, media: bool, ips: list, timeout: float):
+    tasks = [asyncio.create_task(_try_dc_ip(ip, timeout)) for ip in ips]
+    last = None
     try:
-        sock = writer.get_extra_info("socket")
-        if sock is not None:
-            sock.setsockopt(__import__("socket").IPPROTO_TCP, __import__("socket").TCP_NODELAY, 1)
-    except Exception:
-        pass
+        while tasks:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            tasks = list(pending)
+            for t in done:
+                try:
+                    reader, writer, ip = t.result()
+                    _tune_socket(writer, True)
+                    for p in pending:
+                        p.cancel()
+                        try:
+                            await p
+                        except Exception:
+                            pass
+                    # Close any other successes that finished in the same batch.
+                    for other in done:
+                        if other is t:
+                            continue
+                        try:
+                            _r, w, _ip = other.result()
+                            w.close()
+                        except Exception:
+                            pass
+                    LOG.info("dc %s media=%s ultra race won via %s", dc, int(media), ip)
+                    return reader, writer, ip
+                except Exception as e:
+                    last = e
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+    raise last if last is not None else OSError("no dc address")
+
+
+async def _try_dc_ip(ip: str, timeout: float):
+    reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, 443), timeout=timeout)
+    return reader, writer, ip
+
+
+async def open_mtproxy(ultra: bool = False):
+    timeout = CONNECT_TIMEOUT_ULTRA if ultra else CONNECT_TIMEOUT
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(MTPROXY_HOST, MTPROXY_PORT), timeout=timeout)
+    _tune_socket(writer, ultra)
     return reader, writer
 
 
@@ -296,10 +433,11 @@ async def pipe_ws_to_tcp(ws, writer: asyncio.StreamWriter) -> None:
             pass
 
 
-async def pipe_tcp_to_ws(reader: asyncio.StreamReader, ws, received: list) -> None:
+async def pipe_tcp_to_ws(reader: asyncio.StreamReader, ws, received: list, ultra: bool = False) -> None:
+    buf = TCP_BUF_ULTRA if ultra else TCP_BUF
     try:
         while True:
-            data = await reader.read(TCP_BUF)
+            data = await reader.read(buf)
             if not data:
                 break
             received[0] += len(data)
@@ -313,7 +451,7 @@ async def pipe_tcp_to_ws(reader: asyncio.StreamReader, ws, received: list) -> No
             pass
 
 
-async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str) -> bool:
+async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str, ultra: bool = False) -> bool:
     """Re-encrypt the telegram-facing stream onto local MTProxy. Returns False to fall back."""
     if Cipher is None or len(MTPROXY_SECRET) != 16 or len(first) < 64:
         return False
@@ -322,7 +460,7 @@ async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str) 
         sniffed = -dc if media else dc
     proto = proto_from_init(first)
     try:
-        reader, writer = await open_mtproxy()
+        reader, writer = await open_mtproxy(ultra=ultra)
     except Exception as e:
         LOG.warning("%s mtproxy dial failed: %s", peer, e)
         return False
@@ -372,9 +510,10 @@ async def bridge_via_mtproxy(ws, first: bytes, dc: int, media: bool, peer: str) 
                 pass
 
     async def down():
+        buf = TCP_BUF_ULTRA if ultra else TCP_BUF
         try:
             while True:
-                data = await reader.read(TCP_BUF)
+                data = await reader.read(buf)
                 if not data:
                     break
                 plain = mt_to_plain.update(data)
@@ -470,80 +609,91 @@ async def handler(ws):
         # Token already proved access; do not drop the call if a proxy stripped the marker.
         LOG.warning("%s missing X-Mgla-Client path=%s (allowing valid token)", peer, path)
 
+    plan, ultra = parse_priority(headers)
+
     dc = resolve_dc(path)
     if dc is None:
         LOG.info("%s bad path=%s (need /apiws?dc=1..5)", peer, path)
         await ws.close(code=1008, reason="need /apiws?dc=N")
         return
 
-    media = want_media(path)
-    try:
-        first = await asyncio.wait_for(ws.recv(), timeout=10)
-    except Exception as e:
-        LOG.info("%s no init: %s", peer, e)
-        await ws.close(code=1000)
+    if not await acquire_slot(ultra):
+        LOG.info("%s reject busy plan=%s path=%s (std=%s ultra=%s)",
+                 peer, plan, path, _active_standard, _active_ultra)
+        await ws.close(code=1013, reason="busy")
         return
-    if isinstance(first, str):
-        first = first.encode("utf-8", "ignore")
-    sniffed = dc_index_from_init(first)
-    if sniffed is not None:
-        media = sniffed < 0
-        # Prefer the dc encoded in the handshake when it disagrees with the query.
-        abs_dc = abs(sniffed)
-        if abs_dc == 203 or 1 <= abs_dc <= 5:
-            dc = abs_dc
 
-    LOG.info("%s open dc=%s media=%s", peer, dc, int(media))
-
-    # Media: official MTProxy middle-end routing (strong path).
-    if media:
-        if await bridge_via_mtproxy(ws, first, dc, True, peer):
-            return
-        # Fallback: race kws hosts, then raw IP.
+    try:
+        media = want_media(path)
         try:
-            upstream, host = await race_kws(dc, True)
-            LOG.info("%s connected dc=%s media=1 via %s", peer, dc, host)
-            await upstream.send(first)
-            received = [0]
-            up = asyncio.create_task(pipe_ws(ws, upstream))
-            down = asyncio.create_task(pipe_ws(upstream, ws, received))
-            done, pending = await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
-            for t in pending:
-                t.cancel()
-            LOG.info("%s closed dc=%s media=1 via %s bytes=%s", peer, dc, host, received[0])
-            return
+            first = await asyncio.wait_for(ws.recv(), timeout=10)
         except Exception as e:
-            LOG.warning("%s kws media failed: %s", peer, e)
+            LOG.info("%s no init: %s", peer, e)
+            await ws.close(code=1000)
+            return
+        if isinstance(first, str):
+            first = first.encode("utf-8", "ignore")
+        sniffed = dc_index_from_init(first)
+        if sniffed is not None:
+            media = sniffed < 0
+            # Prefer the dc encoded in the handshake when it disagrees with the query.
+            abs_dc = abs(sniffed)
+            if abs_dc == 203 or 1 <= abs_dc <= 5:
+                dc = abs_dc
 
-    try:
-        reader, writer, ip = await open_dc(dc, media)
-    except Exception as e:
-        LOG.warning("%s dc connect failed: %s", peer, e)
-        await ws.close(code=1011, reason="dc unreachable")
-        return
-    LOG.info("%s connected dc=%s media=%s via %s", peer, dc, int(media), ip)
-    try:
-        writer.write(first)
-        await writer.drain()
-    except Exception as e:
-        LOG.warning("%s init forward failed: %s", peer, e)
+        LOG.info("%s open dc=%s media=%s plan=%s ultra=%s", peer, dc, int(media), plan, int(ultra))
+
+        # Media: official MTProxy middle-end routing (strong path).
+        if media:
+            if await bridge_via_mtproxy(ws, first, dc, True, peer, ultra=ultra):
+                return
+            # Fallback: race kws hosts, then raw IP.
+            try:
+                upstream, host = await race_kws(dc, True)
+                LOG.info("%s connected dc=%s media=1 via %s", peer, dc, host)
+                await upstream.send(first)
+                received = [0]
+                up = asyncio.create_task(pipe_ws(ws, upstream))
+                down = asyncio.create_task(pipe_ws(upstream, ws, received))
+                done, pending = await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                LOG.info("%s closed dc=%s media=1 via %s bytes=%s", peer, dc, host, received[0])
+                return
+            except Exception as e:
+                LOG.warning("%s kws media failed: %s", peer, e)
+
         try:
-            writer.close()
-        except Exception:
-            pass
-        await ws.close(code=1011)
-        return
+            reader, writer, ip = await open_dc(dc, media, ultra=ultra)
+        except Exception as e:
+            LOG.warning("%s dc connect failed: %s", peer, e)
+            await ws.close(code=1011, reason="dc unreachable")
+            return
+        LOG.info("%s connected dc=%s media=%s via %s plan=%s", peer, dc, int(media), ip, plan)
+        try:
+            writer.write(first)
+            await writer.drain()
+        except Exception as e:
+            LOG.warning("%s init forward failed: %s", peer, e)
+            try:
+                writer.close()
+            except Exception:
+                pass
+            await ws.close(code=1011)
+            return
 
-    received = [0]
-    started = time.monotonic()
-    up = asyncio.create_task(pipe_ws_to_tcp(ws, writer))
-    down = asyncio.create_task(pipe_tcp_to_ws(reader, ws, received))
-    done, pending = await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
-    for t in pending:
-        t.cancel()
-    if received[0] == 0 and time.monotonic() - started >= 8:
-        mark_silent(dc, media, ip)
-    LOG.info("%s closed dc=%s media=%s bytes=%s", peer, dc, int(media), received[0])
+        received = [0]
+        started = time.monotonic()
+        up = asyncio.create_task(pipe_ws_to_tcp(ws, writer))
+        down = asyncio.create_task(pipe_tcp_to_ws(reader, ws, received, ultra=ultra))
+        done, pending = await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+        if received[0] == 0 and time.monotonic() - started >= 8:
+            mark_silent(dc, media, ip)
+        LOG.info("%s closed dc=%s media=%s bytes=%s plan=%s", peer, dc, int(media), received[0], plan)
+    finally:
+        await release_slot(ultra)
 
 
 async def main() -> None:
@@ -555,7 +705,13 @@ async def main() -> None:
     if len(MTPROXY_SECRET) == 16:
         LOG.info("media via mtproxy %s:%s", MTPROXY_HOST, MTPROXY_PORT)
     else:
-        LOG.warning("MGLA_WEB_PROXY_SECRET missing ??? media falls back to kws/raw")
+        LOG.warning("MGLA_WEB_PROXY_SECRET missing — media falls back to kws/raw")
+    LOG.info(
+        "qos soft_cap=%s ultra_reserved=%s standard_wait=%.1fs (X-Mgla-Plan / X-Mgla-Priority)",
+        SOFT_CAP,
+        ULTRA_RESERVED,
+        STANDARD_WAIT_SEC,
+    )
 
     async with websockets.serve(
         handler,

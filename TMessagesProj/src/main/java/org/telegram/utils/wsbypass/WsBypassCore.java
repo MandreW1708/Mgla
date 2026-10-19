@@ -3,6 +3,7 @@ package org.telegram.utils.wsbypass;
 import android.os.SystemClock;
 
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.MglaSubscription;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,6 +61,7 @@ public final class WsBypassCore {
 
     private static final long WS_ROUTE_DEADLINE_MS = 18_000L;
     private static final long RELAY_ATTEMPT_MS = 12_000L;
+    private static final long RELAY_ATTEMPT_ULTRA_MS = 18_000L;
     private static final long FAIL_BACKOFF_MS = 3_000L;
     private static final int FAILS_BEFORE_BACKOFF = 2;
     private static final int MAX_DIRECT_ATTEMPTS = 6;
@@ -442,9 +444,20 @@ public final class WsBypassCore {
         headers.put("X-Mgla-Token", token);
         // Stock Telegram и чужие клиенты этот заголовок не шлют — релей их отвергнет.
         headers.put("X-Mgla-Client", "mgla");
-        dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : ""));
+        // Device-wide plan for soft QoS on the relay (Ultra if any account has it).
+        String bypassPlan = MglaSubscription.getDeviceBypassPlan();
+        if (bypassPlan != null && !bypassPlan.isEmpty()) {
+            headers.put("X-Mgla-Plan", bypassPlan);
+        }
+        boolean priority = MglaSubscription.hasBypassPriority();
+        if (priority) {
+            headers.put("X-Mgla-Priority", "1");
+        }
+        dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : "")
+            + " plan=" + bypassPlan + (priority ? " prio" : ""));
+        long attemptMs = priority ? RELAY_ATTEMPT_ULTRA_MS : RELAY_ATTEMPT_MS;
         long attemptDeadline = Math.min(deadlineNanos,
-            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RELAY_ATTEMPT_MS));
+            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(attemptMs));
         // Pin only the known default host; custom hosts rely on system CAs + hostname verify.
         String[] pins = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)
             ? new String[]{MglaWsConfig.RELAY_SPKI_SHA256_BASE64}

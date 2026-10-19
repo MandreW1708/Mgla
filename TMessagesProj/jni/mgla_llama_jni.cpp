@@ -300,11 +300,12 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
     }
 
     std::lock_guard<std::mutex> guard(rt->lock);
-    if (rt->abort.load() || !rt->ctx || !rt->model) {
-        set_last_error("модель выгружается");
+    // Always clear a stale abort from a previous Stop / tab switch — a new generate is a fresh request.
+    rt->abort.store(false);
+    if (!rt->ctx || !rt->model) {
+        set_last_error("модель выгружена из памяти");
         return -1;
     }
-    rt->abort.store(false);
 
     const char * raw = env->GetStringUTFChars(prompt, nullptr);
     if (!raw) {
@@ -472,11 +473,11 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeComplete(
     // Fallback: use generate with no streaming (sink null) won't collect text.
     // Inline a minimal non-streaming path.
     std::lock_guard<std::mutex> guard(rt->lock);
+    rt->abort.store(false);
     if (!rt->ctx || !rt->model) {
-        set_last_error("модель выгружается");
+        set_last_error("модель выгружена из памяти");
         return nullptr;
     }
-    rt->abort.store(false);
     const char * raw = env->GetStringUTFChars(prompt, nullptr);
     if (!raw) {
         return nullptr;

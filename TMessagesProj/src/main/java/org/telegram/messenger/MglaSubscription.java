@@ -154,6 +154,55 @@ public final class MglaSubscription {
         return PLAN_FREE;
     }
 
+    private static int planRank(String planId) {
+        switch (normalize(planId)) {
+            case PLAN_PREMIUM_ULTRA:
+                return 3;
+            case PLAN_PREMIUM_PLUS:
+                return 2;
+            case PLAN_PREMIUM:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    /**
+     * True if any activated account on this install has Ultra.
+     * Used for device-wide auto-bypass priority (unlike AI, which is per-account).
+     */
+    public static boolean hasUltraOnAnyAccount() {
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            if (PLAN_PREMIUM_ULTRA.equals(getPlanIdForAccount(a))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Same as {@link #hasUltraOnAnyAccount()} — bypass QoS is install-wide. */
+    public static boolean hasBypassPriority() {
+        return hasUltraOnAnyAccount();
+    }
+
+    /**
+     * Highest plan among activated accounts — sent to the WS relay as
+     * {@code X-Mgla-Plan} for soft priority scheduling.
+     */
+    public static String getDeviceBypassPlan() {
+        String best = PLAN_FREE;
+        int bestRank = 0;
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            String plan = getPlanIdForAccount(a);
+            int rank = planRank(plan);
+            if (rank > bestRank) {
+                best = plan;
+                bestRank = rank;
+            }
+        }
+        return best;
+    }
+
     /** Free: AI tab / section is closed. */
     public static boolean canAccessAiSection() {
         return !PLAN_FREE.equals(getPlanId());

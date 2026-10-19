@@ -1073,6 +1073,17 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
     }
 
+    /** Switch bottom island to a tab by id (e.g. AI after tapping the RAM hint). */
+    public boolean openTab(TabId id) {
+        final int position = positionOf(id);
+        if (position < 0 || viewPager == null) {
+            return false;
+        }
+        selectTab(position, true);
+        viewPager.scrollToPosition(position);
+        return true;
+    }
+
     public void setGestureSelectedOverride(float animatedPosition, boolean allow) {
         for (int index = 0; index < tabs.length; index++) {
             final float visibility = Math.max(0, 1f - Math.abs(index - animatedPosition));

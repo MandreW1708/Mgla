@@ -393,6 +393,8 @@ public class NotificationCenter {
     public static final int mglaExportCompleted = totalEvents++;
     public static final int mglaExportCanceled = totalEvents++;
     public static final int mglaExportFailed = totalEvents++;
+    /** Local GGUF mapped/unmapped/dismissed — DialogsActivity RAM hint. */
+    public static final int mglaLocalModelRamChanged = totalEvents++;
     public static final int dpiBypassChanged = totalEvents++;
 
     public static boolean alreadyLogged;

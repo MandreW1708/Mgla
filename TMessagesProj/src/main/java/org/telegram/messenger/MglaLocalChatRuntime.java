@@ -20,13 +20,14 @@ public final class MglaLocalChatRuntime {
     private static String loadedPath;
     private static final AtomicBoolean loading = new AtomicBoolean(false);
     private static final AtomicBoolean unloading = new AtomicBoolean(false);
+    /** User dismissed the «model still in RAM» banner until next load. */
+    private static volatile boolean ramWarningDismissed;
 
     /** Tuned for phone-sized instruct GGUF (Qwen2.5 0.5B / SmolLM2, etc.). */
     public static final float DEFAULT_TEMPERATURE = 0f; // greedy — стабильнее на 0.5B
     public static final int DEFAULT_MAX_TOKENS = 128;
     public static final int DEFAULT_CONTEXT = 512;
-    public static final int DEFAULT_UNLOAD_SECONDS = 300;
-    private static final int DEFAULTS_VERSION = 4;
+    private static final int DEFAULTS_VERSION = 5;
 
     public interface LoadCallback {
         void onProgress(String status);
@@ -58,7 +59,6 @@ public final class MglaLocalChatRuntime {
                 .putInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)
                 .putInt("ai_local_context", DEFAULT_CONTEXT)
                 .putInt("ai_local_threads", defaultThreads())
-                .putInt("ai_local_unload_seconds", DEFAULT_UNLOAD_SECONDS)
                 .putInt("ai_local_defaults_ver", DEFAULTS_VERSION)
                 .apply();
     }
@@ -69,9 +69,24 @@ public final class MglaLocalChatRuntime {
                 .putInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)
                 .putInt("ai_local_context", DEFAULT_CONTEXT)
                 .putInt("ai_local_threads", defaultThreads())
-                .putInt("ai_local_unload_seconds", DEFAULT_UNLOAD_SECONDS)
                 .putInt("ai_local_defaults_ver", DEFAULTS_VERSION)
                 .apply();
+    }
+
+    /** Show the chat-list banner while weights are mapped and the user hasn't dismissed it. */
+    public static boolean shouldShowRamWarning() {
+        return isLoaded() && !ramWarningDismissed;
+    }
+
+    public static void dismissRamWarning() {
+        ramWarningDismissed = true;
+        notifyRamChanged();
+    }
+
+    /** Ask DialogsActivity / listeners to refresh the «model in RAM» hint. */
+    public static void notifyRamChanged() {
+        AndroidUtilities.runOnUIThread(() ->
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaLocalModelRamChanged));
     }
 
     public static float temperature() {
@@ -215,8 +230,12 @@ public final class MglaLocalChatRuntime {
                     handle = h;
                     loadedPath = model.getAbsolutePath();
                 }
+                ramWarningDismissed = false;
                 loading.set(false);
-                AndroidUtilities.runOnUIThread(callback::onReady);
+                AndroidUtilities.runOnUIThread(() -> {
+                    notifyRamChanged();
+                    callback.onReady();
+                });
             } catch (Throwable e) {
                 FileLog.e(e);
                 loading.set(false);
@@ -244,6 +263,7 @@ public final class MglaLocalChatRuntime {
             return;
         }
         unloading.set(true);
+        ramWarningDismissed = false;
         MglaLlamaNative.abort(h);
         new Thread(() -> {
             try {
@@ -252,9 +272,12 @@ public final class MglaLocalChatRuntime {
                 FileLog.e(e);
             } finally {
                 unloading.set(false);
-                if (onDone != null) {
-                    AndroidUtilities.runOnUIThread(onDone);
-                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    notifyRamChanged();
+                    if (onDone != null) {
+                        onDone.run();
+                    }
+                });
             }
         }, "MglaLocalUnload").start();
     }

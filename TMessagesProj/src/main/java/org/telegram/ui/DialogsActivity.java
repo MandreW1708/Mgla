@@ -117,6 +117,8 @@ import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MglaHeaderConfig;
 import org.telegram.messenger.MglaHiddenChats;
+import org.telegram.messenger.MglaLocalChatRuntime;
+import org.telegram.messenger.MglaMainTabsConfig;
 import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaSideMenuConfig;
@@ -2978,7 +2980,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             .add(NotificationCenter.communityPendingRequestsUpdate)
             .add(NotificationCenter.communitySwitchedCollapsed)
             .add(NotificationCenter.appConfigUpdated)
-            .add(NotificationCenter.activeAuctionsUpdated);
+            .add(NotificationCenter.activeAuctionsUpdated)
+            .addGlobal(NotificationCenter.mglaLocalModelRamChanged);
 
         if (initialDialogsType == DIALOGS_TYPE_DEFAULT) {
             observersGroup.add(NotificationCenter.chatlistFolderUpdate);
@@ -6132,6 +6135,23 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
         if (isInPreviewMode()) {
             dialogsHintCellVisible = false;
+        } else if (folderId == 0 && communityId == 0 && org.telegram.messenger.MglaLocalChatRuntime.shouldShowRamWarning()) {
+            // Local GGUF still mapped after leaving the AI tab — visible on the main chats list.
+            dialogsHintCellVisible = true;
+            dialogsHintCell.setOnClickListener(v -> {
+                BaseFragment last = LaunchActivity.getLastFragment();
+                if (last instanceof MainTabsActivity) {
+                    ((MainTabsActivity) last).openTab(MglaMainTabsConfig.TabId.AI);
+                }
+            });
+            dialogsHintCell.setText(
+                    "Локальная ИИ-модель в памяти",
+                    "Занимает ОЗУ. Нажмите, чтобы открыть ИИ и выгрузить, или закройте уведомление."
+            );
+            dialogsHintCell.setOnCloseListener(v -> {
+                MglaLocalChatRuntime.dismissRamWarning();
+                updateDialogsHint();
+            });
         } else if (getMessagesController().isFrozen()) {
             dialogsHintCellVisible = true;
             dialogsHintCell.setOnClickListener(v -> {
@@ -7517,6 +7537,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             canShowStoryHint = false;
             storyHint.show();
         }
+        // Refresh after returning from AI with a model still mapped in RAM.
+        updateDialogsHint();
         AndroidUtilities.runOnUIThread(this::createSearchViewPager, 200);
     }
 
@@ -11218,6 +11240,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         } else if (id == NotificationCenter.appConfigUpdated) {
             updateDialogsHint();
         } else if (id == NotificationCenter.activeAuctionsUpdated) {
+            updateDialogsHint();
+        } else if (id == NotificationCenter.mglaLocalModelRamChanged) {
             updateDialogsHint();
         }
     }

@@ -7,6 +7,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DispatchQueue;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
@@ -32,6 +33,8 @@ public final class MglaWsBypass {
     private static final long MONITOR_INTERVAL_MS = 5_000L;
     /** Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB. */
     private static final long WS_STALL_MS = 90_000L;
+    /** Ultra (любой аккаунт): дольше держимся за WS — приоритетный маршрут. */
+    private static final long WS_STALL_ULTRA_MS = 150_000L;
     /** Сколько WEB может висеть в Connecting, прежде чем вернуться на WS. */
     private static final long WEB_STALL_MS = 90_000L;
     /**
@@ -39,11 +42,23 @@ public final class MglaWsBypass {
      * Пока маршрут Connected/Updating, переключений нет (иначе лишний reconnect Telegram).
      */
     private static final long WEB_RETRY_WS_MS = 12 * 60_000L;
+    /** Ultra: быстрее возвращаемся на WS с WEB. */
+    private static final long WEB_RETRY_WS_ULTRA_MS = 3 * 60_000L;
     private static final long WS_PROBE_TIMEOUT_MS = 8_000L;
+    private static final long WS_PROBE_TIMEOUT_ULTRA_MS = 12_000L;
     /** Минимальная пауза между любыми сменами маршрута. */
     private static final long ROUTE_SWITCH_COOLDOWN_MS = 2 * 60_000L;
     /** Сколько подряд тиков монитора должны видеть stall после порога. */
     private static final int STALL_CONFIRM_TICKS = 2;
+    private static final int STALL_CONFIRM_TICKS_ULTRA = 3;
+
+    private boolean bypassPriority() {
+        try {
+            return MglaSubscription.hasBypassPriority();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
     private static final MglaWsBypass instance = new MglaWsBypass();
 
@@ -344,10 +359,14 @@ public final class MglaWsBypass {
             return;
         }
 
+        boolean priority = bypassPriority();
         boolean connecting = state == ConnectionsManager.ConnectionStateConnecting
             || state == ConnectionsManager.ConnectionStateConnectingToProxy;
         long stalledFor = now - Math.max(lastConnectedElapsed, routeSinceElapsed);
-        long stallLimit = route == Route.WS ? WS_STALL_MS : WEB_STALL_MS;
+        long wsStall = priority ? WS_STALL_ULTRA_MS : WS_STALL_MS;
+        long stallLimit = route == Route.WS ? wsStall : WEB_STALL_MS;
+        int stallTicksNeeded = priority && route == Route.WS
+            ? STALL_CONFIRM_TICKS_ULTRA : STALL_CONFIRM_TICKS;
 
         if (connecting && stalledFor >= stallLimit) {
             stallConfirmTicks++;
@@ -356,15 +375,16 @@ public final class MglaWsBypass {
         }
 
         if (route == Route.WS) {
-            if (stallConfirmTicks < STALL_CONFIRM_TICKS || !isWebFallbackAvailable()) {
+            if (stallConfirmTicks < stallTicksNeeded || !isWebFallbackAvailable()) {
                 return;
             }
             long lastOk = WsBypassCore.getInstance().getLastUpstreamOkAtMs();
-            if (lastOk > 0 && System.currentTimeMillis() - lastOk < WS_STALL_MS) {
+            if (lastOk > 0 && System.currentTimeMillis() - lastOk < wsStall) {
                 stallConfirmTicks = 0;
                 return;
             }
-            switchRoute(Route.WEB, "ws stalled " + (stalledFor / 1000) + "s");
+            switchRoute(Route.WEB, "ws stalled " + (stalledFor / 1000) + "s"
+                + (priority ? " (ultra)" : ""));
             return;
         }
 
@@ -377,10 +397,13 @@ public final class MglaWsBypass {
         if (connecting) {
             return;
         }
-        if (now - routeSinceElapsed >= WEB_RETRY_WS_MS && now - lastWsProbeElapsed >= WEB_RETRY_WS_MS) {
+        long webRetry = priority ? WEB_RETRY_WS_ULTRA_MS : WEB_RETRY_WS_MS;
+        long probeTimeout = priority ? WS_PROBE_TIMEOUT_ULTRA_MS : WS_PROBE_TIMEOUT_MS;
+        if (now - routeSinceElapsed >= webRetry && now - lastWsProbeElapsed >= webRetry) {
             lastWsProbeElapsed = now;
-            if (WsBypassCore.getInstance().probeRelay(WS_PROBE_TIMEOUT_MS)) {
-                switchRoute(Route.WS, "ws relay reachable while web idle");
+            if (WsBypassCore.getInstance().probeRelay(probeTimeout)) {
+                switchRoute(Route.WS, "ws relay reachable while web idle"
+                    + (priority ? " (ultra)" : ""));
             }
         }
     }
