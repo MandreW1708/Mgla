@@ -2245,17 +2245,12 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
 
         final boolean hasAvatar = chatAvatarContainer.hasVisibleAvatar();
+        // Ceiling stays the previous full-width budget; glass may only shrink to fit the nick/subtitle.
         final int maxAvailable = previewGlassMode
             ? getMeasuredWidth() - dp(6) * 2
             : getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
-        final int targetWidth;
-        if (hasAvatar) {
-            int visualWidth = chatAvatarContainer.getVisualWidth();
-            visualWidth = Math.max(visualWidth, dp(192));
-            targetWidth = Math.min(maxAvailable, visualWidth);
-        } else {
-            targetWidth = maxAvailable;
-        }
+        final int visualWidth = Math.max(0, chatAvatarContainer.getVisualWidth());
+        final int targetWidth = Math.min(maxAvailable, visualWidth);
         if (animated) {
             if (animatorAvatarContainerWidth.getToFactor() != targetWidth) {
                 animatorAvatarContainerWidth.animateTo(targetWidth);

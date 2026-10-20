@@ -106,7 +106,6 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
         if ((id == NotificationCenter.mglaHeaderSettingsChanged
                 || id == NotificationCenter.mglaSubscriptionHintChanged)
                 && listView != null && listView.getAdapter() != null) {
-            MglaMemoryConfig.clearIfUnauthorized();
             listView.getAdapter().notifyDataSetChanged();
         }
     }
@@ -361,7 +360,6 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
     @Override
     public void onResume() {
         super.onResume();
-        MglaMemoryConfig.clearIfUnauthorized();
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyItemChanged(ROW_AI_EDITOR_LIMIT);
             if (MglaMemoryConfig.isActive()) {
@@ -570,14 +568,14 @@ public class MglaAiSettingsActivity extends MglaBaseSettingsActivity implements 
                         cell.setTextAndCheck("AI-редактор",
                             org.telegram.messenger.MglaFeatureFlags.isAllowed("ai_editor") && prefs.getBoolean("ai_editor", true), false);
                         break;
-                    case ROW_MEMORY_ENABLED:
-                        MglaMemoryConfig.clearIfUnauthorized();
+                    case ROW_MEMORY_ENABLED: {
                         boolean unlocked = MglaSubscription.canUseLiveMemory();
-                        // Без подписки переключатель всегда выкл и блок выглядит неактивным.
+                        // Checked = сырой toggle при подписке; без подписки всегда выкл + приглушение.
                         cell.setTextAndCheck(liveMemoryToggleLabel(context),
-                            unlocked && MglaMemoryConfig.isEnabled(), true);
+                            unlocked && MglaMemoryConfig.isToggleOn(), true);
                         cell.setAlpha(unlocked ? 1f : 0.4f);
                         break;
+                    }
                 }
             }
         }

@@ -2093,10 +2093,19 @@ public class LocaleController {
             date *= 1000;
 
             calendar.setTimeInMillis(date);
+            final String datePart;
             if (checkYear && currentYear == calendar.get(Calendar.YEAR) || !checkYear && Math.abs(System.currentTimeMillis() - date) < 31536000000L) {
-                return getInstance().getChatDate().format(date);
+                datePart = getInstance().getChatDate().format(date);
+            } else {
+                datePart = getInstance().getChatFullDate().format(date);
             }
-            return getInstance().getChatFullDate().format(date);
+            // Weekday left of the day number (floating date while scrolling + in-chat separators).
+            String weekday = getInstance().getFormatterWeek().format(date);
+            if (!TextUtils.isEmpty(weekday)) {
+                weekday = weekday.substring(0, 1).toUpperCase() + weekday.substring(1);
+                return weekday + ", " + datePart;
+            }
+            return datePart;
         } catch (Exception e) {
             FileLog.e(e);
         }

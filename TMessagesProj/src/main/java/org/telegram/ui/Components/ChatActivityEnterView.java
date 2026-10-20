@@ -117,6 +117,7 @@ import org.telegram.ui.recyclerview.ChatListItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import org.telegram.messenger.AccountInstance;
+import org.telegram.messenger.MglaWhisperDictationConfig;
 import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -647,6 +648,11 @@ public class ChatActivityEnterView extends FrameLayout implements
     private ViewPropertyAnimator attachButtonAnimator;
     private View attachButton;
     private View.OnClickListener attachButtonClickListener;
+    private ImageView whisperDictationButton;
+    private MglaWhisperDictationController whisperDictationController;
+    private final MglaWhisperDictationGlow whisperDictationGlow = new MglaWhisperDictationGlow();
+    private int dictationInsertStart = -1;
+    private int dictationInsertLength;
     private AiButtonDrawable aiButtonIcon;
     private ImageView aiButton;
     private ImageView richButton;
@@ -2992,6 +2998,57 @@ public class ChatActivityEnterView extends FrameLayout implements
             updateStaticAttachLayout();
             updateStaticAttachButton();
             updateFieldRight(1);
+
+            whisperDictationButton = new ImageView(context);
+            whisperDictationButton.setScaleType(ImageView.ScaleType.CENTER);
+            whisperDictationButton.setImageResource(R.drawable.input_whisper);
+            whisperDictationButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.MULTIPLY));
+            whisperDictationButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), Theme.RIPPLE_MASK_CIRCLE_20DP, dp(22)));
+            whisperDictationButton.setContentDescription("Whisper — голос в текст");
+            ScaleStateListAnimator.apply(whisperDictationButton);
+            textFieldContainer.addView(whisperDictationButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, 0));
+            whisperDictationButton.setTranslationY(-dp(DEFAULT_HEIGHT - 2));
+            whisperDictationButton.setOnClickListener(v -> onWhisperDictationClick());
+            whisperDictationButton.setVisibility(View.GONE);
+            whisperDictationController = new MglaWhisperDictationController();
+            whisperDictationController.setListener(new MglaWhisperDictationController.Listener() {
+                @Override
+                public void onPartial(String text) {
+                    applyDictationText(text, false);
+                }
+
+                @Override
+                public void onFinal(String text) {
+                    applyDictationText(text, true);
+                    setWhisperDictationGlow(false);
+                    updateWhisperDictationButtonVisual(false, false);
+                }
+
+                @Override
+                public void onError(String message) {
+                    setWhisperDictationGlow(false);
+                    updateWhisperDictationButtonVisual(false, false);
+                    dictationInsertStart = -1;
+                    dictationInsertLength = 0;
+                    if (message != null && parentFragment != null) {
+                        BulletinFactory.of(parentFragment).createSimpleBulletin(R.raw.error, message).show();
+                    }
+                }
+
+                @Override
+                public void onStateChanged(boolean recording, boolean processing) {
+                    setWhisperDictationGlow(recording || processing);
+                    updateWhisperDictationButtonVisual(recording, processing);
+                    if (recording && dictationInsertStart < 0 && messageEditText != null) {
+                        dictationInsertStart = messageEditText.getSelectionEnd();
+                        if (dictationInsertStart < 0) {
+                            dictationInsertStart = messageEditText.length();
+                        }
+                        dictationInsertLength = 0;
+                    }
+                }
+            });
+            updateWhisperDictationButton();
         }
 
         aiButton = new ImageView(context);
@@ -6833,6 +6890,7 @@ public class ChatActivityEnterView extends FrameLayout implements
 
     public void onResume() {
         isPaused = false;
+        updateWhisperDictationButton();
         if (hideKeyboardRunnable != null) {
             AndroidUtilities.cancelRunOnUIThread(hideKeyboardRunnable);
             hideKeyboardRunnable = null;
@@ -13962,6 +14020,8 @@ public class ChatActivityEnterView extends FrameLayout implements
                 pendingLocationButton = null;
                 pendingMessageObject = null;
             }
+        } else if (requestCode == 97) {
+            onWhisperDictationPermissionResult(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED);
         }
     }
 
@@ -15075,6 +15135,106 @@ public class ChatActivityEnterView extends FrameLayout implements
             canvas.translate(0, -emojiView.getStickersExpandOffset());
             super.dispatchDraw(canvas);
             canvas.restore();
+        }
+        if (whisperDictationGlow.isActive() && messageEditTextContainer != null) {
+            whisperDictationGlow.draw(canvas, this, messageEditTextContainer, resourcesProvider);
+        }
+    }
+
+    private void onWhisperDictationClick() {
+        if (whisperDictationController == null) {
+            return;
+        }
+        if (whisperDictationController.isBusy()) {
+            if (whisperDictationController.isRecording()) {
+                whisperDictationController.stopAndTranscribe();
+            }
+            return;
+        }
+        if (parentActivity == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 && parentActivity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            parentActivity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 97);
+            return;
+        }
+        if (recordingAudioVideo) {
+            return;
+        }
+        whisperDictationController.start();
+    }
+
+    public void onWhisperDictationPermissionResult(boolean granted) {
+        if (granted && whisperDictationController != null && !whisperDictationController.isBusy()) {
+            whisperDictationController.start();
+        }
+    }
+
+    private void updateWhisperDictationButton() {
+        if (whisperDictationButton == null) {
+            return;
+        }
+        boolean show = MglaWhisperDictationConfig.isEnabled() && !isLiveComment && attachButton != null;
+        whisperDictationButton.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            whisperDictationButton.bringToFront();
+            if (attachButton != null) {
+                attachButton.bringToFront();
+            }
+        } else if (whisperDictationController != null && whisperDictationController.isBusy()) {
+            whisperDictationController.cancel();
+            setWhisperDictationGlow(false);
+        }
+    }
+
+    private void updateWhisperDictationButtonVisual(boolean recording, boolean processing) {
+        if (whisperDictationButton == null) {
+            return;
+        }
+        int colorKey = (recording || processing) ? Theme.key_chat_messagePanelVoiceBackground : Theme.key_glass_defaultIcon;
+        whisperDictationButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(colorKey), PorterDuff.Mode.MULTIPLY));
+        whisperDictationButton.setAlpha(processing ? 0.7f : 1f);
+        whisperDictationButton.setScaleX(recording ? 1.08f : 1f);
+        whisperDictationButton.setScaleY(recording ? 1.08f : 1f);
+    }
+
+    private void setWhisperDictationGlow(boolean active) {
+        whisperDictationGlow.setActive(active);
+        invalidate();
+    }
+
+    private void applyDictationText(String text, boolean isFinal) {
+        if (messageEditText == null || text == null) {
+            return;
+        }
+        if (dictationInsertStart < 0) {
+            dictationInsertStart = messageEditText.getSelectionEnd();
+            if (dictationInsertStart < 0) {
+                dictationInsertStart = messageEditText.length();
+            }
+            dictationInsertLength = 0;
+        }
+        Editable editable = messageEditText.getText();
+        if (editable == null) {
+            return;
+        }
+        int start = Math.min(dictationInsertStart, editable.length());
+        int end = Math.min(start + dictationInsertLength, editable.length());
+        String insert = text;
+        if (start > 0 && insert.length() > 0 && !Character.isWhitespace(editable.charAt(start - 1)) && !Character.isWhitespace(insert.charAt(0))) {
+            insert = " " + insert;
+        }
+        try {
+            editable.replace(start, end, insert);
+            dictationInsertLength = insert.length();
+            int sel = start + dictationInsertLength;
+            messageEditText.setSelection(Math.min(sel, messageEditText.length()));
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        if (isFinal) {
+            dictationInsertStart = -1;
+            dictationInsertLength = 0;
         }
     }
 

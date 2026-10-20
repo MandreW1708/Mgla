@@ -88,6 +88,23 @@ public class WhisperTranscriber {
         }, "MglaWhisperTranscribe").start();
     }
 
+    /**
+     * Синхронная расшифровка уже готового PCM 16 kHz mono.
+     * Вызывать с фонового потока. Использует общий кэш модели.
+     */
+    public static String transcribePcm(float[] pcm, String modelPath, String language) {
+        if (pcm == null || pcm.length == 0 || modelPath == null) {
+            return null;
+        }
+        synchronized (lock) {
+            long handle = ensureModelLocked(modelPath);
+            if (handle == 0) {
+                return null;
+            }
+            return MglaWhisperNative.transcribe(handle, pcm, language, 0);
+        }
+    }
+
     /** Preload selected model into RAM so the first tap isn't cold. */
     public static void preloadSelected() {
         Context ctx = ApplicationLoader.applicationContext;

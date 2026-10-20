@@ -89,7 +89,6 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     @Override
     public void onResume() {
         super.onResume();
-        MglaMemoryConfig.clearIfUnauthorized();
         updateMemoryCell();
         updateDpiBypassCell();
     }
@@ -100,7 +99,6 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             updateDpiBypassCell();
         } else if (id == NotificationCenter.mglaHeaderSettingsChanged
                 || id == NotificationCenter.mglaSubscriptionHintChanged) {
-            MglaMemoryConfig.clearIfUnauthorized();
             updateMemoryCell();
         }
     }
@@ -157,14 +155,15 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             return;
         }
         boolean unlocked = MglaSubscription.canUseLiveMemory();
-        boolean on = unlocked && MglaMemoryConfig.isEnabled();
+        // isEnabled() = подписка + переключатель; статус «Вкл» только когда реально работает.
+        boolean on = MglaMemoryConfig.isEnabled();
         memoryCell.set(
             IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
             R.drawable.msg_saved, liveMemoryPremiumLabel(getContext()), null,
             on ? "Вкл" : "Выкл", false, "alpha"
         );
-        // Без подписки (и при выкл.) пункт выглядит неактивным; клик → upsell / включение.
-        memoryCell.setAlpha(on ? 1f : 0.4f);
+        // Приглушаем только без подписки. Выключенный переключатель у Premium — нормальный «Выкл», не «замок».
+        memoryCell.setAlpha(unlocked ? 1f : 0.4f);
         memoryCell.setEnabled(true);
         memoryCell.setClickable(true);
     }

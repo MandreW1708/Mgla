@@ -832,10 +832,17 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     }
 
     private int getCenteredTextLeft(int baseLeft, int textWidth) {
-        if (glassMode && !hasVisibleAvatar()) {
-            return Math.max(0, (getMeasuredWidth() - textWidth) / 2);
+        if (!glassMode) {
+            return baseLeft + Math.max(0, (getMeasuredWidth() - baseLeft - textWidth) / 2);
         }
-        return baseLeft + Math.max(0, (getMeasuredWidth() - baseLeft - textWidth) / 2);
+        // ChatAvatarContainer stays measured to the full action-bar width; the glass pill is
+        // only getVisualWidth(). Align nick/subtitle inside that pill, otherwise short names
+        // look shifted to the right of the glass.
+        final int blockWidth = Math.max(getVisualWidth(), baseLeft + textWidth);
+        if (!hasVisibleAvatar()) {
+            return Math.max(0, (blockWidth - textWidth) / 2);
+        }
+        return baseLeft + Math.max(0, (blockWidth - baseLeft - textWidth) / 2);
     }
 
     private int getLayoutAvatarHeight() {
@@ -1826,13 +1833,17 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (subtitleTextView != null) {
             width = Math.max(width, subtitleTextView.getExactWidthIncludeDrawables());
         } else if (animatedSubtitleTextView != null) {
-            width = Math.max(width, animatedSubtitleTextView.getWidth());
+            // Prefer text width — view is often measured EXACTLY to availableWidth.
+            width = Math.max(width, animatedSubtitleTextView.width());
         }
         if (hasVisibleAvatar()) {
             width += dp(52 + 12);
         } else if (!glassMode) {
             width += dp(30);
+        } else {
+            // Side inset so short nicks are not flush against the glass edge.
+            width += dp(16);
         }
-        return (int) width;
+        return (int) Math.ceil(width);
     }
 }

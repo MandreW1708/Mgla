@@ -11,9 +11,11 @@ import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaHiddenChats;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -66,6 +68,17 @@ public class MglaPopupNotificationController {
         MessagesController messagesController = MessagesController.getInstance(account);
         long dialogId = message.getDialogId();
         long topicId = message.getTopicId();
+        // Same membership guard as NotificationsController: no in-app popups for chats the
+        // user left / was kicked from / never joined (system tray already skips these).
+        if (DialogObject.isChatDialog(dialogId)) {
+            TLRPC.Chat chat = messagesController.getChat(-dialogId);
+            if (chat == null || chat.min || ChatObject.isNotInChat(chat) || ChatObject.isCommunity(chat)) {
+                return;
+            }
+        }
+        if (MglaHiddenChats.isHidden(account, dialogId)) {
+            return;
+        }
         if (messagesController.isDialogMuted(dialogId, topicId) || !messagesController.isDialogNotificationsSoundEnabled(dialogId, topicId)) {
             return;
         }
