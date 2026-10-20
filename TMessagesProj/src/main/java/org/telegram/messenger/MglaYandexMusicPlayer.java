@@ -48,6 +48,8 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     private final List<String> currentRotorSeeds = new ArrayList<>();
     private boolean isRotorLoading;
     private boolean observersRegistered;
+    /** After a one-shot track ends, start wave seeded by this track id. */
+    private String waveSeedAfterQueue;
 
     private MglaYandexMusicPlayer() {
         ensureObservers();
@@ -134,8 +136,12 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         return isMyWaveActive;
     }
 
+    public boolean isCollectionWaveActive() {
+        return isMyWaveActive && "Моя волна по коллекции".equals(currentSourceTitle);
+    }
+
     public String getCurrentSourceTitle() {
-        return currentSourceTitle;
+        return currentSourceTitle != null ? currentSourceTitle : "";
     }
 
     public long getCurrentPosition() {
@@ -165,11 +171,24 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     }
 
     public void playTrack(MglaYandexMusicModel.Track track, List<MglaYandexMusicModel.Track> newQueue, String sourceTitle) {
+        playTrack(track, newQueue, sourceTitle, false);
+    }
+
+    /** Play one track from search; when it ends, continue with Моя волна seeded by that track. */
+    public void playTrackThenWave(MglaYandexMusicModel.Track track) {
+        if (track == null) return;
+        List<MglaYandexMusicModel.Track> q = new ArrayList<>();
+        q.add(track);
+        playTrack(track, q, "Поиск", true);
+    }
+
+    public void playTrack(MglaYandexMusicModel.Track track, List<MglaYandexMusicModel.Track> newQueue, String sourceTitle, boolean thenWave) {
         if (track == null) return;
         ensureObservers();
         isMyWaveActive = false;
         currentRotorSessionId = null;
         currentRotorSeeds.clear();
+        waveSeedAfterQueue = thenWave && !TextUtils.isEmpty(track.id) ? track.id : null;
         currentSourceTitle = sourceTitle != null ? sourceTitle : "";
 
         synchronized (queue) {
@@ -214,6 +233,8 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     public void playCollectionWave() {
         ensureObservers();
         isMyWaveActive = true;
+        waveSeedAfterQueue = null;
+        isRotorLoading = false;
         currentSourceTitle = "Моя волна по коллекции";
         currentRotorStation = "collection";
         currentRotorSessionId = null;
@@ -271,6 +292,8 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     public void playRotorSession(List<String> seeds, String title) {
         ensureObservers();
         isMyWaveActive = true;
+        waveSeedAfterQueue = null;
+        isRotorLoading = false; // allow replacing an in-flight fetch when switching sources
         currentSourceTitle = !TextUtils.isEmpty(title) ? title : "Моя волна";
         currentRotorStation = seeds != null && !seeds.isEmpty() ? seeds.get(0) : "user:onyourwave";
         currentRotorSessionId = null;
@@ -282,6 +305,9 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             currentRotorSeeds.add("user:onyourwave");
         }
 
+        isBuffering = true;
+        notifyPlaybackState(isPlaying, true);
+
         if (currentRotorSeeds.contains("user:onyourwave")) {
             List<MglaYandexMusicModel.Track> cached = MglaYandexMusicStore.getInstance().getCachedRotor();
             if (cached != null && !cached.isEmpty()) {
@@ -292,15 +318,18 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
                 }
                 notifyQueueChanged();
                 loadAndPlayCurrent();
-            } else {
-                isBuffering = true;
-                notifyPlaybackState(isPlaying, true);
             }
-        } else {
-            isBuffering = true;
-            notifyPlaybackState(isPlaying, true);
         }
         fetchRotorTracks(false);
+    }
+
+    /** Toggle collection wave: start, or pause/resume when already active. */
+    public void toggleCollectionWave() {
+        if (isCollectionWaveActive()) {
+            togglePlayPause();
+        } else {
+            playCollectionWave();
+        }
     }
 
     private void fetchRotorTracks(boolean append) {
@@ -387,13 +416,12 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         synchronized (queue) {
             if (append) {
                 queue.addAll(tracks);
-            } else if (currentTrack == null || !isPlaying) {
+            } else {
+                // Always replace — starting a wave must interrupt library playback.
                 queue.clear();
                 queue.addAll(tracks);
                 currentIndex = 0;
                 loadAndPlayCurrent();
-            } else {
-                queue.addAll(tracks);
             }
         }
         notifyQueueChanged();
@@ -509,6 +537,12 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             } else if (repeatMode == 1) {
                 currentIndex = 0;
                 loadAndPlayCurrent();
+            } else if (!TextUtils.isEmpty(waveSeedAfterQueue)) {
+                String seed = waveSeedAfterQueue;
+                waveSeedAfterQueue = null;
+                List<String> seeds = new ArrayList<>();
+                seeds.add("track:" + seed);
+                playRotorSession(seeds, "Моя волна");
             } else {
                 pause();
             }

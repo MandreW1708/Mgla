@@ -9850,6 +9850,17 @@ public class MessagesStorage extends BaseController {
                         database, currentAccount, dialogId, isTopic ? threadMessageId : 0,
                         minLoadedId, maxLoadedId, isEnd, atNewestEdge, 500
                     );
+                    // LOAD_AROUND_MESSAGE / open-by-link targets max_id. If that message exists only
+                    // in the deleted archive, neighbors alone are not enough — include it explicitly
+                    // so ChatActivity does not show MessageNotFound for a saved deletion.
+                    if (max_id > 0 && !loadedIds.contains(max_id)
+                            && (load_type == LOAD_AROUND_MESSAGE || load_type == LOAD_AROUND_DATE)) {
+                        TLRPC.Message aroundArchived = MglaDeletedStorage.loadMessage(
+                            database, currentAccount, dialogId, max_id);
+                        if (aroundArchived != null) {
+                            archived.add(aroundArchived);
+                        }
+                    }
                     for (int a = 0, N = archived.size(); a < N; a++) {
                         TLRPC.Message archivedMessage = archived.get(a);
                         if (archivedMessage == null) {
@@ -9869,6 +9880,7 @@ public class MessagesStorage extends BaseController {
                             }
                             continue;
                         }
+                        loadedIds.add(archivedMessage.id);
                         addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
                         res.messages.add(archivedMessage);
                         messagesCount++;

@@ -15,6 +15,8 @@ import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Shader;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -33,11 +35,13 @@ import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaMainTabsConfig;
 import org.telegram.messenger.MglaPremiumController;
 import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CubicBezierInterpolator;
@@ -287,6 +291,16 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         listView.setLayoutManager(layoutManager = new FillLastLinearLayoutManager(context, dp(68) + statusBarHeight - dp(16), listView));
         layoutManager.setFixedLastItemHeight();
         listView.setAdapter(new Adapter());
+        listView.setOnItemClickListener((view, position) -> {
+            if (position < featuresStartRow || position >= featuresEndRow) {
+                return;
+            }
+            int index = position - featuresStartRow;
+            if (index < 0 || index >= premiumFeatures.size()) {
+                return;
+            }
+            openFeature(premiumFeatures.get(index).type);
+        });
         listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
@@ -446,6 +460,49 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 new float[]{0f, 0.35f, 0.65f, 1f},
                 Shader.TileMode.CLAMP);
         accentButtonPaint.setShader(buttonShader);
+    }
+
+    /** Open the settings / tab that corresponds to a premium feature row. */
+    private void openFeature(int type) {
+        switch (type) {
+            case FEATURE_ANIMATIONS:
+                presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON));
+                break;
+            case FEATURE_TASKS:
+                openMainTab(MglaMainTabsConfig.TabId.TASKS);
+                break;
+            case FEATURE_LOCAL_MODELS:
+                presentFragment(new MglaLocalModelsActivity());
+                break;
+            case FEATURE_MEMORY:
+                presentFragment(new MglaMemoryActivity());
+                break;
+            case FEATURE_ICON_THEMES:
+                presentFragment(new ThemeActivity(ThemeActivity.THEME_TYPE_BASIC));
+                break;
+            case FEATURE_AUTO_TRANSLATE:
+                presentFragment(new MglaChatsSettingsActivity());
+                break;
+            case FEATURE_CLOUD_AI:
+            case FEATURE_ULTRA_AI:
+                openMainTab(MglaMainTabsConfig.TabId.AI);
+                break;
+            case FEATURE_PRIORITY_BYPASS:
+                presentFragment(new MglaDpiBypassActivity());
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void openMainTab(MglaMainTabsConfig.TabId tabId) {
+        finishFragment();
+        AndroidUtilities.runOnUIThread(() -> {
+            BaseFragment last = LaunchActivity.getLastFragment();
+            if (last instanceof MainTabsActivity) {
+                ((MainTabsActivity) last).openTab(tabId);
+            }
+        });
     }
 
     private void fillFeaturesForPlan(int plan) {
@@ -751,6 +808,27 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                             cardPaint.setColor(COLOR_CARD);
                             framePaint.setStyle(Paint.Style.STROKE);
                             framePaint.setStrokeWidth(dp(1));
+                            // Icon vertically centered; more inset from the left card edge.
+                            FrameLayout.LayoutParams iconLp = (FrameLayout.LayoutParams) imageView.getLayoutParams();
+                            iconLp.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
+                            iconLp.leftMargin = dp(30);
+                            iconLp.topMargin = 0;
+                            iconLp.bottomMargin = 0;
+                            imageView.setLayoutParams(iconLp);
+                            View textCol = getChildAt(0);
+                            if (textCol != null) {
+                                FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) textCol.getLayoutParams();
+                                textLp.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
+                                textLp.leftMargin = dp(78);
+                                textLp.topMargin = dp(10);
+                                textLp.bottomMargin = dp(10);
+                                textLp.rightMargin = dp(44);
+                                textCol.setLayoutParams(textLp);
+                            }
+                            FrameLayout.LayoutParams arrowLp = (FrameLayout.LayoutParams) nextIcon.getLayoutParams();
+                            arrowLp.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
+                            arrowLp.rightMargin = dp(28);
+                            nextIcon.setLayoutParams(arrowLp);
                         }
 
                         @Override
@@ -758,7 +836,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                             // Every feature is its own framed card (no first/last-only border).
                             final float cardR = dp(16);
                             Path path = new Path();
-                            AndroidUtilities.rectTmp.set(dp(12), dp(4), getWidth() - dp(12), getHeight() - dp(4));
+                            AndroidUtilities.rectTmp.set(dp(16), dp(4), getWidth() - dp(16), getHeight() - dp(4));
                             path.addRoundRect(AndroidUtilities.rectTmp, cardR, cardR, Path.Direction.CW);
                             canvas.drawPath(path, cardPaint);
                             framePaint.setColor(accent.stroke);
@@ -795,7 +873,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             if (position >= featuresStartRow && position < featuresEndRow) {
                 PremiumFeatureCell cell = (PremiumFeatureCell) holder.itemView;
                 cell.setData(premiumFeatures.get(position - featuresStartRow), false);
-                cell.nextIcon.setVisibility(View.GONE);
+                cell.nextIcon.setVisibility(View.VISIBLE);
+                cell.nextIcon.setColorFilter(new PorterDuffColorFilter(accent.textSecondary, PorterDuff.Mode.SRC_IN));
                 cell.setBackgroundColor(Color.TRANSPARENT);
                 cell.title.setTextColor(COLOR_TEXT);
                 cell.description.setTextColor(accent.textSecondary);
@@ -845,7 +924,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return false;
+            return holder.getItemViewType() == TYPE_FEATURE;
         }
     }
 

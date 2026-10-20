@@ -177,11 +177,21 @@ public class MglaMusicActivity extends BaseFragment implements
     // Search Page
     private EditText searchInput;
     private ImageView searchClearBtn;
+    private LinearLayout searchTabsRow;
+    private TextView searchTabTracks;
+    private TextView searchTabAlbums;
+    private TextView searchTabArtists;
     private RecyclerListView searchListView;
-    private FullTrackAdapter searchAdapter;
-    private final List<MglaYandexMusicModel.Track> searchResults = new ArrayList<>();
+    private SearchAdapter searchAdapter;
+    private final List<SearchRow> searchRows = new ArrayList<>();
+    private MglaYandexMusicApi.SearchPage lastSearchPage;
+    private int searchTab = SEARCH_TAB_TRACKS;
+    private static final int SEARCH_TAB_TRACKS = 0;
+    private static final int SEARCH_TAB_ALBUMS = 1;
+    private static final int SEARCH_TAB_ARTISTS = 2;
     private ProgressBar searchLoading;
     private TextView searchEmptyView;
+    private boolean openedFromSearch;
 
     // Data lists
     private final List<MglaYandexMusicModel.Track> favoritesList = new ArrayList<>();
@@ -220,6 +230,7 @@ public class MglaMusicActivity extends BaseFragment implements
     public void onResume() {
         super.onResume();
         updateCollectionWaveSubtitle();
+        updateCollectionWaveButton();
     }
 
     /** Under «Моя волна»: VPN warning when active, otherwise the color tagline. */
@@ -236,6 +247,20 @@ public class MglaMusicActivity extends BaseFragment implements
         span.setSpan(new ForegroundColorSpan(MD3_ON_SURFACE_VARIANT), 0, 20, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         span.setSpan(new ForegroundColorSpan(MD3_PRIMARY), 20, 24, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         collectionWaveSubtitle.setText(span);
+    }
+
+    private void updateCollectionWaveButton() {
+        if (collectionWaveTitle == null) {
+            return;
+        }
+        MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
+        boolean pausing = player.isCollectionWaveActive() && player.isPlaying();
+        String label = pausing ? "  Пауза" : "  Слушать";
+        SpannableStringBuilder span = new SpannableStringBuilder("\u200B" + label);
+        WaveControlDrawable icon = new WaveControlDrawable(MD3_ON_PRIMARY_CONTAINER, pausing);
+        icon.setBounds(0, 0, dp(18), dp(18));
+        span.setSpan(new android.text.style.ImageSpan(icon, android.text.style.ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        collectionWaveTitle.setText(span);
     }
 
     /** Soft palette from the active Telegram theme — muted accent, quiet surfaces. */
@@ -396,14 +421,16 @@ public class MglaMusicActivity extends BaseFragment implements
         waveInner.addView(collectionWaveStatus, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
         collectionWaveTitle = new TextView(context);
-        collectionWaveTitle.setText("▶  Слушать");
         collectionWaveTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
         collectionWaveTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
         collectionWaveTitle.setTextColor(MD3_ON_PRIMARY_CONTAINER);
+        collectionWaveTitle.setGravity(Gravity.CENTER_VERTICAL);
         waveInner.addView(collectionWaveTitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 6, 0, 0));
 
         collectionWaveCard.addView(waveInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-        collectionWaveCard.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playCollectionWave());
+        collectionWaveCard.setClickable(true);
+        collectionWaveCard.setFocusable(true);
+        collectionWaveCard.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().toggleCollectionWave());
 
         waveCardWrapper.addView(collectionWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 96));
         content.addView(waveCardWrapper, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -413,6 +440,7 @@ public class MglaMusicActivity extends BaseFragment implements
         collectionWaveSubtitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
         collectionWaveSubtitle.setGravity(Gravity.CENTER);
         updateCollectionWaveSubtitle();
+        updateCollectionWaveButton();
         content.addView(collectionWaveSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 16));
 
         // Favorites playlist preview — surface card
@@ -967,6 +995,13 @@ public class MglaMusicActivity extends BaseFragment implements
                 return;
             }
         }
+        if (openedFromSearch) {
+            openedFromSearch = false;
+            if (searchView != null) {
+                searchView.setVisibility(View.VISIBLE);
+                return;
+            }
+        }
         if (openedPlaylistFromFullList) {
             openedPlaylistFromFullList = false;
             if (fullPlaylistsView != null) {
@@ -1158,6 +1193,9 @@ public class MglaMusicActivity extends BaseFragment implements
             return;
         }
         openedArtistFromFullList = fullArtistsView != null && fullArtistsView.getVisibility() == View.VISIBLE;
+        if (searchView != null && searchView.getVisibility() == View.VISIBLE) {
+            openedFromSearch = true;
+        }
         openedDetailFromArtist = false;
         currentArtist = artist;
         artistPopularTracks.clear();
@@ -1558,7 +1596,14 @@ public class MglaMusicActivity extends BaseFragment implements
         if (album == null || TextUtils.isEmpty(album.id)) {
             return;
         }
-        openedDetailFromArtist = artistPageView != null && artistPageView.getVisibility() == View.VISIBLE;
+        boolean fromArtist = artistPageView != null && artistPageView.getVisibility() == View.VISIBLE;
+        boolean fromSearch = searchView != null && searchView.getVisibility() == View.VISIBLE;
+        openedDetailFromArtist = fromArtist;
+        if (fromSearch) {
+            openedFromSearch = true;
+        } else if (fromArtist) {
+            openedFromSearch = false;
+        }
         detailSourceTitle = album.title;
         detailTracks.clear();
         if (fullFavoritesTitleText != null) {
@@ -1606,6 +1651,13 @@ public class MglaMusicActivity extends BaseFragment implements
     private void closeArtistPage() {
         if (artistPageView != null) {
             artistPageView.setVisibility(View.GONE);
+        }
+        if (openedFromSearch) {
+            openedFromSearch = false;
+            if (searchView != null) {
+                searchView.setVisibility(View.VISIBLE);
+                return;
+            }
         }
         if (openedArtistFromFullList) {
             openedArtistFromFullList = false;
@@ -1723,14 +1775,32 @@ public class MglaMusicActivity extends BaseFragment implements
         searchPill.addView(searchClearBtn, LayoutHelper.createLinear(24, 24));
 
         bar.addView(searchPill, LayoutHelper.createLinear(0, 42, 1f));
-        layout.addView(bar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
+        layout.addView(bar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+
+        searchTabsRow = new LinearLayout(context);
+        searchTabsRow.setOrientation(LinearLayout.HORIZONTAL);
+        searchTabsRow.setGravity(Gravity.CENTER_VERTICAL);
+        GradientDrawable tabsBg = new GradientDrawable();
+        tabsBg.setCornerRadius(dp(22));
+        tabsBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        searchTabsRow.setBackground(tabsBg);
+        searchTabsRow.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        searchTabTracks = createSearchTab(context, "Треки", SEARCH_TAB_TRACKS);
+        searchTabAlbums = createSearchTab(context, "Альбомы", SEARCH_TAB_ALBUMS);
+        searchTabArtists = createSearchTab(context, "Исполнители", SEARCH_TAB_ARTISTS);
+        searchTabsRow.addView(searchTabTracks, LayoutHelper.createLinear(0, 36, 1f));
+        searchTabsRow.addView(searchTabAlbums, LayoutHelper.createLinear(0, 36, 1f, 4, 0, 4, 0));
+        searchTabsRow.addView(searchTabArtists, LayoutHelper.createLinear(0, 36, 1f));
+        layout.addView(searchTabsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+        updateSearchTabsUi();
 
         searchLoading = new ProgressBar(context);
         searchLoading.setVisibility(View.GONE);
         layout.addView(searchLoading, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 20, 0, 20));
 
         searchEmptyView = new TextView(context);
-        searchEmptyView.setText("Введите название трека или артиста");
+        searchEmptyView.setText("Введите название трека, альбома или артиста");
         searchEmptyView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         searchEmptyView.setTextColor(MD3_ON_SURFACE_VARIANT);
         searchEmptyView.setGravity(Gravity.CENTER);
@@ -1741,12 +1811,108 @@ public class MglaMusicActivity extends BaseFragment implements
         searchListView.setLayoutManager(new LinearLayoutManager(context));
         searchListView.setClipToPadding(false);
         searchListView.setPadding(0, 0, 0, islandBottomInset());
-        searchAdapter = new FullTrackAdapter(searchResults, (track, position) ->
-                MglaYandexMusicPlayer.getInstance().playTrack(track, new ArrayList<>(searchResults), "Поиск"));
+        searchAdapter = new SearchAdapter();
         searchListView.setAdapter(searchAdapter);
+        searchListView.setOnItemClickListener((view, position) -> onSearchRowClicked(position));
         layout.addView(searchListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
+    }
+
+    private TextView createSearchTab(Context context, String title, int tab) {
+        TextView tabView = new TextView(context);
+        tabView.setText(title);
+        tabView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        tabView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        tabView.setGravity(Gravity.CENTER);
+        tabView.setPadding(dp(8), 0, dp(8), 0);
+        tabView.setOnClickListener(v -> setSearchTab(tab));
+        return tabView;
+    }
+
+    private void setSearchTab(int tab) {
+        if (searchTab == tab) {
+            return;
+        }
+        searchTab = tab;
+        updateSearchTabsUi();
+        bindSearchRowsFromPage(lastSearchPage, searchInput != null ? searchInput.getText().toString().trim() : "");
+    }
+
+    private void updateSearchTabsUi() {
+        styleSearchTab(searchTabTracks, searchTab == SEARCH_TAB_TRACKS);
+        styleSearchTab(searchTabAlbums, searchTab == SEARCH_TAB_ALBUMS);
+        styleSearchTab(searchTabArtists, searchTab == SEARCH_TAB_ARTISTS);
+    }
+
+    private void styleSearchTab(TextView tab, boolean selected) {
+        if (tab == null) {
+            return;
+        }
+        if (selected) {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(18));
+            bg.setColor(MD3_PRIMARY_CONTAINER);
+            tab.setBackground(bg);
+            tab.setTextColor(MD3_ON_PRIMARY_CONTAINER);
+        } else {
+            tab.setBackground(null);
+            tab.setTextColor(MD3_ON_SURFACE_VARIANT);
+        }
+    }
+
+    private void bindSearchRowsFromPage(MglaYandexMusicApi.SearchPage page, String query) {
+        searchRows.clear();
+        if (page != null) {
+            if (searchTab == SEARCH_TAB_TRACKS && page.tracks != null) {
+                for (MglaYandexMusicModel.Track track : page.tracks) {
+                    searchRows.add(SearchRow.track(track));
+                }
+            } else if (searchTab == SEARCH_TAB_ALBUMS && page.albums != null) {
+                for (MglaYandexMusicModel.Album album : page.albums) {
+                    searchRows.add(SearchRow.album(album));
+                }
+            } else if (searchTab == SEARCH_TAB_ARTISTS && page.artists != null) {
+                for (MglaYandexMusicModel.Artist artist : page.artists) {
+                    searchRows.add(SearchRow.artist(artist));
+                }
+            }
+        }
+        if (searchAdapter != null) {
+            searchAdapter.notifyDataSetChanged();
+        }
+        boolean emptyQuery = TextUtils.isEmpty(query);
+        boolean empty = searchRows.isEmpty();
+        if (searchEmptyView != null) {
+            if (emptyQuery) {
+                searchEmptyView.setVisibility(View.VISIBLE);
+                searchEmptyView.setText("Введите название трека, альбома или артиста");
+            } else if (empty) {
+                searchEmptyView.setVisibility(View.VISIBLE);
+                String kind = searchTab == SEARCH_TAB_ALBUMS ? "альбомов"
+                        : searchTab == SEARCH_TAB_ARTISTS ? "исполнителей" : "треков";
+                searchEmptyView.setText("Нет " + kind + " по запросу \"" + query + "\"");
+            } else {
+                searchEmptyView.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    private void onSearchRowClicked(int position) {
+        if (position < 0 || position >= searchRows.size()) {
+            return;
+        }
+        SearchRow row = searchRows.get(position);
+        if (row.type == SearchRow.TYPE_TRACK && row.track != null) {
+            AndroidUtilities.hideKeyboard(searchInput);
+            MglaYandexMusicPlayer.getInstance().playTrackThenWave(row.track);
+        } else if (row.type == SearchRow.TYPE_ALBUM && row.album != null) {
+            AndroidUtilities.hideKeyboard(searchInput);
+            openAlbum(row.album);
+        } else if (row.type == SearchRow.TYPE_ARTIST && row.artist != null) {
+            AndroidUtilities.hideKeyboard(searchInput);
+            openArtist(row.artist);
+        }
     }
 
     private void openSearch() {
@@ -1777,11 +1943,9 @@ public class MglaMusicActivity extends BaseFragment implements
     private void triggerSearch(String query) {
         searchHandler.removeCallbacks(searchRunnable);
         if (TextUtils.isEmpty(query)) {
-            searchResults.clear();
-            searchAdapter.notifyDataSetChanged();
+            lastSearchPage = null;
             searchLoading.setVisibility(View.GONE);
-            searchEmptyView.setVisibility(View.VISIBLE);
-            searchEmptyView.setText("Введите название трека или артиста");
+            bindSearchRowsFromPage(null, "");
             return;
         }
 
@@ -1789,24 +1953,24 @@ public class MglaMusicActivity extends BaseFragment implements
             searchLoading.setVisibility(View.VISIBLE);
             searchEmptyView.setVisibility(View.GONE);
 
-            MglaYandexMusicApi.searchTracks(query, new MglaYandexMusicApi.Callback<List<MglaYandexMusicModel.Track>>() {
+            MglaYandexMusicApi.searchAll(query, new MglaYandexMusicApi.Callback<MglaYandexMusicApi.SearchPage>() {
                 @Override
-                public void onSuccess(List<MglaYandexMusicModel.Track> tracks) {
+                public void onSuccess(MglaYandexMusicApi.SearchPage page) {
                     searchLoading.setVisibility(View.GONE);
-                    searchResults.clear();
-                    if (tracks != null) {
-                        searchResults.addAll(tracks);
-                    }
-                    searchAdapter.notifyDataSetChanged();
-                    searchEmptyView.setVisibility(searchResults.isEmpty() ? View.VISIBLE : View.GONE);
-                    if (searchResults.isEmpty()) {
-                        searchEmptyView.setText("Ничего не найдено по запросу \"" + query + "\"");
-                    }
+                    lastSearchPage = page;
+                    bindSearchRowsFromPage(page, query);
                 }
 
                 @Override
                 public void onError(Exception error) {
                     searchLoading.setVisibility(View.GONE);
+                    lastSearchPage = null;
+                    searchRows.clear();
+                    if (searchAdapter != null) {
+                        searchAdapter.notifyDataSetChanged();
+                    }
+                    searchEmptyView.setVisibility(View.VISIBLE);
+                    searchEmptyView.setText("Ошибка поиска. Попробуйте ещё раз");
                 }
             });
         };
@@ -2170,11 +2334,13 @@ public class MglaMusicActivity extends BaseFragment implements
         AndroidUtilities.runOnUIThread(() -> {
             if (fullFavoritesAdapter != null) fullFavoritesAdapter.notifyDataSetChanged();
             if (searchAdapter != null) searchAdapter.notifyDataSetChanged();
+            updateCollectionWaveButton();
         });
     }
 
     @Override
     public void onPlaybackStateChanged(boolean isPlaying, boolean isBuffering) {
+        AndroidUtilities.runOnUIThread(this::updateCollectionWaveButton);
     }
 
     @Override
@@ -2293,6 +2459,154 @@ public class MglaMusicActivity extends BaseFragment implements
             final TextView subtitle;
 
             Holder(View itemView, ImageView cover, TextView title, TextView subtitle) {
+                super(itemView);
+                this.cover = cover;
+                this.title = title;
+                this.subtitle = subtitle;
+            }
+        }
+    }
+
+    private static class SearchRow {
+        static final int TYPE_HEADER = 0;
+        static final int TYPE_TRACK = 1;
+        static final int TYPE_ALBUM = 2;
+        static final int TYPE_ARTIST = 3;
+
+        final int type;
+        final String header;
+        final MglaYandexMusicModel.Track track;
+        final MglaYandexMusicModel.Album album;
+        final MglaYandexMusicModel.Artist artist;
+
+        private SearchRow(int type, String header, MglaYandexMusicModel.Track track,
+                          MglaYandexMusicModel.Album album, MglaYandexMusicModel.Artist artist) {
+            this.type = type;
+            this.header = header;
+            this.track = track;
+            this.album = album;
+            this.artist = artist;
+        }
+
+        static SearchRow header(String title) {
+            return new SearchRow(TYPE_HEADER, title, null, null, null);
+        }
+
+        static SearchRow track(MglaYandexMusicModel.Track track) {
+            return new SearchRow(TYPE_TRACK, null, track, null, null);
+        }
+
+        static SearchRow album(MglaYandexMusicModel.Album album) {
+            return new SearchRow(TYPE_ALBUM, null, null, album, null);
+        }
+
+        static SearchRow artist(MglaYandexMusicModel.Artist artist) {
+            return new SearchRow(TYPE_ARTIST, null, null, null, artist);
+        }
+    }
+
+    private class SearchAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+        @Override
+        public int getItemViewType(int position) {
+            return searchRows.get(position).type;
+        }
+
+        @NonNull
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            Context ctx = parent.getContext();
+            if (viewType == SearchRow.TYPE_HEADER) {
+                TextView header = new TextView(ctx);
+                header.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+                header.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+                header.setTextColor(MD3_ON_SURFACE);
+                header.setPadding(dp(4), dp(14), dp(4), dp(8));
+                return new RecyclerView.ViewHolder(header) {};
+            }
+
+            // Root must stay non-clickable: RecyclerListView only delivers taps via OnItemClickListener.
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(8), dp(8), dp(8), dp(8));
+            row.setClickable(false);
+            row.setFocusable(false);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(12));
+            bg.setColor(MD3_ROW_SCRIM);
+            row.setBackground(bg);
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = dp(6);
+            row.setLayoutParams(lp);
+
+            ImageView cover = new ImageView(ctx);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            row.addView(cover, LayoutHelper.createLinear(48, 48, 0, 0, 12, 0));
+
+            LinearLayout col = new LinearLayout(ctx);
+            col.setOrientation(LinearLayout.VERTICAL);
+            TextView title = new TextView(ctx);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+            title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+            title.setTextColor(MD3_ON_SURFACE);
+            title.setSingleLine(true);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            TextView subtitle = new TextView(ctx);
+            subtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            subtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
+            subtitle.setSingleLine(true);
+            subtitle.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+            row.addView(col, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+            return new SearchItemHolder(row, cover, title, subtitle);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            SearchRow row = searchRows.get(position);
+            if (row.type == SearchRow.TYPE_HEADER) {
+                ((TextView) holder.itemView).setText(row.header);
+                return;
+            }
+            SearchItemHolder h = (SearchItemHolder) holder;
+            if (row.type == SearchRow.TYPE_TRACK && row.track != null) {
+                h.title.setText(row.track.title);
+                h.subtitle.setText(row.track.artist);
+                MglaMusicImageHelper.bindCover(h.cover, row.track.getCoverUrl(100), 8, R.drawable.bot_music);
+                MglaYandexMusicModel.Track current = MglaYandexMusicPlayer.getInstance().getCurrentTrack();
+                boolean isThisPlaying = current != null && current.id != null && current.id.equals(row.track.id);
+                h.title.setTextColor(isThisPlaying ? MD3_PRIMARY : MD3_ON_SURFACE);
+            } else if (row.type == SearchRow.TYPE_ALBUM && row.album != null) {
+                h.title.setText(row.album.title);
+                h.title.setTextColor(MD3_ON_SURFACE);
+                String meta = !TextUtils.isEmpty(row.album.artists) ? row.album.artists : "Альбом";
+                if (row.album.year > 0) {
+                    meta = meta + " · " + row.album.year;
+                }
+                h.subtitle.setText(meta);
+                MglaMusicImageHelper.bindCover(h.cover, row.album.getCoverUrl(100), 8, R.drawable.bot_music);
+            } else if (row.type == SearchRow.TYPE_ARTIST && row.artist != null) {
+                h.title.setText(row.artist.name);
+                h.title.setTextColor(MD3_ON_SURFACE);
+                h.subtitle.setText("Исполнитель");
+                MglaMusicImageHelper.bindCircleCover(h.cover, row.artist.getCoverUrl(100), R.drawable.bot_music);
+            }
+        }
+
+        @Override
+        public int getItemCount() {
+            return searchRows.size();
+        }
+
+        class SearchItemHolder extends RecyclerView.ViewHolder {
+            final ImageView cover;
+            final TextView title;
+            final TextView subtitle;
+
+            SearchItemHolder(View itemView, ImageView cover, TextView title, TextView subtitle) {
                 super(itemView);
                 this.cover = cover;
                 this.title = title;
@@ -2602,6 +2916,74 @@ public class MglaMusicActivity extends BaseFragment implements
             canvas.drawPath(heartPath, fillPaint);
             canvas.drawPath(heartPath, glowPaint);
             canvas.restore();
+        }
+    }
+
+    /** Play triangle / pause bars — same filled geometric style for the wave card. */
+    private static class WaveControlDrawable extends Drawable {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final boolean pause;
+        private final android.graphics.Path triangle = new android.graphics.Path();
+
+        WaveControlDrawable(int color, boolean pause) {
+            this.pause = pause;
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.FILL);
+        }
+
+        @Override
+        public void draw(@NonNull Canvas canvas) {
+            Rect b = getBounds();
+            float l = b.left;
+            float t = b.top;
+            float w = b.width();
+            float h = b.height();
+            if (pause) {
+                float barW = w * 0.22f;
+                float gap = w * 0.18f;
+                float top = t + h * 0.12f;
+                float bottom = t + h * 0.88f;
+                float x1 = l + (w - barW * 2 - gap) / 2f;
+                canvas.drawRoundRect(x1, top, x1 + barW, bottom, barW / 2f, barW / 2f, paint);
+                canvas.drawRoundRect(x1 + barW + gap, top, x1 + barW * 2 + gap, bottom, barW / 2f, barW / 2f, paint);
+            } else {
+                triangle.reset();
+                float left = l + w * 0.22f;
+                float right = l + w * 0.88f;
+                float top = t + h * 0.12f;
+                float bottom = t + h * 0.88f;
+                float mid = t + h * 0.5f;
+                triangle.moveTo(left, top);
+                triangle.lineTo(right, mid);
+                triangle.lineTo(left, bottom);
+                triangle.close();
+                canvas.drawPath(triangle, paint);
+            }
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
+            paint.setColorFilter(colorFilter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
+
+        @Override
+        public int getIntrinsicWidth() {
+            return dp(18);
+        }
+
+        @Override
+        public int getIntrinsicHeight() {
+            return dp(18);
         }
     }
 

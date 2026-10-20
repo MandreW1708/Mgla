@@ -17453,6 +17453,76 @@ public class ChatActivity extends BaseFragment implements
         }
     }
 
+    /** Clears sticky state left after a failed scroll-to-message (open link / highlight). */
+    private void abortScrollToMissingMessage() {
+        showScrollToMessageError = false;
+        startLoadFromMessageId = 0;
+        postponedScrollMessageId = 0;
+        postponedScrollMessageDate = 0;
+        postponedScrollToLastMessageQueryIndex = 0;
+        needSelectFromMessageId = false;
+        createUnreadMessageAfterIdLoading = false;
+        resetProgressDialogLoading();
+        showPinnedProgress(false);
+    }
+
+    /**
+     * If {@code messageId} is a Mgla-archived deletion, load it and scroll without showing
+     * MessageNotFound. Returns true when handling (sync hit or async archive lookup started).
+     */
+    private boolean tryScrollToMglaDeletedMessage(int messageId) {
+        if (messageId <= 0 || chatMode != MODE_DEFAULT || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            return false;
+        }
+        if (messagesDict[0].indexOfKey(messageId) >= 0
+                || mergeDialogId != 0 && messagesDict[1].indexOfKey(messageId) >= 0) {
+            scrollToMessageId(messageId, 0, true, 0, true, 0);
+            return true;
+        }
+        final int account = currentAccount;
+        final long did = dialog_id;
+        final int classGuidSnapshot = classGuid;
+        getMessagesStorage().getStorageQueue().postRunnable(() -> {
+            TLRPC.Message archived = MglaDeletedStorage.loadMessage(
+                    getMessagesStorage().getDatabase(), account, did, messageId);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (classGuid != classGuidSnapshot || fragmentView == null || getParentActivity() == null) {
+                    return;
+                }
+                if (archived == null) {
+                    BulletinFactory.of(ChatActivity.this)
+                            .createErrorBulletin(LocaleController.getString(R.string.MessageNotFound), themeDelegate)
+                            .show();
+                    return;
+                }
+                if (messagesDict[0].indexOfKey(messageId) < 0) {
+                    MessageObject obj = new MessageObject(account, archived, true, true);
+                    obj.mglaDeleted = true;
+                    int insertAt = 0;
+                    for (int i = 0, N = messages.size(); i < N; i++) {
+                        MessageObject other = messages.get(i);
+                        if (other == null || other.getId() <= 0 || other.isSponsored()) {
+                            continue;
+                        }
+                        if (other.getId() < messageId) {
+                            insertAt = i;
+                            break;
+                        }
+                        insertAt = i + 1;
+                    }
+                    messages.add(insertAt, obj);
+                    messagesDict[0].put(messageId, obj);
+                    if (chatAdapter != null) {
+                        chatAdapter.updateRowsSafe();
+                        chatAdapter.notifyDataSetChanged(true);
+                    }
+                }
+                scrollToMessageId(messageId, 0, true, 0, true, 0);
+            });
+        });
+        return true;
+    }
+
     private boolean shouldHaveLightStatusBarIcons;
     private boolean shouldHaveLightNavigationBarIcons;
 
@@ -21232,6 +21302,18 @@ public class ChatActivity extends BaseFragment implements
                         }
                     }
                     if (!found) {
+                        final int missingId = postponedScrollMessageId;
+                        // Must clear sticky scroll-error state. Leaving showScrollToMessageError /
+                        // startLoadFromMessageId set caused repeated «Message not found» bulletins
+                        // after opening a t.me link to a deleted message (save-deleted archive).
+                        abortScrollToMissingMessage();
+                        // Prefer scrolling to an already-loaded bubble (incl. Mgla archived copy)
+                        // without clearChatData — rebuilding from messArr would drop it again.
+                        if (messagesDict[0].indexOfKey(missingId) >= 0
+                                || mergeDialogId != 0 && messagesDict[1].indexOfKey(missingId) >= 0) {
+                            scrollToMessageId(missingId, 0, true, 0, true, 0);
+                            return;
+                        }
                         if (isThreadChat()) {
                             Bundle bundle = new Bundle();
                             if (currentEncryptedChat != null) {
@@ -21241,9 +21323,9 @@ public class ChatActivity extends BaseFragment implements
                             } else {
                                 bundle.putLong("user_id", currentUser.id);
                             }
-                            bundle.putInt("message_id", postponedScrollMessageId);
+                            bundle.putInt("message_id", missingId);
                             presentFragment(new ChatActivity(bundle), true);
-                        } else {
+                        } else if (!tryScrollToMglaDeletedMessage(missingId)) {
                             BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.MessageNotFound), themeDelegate).show();
                         }
                         return;
@@ -21830,6 +21912,7 @@ public class ChatActivity extends BaseFragment implements
                 }
                 if (showScrollToMessageError && messageId != startLoadFromMessageId) {
                     BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.MessageNotFound), themeDelegate).show();
+                    showScrollToMessageError = false;
                 }
                 scrollToMessage = obj;
                 if (postponedScroll) {

@@ -38,8 +38,11 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.ActionBarMenu;
+import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
@@ -51,6 +54,9 @@ import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.wsbypass.MglaWsBypass;
 public class MglaSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
+
+    private static final int MENU_PRIVACY = 1;
+    private static final int MENU_TERMS = 2;
 
     private SettingCell dpiBypassCell;
     private SettingCell memoryCell;
@@ -190,11 +196,20 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
         actionBar.setTitle("Настройки Mgla");
+        ActionBarMenu menu = actionBar.createMenu();
+        ActionBarMenuItem other = menu.addItem(0, R.drawable.ic_ab_other);
+        other.setContentDescription("Ещё");
+        other.addSubItem(MENU_PRIVACY, "Политика конфиденциальности");
+        other.addSubItem(MENU_TERMS, "Пользовательское соглашение");
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
                 if (id == -1) {
                     finishFragment();
+                } else if (id == MENU_PRIVACY) {
+                    openUrl(BuildVars.MGLA_PRIVACY_POLICY_URL);
+                } else if (id == MENU_TERMS) {
+                    openUrl(BuildVars.MGLA_TERMS_OF_SERVICE_URL);
                 }
             }
         });
@@ -251,7 +266,15 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         extraBlock.addView(MglaUi.createDivider(context));
         addMenuItem(extraBlock, () -> openMglaGuide(),
             IconBackgroundColors.BLUE_DEEP.top, IconBackgroundColors.BLUE_DEEP.bottom, R.drawable.menu_website, "Инструкция");
-        rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, AndroidUtilities.navigationBarHeight + 16));
+        extraBlock.addView(MglaUi.createDivider(context));
+        addMenuItem(extraBlock, this::openSupport,
+            IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.msg_help, "Поддержка");
+        rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
+        TextInfoPrivacyCell statsNote = new TextInfoPrivacyCell(context);
+        statsNote.setText("Собираются только обезличенные модели устройств и частота использования функций, а также Telegram ID — для выдачи подписки. Личные сообщения, контакты и содержимое чатов не собираются.");
+        statsNote.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+        rootLayout.addView(statsNote, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, AndroidUtilities.navigationBarHeight + 8));
 
         fragmentView = scrollView;
         return fragmentView;
@@ -362,6 +385,13 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         return cell;
     }
 
+    private void openUrl(String url) {
+        if (getParentActivity() == null || TextUtils.isEmpty(url)) {
+            return;
+        }
+        Browser.openUrl(getParentActivity(), url);
+    }
+
     private void openTelegramUsername(String username) {
         if (getParentActivity() == null || TextUtils.isEmpty(username)) {
             return;
@@ -369,18 +399,24 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         Browser.openUrl(getParentActivity(), "https://t.me/" + username);
     }
 
-    private void openMglaGuide() {
-        if (getParentActivity() == null || TextUtils.isEmpty(BuildVars.MGLA_GUIDE_URL)) {
+    private void openSupport() {
+        String username = BuildVars.MGLA_SUPPORT_USERNAME;
+        if (TextUtils.isEmpty(username)) {
             return;
         }
-        Browser.openUrl(getParentActivity(), BuildVars.MGLA_GUIDE_URL);
+        try {
+            getMessagesController().openByUserName(username, this, 1);
+        } catch (Throwable ignored) {
+            openTelegramUsername(username);
+        }
+    }
+
+    private void openMglaGuide() {
+        openUrl(BuildVars.MGLA_GUIDE_URL);
     }
 
     private void openDonate() {
-        if (getParentActivity() == null) {
-            return;
-        }
-        Browser.openUrl(getParentActivity(), "https://pay.cloudtips.ru/p/98e2d5e0");
+        openUrl("https://pay.cloudtips.ru/p/98e2d5e0");
     }
 
     public static class SettingCell extends LinearLayout implements Theme.Colorable {

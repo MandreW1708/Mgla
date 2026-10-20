@@ -118,24 +118,27 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
 
         basicBlock.addView(MglaUi.createDivider(context));
 
-        // Free users must see the toggle OFF (pref alone can be stale after expired trials).
+        // Free users must see the toggle OFF (effective state is per current account).
         MglaChatsConfig.clearAutoTranslateIfUnauthorized();
+        final boolean translateUnlocked = MglaSubscription.canUseAutoTranslate();
         TextCheckCell autoTranslateCell = new TextCheckCell(context);
         autoTranslateCell.setBackground(null);
         autoTranslateCell.setTextAndCheck(
                 autoTranslatePremiumLabel(context),
-                MglaChatsConfig.isAutoTranslateActive(),
+                translateUnlocked && MglaChatsConfig.isAutoTranslateActive(),
                 false);
+        autoTranslateCell.setAlpha(translateUnlocked ? 1f : 0.4f);
         autoTranslateCell.setOnClickListener(v -> {
             if (!MglaSubscription.canUseAutoTranslate()) {
-                MglaChatsConfig.setAutoTranslateEnabled(false);
                 autoTranslateCell.setChecked(false);
+                autoTranslateCell.setAlpha(0.4f);
                 showAutoTranslateUpsell();
                 return;
             }
             boolean enabled = !MglaChatsConfig.isAutoTranslateEnabled();
             MglaChatsConfig.setAutoTranslateEnabled(enabled);
             autoTranslateCell.setChecked(MglaChatsConfig.isAutoTranslateActive());
+            autoTranslateCell.setAlpha(1f);
             if (enabled) {
                 TranslateAlert2.setToLanguage(MglaChatsConfig.getAutoTranslateTargetLang());
             }
@@ -145,7 +148,8 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
         basicBlock.addView(MglaUi.createDivider(context));
 
         TextView[] providerValueRef = new TextView[1];
-        addSelectRow(basicBlock, "Переводчик", MglaChatsConfig.getAutoTranslateProviderTitle(),
+        View providerRow = addSelectRow(basicBlock, "Переводчик",
+                translateUnlocked ? MglaChatsConfig.getAutoTranslateProviderTitle() : "—",
                 () -> {
                     if (!MglaSubscription.canUseAutoTranslate()) {
                         showAutoTranslateUpsell();
@@ -153,11 +157,15 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
                     }
                     showAutoTranslateProviderDialog(providerValueRef[0]);
                 }, providerValueRef);
+        if (!translateUnlocked) {
+            providerRow.setAlpha(0.4f);
+        }
 
         basicBlock.addView(MglaUi.createDivider(context));
 
         TextView[] langValueRef = new TextView[1];
-        addSelectRow(basicBlock, "Язык перевода", MglaChatsConfig.getAutoTranslateTargetLangTitle(),
+        View langRow = addSelectRow(basicBlock, "Язык перевода",
+                translateUnlocked ? MglaChatsConfig.getAutoTranslateTargetLangTitle() : "—",
                 () -> {
                     if (!MglaSubscription.canUseAutoTranslate()) {
                         showAutoTranslateUpsell();
@@ -165,6 +173,9 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
                     }
                     showAutoTranslateLanguageDialog(langValueRef[0]);
                 }, langValueRef);
+        if (!translateUnlocked) {
+            langRow.setAlpha(0.4f);
+        }
 
         rootLayout.addView(basicBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
@@ -565,7 +576,7 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
         showDialog(bottomSheet);
     }
 
-    private void addSelectRow(LinearLayout block, String title, String value, Runnable onClick, TextView[] valueRef) {
+    private View addSelectRow(LinearLayout block, String title, String value, Runnable onClick, TextView[] valueRef) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -592,6 +603,7 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
         }
 
         block.addView(row);
+        return row;
     }
 
     private void notifyTimeFormatChanged() {
@@ -600,14 +612,14 @@ public class MglaChatsSettingsActivity extends MglaBaseSettingsActivity {
         }
     }
 
-    /** Premium star to the left of the auto-translate title (same pattern as Ultra-обход). */
+    /** Gold premium star to the left of «Автоперевод чатов». */
     private static CharSequence autoTranslatePremiumLabel(Context context) {
         SpannableStringBuilder sb = new SpannableStringBuilder("  Автоперевод чатов");
         Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
         int size = dp(16);
         star.setBounds(0, 0, size, size);
         star.setColorFilter(new PorterDuffColorFilter(
-                Theme.getColor(Theme.key_premiumGradient1), PorterDuff.Mode.SRC_IN));
+                Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
         sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return sb;
     }

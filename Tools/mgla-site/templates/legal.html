@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — Mgla{% endblock %}
+{% block content %}
+<section class="wrap section legal-page" data-reveal>
+  <p class="legal-kicker"><a href="{{ url_for('home') }}#premium">← Mgla Premium</a></p>
+  <h1>{{ title }}</h1>
+  <p class="lead legal-updated">Актуально на {{ updated }}</p>
+  <div class="prose legal-prose">
+    {{ body|safe }}
+  </div>
+  <div class="legal-actions">
+    <a class="btn btn-ghost" href="{{ url_for('home') }}#premium"><span>К тарифам</span></a>
+    <a class="btn btn-tg" href="https://t.me/mgla_admin" target="_blank" rel="noopener"><span>Поддержка</span></a>
+  </div>
+</section>
+{% endblock %}

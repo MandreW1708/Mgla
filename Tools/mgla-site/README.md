@@ -8,6 +8,9 @@
 ## URL
 
 - Сайт: `https://mgla.home.mooo.com/`
+- Premium: `/#premium`
+- Политика конфиденциальности: `/privacy`
+- Пользовательское соглашение: `/terms`
 - Инструкция: `/guide`
 - Поддержать: `/support`
 - CMS: `/admin` (логин из `/opt/mgla-site/env`)

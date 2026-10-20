@@ -130,11 +130,19 @@ public class MglaChatsConfig {
         getPrefs().edit().putBoolean(PREF_AUTO_TRANSLATE_ENABLED, enabled).apply();
     }
 
-    /** Drop a sticky ON after plan expiry so Free users never see the toggle lit. */
+    /**
+     * Drop sticky ON only when no account has a paid plan.
+     * Per-account gating is {@link #isAutoTranslateActive()} — do not clear the
+     * install-wide pref just because the current account is Free.
+     */
     public static void clearAutoTranslateIfUnauthorized() {
-        if (!MglaSubscription.canUseAutoTranslate() && isAutoTranslateEnabled()) {
-            getPrefs().edit().putBoolean(PREF_AUTO_TRANSLATE_ENABLED, false).apply();
+        if (!isAutoTranslateEnabled()) {
+            return;
         }
+        if (MglaSubscription.hasPaidOnAnyAccount()) {
+            return;
+        }
+        getPrefs().edit().putBoolean(PREF_AUTO_TRANSLATE_ENABLED, false).apply();
     }
 
     public static String getAutoTranslateProvider() {

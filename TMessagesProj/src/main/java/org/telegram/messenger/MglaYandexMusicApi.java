@@ -241,36 +241,39 @@ public final class MglaYandexMusicApi {
                     return;
                 }
 
-                int batchSize = Math.min(100, trackIds.size());
-                List<String> subList = trackIds.subList(0, batchSize);
-                StringBuilder postBody = new StringBuilder("track-ids=");
-                for (int i = 0; i < subList.size(); i++) {
-                    if (i > 0) postBody.append(',');
-                    postBody.append(subList.get(i));
-                }
-
-                HttpURLConnection connTracks = setupConnection(BASE_URL + "/tracks", "POST");
-                connTracks.setDoOutput(true);
-                connTracks.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-                OutputStream os = connTracks.getOutputStream();
-                os.write(postBody.toString().getBytes(StandardCharsets.UTF_8));
-                os.flush();
-                os.close();
-
-                String respTracks = readResponse(connTracks);
-                JSONObject rootTracks = new JSONObject(respTracks);
-                JSONArray resArr = rootTracks.optJSONArray("result");
-
+                // Resolve metadata in batches — likes lists are often 200–1000+ ids.
                 List<MglaYandexMusicModel.Track> list = new ArrayList<>();
-                if (resArr != null) {
+                final int batchSize = 100;
+                for (int start = 0; start < trackIds.size(); start += batchSize) {
+                    int end = Math.min(start + batchSize, trackIds.size());
+                    List<String> subList = trackIds.subList(start, end);
+                    StringBuilder postBody = new StringBuilder("track-ids=");
+                    for (int i = 0; i < subList.size(); i++) {
+                        if (i > 0) postBody.append(',');
+                        postBody.append(subList.get(i));
+                    }
+
+                    HttpURLConnection connTracks = setupConnection(BASE_URL + "/tracks", "POST");
+                    connTracks.setDoOutput(true);
+                    connTracks.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    OutputStream os = connTracks.getOutputStream();
+                    os.write(postBody.toString().getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
+
+                    String respTracks = readResponse(connTracks);
+                    JSONObject rootTracks = new JSONObject(respTracks);
+                    JSONArray resArr = rootTracks.optJSONArray("result");
+                    if (resArr == null) {
+                        continue;
+                    }
                     for (int i = 0; i < resArr.length(); i++) {
                         JSONObject obj = resArr.optJSONObject(i);
-                        if (obj != null) {
-                            MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(obj);
-                            if (t != null) {
-                                t.isLiked = true;
-                                list.add(t);
-                            }
+                        if (obj == null) continue;
+                        MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(obj);
+                        if (t != null) {
+                            t.isLiked = true;
+                            list.add(t);
                         }
                     }
                 }
@@ -734,37 +737,75 @@ public final class MglaYandexMusicApi {
         });
     }
 
+    public static class SearchPage {
+        public final List<MglaYandexMusicModel.Track> tracks = new ArrayList<>();
+        public final List<MglaYandexMusicModel.Album> albums = new ArrayList<>();
+        public final List<MglaYandexMusicModel.Artist> artists = new ArrayList<>();
+    }
+
     public static void searchTracks(String query, Callback<List<MglaYandexMusicModel.Track>> callback) {
+        searchAll(query, new Callback<SearchPage>() {
+            @Override
+            public void onSuccess(SearchPage result) {
+                if (callback != null) {
+                    callback.onSuccess(result != null ? result.tracks : new ArrayList<>());
+                }
+            }
+
+            @Override
+            public void onError(Exception error) {
+                if (callback != null) callback.onError(error);
+            }
+        });
+    }
+
+    public static void searchAll(String query, Callback<SearchPage> callback) {
         if (TextUtils.isEmpty(query)) {
-            if (callback != null) callback.onSuccess(new ArrayList<>());
+            if (callback != null) callback.onSuccess(new SearchPage());
             return;
         }
         Utilities.globalQueue.postRunnable(() -> {
             try {
-                String url = BASE_URL + "/search?text=" + Uri.encode(query.trim()) + "&type=track&page=0";
+                String url = BASE_URL + "/search?text=" + Uri.encode(query.trim())
+                        + "&type=all&page=0&nocorrect=false";
                 HttpURLConnection conn = setupConnection(url, "GET");
                 String resp = readResponse(conn);
                 JSONObject root = new JSONObject(resp);
                 JSONObject result = root.optJSONObject("result");
-                JSONObject tracksObj = result != null ? result.optJSONObject("tracks") : null;
-                JSONArray items = tracksObj != null ? tracksObj.optJSONArray("items") : null;
-
-                List<MglaYandexMusicModel.Track> list = new ArrayList<>();
-                if (items != null) {
-                    for (int i = 0; i < items.length(); i++) {
-                        JSONObject obj = items.optJSONObject(i);
-                        if (obj != null) {
-                            MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(obj);
+                SearchPage page = new SearchPage();
+                if (result != null) {
+                    JSONArray trackItems = searchResultArray(result.optJSONObject("tracks"));
+                    if (trackItems != null) {
+                        for (int i = 0; i < trackItems.length(); i++) {
+                            MglaYandexMusicModel.Track t = MglaYandexMusicModel.Track.fromApiJson(trackItems.optJSONObject(i));
                             if (t != null) {
                                 t.isLiked = MglaYandexMusicStore.getInstance().isLiked(t.id);
-                                list.add(t);
+                                page.tracks.add(t);
+                            }
+                        }
+                    }
+                    JSONArray albumItems = searchResultArray(result.optJSONObject("albums"));
+                    if (albumItems != null) {
+                        for (int i = 0; i < albumItems.length(); i++) {
+                            MglaYandexMusicModel.Album a = MglaYandexMusicModel.Album.fromApiJson(albumItems.optJSONObject(i));
+                            if (a != null && !TextUtils.isEmpty(a.id)) {
+                                page.albums.add(a);
+                            }
+                        }
+                    }
+                    JSONArray artistItems = searchResultArray(result.optJSONObject("artists"));
+                    if (artistItems != null) {
+                        for (int i = 0; i < artistItems.length(); i++) {
+                            MglaYandexMusicModel.Artist a = MglaYandexMusicModel.Artist.fromApiJson(artistItems.optJSONObject(i));
+                            if (a != null && !TextUtils.isEmpty(a.id)) {
+                                page.artists.add(a);
                             }
                         }
                     }
                 }
 
                 AndroidUtilities.runOnUIThread(() -> {
-                    if (callback != null) callback.onSuccess(list);
+                    if (callback != null) callback.onSuccess(page);
                 });
             } catch (Exception e) {
                 FileLog.e(e);
@@ -773,6 +814,18 @@ public final class MglaYandexMusicApi {
                 });
             }
         });
+    }
+
+    /** Yandex search blocks expose either `results` (current) or legacy `items`. */
+    private static JSONArray searchResultArray(JSONObject block) {
+        if (block == null) {
+            return null;
+        }
+        JSONArray arr = block.optJSONArray("results");
+        if (arr == null) {
+            arr = block.optJSONArray("items");
+        }
+        return arr;
     }
 
     public static void toggleLike(String trackId, boolean like, Callback<Boolean> callback) {

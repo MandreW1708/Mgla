@@ -12119,27 +12119,31 @@ public class MessagesController extends BaseController implements NotificationCe
             messageObject.scheduled = mode == 1;
             objects.add(messageObject);
             if (isCache) {
-                if (message.legacy && message.layer < TLRPC.LAYER) {
-                    messagesToReload.add(message.id);
-                } else if (MessageObject.getMedia(message) instanceof TLRPC.TL_messageMediaUnsupported) {
-                    if (MessageObject.getMedia(message).bytes != null && (MessageObject.getMedia(message).bytes.length == 0 || MessageObject.getMedia(message).bytes.length == 1 && MessageObject.getMedia(message).bytes[0] < TLRPC.LAYER || MessageObject.getMedia(message).bytes.length == 4 && Utilities.bytesToInt(MessageObject.getMedia(message).bytes) < TLRPC.LAYER)) {
-                        if (!MessageObject.isEphemeral(message)) {
-                            messagesToReload.add(message.id);
+                // Archived deletions are gone on the server — never queue them or pending
+                // webpage/legacy reload loops spam getMessages and can surface MessageNotFound.
+                if (!message.mglaDeleted) {
+                    if (message.legacy && message.layer < TLRPC.LAYER) {
+                        messagesToReload.add(message.id);
+                    } else if (MessageObject.getMedia(message) instanceof TLRPC.TL_messageMediaUnsupported) {
+                        if (MessageObject.getMedia(message).bytes != null && (MessageObject.getMedia(message).bytes.length == 0 || MessageObject.getMedia(message).bytes.length == 1 && MessageObject.getMedia(message).bytes[0] < TLRPC.LAYER || MessageObject.getMedia(message).bytes.length == 4 && Utilities.bytesToInt(MessageObject.getMedia(message).bytes) < TLRPC.LAYER)) {
+                            if (!MessageObject.isEphemeral(message)) {
+                                messagesToReload.add(message.id);
+                            }
                         }
                     }
-                }
-                if (MessageObject.getMedia(message) instanceof TLRPC.TL_messageMediaWebPage) {
-                    if (MessageObject.getMedia(message).webpage instanceof TLRPC.TL_webPagePending && MessageObject.getMedia(message).webpage.date <= getConnectionsManager().getCurrentTime()) {
-                        if (!MessageObject.isEphemeral(message)) {
-                            messagesToReload.add(message.id);
+                    if (MessageObject.getMedia(message) instanceof TLRPC.TL_messageMediaWebPage) {
+                        if (MessageObject.getMedia(message).webpage instanceof TLRPC.TL_webPagePending && MessageObject.getMedia(message).webpage.date <= getConnectionsManager().getCurrentTime()) {
+                            if (!MessageObject.isEphemeral(message)) {
+                                messagesToReload.add(message.id);
+                            }
+                        } else if (MessageObject.getMedia(message).webpage instanceof TLRPC.TL_webPageUrlPending) {
+                            ArrayList<MessageObject> arrayList = webpagesToReload.get(MessageObject.getMedia(message).webpage.url);
+                            if (arrayList == null) {
+                                arrayList = new ArrayList<>();
+                                webpagesToReload.put(MessageObject.getMedia(message).webpage.url, arrayList);
+                            }
+                            arrayList.add(messageObject);
                         }
-                    } else if (MessageObject.getMedia(message).webpage instanceof TLRPC.TL_webPageUrlPending) {
-                        ArrayList<MessageObject> arrayList = webpagesToReload.get(MessageObject.getMedia(message).webpage.url);
-                        if (arrayList == null) {
-                            arrayList = new ArrayList<>();
-                            webpagesToReload.put(MessageObject.getMedia(message).webpage.url, arrayList);
-                        }
-                        arrayList.add(messageObject);
                     }
                 }
             }

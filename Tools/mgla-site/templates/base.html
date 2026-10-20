@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/fx.css') }}">
 </head>
 <body class="fx-page">
+  <!-- PlaVER: verification keyword for payment onboarding; remove after cash register is registered. -->
   <div class="fx-aurora" aria-hidden="true"></div>
   <div class="fx-grid" aria-hidden="true"></div>
   <div class="fx-spot" id="fx-spot" aria-hidden="true"></div>
@@ -32,6 +33,8 @@
         <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Главная</a>
         <a href="{{ url_for('home') }}#premium">Premium</a>
         <a href="{{ url_for('guide') }}" class="{{ 'active' if active=='guide' else '' }}">Инструкция</a>
+        <a href="{{ url_for('privacy') }}" class="{{ 'active' if active=='privacy' else '' }}">Конфиденциальность</a>
+        <a href="{{ url_for('terms') }}" class="{{ 'active' if active=='terms' else '' }}">Соглашение</a>
         <a href="{{ url_for('support') }}" class="{{ 'active' if active=='support' else '' }}">Поддержать</a>
       </nav>
     </div>
@@ -41,8 +44,14 @@
   </main>
   <footer class="site-footer" data-reveal>
     <div class="wrap">
-      <div>© Mgla</div>
-      <div><a href="https://t.me/mgla_admin" target="_blank" rel="noopener">t.me/mgla_admin</a></div>
+      <div>© Mgla · <span class="legal-codeword" title="Кодовое слово для согласования платежей">PlaVER</span></div>
+      <div>
+        <a href="{{ url_for('privacy') }}">Конфиденциальность</a>
+        ·
+        <a href="{{ url_for('terms') }}">Соглашение</a>
+        ·
+        <a href="https://t.me/mgla_admin" target="_blank" rel="noopener">t.me/mgla_admin</a>
+      </div>
     </div>
   </footer>
   <script src="{{ url_for('static', filename='js/mobile.js') }}" defer></script>
