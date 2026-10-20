@@ -118,6 +118,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     private CharSequence lastSubtitle;
     private int lastSubtitleColorKey = -1;
     private Integer overrideSubtitleColor;
+    /**
+     * When true, glass width grows to fit the subtitle (online / last seen / members).
+     * When false (Connecting, typing, …), glass stays nick-sized and subtitle ellipsizes.
+     */
+    private boolean subtitleExpandsGlass = true;
 
     private SharedMediaLayout.SharedMediaPreloader sharedMediaPreloader;
     private Theme.ResourcesProvider resourcesProvider;
@@ -705,10 +710,15 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             menuDotsImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY));
         }
         titleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(24 + 8) + titleTextView.getPaddingRight(), MeasureSpec.AT_MOST));
+        int subtitleMax = availableWidth;
+        if (!subtitleExpandsGlass) {
+            // Keep connection/typing status inside the nick column of the glass pill.
+            subtitleMax = Math.min(availableWidth, Math.max(dp(24), (int) Math.ceil(titleTextView.getExactWidthIncludeDrawables())));
+        }
         if (subtitleTextView != null) {
-            subtitleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
+            subtitleTextView.measure(MeasureSpec.makeMeasureSpec(subtitleMax, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
         } else if (animatedSubtitleTextView != null) {
-            animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
+            animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(subtitleMax, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
         }
         if (communityItem != null) {
             communityItem.measure(MeasureSpec.makeMeasureSpec(dp(14), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(14), MeasureSpec.EXACTLY));
@@ -911,16 +921,23 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             starFgItem.layout(leftPadding + dp(28), viewTop + dp(24), leftPadding + dp(28) + starFgItem.getMeasuredWidth(), viewTop + dp(24) + starFgItem.getMeasuredHeight());
         }
         if (subtitleTextView != null) {
-            int subtitleLeft = getCenteredTextLeft(glassTitleCentered ? 0 : l, subtitleTextView.getMeasuredWidth());
-            subtitleTextView.layout(subtitleLeft, subtitleTop, subtitleLeft + subtitleTextView.getMeasuredWidth(), subtitleTop + subtitleTextView.getTextHeight());
+            // Content/ellipsized width — measuredWidth is often the full bar and shifts CENTER text right of the glass.
+            final int contentW = (int) Math.ceil(subtitleTextView.getExactWidthIncludeDrawables());
+            final int subW = Math.max(1, Math.min(subtitleTextView.getMeasuredWidth(), contentW > 0 ? contentW : subtitleTextView.getMeasuredWidth()));
+            int subtitleLeft = getCenteredTextLeft(glassTitleCentered ? 0 : l, subW);
+            subtitleTextView.layout(subtitleLeft, subtitleTop, subtitleLeft + subW, subtitleTop + subtitleTextView.getTextHeight());
         } else if (animatedSubtitleTextView != null) {
-            int subtitleLeft = getCenteredTextLeft(glassTitleCentered ? 0 : l, animatedSubtitleTextView.getMeasuredWidth());
-            animatedSubtitleTextView.layout(subtitleLeft, subtitleTop, subtitleLeft + animatedSubtitleTextView.getMeasuredWidth(), subtitleTop + animatedSubtitleTextView.getTextHeight());
+            final int contentW = animatedSubtitleTextView.width();
+            final int subW = Math.max(1, Math.min(animatedSubtitleTextView.getMeasuredWidth(), contentW > 0 ? contentW : animatedSubtitleTextView.getMeasuredWidth()));
+            int subtitleLeft = getCenteredTextLeft(glassTitleCentered ? 0 : l, subW);
+            animatedSubtitleTextView.layout(subtitleLeft, subtitleTop, subtitleLeft + subW, subtitleTop + animatedSubtitleTextView.getTextHeight());
         }
         SimpleTextView subtitleTextLargerCopyView = this.subtitleTextLargerCopyView.get();
         if (subtitleTextLargerCopyView != null) {
-            int copyLeft = getCenteredTextLeft(glassTitleCentered ? 0 : l, subtitleTextLargerCopyView.getMeasuredWidth());
-            subtitleTextLargerCopyView.layout(copyLeft, subtitleTop, copyLeft + subtitleTextLargerCopyView.getMeasuredWidth(), subtitleTop + subtitleTextLargerCopyView.getTextHeight());
+            final int contentW = (int) Math.ceil(subtitleTextLargerCopyView.getExactWidthIncludeDrawables());
+            final int copyW = Math.max(1, Math.min(subtitleTextLargerCopyView.getMeasuredWidth(), contentW > 0 ? contentW : subtitleTextLargerCopyView.getMeasuredWidth()));
+            int copyLeft = getCenteredTextLeft(glassTitleCentered ? 0 : l, copyW);
+            subtitleTextLargerCopyView.layout(copyLeft, subtitleTop, copyLeft + copyW, subtitleTop + subtitleTextLargerCopyView.getTextHeight());
         }
     }
 
@@ -1239,6 +1256,12 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         }
         CharSequence newSubtitle;
         boolean useOnlineColor = false;
+        // Typing / action / connection strings may be long — don't force the glass wider than the nick.
+        // lastSubtitle != null means connection state is currently overriding the real status.
+        final boolean typingSubtitle = printString != null && printString.length() != 0
+                && !(ChatObject.isChannel(chat) && !chat.megagroup);
+        final boolean connectionOverride = lastSubtitle != null;
+        subtitleExpandsGlass = !typingSubtitle && !connectionOverride;
         if (printString == null || printString.length() == 0 || ChatObject.isChannel(chat) && !chat.megagroup) {
             if (parentFragment.isThreadChat() && !parentFragment.isTopic) {
                 if (titleTextView.getTag() != null) {
@@ -1412,6 +1435,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         } else {
             lastSubtitle = newSubtitle;
         }
+        requestLayout();
         checkActionBar(animated);
     }
 
@@ -1699,6 +1723,8 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             title = getString(R.string.ConnectingToProxy);
         }
         if (title == null) {
+            // Back to real status (online / last seen) — glass may grow to fit it fully.
+            subtitleExpandsGlass = true;
             if (lastSubtitle != null) {
                 if (subtitleTextView != null) {
                     subtitleTextView.setText(lastSubtitle);
@@ -1721,6 +1747,8 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
                 }
             }
         } else {
+            // Connecting / Updating / … — keep glass at nick width, ellipsize status.
+            subtitleExpandsGlass = false;
             if (subtitleTextView != null) {
                 if (lastSubtitle == null) {
                     lastSubtitle = subtitleTextView.getText();
@@ -1745,6 +1773,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
                 }
             }
         }
+        requestLayout();
         checkActionBar(true);
     }
 
@@ -1830,11 +1859,13 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (titleTextView != null) {
             width = Math.max(width, titleTextView.getExactWidthIncludeDrawables());
         }
-        if (subtitleTextView != null) {
-            width = Math.max(width, subtitleTextView.getExactWidthIncludeDrawables());
-        } else if (animatedSubtitleTextView != null) {
-            // Prefer text width — view is often measured EXACTLY to availableWidth.
-            width = Math.max(width, animatedSubtitleTextView.width());
+        // Presence / last-seen must fit fully; connection & typing stay clipped to nick width.
+        if (subtitleExpandsGlass) {
+            if (subtitleTextView != null && subtitleTextView.getVisibility() != GONE) {
+                width = Math.max(width, subtitleTextView.getExactWidthIncludeDrawables());
+            } else if (animatedSubtitleTextView != null && animatedSubtitleTextView.getVisibility() != GONE) {
+                width = Math.max(width, animatedSubtitleTextView.width());
+            }
         }
         if (hasVisibleAvatar()) {
             width += dp(52 + 12);

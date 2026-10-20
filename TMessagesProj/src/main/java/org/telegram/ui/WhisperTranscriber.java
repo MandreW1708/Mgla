@@ -93,15 +93,27 @@ public class WhisperTranscriber {
      * Вызывать с фонового потока. Использует общий кэш модели.
      */
     public static String transcribePcm(float[] pcm, String modelPath, String language) {
+        return transcribePcm(pcm, modelPath, language, 0);
+    }
+
+    /**
+     * @param maxTokens 0 = default; for dictation use 48–64 to keep short phrases fast
+     */
+    public static String transcribePcm(float[] pcm, String modelPath, String language, int maxTokens) {
         if (pcm == null || pcm.length == 0 || modelPath == null) {
             return null;
         }
+        long t0 = System.currentTimeMillis();
         synchronized (lock) {
             long handle = ensureModelLocked(modelPath);
             if (handle == 0) {
                 return null;
             }
-            return MglaWhisperNative.transcribe(handle, pcm, language, 0);
+            String text = MglaWhisperNative.transcribe(handle, pcm, language, 0, maxTokens);
+            FileLog.d("WhisperTranscribePcm samples=" + pcm.length
+                + " maxTokens=" + maxTokens
+                + " infer=" + (System.currentTimeMillis() - t0) + "ms");
+            return text;
         }
     }
 

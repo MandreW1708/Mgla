@@ -10,7 +10,6 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MglaWhisperDictationConfig;
 import org.telegram.messenger.MglaWhisperModelsManager;
-import org.telegram.messenger.MglaWhisperNative;
 import org.telegram.ui.WhisperTranscriber;
 
 import java.io.File;
@@ -18,8 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Запись с микрофона + локальный Whisper → текст для поля ввода.
- * При включённом live каждые ~1.8 с гоняет инференс по накопленному PCM
- * и отдаёт промежуточный текст.
+ * Live гоняет только последние ~4 с (не весь буфер), финал — один быстрый проход.
  */
 public class MglaWhisperDictationController {
 
@@ -34,13 +32,18 @@ public class MglaWhisperDictationController {
     }
 
     private static final int SAMPLE_RATE = 16000;
-    private static final int LIVE_INTERVAL_MS = 1800;
+    private static final int LIVE_INTERVAL_MS = 2200;
+    private static final int LIVE_WINDOW_SEC = 4;
     private static final int MAX_SECONDS = 90;
+    /** Короткий лимит токенов — 3 слова не должны декодировать как эссе. */
+    private static final int DICTATION_MAX_TOKENS = 48;
+    private static final int LIVE_MAX_TOKENS = 32;
 
     private final Object pcmLock = new Object();
     private final AtomicBoolean recording = new AtomicBoolean(false);
     private final AtomicBoolean processing = new AtomicBoolean(false);
     private final AtomicBoolean liveBusy = new AtomicBoolean(false);
+    private final AtomicBoolean abortLive = new AtomicBoolean(false);
 
     private Listener listener;
     private Thread recordThread;
@@ -87,6 +90,7 @@ public class MglaWhisperDictationController {
             pcmFilled = 0;
         }
         lastPartial = "";
+        abortLive.set(false);
         recording.set(true);
         notifyState();
         recordThread = new Thread(this::recordLoop, "MglaWhisperDictationRecord");
@@ -101,12 +105,14 @@ public class MglaWhisperDictationController {
         if (!recording.get()) {
             return;
         }
+        // Сразу рвём live — иначе финал ждёт длинный проход по старому буферу
+        abortLive.set(true);
         recording.set(false);
         notifyState();
         Thread rt = recordThread;
         if (rt != null) {
             try {
-                rt.join(1500);
+                rt.join(800);
             } catch (InterruptedException ignore) {
             }
         }
@@ -114,25 +120,44 @@ public class MglaWhisperDictationController {
         liveThread = null;
 
         float[] pcm;
+        int filled;
         synchronized (pcmLock) {
-            if (pcmFilled <= SAMPLE_RATE / 5) {
+            filled = pcmFilled;
+            if (filled <= SAMPLE_RATE / 5) {
                 notifyError("Слишком короткая запись");
                 notifyState();
                 return;
             }
-            pcm = new float[pcmFilled];
-            System.arraycopy(pcmBuffer, 0, pcm, 0, pcmFilled);
+            pcm = new float[filled];
+            System.arraycopy(pcmBuffer, 0, pcm, 0, filled);
         }
+
+        // Короткая фраза + уже есть live-текст → не гоняем вторую полную расшифровку
+        final float sec = filled / (float) SAMPLE_RATE;
+        if (!TextUtils.isEmpty(lastPartial) && sec <= 5f) {
+            waitLiveIdle(400);
+            final String quick = lastPartial.trim();
+            processing.set(false);
+            notifyState();
+            if (listener != null) {
+                listener.onFinal(quick);
+            }
+            return;
+        }
+
+        waitLiveIdle(1500);
+
         processing.set(true);
         notifyState();
         final String language = MglaWhisperModelsManager.getLanguage();
         final File model = MglaWhisperModelsManager.getLoadedModel(ApplicationLoader.applicationContext);
+        final float[] trimmed = trimSilence(pcm);
         new Thread(() -> {
             try {
                 if (model == null) {
                     throw new Exception("Модель не найдена");
                 }
-                String text = WhisperTranscriber.transcribePcm(pcm, model.getAbsolutePath(), language);
+                String text = WhisperTranscriber.transcribePcm(trimmed, model.getAbsolutePath(), language, DICTATION_MAX_TOKENS);
                 final String result = text == null ? "" : text.trim();
                 AndroidUtilities.runOnUIThread(() -> {
                     processing.set(false);
@@ -153,6 +178,7 @@ public class MglaWhisperDictationController {
     }
 
     public void cancel() {
+        abortLive.set(true);
         recording.set(false);
         processing.set(false);
         recordThread = null;
@@ -162,6 +188,17 @@ public class MglaWhisperDictationController {
             pcmFilled = 0;
         }
         notifyState();
+    }
+
+    private void waitLiveIdle(int timeoutMs) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (liveBusy.get() && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(40);
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
     }
 
     private void recordLoop() {
@@ -227,31 +264,44 @@ public class MglaWhisperDictationController {
     }
 
     private void liveLoop() {
-        while (recording.get()) {
+        while (recording.get() && !abortLive.get()) {
             try {
                 Thread.sleep(LIVE_INTERVAL_MS);
             } catch (InterruptedException e) {
                 break;
             }
-            if (!recording.get() || liveBusy.get()) {
+            if (!recording.get() || abortLive.get() || liveBusy.get()) {
                 continue;
             }
             float[] snapshot;
             synchronized (pcmLock) {
-                if (pcmFilled < SAMPLE_RATE) { // need ≥1s
+                if (pcmFilled < (int) (SAMPLE_RATE * 1.2f)) {
                     continue;
                 }
-                snapshot = new float[pcmFilled];
-                System.arraycopy(pcmBuffer, 0, snapshot, 0, pcmFilled);
+                // Только хвост — полный буфер на каждом тике убивает скорость
+                int window = SAMPLE_RATE * LIVE_WINDOW_SEC;
+                int start = Math.max(0, pcmFilled - window);
+                int len = pcmFilled - start;
+                snapshot = new float[len];
+                System.arraycopy(pcmBuffer, start, snapshot, 0, len);
+            }
+            if (abortLive.get() || !recording.get()) {
+                break;
             }
             liveBusy.set(true);
             try {
+                if (abortLive.get()) {
+                    break;
+                }
                 File model = MglaWhisperModelsManager.getLoadedModel(ApplicationLoader.applicationContext);
                 if (model == null) {
                     continue;
                 }
                 String text = WhisperTranscriber.transcribePcm(snapshot, model.getAbsolutePath(),
-                    MglaWhisperModelsManager.getLanguage());
+                    MglaWhisperModelsManager.getLanguage(), LIVE_MAX_TOKENS);
+                if (abortLive.get() || !recording.get()) {
+                    break;
+                }
                 if (text == null) {
                     continue;
                 }
@@ -262,7 +312,7 @@ public class MglaWhisperDictationController {
                 lastPartial = text;
                 final String partial = text;
                 AndroidUtilities.runOnUIThread(() -> {
-                    if (listener != null && (recording.get() || processing.get())) {
+                    if (listener != null && recording.get()) {
                         listener.onPartial(partial);
                     }
                 });
@@ -272,6 +322,33 @@ public class MglaWhisperDictationController {
                 liveBusy.set(false);
             }
         }
+        liveBusy.set(false);
+    }
+
+    /** Обрезает тишину по краям — меньше samples → меньше audio_ctx. */
+    private static float[] trimSilence(float[] pcm) {
+        if (pcm == null || pcm.length < SAMPLE_RATE / 4) {
+            return pcm;
+        }
+        final float thr = 0.012f;
+        int start = 0;
+        while (start < pcm.length && Math.abs(pcm[start]) < thr) {
+            start++;
+        }
+        int end = pcm.length - 1;
+        while (end > start && Math.abs(pcm[end]) < thr) {
+            end--;
+        }
+        // Небольшой pad, чтобы не срезать начало слова
+        start = Math.max(0, start - SAMPLE_RATE / 10);
+        end = Math.min(pcm.length - 1, end + SAMPLE_RATE / 10);
+        int len = end - start + 1;
+        if (len >= pcm.length - SAMPLE_RATE / 5) {
+            return pcm;
+        }
+        float[] out = new float[len];
+        System.arraycopy(pcm, start, out, 0, len);
+        return out;
     }
 
     private void ensureCapacity(int need) {

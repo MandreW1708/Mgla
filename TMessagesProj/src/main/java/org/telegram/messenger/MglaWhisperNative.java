@@ -48,12 +48,19 @@ public final class MglaWhisperNative {
     }
 
     public static String transcribe(long handle, float[] pcm16kMono, String language, int threads) {
+        return transcribe(handle, pcm16kMono, language, threads, 0);
+    }
+
+    /**
+     * @param maxTokens 0 = default (224); for short dictation pass ~48–64
+     */
+    public static String transcribe(long handle, float[] pcm16kMono, String language, int threads, int maxTokens) {
         ensureLoaded();
         if (loadFailed || handle == 0 || pcm16kMono == null) {
             return null;
         }
         try {
-            return nativeTranscribe(handle, pcm16kMono, language, threads);
+            return nativeTranscribe(handle, pcm16kMono, language, threads, maxTokens);
         } catch (Throwable t) {
             FileLog.e(t);
             return null;
@@ -98,7 +105,7 @@ public final class MglaWhisperNative {
 
     private static native void nativeFree(long handle);
 
-    private static native String nativeTranscribe(long handle, float[] audio, String language, int threads);
+    private static native String nativeTranscribe(long handle, float[] audio, String language, int threads, int maxTokens);
 
     private static native float[] nativeDecodeOpusToPcm16k(String path);
 }

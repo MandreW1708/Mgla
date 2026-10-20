@@ -23,6 +23,12 @@ public final class MglaWhisperDictationConfig {
         return ctx.getSharedPreferences(MglaWhisperModelsManager.PREFS, Context.MODE_PRIVATE);
     }
 
+    /** Только пользовательский переключатель — для показа кнопки в чате. */
+    public static boolean isPrefEnabled() {
+        SharedPreferences p = prefs();
+        return p != null && p.getBoolean(PREF_ENABLED, false);
+    }
+
     public static boolean isEnabled() {
         SharedPreferences p = prefs();
         return MglaFeatureFlags.isAllowed("ai_enabled")
@@ -38,6 +44,13 @@ public final class MglaWhisperDictationConfig {
         if (p != null) {
             p.edit().putBoolean(PREF_ENABLED, enabled).apply();
         }
+        AndroidUtilities.runOnUIThread(() -> {
+            try {
+                NotificationCenter.getGlobalInstance()
+                    .postNotificationName(NotificationCenter.mglaHeaderSettingsChanged);
+            } catch (Throwable ignore) {
+            }
+        });
     }
 
     /** Постепенная расшифровка во время записи (дороже по CPU). */
