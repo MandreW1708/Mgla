@@ -26,6 +26,8 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
     private TextSettingsCell commonAnimCell;
     private TextSettingsCell chatsAnimCell;
     private TextSettingsCell dialogsAnimCell;
+    private org.telegram.ui.Components.MglaChatHeaderPreview headerPreview;
+    private org.telegram.ui.Components.MglaChatBottomPanelPreview bottomPanelPreview;
 
     public MglaAppearanceSettingsActivity() {
         this(null);
@@ -59,6 +61,11 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         final int headerStyle = MglaGlassConfig.getChatHeaderStyle();
 
+        final org.telegram.ui.Components.MglaChatHeaderPreview headerPreview =
+                new org.telegram.ui.Components.MglaChatHeaderPreview(context);
+        headerPreview.setPadding(dp(12), dp(4), dp(12), dp(8));
+        headerStyleBlock.addView(headerPreview, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         RadioCell standardCell = new RadioCell(context);
         standardCell.setBackground(null);
         standardCell.setText("Стандартная", headerStyle == MglaGlassConfig.HEADER_STYLE_STANDARD, false);
@@ -86,10 +93,7 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
         cleanConfigureCell.setOnClickListener(v -> presentFragment(new MglaCleanHeaderSettingsActivity()));
         cleanSettingsBlock.addView(cleanConfigureCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        rootLayout.addView(headerStyleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
-        rootLayout.addView(cleanSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
-        
-        cleanSettingsBlock.setVisibility(headerStyle == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+        this.headerPreview = headerPreview;
 
         final Runnable applyHeaderRadios = () -> {
             final int style = MglaGlassConfig.getChatHeaderStyle();
@@ -97,6 +101,9 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
             cleanCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_CLEAN, true);
             telegramCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_TELEGRAM, true);
             cleanSettingsBlock.setVisibility(style == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+            if (this.headerPreview != null) {
+                this.headerPreview.setStyleAnimated(style);
+            }
         };
 
         standardCell.setOnClickListener(v -> {
@@ -113,6 +120,52 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
             MglaGlassConfig.setChatHeaderStyle(MglaGlassConfig.HEADER_STYLE_TELEGRAM);
             applyHeaderRadios.run();
         });
+
+        LinearLayout bottomPanelBlock = createBlock(context, "Вид нижней панели");
+        final int bottomPanelStyle = MglaGlassConfig.getChatBottomPanelStyle();
+        final org.telegram.ui.Components.MglaChatBottomPanelPreview bottomPanelPreview =
+                new org.telegram.ui.Components.MglaChatBottomPanelPreview(context);
+        bottomPanelPreview.setPadding(dp(12), dp(4), dp(12), dp(8));
+        bottomPanelBlock.addView(bottomPanelPreview, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        RadioCell bottomStandardCell = new RadioCell(context);
+        bottomStandardCell.setBackground(null);
+        bottomStandardCell.setText("Стандартная", bottomPanelStyle == MglaGlassConfig.BOTTOM_PANEL_STYLE_STANDARD, false);
+
+        RadioCell bottomTelegramCell = new RadioCell(context);
+        bottomTelegramCell.setBackground(null);
+        bottomTelegramCell.setText("Telegram", bottomPanelStyle == MglaGlassConfig.BOTTOM_PANEL_STYLE_TELEGRAM, false);
+
+        bottomPanelBlock.addView(bottomStandardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        bottomPanelBlock.addView(MglaUi.createDivider(context));
+        bottomPanelBlock.addView(bottomTelegramCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        this.bottomPanelPreview = bottomPanelPreview;
+
+        final Runnable applyBottomPanelRadios = () -> {
+            final int style = MglaGlassConfig.getChatBottomPanelStyle();
+            bottomStandardCell.setChecked(style == MglaGlassConfig.BOTTOM_PANEL_STYLE_STANDARD, true);
+            bottomTelegramCell.setChecked(style == MglaGlassConfig.BOTTOM_PANEL_STYLE_TELEGRAM, true);
+            if (this.bottomPanelPreview != null) {
+                this.bottomPanelPreview.setStyleAnimated(style);
+            }
+        };
+
+        bottomStandardCell.setOnClickListener(v -> {
+            MglaGlassConfig.setChatBottomPanelStyle(MglaGlassConfig.BOTTOM_PANEL_STYLE_STANDARD);
+            applyBottomPanelRadios.run();
+        });
+
+        bottomTelegramCell.setOnClickListener(v -> {
+            MglaGlassConfig.setChatBottomPanelStyle(MglaGlassConfig.BOTTOM_PANEL_STYLE_TELEGRAM);
+            applyBottomPanelRadios.run();
+        });
+
+        // Order: header → bottom panel → clean (if any) → glass.
+        rootLayout.addView(headerStyleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        rootLayout.addView(bottomPanelBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        rootLayout.addView(cleanSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        cleanSettingsBlock.setVisibility(headerStyle == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
 
         LinearLayout glassBlock = createBlock(context, "Внешний вид");
 
@@ -288,6 +341,12 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
     @Override
     public void onResume() {
         super.onResume();
+        if (headerPreview != null) {
+            headerPreview.applyFromConfig();
+        }
+        if (bottomPanelPreview != null) {
+            bottomPanelPreview.applyFromConfig();
+        }
         if (commonAnimCell != null) {
             commonAnimCell.setTextAndValue("Общие анимации", MglaAnimationSettingsActivity.getSummaryForType(MglaAnimationSettingsActivity.TYPE_COMMON), true);
         }

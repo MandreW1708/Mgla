@@ -87,6 +87,12 @@ public class MglaGlassConfig {
     public static final int HEADER_STYLE_CLEAN = 1;
     /** Stock Telegram liquid-glass header: back circle + avatar/title pill + menu pill. */
     public static final int HEADER_STYLE_TELEGRAM = 2;
+    /** Chat input panel style: Mgla iOS-like / stock Telegram. */
+    public static final String PREF_CHAT_BOTTOM_PANEL_STYLE = "chat_bottom_panel_style";
+    /** Current Mgla input: attach + send as separate glass circles outside the field pill. */
+    public static final int BOTTOM_PANEL_STYLE_STANDARD = 0;
+    /** Stock Telegram input: attach + send inside the glass field pill. */
+    public static final int BOTTOM_PANEL_STYLE_TELEGRAM = 1;
     public static final String PREF_CLEAN_HEADER_HIDE_BACK_BTN = "clean_header_hide_back_btn";
     public static final String PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK = "clean_header_hide_title_block";
     public static final String PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK = "clean_header_hide_pinned_block";
@@ -115,6 +121,7 @@ public class MglaGlassConfig {
     private static boolean customNotificationIcon = true;
     private static boolean cleanHeader;
     private static int chatHeaderStyle = HEADER_STYLE_STANDARD;
+    private static int chatBottomPanelStyle = BOTTOM_PANEL_STYLE_STANDARD;
     private static boolean cleanHeaderHideBackBtn = true;
     private static boolean cleanHeaderHideTitleBlock = true;
     private static boolean cleanHeaderHidePinnedBlock = true;
@@ -146,6 +153,7 @@ public class MglaGlassConfig {
             chatHeaderStyle = cleanHeader ? HEADER_STYLE_CLEAN : HEADER_STYLE_STANDARD;
         }
         cleanHeader = chatHeaderStyle == HEADER_STYLE_CLEAN;
+        chatBottomPanelStyle = clampBottomPanelStyle(p.getInt(PREF_CHAT_BOTTOM_PANEL_STYLE, BOTTOM_PANEL_STYLE_STANDARD));
         cleanHeaderHideBackBtn = p.getBoolean(PREF_CLEAN_HEADER_HIDE_BACK_BTN, true);
         cleanHeaderHideTitleBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK, true);
         cleanHeaderHidePinnedBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK, true);
@@ -241,6 +249,34 @@ public class MglaGlassConfig {
     /** Any floating glass header (Standard, Clean, or stock Telegram). */
     public static boolean isFloatingGlassHeaderEnabled() {
         return isGlassChatHeaderEnabled() || isTelegramHeaderEnabled();
+    }
+
+    private static int clampBottomPanelStyle(int style) {
+        if (style < BOTTOM_PANEL_STYLE_STANDARD || style > BOTTOM_PANEL_STYLE_TELEGRAM) {
+            return BOTTOM_PANEL_STYLE_STANDARD;
+        }
+        return style;
+    }
+
+    public static int getChatBottomPanelStyle() {
+        ensureCache();
+        return chatBottomPanelStyle;
+    }
+
+    public static void setChatBottomPanelStyle(int style) {
+        ensureCache();
+        style = clampBottomPanelStyle(style);
+        if (chatBottomPanelStyle == style) {
+            return;
+        }
+        chatBottomPanelStyle = style;
+        getPrefs().edit().putInt(PREF_CHAT_BOTTOM_PANEL_STYLE, style).apply();
+        notifyGlassAppearanceChanged();
+    }
+
+    /** Stock Telegram chat input panel (attach/send inside the field pill). */
+    public static boolean isTelegramBottomPanelEnabled() {
+        return getChatBottomPanelStyle() == BOTTOM_PANEL_STYLE_TELEGRAM;
     }
 
     public static boolean isCleanHeaderEnabled() {

@@ -2774,7 +2774,15 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
         };
         frameLayout.setClipChildren(!useStaticSendButton());
-        int leftInputOffset = useStaticAttachButton() ? (DEFAULT_HEIGHT + STATIC_ATTACH_GAP - INPUT_BUBBLE_CONTENT_SIDE_TUCK) : (isChat ? DEFAULT_HEIGHT + STATIC_ATTACH_GAP : 0);
+        int leftInputOffset;
+        if (useStaticAttachButton()) {
+            leftInputOffset = DEFAULT_HEIGHT + STATIC_ATTACH_GAP - INPUT_BUBBLE_CONTENT_SIDE_TUCK;
+        } else if (useTelegramBottomPanelLayout()) {
+            // Stock Telegram: field pill is full-width; attach sits inside on the right.
+            leftInputOffset = 0;
+        } else {
+            leftInputOffset = isChat ? DEFAULT_HEIGHT + STATIC_ATTACH_GAP : 0;
+        }
         int rightInputOffset = useStaticSendButton() ? (DEFAULT_HEIGHT + STATIC_SEND_GAP - INPUT_BUBBLE_CONTENT_SIDE_TUCK) : DEFAULT_HEIGHT;
         textFieldContainer.addView(frameLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, leftInputOffset, 0, rightInputOffset, 0));
 
@@ -2979,8 +2987,6 @@ public class ChatActivityEnterView extends FrameLayout implements
             attachButtonView.setImageResource(R.drawable.msg_input_attach2);
             attachButtonView.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), Theme.RIPPLE_MASK_CIRCLE_20DP, dp(22)));
             attachButton = attachButtonView;
-            textFieldContainer.addView(attachButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, 0));
-            attachButton.bringToFront();
             attachButtonClickListener = v -> {
                 if (adjustPanLayoutHelper != null && adjustPanLayoutHelper.animationInProgress() || attachLayoutPaddingAlpha == 0f) {
                     return;
@@ -2989,8 +2995,16 @@ public class ChatActivityEnterView extends FrameLayout implements
             };
             attachButton.setOnClickListener(attachButtonClickListener);
             attachButton.setContentDescription(getString(R.string.AccDescrAttachButton));
-            updateStaticAttachLayout();
-            updateStaticAttachButton();
+            if (useTelegramBottomPanelLayout()) {
+                // Stock Telegram: paperclip sits in attachLayout inside the field pill (right).
+                attachLayout.addView(attachButton, LayoutHelper.createLinear(DEFAULT_HEIGHT, DEFAULT_HEIGHT));
+            } else {
+                // Mgla Standard: separate glass circle to the left of the field pill.
+                textFieldContainer.addView(attachButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, 0));
+                attachButton.bringToFront();
+                updateStaticAttachLayout();
+                updateStaticAttachButton();
+            }
             updateFieldRight(1);
         }
         aiButton = new ImageView(context);
@@ -15206,8 +15220,28 @@ public class ChatActivityEnterView extends FrameLayout implements
         updateStaticAttachButton();
     }
 
+    /**
+     * Stock Telegram bottom panel: attach/send inside the glass field (not separate circles).
+     * Broadcast channels keep the Mgla Standard layout untouched.
+     */
+    private boolean useTelegramBottomPanelLayout() {
+        if (!org.telegram.ui.MglaGlassConfig.isTelegramBottomPanelEnabled()) {
+            return false;
+        }
+        if (!isChat || isLiveComment) {
+            return false;
+        }
+        if (parentFragment != null) {
+            final TLRPC.Chat chat = parentFragment.getCurrentChat();
+            if (ChatObject.isChannelAndNotMegaGroup(chat)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean useStaticAttachButton() {
-        return isChat && !isLiveComment;
+        return isChat && !isLiveComment && !useTelegramBottomPanelLayout();
     }
 
     public float getStaticAttachBubbleLeftOffset() {
@@ -15424,7 +15458,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     private boolean useStaticSendButton() {
-        return isChat && !isLiveComment;
+        return isChat && !isLiveComment && !useTelegramBottomPanelLayout();
     }
 
     public float getStaticSendBubbleRightOffset() {

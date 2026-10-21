@@ -349,31 +349,35 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private void updateHomeWaveButton() {
-        if (homeWaveTitle == null) {
-            return;
-        }
-        MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
-        boolean pausing = player.isPersonalWaveActive() && player.isPlaying();
-        String label = pausing ? "  Пауза" : "  Слушать";
-        SpannableStringBuilder span = new SpannableStringBuilder("\u200B" + label);
-        WaveControlDrawable icon = new WaveControlDrawable(MD3_ON_PRIMARY_CONTAINER, pausing);
-        icon.setBounds(0, 0, dp(18), dp(18));
-        span.setSpan(new android.text.style.ImageSpan(icon, android.text.style.ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        homeWaveTitle.setText(span);
+        applyWaveActionState(homeWaveCard, homeWaveTitle,
+                MglaYandexMusicPlayer.getInstance().isPersonalWaveActive()
+                        && MglaYandexMusicPlayer.getInstance().isPlaying());
     }
 
     private void updateCollectionWaveButton() {
-        if (collectionWaveTitle == null) {
+        applyWaveActionState(collectionWaveCard, collectionWaveTitle,
+                MglaYandexMusicPlayer.getInstance().isCollectionWaveActive()
+                        && MglaYandexMusicPlayer.getInstance().isPlaying());
+    }
+
+    private void applyWaveActionState(FrameLayout card, TextView title, boolean pausing) {
+        if (title == null) {
             return;
         }
-        MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
-        boolean pausing = player.isCollectionWaveActive() && player.isPlaying();
-        String label = pausing ? "  Пауза" : "  Слушать";
-        SpannableStringBuilder span = new SpannableStringBuilder("\u200B" + label);
-        WaveControlDrawable icon = new WaveControlDrawable(MD3_ON_PRIMARY_CONTAINER, pausing);
-        icon.setBounds(0, 0, dp(18), dp(18));
-        span.setSpan(new android.text.style.ImageSpan(icon, android.text.style.ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        collectionWaveTitle.setText(span);
+        title.setText(pausing ? "Пауза" : "Слушать");
+        title.setGravity(Gravity.CENTER);
+        ImageView iconView = null;
+        if (card != null && card.getTag() instanceof Object[]) {
+            Object[] tags = (Object[]) card.getTag();
+            if (tags.length >= 3 && tags[2] instanceof ImageView) {
+                iconView = (ImageView) tags[2];
+            }
+        }
+        if (iconView != null) {
+            WaveControlDrawable icon = new WaveControlDrawable(MD3_ON_PRIMARY_CONTAINER, pausing);
+            icon.setBounds(0, 0, dp(18), dp(18));
+            iconView.setImageDrawable(icon);
+        }
     }
 
     /** Soft palette from the active Telegram theme — muted accent, quiet surfaces. */
@@ -691,7 +695,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
         LinearLayout waveInner = new LinearLayout(context);
         waveInner.setOrientation(LinearLayout.VERTICAL);
-        waveInner.setGravity(Gravity.CENTER);
+        waveInner.setGravity(Gravity.CENTER_HORIZONTAL);
 
         TextView status = new TextView(context);
         status.setText(statusText);
@@ -699,20 +703,33 @@ public class MglaMusicActivity extends BaseFragment implements
         status.setLetterSpacing(0.02f);
         status.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
         status.setTextColor(MD3_ON_PRIMARY_CONTAINER);
-        waveInner.addView(status, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        status.setGravity(Gravity.CENTER);
+        waveInner.addView(status, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        // Icon + «Слушать»/«Пауза» as one centered row (ImageSpan often misaligns).
+        LinearLayout actionRow = new LinearLayout(context);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER);
+
+        ImageView actionIcon = new ImageView(context);
+        actionIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        actionRow.addView(actionIcon, LayoutHelper.createLinear(20, 20, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
 
         TextView title = new TextView(context);
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
         title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
         title.setTextColor(MD3_ON_PRIMARY_CONTAINER);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        waveInner.addView(title, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 6, 0, 0));
+        title.setGravity(Gravity.CENTER);
+        title.setIncludeFontPadding(false);
+        actionRow.addView(title, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
 
-        card.addView(waveInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+        waveInner.addView(actionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 6, 0, 0));
+
+        card.addView(waveInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
         card.setClickable(true);
         card.setFocusable(true);
         card.setOnClickListener(click);
-        card.setTag(new TextView[]{status, title});
+        card.setTag(new Object[]{status, title, actionIcon});
         return card;
     }
 
@@ -731,9 +748,9 @@ public class MglaMusicActivity extends BaseFragment implements
         waveWrap.setPadding(dp(16), dp(8), dp(16), dp(4));
         homeWaveCard = createWaveHeroCard(context, "Моя волна",
                 v -> MglaYandexMusicPlayer.getInstance().toggleMyWave());
-        TextView[] tags = (TextView[]) homeWaveCard.getTag();
-        homeWaveStatus = tags[0];
-        homeWaveTitle = tags[1];
+        Object[] homeTags = (Object[]) homeWaveCard.getTag();
+        homeWaveStatus = (TextView) homeTags[0];
+        homeWaveTitle = (TextView) homeTags[1];
         waveWrap.addView(homeWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 96));
         content.addView(waveWrap, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -1041,9 +1058,9 @@ public class MglaMusicActivity extends BaseFragment implements
 
         collectionWaveCard = createWaveHeroCard(context, "Моя волна по коллекции",
                 v -> MglaYandexMusicPlayer.getInstance().toggleCollectionWave());
-        TextView[] cTags = (TextView[]) collectionWaveCard.getTag();
-        collectionWaveStatus = cTags[0];
-        collectionWaveTitle = cTags[1];
+        Object[] cTags = (Object[]) collectionWaveCard.getTag();
+        collectionWaveStatus = (TextView) cTags[0];
+        collectionWaveTitle = (TextView) cTags[1];
 
         waveCardWrapper.addView(collectionWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 96));
         content.addView(waveCardWrapper, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));

@@ -4459,9 +4459,10 @@ public class ChatActivity extends BaseFragment implements
                 audioCallIconItem = menu.lazilyAddItem(call, R.drawable.call, themeDelegate);
                 audioCallIconItem.setContentDescription(LocaleController.getString(R.string.Call));
                 userFull = getMessagesController().getUserFull(currentUser.id);
-                // Telegram header: always show call next to ⋮ (shortens the nick pill).
+                // Call icon in the action bar only for Telegram header (next to ⋮).
+                // Standard/Clean keep call in the overflow menu when available.
                 final boolean telegramCallIcon = telegramHeader && !currentUser.self && !UserObject.isDeleted(currentUser);
-                if (telegramCallIcon || (userFull != null && userFull.phone_calls_available)) {
+                if (telegramCallIcon) {
                     showAudioCallAsIcon = !inPreviewMode;
                     audioCallIconItem.setVisibility(View.VISIBLE);
                     audioCallIconItem.createView();
@@ -18799,7 +18800,9 @@ public class ChatActivity extends BaseFragment implements
                         audioCallIconItem.createView();
                         audioCallIconItem.setVisibility(View.VISIBLE);
                     } else {
-                        audioCallIconItem.setVisibility((showAudioCallAsIcon && !showSearchAsIcon) ? View.VISIBLE : View.GONE);
+                        // Standard/Clean: never show call in the header bar.
+                        showAudioCallAsIcon = false;
+                        audioCallIconItem.setVisibility(View.GONE);
                     }
                 }
                 if (headerItem != null) {
@@ -24671,20 +24674,28 @@ public class ChatActivity extends BaseFragment implements
                 if (headerItem != null) {
                     final boolean telegramCallIcon = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
                             && currentUser != null && !currentUser.self && !UserObject.isDeleted(currentUser);
-                    showAudioCallAsIcon = (telegramCallIcon || userInfo.phone_calls_available) && !inPreviewMode;
-                    if (userInfo.phone_calls_available || telegramCallIcon) {
-                        if (showAudioCallAsIcon) {
-                            if (audioCallIconItem != null) {
-                                View item = audioCallIconItem.createView();
-                                if (openAnimationStartTime != 0 && item.getVisibility() != View.VISIBLE) {
-                                    item.setAlpha(0f);
-                                    item.animate().alpha(1f).setDuration(160).setInterpolator(CubicBezierInterpolator.EASE_IN).setStartDelay(50).start();
-                                }
-                                audioCallIconItem.setVisibility(View.VISIBLE);
+                    // Header call button only for Telegram style; Standard/Clean use the menu.
+                    showAudioCallAsIcon = telegramCallIcon && !inPreviewMode;
+                    if (telegramCallIcon) {
+                        if (audioCallIconItem != null) {
+                            View item = audioCallIconItem.createView();
+                            if (openAnimationStartTime != 0 && item.getVisibility() != View.VISIBLE) {
+                                item.setAlpha(0f);
+                                item.animate().alpha(1f).setDuration(160).setInterpolator(CubicBezierInterpolator.EASE_IN).setStartDelay(50).start();
                             }
-                        } else {
-                            headerItem.showSubItem(call, true);
+                            audioCallIconItem.setVisibility(View.VISIBLE);
                         }
+                        headerItem.hideSubItem(call);
+                        if (userInfo.video_calls_available) {
+                            headerItem.showSubItem(video_call, true);
+                        } else {
+                            headerItem.hideSubItem(video_call);
+                        }
+                    } else if (userInfo.phone_calls_available) {
+                        if (audioCallIconItem != null) {
+                            audioCallIconItem.setVisibility(View.GONE);
+                        }
+                        headerItem.showSubItem(call, true);
                         if (userInfo.video_calls_available) {
                             headerItem.showSubItem(video_call, true);
                         } else {
@@ -30538,9 +30549,10 @@ public class ChatActivity extends BaseFragment implements
     public void setInPreviewMode(boolean value) {
         super.setInPreviewMode(value);
         if (currentUser != null && audioCallIconItem != null) {
-            TLRPC.UserFull userFull = getMessagesController().getUserFull(currentUser.id);
-            if (userFull != null && userFull.phone_calls_available) {
-                showAudioCallAsIcon = !inPreviewMode;
+            final boolean telegramCallIcon = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+                    && !currentUser.self && !UserObject.isDeleted(currentUser);
+            if (telegramCallIcon && !inPreviewMode) {
+                showAudioCallAsIcon = true;
                 audioCallIconItem.setVisibility(View.VISIBLE);
             } else {
                 showAudioCallAsIcon = false;

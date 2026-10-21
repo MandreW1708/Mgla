@@ -40,6 +40,22 @@ public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
 
+        LinearLayout previewBlock = createBlock(context, "Превью");
+        final org.telegram.ui.Components.MglaChatHeaderPreview headerPreview =
+                new org.telegram.ui.Components.MglaChatHeaderPreview(context);
+        headerPreview.setPadding(dp(12), dp(4), dp(12), dp(8));
+        // Force Clean style in this screen so toggles are visible immediately.
+        headerPreview.setPreviewState(
+                MglaGlassConfig.HEADER_STYLE_CLEAN,
+                MglaGlassConfig.isCleanHeaderHideBackBtnEnabled(),
+                MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled(),
+                MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled(),
+                MglaGlassConfig.isCleanHeaderHideTranslationPanelEnabled(),
+                false
+        );
+        previewBlock.addView(headerPreview, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(previewBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         LinearLayout backgroundBlock = createBlock(context, "Убрать фон");
 
         TextCheckCell backBtnCell = new TextCheckCell(context);
@@ -58,6 +74,15 @@ public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
         translationPanelCell.setBackground(null);
         translationPanelCell.setTextAndCheck("Панель перевода", MglaGlassConfig.isCleanHeaderHideTranslationPanelEnabled(), false);
 
+        final Runnable refreshPreview = () -> headerPreview.setPreviewState(
+                MglaGlassConfig.HEADER_STYLE_CLEAN,
+                MglaGlassConfig.isCleanHeaderHideBackBtnEnabled(),
+                MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled(),
+                MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled(),
+                MglaGlassConfig.isCleanHeaderHideTranslationPanelEnabled(),
+                false
+        );
+
         Runnable toggleCheck = () -> {
             BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Переключитесь тогда на стандартную шапку").show();
         };
@@ -70,6 +95,7 @@ public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
             }
             MglaGlassConfig.setCleanHeaderHideBackBtnEnabled(newVal);
             backBtnCell.setChecked(newVal);
+            refreshPreview.run();
         });
 
         titleBlockCell.setOnClickListener(v -> {
@@ -80,6 +106,7 @@ public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
             }
             MglaGlassConfig.setCleanHeaderHideTitleBlockEnabled(newVal);
             titleBlockCell.setChecked(newVal);
+            refreshPreview.run();
         });
 
         pinnedBlockCell.setOnClickListener(v -> {
@@ -90,6 +117,7 @@ public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
             }
             MglaGlassConfig.setCleanHeaderHidePinnedBlockEnabled(newVal);
             pinnedBlockCell.setChecked(newVal);
+            refreshPreview.run();
         });
 
         translationPanelCell.setOnClickListener(v -> {
@@ -100,6 +128,7 @@ public class MglaCleanHeaderSettingsActivity extends MglaBaseSettingsActivity {
             }
             MglaGlassConfig.setCleanHeaderHideTranslationPanelEnabled(newVal);
             translationPanelCell.setChecked(newVal);
+            refreshPreview.run();
         });
 
         backgroundBlock.addView(backBtnCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
