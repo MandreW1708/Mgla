@@ -9928,6 +9928,11 @@ public class MessagesController extends BaseController implements NotificationCe
         if (dialog == null) {
             return;
         }
+        // Locally preserved chats stay in the list after peer/self history wipe.
+        if (MglaDeletedStorage.isDialogPreserved(currentAccount, dialog.id)
+                || MglaDeletedStorage.peekPreserveDialog(dialog.id)) {
+            return;
+        }
         long did = dialog.id;
         if (dialogsServerOnly.remove(dialog) && DialogObject.isChannel(dialog)) {
             Utilities.stageQueue.postRunnable(() -> {
@@ -10108,14 +10113,19 @@ public class MessagesController extends BaseController implements NotificationCe
             if (did == getUserConfig().getClientUserId()) {
                 getSavedMessagesController().deleteAllDialogs();
             }
+            final boolean preserveLocal = onlyHistory == 0
+                && (MglaDeletedStorage.peekPreserveDialog(did) || MglaDeletedStorage.isDialogPreserved(currentAccount, did));
+            if (preserveLocal) {
+                MglaDeletedStorage.markDialogPreserved(currentAccount, did);
+            }
             getMessagesStorage().deleteDialog(did, onlyHistory);
             TLRPC.Dialog dialog = dialogs_dict.get(did);
-            if (onlyHistory == 0 || onlyHistory == 3) {
+            if ((onlyHistory == 0 || onlyHistory == 3) && !preserveLocal) {
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogDeleted, did, 0);
                 getNotificationsController().deleteNotificationChannel(did, 0);
                 JoinCallAlert.processDeletedChat(currentAccount, did);
             }
-            if (onlyHistory == 0) {
+            if (onlyHistory == 0 && !preserveLocal) {
                 getMediaDataController().cleanDraft(did, 0, false);
             }
             if (dialog != null) {
@@ -10134,12 +10144,34 @@ public class MessagesController extends BaseController implements NotificationCe
                             }
                         }
                         sortDialogs(null);
-                    } else {
+                    } else if (!preserveLocal) {
                         removeDialog(dialog);
                         int offset = nextDialogsCacheOffset.get(dialog.folder_id, 0);
                         if (offset > 0) {
                             nextDialogsCacheOffset.put(dialog.folder_id, offset - 1);
                         }
+                    } else {
+                        // Keep chat in the list; refresh preview from archive after storage finishes.
+                        dialog.unread_count = 0;
+                        getMessagesStorage().getStorageQueue().postRunnable(() -> {
+                            TLRPC.Message newest = MglaDeletedStorage.loadNewestArchived(
+                                getMessagesStorage().getDatabase(), currentAccount, did);
+                            AndroidUtilities.runOnUIThread(() -> {
+                                if (newest == null) {
+                                    getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                                    return;
+                                }
+                                MessageObject preview = new MessageObject(currentAccount, newest, false, false);
+                                preview.mglaDeleted = true;
+                                ArrayList<MessageObject> list = new ArrayList<>(1);
+                                list.add(preview);
+                                dialogMessage.put(did, list);
+                                dialog.top_message = newest.id;
+                                dialog.last_message_date = newest.date;
+                                sortDialogs(null);
+                                getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                            });
+                        });
                     }
                 } else {
                     dialog.unread_count = 0;
@@ -13099,6 +13131,7 @@ public class MessagesController extends BaseController implements NotificationCe
                     }
                     allDialogs.add(dialog);
                 }
+                reinjectPreservedDialogs();
                 sortDialogs(null);
                 dialogsEndReached.put(0, true);
                 serverDialogsEndReached.put(0, false);
@@ -13114,6 +13147,51 @@ public class MessagesController extends BaseController implements NotificationCe
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
             });
         });
+    }
+
+    /**
+     * Re-add chats that were wiped on the server but kept locally ("Сохранить у себя" /
+     * peer deleted chat for everyone). Runs on the UI thread.
+     */
+    private void reinjectPreservedDialogs() {
+        ArrayList<Long> ids = MglaDeletedStorage.getPreservedDialogIds(currentAccount);
+        if (ids.isEmpty()) {
+            return;
+        }
+        for (int a = 0, N = ids.size(); a < N; a++) {
+            long did = ids.get(a);
+            if (dialogs_dict.get(did) != null || DialogObject.isEncryptedDialog(did)) {
+                continue;
+            }
+            TLRPC.TL_dialog dialog = new TLRPC.TL_dialog();
+            dialog.id = did;
+            dialog.flags = DialogObject.isChatDialog(did) && ChatObject.isChannel(getChat(-did)) ? 1 : 0;
+            dialogs_dict.put(did, dialog);
+            allDialogs.add(dialog);
+            final long dialogId = did;
+            getMessagesStorage().getStorageQueue().postRunnable(() -> {
+                TLRPC.Message newest = MglaDeletedStorage.loadNewestArchived(
+                    getMessagesStorage().getDatabase(), currentAccount, dialogId);
+                if (newest == null) {
+                    return;
+                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    TLRPC.Dialog d = dialogs_dict.get(dialogId);
+                    if (d == null) {
+                        return;
+                    }
+                    MessageObject preview = new MessageObject(currentAccount, newest, false, false);
+                    preview.mglaDeleted = true;
+                    ArrayList<MessageObject> list = new ArrayList<>(1);
+                    list.add(preview);
+                    dialogMessage.put(dialogId, list);
+                    d.top_message = newest.id;
+                    d.last_message_date = newest.date;
+                    sortDialogs(null);
+                    getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                });
+            });
+        }
     }
 
     private void migrateDialogs(int offset, int offsetDate, long offsetUser, long offsetChat, long offsetChannel, long accessPeer) {
@@ -13760,6 +13838,7 @@ public class MessagesController extends BaseController implements NotificationCe
                     }
                     allDialogs.add(dialog);
                 }
+                reinjectPreservedDialogs();
                 sortDialogs(migrate ? chatsDict : null);
 
                 putAllNeededDraftDialogs();
@@ -21312,7 +21391,16 @@ public class MessagesController extends BaseController implements NotificationCe
                                 if (BuildVars.LOGS_ENABLED) {
                                     FileLog.d("mark messages " + obj.getId() + " deleted");
                                 }
-                                obj.deleted = true;
+                                long objDid = obj.getDialogId();
+                                if (obj.messageOwner != null
+                                        && MglaDeletedStorage.shouldSave(currentAccount, objDid, obj.messageOwner)) {
+                                    obj.mglaDeleted = true;
+                                    obj.deleted = false;
+                                    obj.messageOwner.mglaDeleted = true;
+                                    MglaDeletedStorage.markDialogPreserved(currentAccount, objDid);
+                                } else {
+                                    obj.deleted = true;
+                                }
                             }
                         }
                     } else {
@@ -21323,7 +21411,15 @@ public class MessagesController extends BaseController implements NotificationCe
                                 if (obj != null) {
                                     for (int b = 0, size2 = arrayList.size(); b < size2; b++) {
                                         if (obj.getId() == arrayList.get(b)) {
-                                            obj.deleted = true;
+                                            if (obj.messageOwner != null
+                                                    && MglaDeletedStorage.shouldSave(currentAccount, dialogId, obj.messageOwner)) {
+                                                obj.mglaDeleted = true;
+                                                obj.deleted = false;
+                                                obj.messageOwner.mglaDeleted = true;
+                                                MglaDeletedStorage.markDialogPreserved(currentAccount, dialogId);
+                                            } else {
+                                                obj.deleted = true;
+                                            }
                                             break;
                                         }
                                     }

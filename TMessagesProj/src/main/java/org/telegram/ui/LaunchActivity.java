@@ -1322,6 +1322,19 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     private NotificationCenter.ObserversGroup globalObserversGroup;
 
     private void checkCurrentAccount() {
+        if (currentAccount == UserConfig.selectedAccount && observersGroup != null) {
+            return;
+        }
+
+        if (observersGroup != null) {
+            observersGroup.removeAllObservers();
+            observersGroup = null;
+        }
+
+        // Must follow UserConfig.selectedAccount — otherwise switchToAccount keeps the old
+        // account's NotificationCenter observers and ConnectionsManager pause/resume target,
+        // which crashes intermittently while fragments rebuild (seen on Tecno/HiOS).
+        currentAccount = UserConfig.selectedAccount;
         observersGroup = NotificationCenter.getInstance(currentAccount)
             .createObserversGroup(this)
             .add(NotificationCenter.openBoostForUsersDialog)
@@ -1343,7 +1356,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             .add(NotificationCenter.currentUserPremiumStatusChanged)
             .add(NotificationCenter.chatSwitchedForum)
             .add(NotificationCenter.guardBotDecisionResult)
-                .add(NotificationCenter.didReceiveNewMessages);
+            .add(NotificationCenter.didReceiveNewMessages);
     }
 
     private void checkLayout() {
@@ -8278,7 +8291,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         String title = null;
         int titleId = 0;
         Runnable action = null;
-        currentConnectionState = ConnectionsManager.getInstance(currentAccount).getConnectionState();
+        final int accountToUse = UserConfig.isValidAccount(account) ? account : currentAccount;
+        currentConnectionState = ConnectionsManager.getInstance(accountToUse).getConnectionState();
         if (currentConnectionState == ConnectionsManager.ConnectionStateWaitingForNetwork) {
             title = "WaitingForNetwork";
             titleId = R.string.WaitingForNetwork;

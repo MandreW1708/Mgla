@@ -1,5 +1,8 @@
 package org.telegram.messenger;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import androidx.collection.LongSparseArray;
 
 import org.telegram.SQLite.SQLiteCursor;
@@ -13,6 +16,8 @@ import org.telegram.tgnet.TLRPC;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Deleted messages archive, stored in the regular Telegram cache database.
@@ -25,6 +30,9 @@ public class MglaDeletedStorage {
 
     private static final String TABLE = "mgla_deleted_messages";
 
+    /** Soft cap when archiving a whole dialog so a huge history cannot hang the storage queue. */
+    public static final int MAX_DIALOG_ARCHIVE_MESSAGES = 2_000;
+
     /**
      * Message ids the user opted not to archive on the next local delete
      * ("Сохранить у себя" unchecked). Checked from the UI thread (keep-visible)
@@ -32,6 +40,16 @@ public class MglaDeletedStorage {
      */
     private static final Object skipArchiveLock = new Object();
     private static final LongSparseArray<HashSet<Integer>> skipArchiveByDialog = new LongSparseArray<>();
+
+    /** Whole-dialog skip/preserve for the next {@code deleteDialog} call. */
+    private static final Object dialogDeleteLock = new Object();
+    private static final HashSet<Long> skipArchiveDialogs = new HashSet<>();
+    private static final HashSet<Long> preserveDialogsOnce = new HashSet<>();
+
+    /** Dialogs kept in the chat list after local/server history wipe. */
+    private static final Object preservedLock = new Object();
+    private static final HashSet<Long>[] preservedDialogs = new HashSet[UserConfig.MAX_ACCOUNT_COUNT];
+    private static boolean preservedLoaded;
 
     public static void ensureTable(SQLiteDatabase database) {
         if (database == null) {
@@ -148,6 +166,241 @@ public class MglaDeletedStorage {
                 skipArchiveByDialog.remove(dialogId);
             }
             return removed;
+        }
+    }
+
+    /** UI: next chat delete must wipe locally without archiving. */
+    public static void skipArchiveDialogOnce(long dialogId) {
+        if (dialogId == 0) {
+            return;
+        }
+        synchronized (dialogDeleteLock) {
+            skipArchiveDialogs.add(dialogId);
+            preserveDialogsOnce.remove(dialogId);
+        }
+    }
+
+    /** UI: next chat delete must archive messages and keep the dialog in the list. */
+    public static void preserveDialogOnce(long dialogId) {
+        if (dialogId == 0) {
+            return;
+        }
+        synchronized (dialogDeleteLock) {
+            preserveDialogsOnce.add(dialogId);
+            skipArchiveDialogs.remove(dialogId);
+        }
+    }
+
+    public static boolean consumeSkipArchiveDialog(long dialogId) {
+        synchronized (dialogDeleteLock) {
+            return skipArchiveDialogs.remove(dialogId);
+        }
+    }
+
+    public static boolean consumePreserveDialog(long dialogId) {
+        synchronized (dialogDeleteLock) {
+            return preserveDialogsOnce.remove(dialogId);
+        }
+    }
+
+    public static boolean peekPreserveDialog(long dialogId) {
+        synchronized (dialogDeleteLock) {
+            return preserveDialogsOnce.contains(dialogId);
+        }
+    }
+
+    private static SharedPreferences preservedPrefs() {
+        if (ApplicationLoader.applicationContext == null) {
+            return null;
+        }
+        return ApplicationLoader.applicationContext.getSharedPreferences("mgla_preserved_dialogs", Context.MODE_PRIVATE);
+    }
+
+    private static void ensurePreservedLoaded() {
+        synchronized (preservedLock) {
+            if (preservedLoaded) {
+                return;
+            }
+            SharedPreferences p = preservedPrefs();
+            for (int a = 0; a < preservedDialogs.length; a++) {
+                HashSet<Long> set = new HashSet<>();
+                if (p != null) {
+                    Set<String> raw = p.getStringSet("ids_" + a, null);
+                    if (raw != null) {
+                        for (String s : raw) {
+                            try {
+                                set.add(Long.parseLong(s));
+                            } catch (NumberFormatException ignore) {
+                            }
+                        }
+                    }
+                }
+                preservedDialogs[a] = set;
+            }
+            preservedLoaded = true;
+        }
+    }
+
+    private static void savePreservedIds(int account) {
+        SharedPreferences p = preservedPrefs();
+        if (p == null || account < 0 || account >= preservedDialogs.length) {
+            return;
+        }
+        HashSet<String> raw = new HashSet<>();
+        for (Long id : preservedDialogs[account]) {
+            raw.add(String.valueOf(id));
+        }
+        p.edit().putStringSet("ids_" + account, raw).apply();
+    }
+
+    public static void markDialogPreserved(int account, long dialogId) {
+        if (dialogId == 0 || account < 0 || account >= preservedDialogs.length) {
+            return;
+        }
+        if (!shouldOfferSaveOnDelete(account, dialogId)) {
+            return;
+        }
+        ensurePreservedLoaded();
+        synchronized (preservedLock) {
+            if (preservedDialogs[account].add(dialogId)) {
+                savePreservedIds(account);
+            }
+        }
+    }
+
+    public static void unmarkDialogPreserved(int account, long dialogId) {
+        if (dialogId == 0 || account < 0 || account >= preservedDialogs.length) {
+            return;
+        }
+        ensurePreservedLoaded();
+        synchronized (preservedLock) {
+            if (preservedDialogs[account].remove(dialogId)) {
+                savePreservedIds(account);
+            }
+        }
+    }
+
+    public static boolean isDialogPreserved(int account, long dialogId) {
+        if (dialogId == 0 || account < 0 || account >= preservedDialogs.length) {
+            return false;
+        }
+        if (!MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            return false;
+        }
+        ensurePreservedLoaded();
+        synchronized (preservedLock) {
+            return preservedDialogs[account].contains(dialogId);
+        }
+    }
+
+    public static ArrayList<Long> getPreservedDialogIds(int account) {
+        ArrayList<Long> out = new ArrayList<>();
+        if (account < 0 || account >= preservedDialogs.length || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            return out;
+        }
+        ensurePreservedLoaded();
+        synchronized (preservedLock) {
+            out.addAll(preservedDialogs[account]);
+        }
+        return out;
+    }
+
+    /**
+     * Copy up to {@link #MAX_DIALOG_ARCHIVE_MESSAGES} messages from {@code messages_v2} into the
+     * archive. Safe to call on the storage thread; never throws into the caller.
+     *
+     * @return number of messages archived
+     */
+    public static int archiveDialogMessages(SQLiteDatabase database, int currentAccount, long dialogId) {
+        if (database == null || dialogId == 0 || !shouldOfferSaveOnDelete(currentAccount, dialogId)) {
+            return 0;
+        }
+        ensureTable(database);
+        int archived = 0;
+        SQLiteCursor cursor = null;
+        try {
+            cursor = database.queryFinalized(String.format(Locale.US,
+                "SELECT data, mid FROM messages_v2 WHERE uid = %d ORDER BY date DESC, mid DESC LIMIT %d",
+                dialogId, MAX_DIALOG_ARCHIVE_MESSAGES));
+            long clientUserId = UserConfig.getInstance(currentAccount).getClientUserId();
+            while (cursor.next()) {
+                NativeByteBuffer data = cursor.byteBufferValue(0);
+                if (data == null) {
+                    continue;
+                }
+                try {
+                    TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                    if (message != null) {
+                        message.readAttachPath(data, clientUserId);
+                        if (message.dialog_id == 0) {
+                            message.dialog_id = dialogId;
+                        }
+                        if (shouldSave(currentAccount, dialogId, message)) {
+                            save(
+                                database, currentAccount, dialogId,
+                                MessageObject.getTopicId(currentAccount, message, 0),
+                                message
+                            );
+                            archived++;
+                        }
+                    }
+                } catch (Exception e) {
+                    FileLog.e(e);
+                } finally {
+                    data.reuse();
+                }
+            }
+            if (archived > 0) {
+                markDialogPreserved(currentAccount, dialogId);
+            }
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("mgla-deleted archiveDialog did=" + dialogId + " count=" + archived);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        return archived;
+    }
+
+    /** Newest archived message for dialog-list preview after a preserved wipe. */
+    public static TLRPC.Message loadNewestArchived(SQLiteDatabase database, int currentAccount, long dialogId) {
+        if (database == null || dialogId == 0) {
+            return null;
+        }
+        SQLiteCursor cursor = null;
+        try {
+            cursor = database.queryFinalized(
+                "SELECT data FROM " + TABLE + " WHERE uid = ? ORDER BY date DESC, mid DESC LIMIT 1",
+                dialogId
+            );
+            if (!cursor.next()) {
+                return null;
+            }
+            NativeByteBuffer data = cursor.byteBufferValue(0);
+            if (data == null) {
+                return null;
+            }
+            TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+            if (message != null) {
+                message.readAttachPath(data, UserConfig.getInstance(currentAccount).getClientUserId());
+                if (message.dialog_id == 0) {
+                    message.dialog_id = dialogId;
+                }
+                message.mglaDeleted = true;
+            }
+            data.reuse();
+            return message;
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
         }
     }
 
@@ -535,8 +788,16 @@ public class MglaDeletedStorage {
             if (!UserConfig.getInstance(a).isClientActivated()) {
                 continue;
             }
+            final int account = a;
             MessagesStorage storage = MessagesStorage.getInstance(a);
             storage.getStorageQueue().postRunnable(() -> clearAll(storage.getDatabase()));
+            ensurePreservedLoaded();
+            synchronized (preservedLock) {
+                if (preservedDialogs[account] != null) {
+                    preservedDialogs[account].clear();
+                    savePreservedIds(account);
+                }
+            }
         }
     }
 

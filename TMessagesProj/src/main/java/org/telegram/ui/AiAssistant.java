@@ -323,7 +323,7 @@ public class AiAssistant {
         StringBuilder json = new StringBuilder(192);
         json.append("{\"message\":\"").append(escapeJson(userMessage))
                 .append("\",\"lang\":\"").append(escapeJson(getClientLangName()))
-                .append("\",\"plan\":\"free\"");
+                .append("\",\"plan\":\"free\",\"utility\":true");
         try {
             long tgId = org.telegram.messenger.UserConfig.getInstance(
                     org.telegram.messenger.UserConfig.selectedAccount).getClientUserId();

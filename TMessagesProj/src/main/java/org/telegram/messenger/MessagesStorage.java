@@ -4416,6 +4416,21 @@ public class MessagesStorage extends BaseController {
             SQLitePreparedStatement state5 = null;
             SQLitePreparedStatement state6 = null;
             try {
+                final boolean skipArchive = MglaDeletedStorage.consumeSkipArchiveDialog(did);
+                final boolean preserve = !skipArchive && MglaDeletedStorage.consumePreserveDialog(did);
+                if (skipArchive) {
+                    MglaDeletedStorage.clearChat(database, did, 0);
+                    MglaDeletedStorage.unmarkDialogPreserved(currentAccount, did);
+                } else if (preserve) {
+                    // Archive before wipe; keep the dialogs row so the chat stays in the list.
+                    try {
+                        MglaDeletedStorage.archiveDialogMessages(database, currentAccount, did);
+                    } catch (Throwable t) {
+                        FileLog.e(t);
+                    }
+                    MglaDeletedStorage.markDialogPreserved(currentAccount, did);
+                }
+
                 if (messagesOnly == 3) {
                     int lastMid = -1;
                     cursor = database.queryFinalized("SELECT last_mid FROM dialogs WHERE did = " + did);
@@ -4454,17 +4469,28 @@ public class MessagesStorage extends BaseController {
                 }
 
                 if (messagesOnly == 0 || messagesOnly == 3) {
-                    database.executeFast("DELETE FROM dialogs WHERE did = " + did).stepThis().dispose();
-                    database.executeFast("DELETE FROM chat_pinned_v2 WHERE uid = " + did).stepThis().dispose();
-                    database.executeFast("DELETE FROM chat_pinned_count WHERE uid = " + did).stepThis().dispose();
-                    database.executeFast("DELETE FROM channel_users_v2 WHERE did = " + did).stepThis().dispose();
-                    database.executeFast("DELETE FROM search_recent WHERE did = " + did).stepThis().dispose();
-                    if (!DialogObject.isEncryptedDialog(did)) {
-                        if (DialogObject.isChatDialog(did)) {
-                            database.executeFast("DELETE FROM chat_settings_v2 WHERE uid = " + (-did)).stepThis().dispose();
+                    if (!preserve) {
+                        database.executeFast("DELETE FROM dialogs WHERE did = " + did).stepThis().dispose();
+                        database.executeFast("DELETE FROM chat_pinned_v2 WHERE uid = " + did).stepThis().dispose();
+                        database.executeFast("DELETE FROM chat_pinned_count WHERE uid = " + did).stepThis().dispose();
+                        database.executeFast("DELETE FROM channel_users_v2 WHERE did = " + did).stepThis().dispose();
+                        database.executeFast("DELETE FROM search_recent WHERE did = " + did).stepThis().dispose();
+                        if (!DialogObject.isEncryptedDialog(did)) {
+                            if (DialogObject.isChatDialog(did)) {
+                                database.executeFast("DELETE FROM chat_settings_v2 WHERE uid = " + (-did)).stepThis().dispose();
+                            }
+                        } else {
+                            database.executeFast("DELETE FROM enc_chats WHERE uid = " + DialogObject.getEncryptedChatId(did)).stepThis().dispose();
                         }
                     } else {
-                        database.executeFast("DELETE FROM enc_chats WHERE uid = " + DialogObject.getEncryptedChatId(did)).stepThis().dispose();
+                        // Keep dialog row; refresh last_mid from archive for list preview.
+                        TLRPC.Message newest = MglaDeletedStorage.loadNewestArchived(database, currentAccount, did);
+                        if (newest != null) {
+                            database.executeFast("UPDATE dialogs SET last_mid = " + newest.id
+                                + ", unread_count = 0, unread_count_i = 0 WHERE did = " + did).stepThis().dispose();
+                        } else {
+                            database.executeFast("UPDATE dialogs SET unread_count = 0, unread_count_i = 0 WHERE did = " + did).stepThis().dispose();
+                        }
                     }
                 } else if (messagesOnly == 2) {
                     cursor = database.queryFinalized("SELECT last_mid_i, last_mid FROM dialogs WHERE did = " + did);
@@ -14756,6 +14782,8 @@ public class MessagesStorage extends BaseController {
                                     message
                                 );
                                 archivedMids.add(mid);
+                                // Peer wiped history / messages — keep the chat listed locally.
+                                MglaDeletedStorage.markDialogPreserved(currentAccount, did);
                             }
                             if (!DialogObject.isEncryptedDialog(did) && !deleteFiles && did != currentUser) {
                                 data.reuse();

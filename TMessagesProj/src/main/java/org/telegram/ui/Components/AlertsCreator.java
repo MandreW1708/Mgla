@@ -2630,17 +2630,32 @@ public class AlertsCreator {
 
         boolean clearingCache = !canDeleteHistory && ChatObject.isChannel(chat) && ChatObject.isPublic(chat);
 
+        final LinearLayout checksContainer = new LinearLayout(context);
+        checksContainer.setOrientation(LinearLayout.VERTICAL);
         FrameLayout frameLayout = new FrameLayout(context) {
             @Override
             protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                if (cell[0] != null) {
-                    setMeasuredDimension(getMeasuredWidth(), getMeasuredHeight() + cell[0].getMeasuredHeight() + dp(7));
+                if (checksContainer.getChildCount() > 0) {
+                    measureChild(checksContainer,
+                        View.MeasureSpec.makeMeasureSpec(getMeasuredWidth(), View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                    setMeasuredDimension(getMeasuredWidth(), getMeasuredHeight() + checksContainer.getMeasuredHeight() + dp(7));
+                }
+            }
+
+            @Override
+            protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+                super.onLayout(changed, left, top, right, bottom);
+                if (checksContainer.getChildCount() > 0) {
+                    int h = checksContainer.getMeasuredHeight();
+                    checksContainer.layout(0, getMeasuredHeight() - h, getMeasuredWidth(), getMeasuredHeight());
                 }
             }
         };
         builder.setCustomViewOffset(6);
         builder.setView(frameLayout);
+        frameLayout.addView(checksContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
 
         AvatarDrawable avatarDrawable = new AvatarDrawable();
         avatarDrawable.setTextSize(dp(18));
@@ -2693,6 +2708,10 @@ public class AlertsCreator {
         }
         boolean canDeleteInbox = !secret && user != null && canRevokeInbox && revokeTimeLimit == 0x7fffffff;
         final boolean[] deleteForAll = new boolean[1];
+        final boolean[] saveForMe = new boolean[]{true};
+        final long offerDialogId = user != null ? user.id : (chat != null ? -chat.id : 0);
+        final boolean offerSaveForMe = !clear && !second && !secret
+            && MglaDeletedStorage.shouldOfferSaveOnDelete(account, offerDialogId);
         boolean deleteChatForAll = false;
 
         boolean lastMessageIsJoined = false;
@@ -2708,7 +2727,7 @@ public class AlertsCreator {
             cell[0].setPadding(LocaleController.isRTL ? dp(16) : dp(8), dp(10), LocaleController.isRTL ? dp(8) : dp(16), dp(10));
             cell[0].setChecked(deleteForAll[0] = true, false);
             cell[0].setMultiline(true);
-            frameLayout.addView(cell[0], LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, 0));
+            checksContainer.addView(cell[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             cell[0].setOnClickListener(v -> {
                 CheckBoxCell cell1 = (CheckBoxCell) v;
                 deleteForAll[0] = !deleteForAll[0];
@@ -2731,7 +2750,7 @@ public class AlertsCreator {
             }
             cell[0].setMultiline(true);
             cell[0].setPadding(LocaleController.isRTL ? dp(16) : dp(8), dp(10), LocaleController.isRTL ? dp(8) : dp(16), dp(10));
-            frameLayout.addView(cell[0], LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, 0));
+            checksContainer.addView(cell[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             final Runnable updateText = () -> {
                 if (!deleteChatForAllFinal || !ChatObject.isChannel(chat)) return;
 
@@ -2763,6 +2782,21 @@ public class AlertsCreator {
                 cell[0].setChecked(deleteForAll[0] = true, false);
                 updateText.run();
             }
+        }
+
+        if (offerSaveForMe) {
+            CheckBoxCell saveCell = new CheckBoxCell(context, 1, resourcesProvider);
+            saveCell.setBackground(Theme.getSelectorDrawable(false));
+            saveCell.setText("Сохранить у себя", "", true, false);
+            saveCell.setChecked(true, false);
+            saveCell.setMultiline(true);
+            saveCell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), dp(10), LocaleController.isRTL ? dp(8) : dp(16), dp(10));
+            checksContainer.addView(saveCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            saveCell.setOnClickListener(v -> {
+                CheckBoxCell cell1 = (CheckBoxCell) v;
+                saveForMe[0] = !saveForMe[0];
+                cell1.setChecked(saveForMe[0], true);
+            });
         }
 
         if (user != null) {
@@ -2870,13 +2904,25 @@ public class AlertsCreator {
                 }
             }
         }
+        final Runnable applySavePreference = () -> {
+            if (!offerSaveForMe || offerDialogId == 0) {
+                return;
+            }
+            if (saveForMe[0]) {
+                MglaDeletedStorage.preserveDialogOnce(offerDialogId);
+            } else {
+                MglaDeletedStorage.skipArchiveDialogOnce(offerDialogId);
+            }
+        };
         builder.setPositiveButton(actionText, (dialogInterface, i) -> {
             if (!clearingCache && !second && !secret) {
                 if (UserObject.isUserSelf(user)) {
+                    applySavePreference.run();
                     createClearOrDeleteDialogAlert(fragment, clear, true, chat, user, false, checkDeleteForAll, deleteForAll[0], canDeleteHistory, onProcessRunnable, resourcesProvider);
                     return;
                 } else if (user != null && deleteForAll[0]) {
                     MessagesStorage.getInstance(fragment.getCurrentAccount()).getMessagesCount(user.id, (count) -> {
+                        applySavePreference.run();
                         if (count >= 50) {
                             createClearOrDeleteDialogAlert(fragment, clear, true, chat, user, false, checkDeleteForAll, deleteForAll[0], canDeleteHistory, onProcessRunnable, resourcesProvider);
                         } else {
@@ -2898,6 +2944,7 @@ public class AlertsCreator {
                         if (futureCreatorAfterLeave instanceof TLRPC.TL_userEmpty)
                             futureCreatorAfterLeave = null;
                         if (futureCreatorAfterLeave == null) {
+                            applySavePreference.run();
                             if (onProcessRunnable != null) {
                                 onProcessRunnable.run(second || deleteForAll[0]);
                             }
@@ -2908,12 +2955,14 @@ public class AlertsCreator {
                             new SelectChatUserSheet(context, chat, finalFutureCreator, () -> {
                                 NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.closeChats);
                                 AndroidUtilities.runOnUIThread(() -> {
+                                    applySavePreference.run();
                                     if (onProcessRunnable != null) {
                                         onProcessRunnable.run(false);
                                     }
                                 }, 250);
                             }, resourcesProvider).show();
                         }, () -> {
+                            applySavePreference.run();
                             if (onProcessRunnable != null) {
                                 onProcessRunnable.run(false);
                             }
@@ -2922,6 +2971,7 @@ public class AlertsCreator {
                     return;
                 }
             }
+            applySavePreference.run();
             if (onProcessRunnable != null) {
                 onProcessRunnable.run(second || deleteForAll[0]);
             }

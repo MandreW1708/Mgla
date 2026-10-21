@@ -166,11 +166,11 @@ public class MglaMemoryAi {
                 lang = org.telegram.messenger.LocaleController.getInstance().getCurrentLocaleInfo().shortName;
             } catch (Throwable ignore) {
             }
-            // Always Free catalog — memory OpenRouter/auto must not use Plus/Ultra models.
+            // Always Free catalog + Free OpenRouter key — never Plus/Ultra billing.
             StringBuilder json = new StringBuilder(256);
             json.append("{\"message\":\"").append(MglaChatDna.escapeJson(systemPrompt + "\n\n" + userText))
                     .append("\",\"lang\":\"").append(MglaChatDna.escapeJson(lang))
-                    .append("\",\"plan\":\"free\"");
+                    .append("\",\"plan\":\"free\",\"utility\":true");
             try {
                 long tgId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
                 if (tgId > 0) {

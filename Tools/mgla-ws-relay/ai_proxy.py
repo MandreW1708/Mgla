@@ -1347,14 +1347,31 @@ class Handler(BaseHTTPRequestHandler):
             client_plan = client_plan.strip() or None
         else:
             client_plan = None
+        # Utilities (Живая память, «Базовый» ассистент) must never bill Plus/Ultra keys,
+        # even if the client omits plan or an old APK forgets plan=free.
+        utility = bool(raw.get("utility"))
         exclude_ultra = bool(raw.get("exclude_ultra"))
         import mgla_entitlements
 
         tg_ids = mgla_entitlements.parse_tg_ids(raw.get("tg_id"), raw.get("tg_ids"))
         hub_plan = fetch_hub_plan(tg_ids)
+        if not isinstance(message, str) or not message.strip():
+            self._reply(400, b'{"error":"message required"}')
+            return
+        # Old Live Memory builds sent no plan → hub elevated to Ultra. Detect by prompt.
+        msg_head = message.strip()[:240]
+        if (
+            "архивариус переписки" in msg_head
+            or "память переписок пользователя" in msg_head
+        ):
+            utility = True
         # Never elevate above hub-verified subscription; explicit free claim stays free
         # (utilities / «Базовый»), so Premium subscribers can still use Free tools.
-        effective_plan = mgla_entitlements.clamp_plan(client_plan, hub_plan)
+        if utility:
+            effective_plan = PLAN_FREE
+            client_plan = PLAN_FREE
+        else:
+            effective_plan = mgla_entitlements.clamp_plan(client_plan, hub_plan)
         # Allowlist is against the clamped request plan (not raw hub), so a paid
         # user may request Free utilities, but cannot pick Ultra models on Plus.
         if preferred_model and not plan_allows_model(effective_plan, preferred_model):
@@ -1362,9 +1379,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if exclude_ultra and hub_plan != PLAN_PREMIUM_ULTRA:
             exclude_ultra = False
-        if not isinstance(message, str) or not message.strip():
-            self._reply(400, b'{"error":"message required"}')
-            return
         # Oversized bodies are clipped inside call_openrouter; hard reject only absurd sizes.
         if len(message) > MAX_AI_MESSAGE * 2:
             self._reply(413, b'{"error":"message too long"}')
@@ -1391,7 +1405,9 @@ class Handler(BaseHTTPRequestHandler):
                     "content": content,
                     "model": used_model,
                     "ultra": (plan_for_model(used_model) == PLAN_PREMIUM_ULTRA),
+                    # Subscription on the account (for UI); billing used effective_plan.
                     "plan": hub_plan,
+                    "request_plan": effective_plan,
                 },
                 ensure_ascii=False,
             ).encode("utf-8"),
