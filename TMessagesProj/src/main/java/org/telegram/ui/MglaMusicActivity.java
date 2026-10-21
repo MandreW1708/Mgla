@@ -72,13 +72,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Yandex Music collection tab — calm theme-tinted surfaces.
- * Keeps: favorites playlist preview, playlists carousel, favorite artists.
+ * Yandex Music — Главная (Моя волна + пресеты) и Коллекция.
  */
 public class MglaMusicActivity extends BaseFragment implements
         MainTabsActivity.TabFragmentDelegate,
         MglaYandexMusicPlayer.PlayerListener,
         MglaYandexMusicStore.AuthListener {
+
+    private static final int MAIN_TAB_HOME = 0;
+    private static final int MAIN_TAB_COLLECTION = 1;
 
     /** Theme-derived palette (soft accent, not neon). */
     private int MD3_SURFACE;
@@ -113,18 +115,34 @@ public class MglaMusicActivity extends BaseFragment implements
     private final RectF iBlur3PositionMainTabs = new RectF();
 
     // Pages
+    private LinearLayout musicRootColumn;
+    private ScrollView homeScrollView;
     private ScrollView collectionScrollView;
     private LinearLayout fullFavoritesView;
     private LinearLayout searchView;
     private View authPromoView;
 
-    // Collection Page Header
-    private TextView collectionTitleView;
+    // Shared header / tabs
+    private TextView mainTabHome;
+    private TextView mainTabCollection;
     private ImageView profileActionBtn;
     private ImageView equalizerActionBtn;
     private ImageView searchActionBtn;
+    private int mainTab = MAIN_TAB_HOME;
 
-    // Collection Page Content
+    // Home — Моя волна
+    private FrameLayout homeWaveCard;
+    private TextView homeWaveStatus;
+    private TextView homeWaveTitle;
+    private TextView homeWaveSubtitle;
+    private LinearLayout homeDiversityRow;
+    private LinearLayout homeMoodRow;
+    private LinearLayout homeLanguageRow;
+    private LinearLayout homeActivityRow;
+    private MglaYandexMusicModel.WaveSettingsData waveSettings =
+            MglaYandexMusicModel.WaveSettingsData.fallback();
+
+    // Collection — волна по коллекции
     private FrameLayout collectionWaveCard;
     private TextView collectionWaveStatus;
     private TextView collectionWaveTitle;
@@ -262,11 +280,25 @@ public class MglaMusicActivity extends BaseFragment implements
     @Override
     public void onResume() {
         super.onResume();
+        updateHomeWaveSubtitle();
         updateCollectionWaveSubtitle();
-        updateCollectionWaveButton();
+        updateWaveButtons();
     }
 
-    /** Under «Моя волна»: VPN warning when active, otherwise the color tagline. */
+    private void updateHomeWaveSubtitle() {
+        if (homeWaveSubtitle == null) {
+            return;
+        }
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            homeWaveSubtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
+            homeWaveSubtitle.setText("При включённом VPN может не работать");
+            return;
+        }
+        homeWaveSubtitle.setTextColor(MD3_ON_SURFACE_VARIANT);
+        homeWaveSubtitle.setText(describeWaveSettings());
+    }
+
+    /** Under collection wave: VPN warning or color tagline. */
     private void updateCollectionWaveSubtitle() {
         if (collectionWaveSubtitle == null) {
             return;
@@ -280,6 +312,54 @@ public class MglaMusicActivity extends BaseFragment implements
         span.setSpan(new ForegroundColorSpan(MD3_ON_SURFACE_VARIANT), 0, 20, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         span.setSpan(new ForegroundColorSpan(MD3_PRIMARY), 20, 24, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         collectionWaveSubtitle.setText(span);
+    }
+
+    private String describeWaveSettings() {
+        MglaYandexMusicStore store = MglaYandexMusicStore.getInstance();
+        ArrayList<String> parts = new ArrayList<>();
+        appendSettingTitle(parts, waveSettings.diversities, store.getWaveDiversitySeed());
+        appendSettingTitle(parts, waveSettings.moodEnergies, store.getWaveMoodSeed());
+        appendSettingTitle(parts, waveSettings.languages, store.getWaveLanguageSeed());
+        if (parts.isEmpty()) {
+            return "Персональный поток под ваши вкусы";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) sb.append(" · ");
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
+    }
+
+    private static void appendSettingTitle(List<String> parts, List<MglaYandexMusicModel.WaveOption> options, String seed) {
+        if (TextUtils.isEmpty(seed) || options == null) {
+            return;
+        }
+        for (MglaYandexMusicModel.WaveOption o : options) {
+            if (o != null && seed.equals(o.seed) && !TextUtils.isEmpty(o.title)) {
+                parts.add(o.title);
+                return;
+            }
+        }
+    }
+
+    private void updateWaveButtons() {
+        updateHomeWaveButton();
+        updateCollectionWaveButton();
+    }
+
+    private void updateHomeWaveButton() {
+        if (homeWaveTitle == null) {
+            return;
+        }
+        MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
+        boolean pausing = player.isPersonalWaveActive() && player.isPlaying();
+        String label = pausing ? "  Пауза" : "  Слушать";
+        SpannableStringBuilder span = new SpannableStringBuilder("\u200B" + label);
+        WaveControlDrawable icon = new WaveControlDrawable(MD3_ON_PRIMARY_CONTAINER, pausing);
+        icon.setBounds(0, 0, dp(18), dp(18));
+        span.setSpan(new android.text.style.ImageSpan(icon, android.text.style.ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        homeWaveTitle.setText(span);
     }
 
     private void updateCollectionWaveButton() {
@@ -362,36 +442,47 @@ public class MglaMusicActivity extends BaseFragment implements
         // Background fills to the physical bottom; scrollables reserve space for islands via their own padding.
         mainContainer.setPadding(0, AndroidUtilities.statusBarHeight, 0, 0);
 
-        // 1. Main "Коллекция" Page
-        collectionScrollView = createCollectionPage(context);
-        mainContainer.addView(collectionScrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Root music column: shared tabs header + Главная / Коллекция pages
+        musicRootColumn = new LinearLayout(context);
+        musicRootColumn.setOrientation(LinearLayout.VERTICAL);
+        musicRootColumn.addView(createMusicTabsHeader(context),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        // 2. Full Favorites / playlist tracks Page
+        FrameLayout pagesHost = new FrameLayout(context);
+        homeScrollView = createHomePage(context);
+        pagesHost.addView(homeScrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        collectionScrollView = createCollectionPage(context);
+        collectionScrollView.setVisibility(View.GONE);
+        pagesHost.addView(collectionScrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        musicRootColumn.addView(pagesHost, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
+        mainContainer.addView(musicRootColumn, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // Full Favorites / playlist tracks Page
         fullFavoritesView = createFullFavoritesPage(context);
         fullFavoritesView.setVisibility(View.GONE);
         mainContainer.addView(fullFavoritesView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 3. Full playlists list
+        // Full playlists list
         fullPlaylistsView = createFullPlaylistsPage(context);
         fullPlaylistsView.setVisibility(View.GONE);
         mainContainer.addView(fullPlaylistsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 4. Full artists list
+        // Full artists list
         fullArtistsView = createFullArtistsPage(context);
         fullArtistsView.setVisibility(View.GONE);
         mainContainer.addView(fullArtistsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 5. Artist detail page
+        // Artist detail page
         artistPageView = createArtistPage(context);
         artistPageView.setVisibility(View.GONE);
         mainContainer.addView(artistPageView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 6. Search Page
+        // Search Page
         searchView = createSearchPage(context);
         searchView.setVisibility(View.GONE);
         mainContainer.addView(searchView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        // 7. Auth Promo Page (shown when unauthorized)
+        // Auth Promo Page (shown when unauthorized)
         authPromoView = createAuthPromoPage(context);
         authPromoView.setVisibility(View.GONE);
         mainContainer.addView(authPromoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -475,7 +566,7 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     // ==========================================
-    // MAIN COLLECTION PAGE
+    // TABS + HOME + COLLECTION
     // ==========================================
 
     private int islandBottomInset() {
@@ -483,6 +574,454 @@ public class MglaMusicActivity extends BaseFragment implements
                 + (hasMainTabs
                 ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.BAR_HEIGHT + 12)
                 : dp(16));
+    }
+
+    private LinearLayout createMusicTabsHeader(Context context) {
+        LinearLayout topBar = new LinearLayout(context);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(12), dp(10), dp(12), dp(8));
+
+        if (!hasMainTabs) {
+            topBar.addView(createMd3IconButton(context, R.drawable.ic_ab_back, v -> finishFragment()),
+                    LayoutHelper.createLinear(40, 40, 0, 0, 4, 0));
+        }
+
+        LinearLayout tabs = new LinearLayout(context);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setGravity(Gravity.CENTER_VERTICAL);
+
+        mainTabHome = createMainTabChip(context, "Главная", MAIN_TAB_HOME);
+        mainTabCollection = createMainTabChip(context, "Коллекция", MAIN_TAB_COLLECTION);
+        tabs.addView(mainTabHome, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
+        tabs.addView(mainTabCollection, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        topBar.addView(tabs, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        profileActionBtn = createMd3IconButton(context, R.drawable.settings_account, v -> onProfileClicked());
+        topBar.addView(profileActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 4, 0));
+
+        equalizerActionBtn = createMd3IconButton(context, null, v -> onEqualizerClicked());
+        equalizerActionBtn.setImageDrawable(new SlidersDrawable(MD3_ON_SURFACE, MD3_SURFACE));
+        topBar.addView(equalizerActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 4, 0));
+
+        searchActionBtn = createMd3IconButton(context, R.drawable.outline_header_search, v -> openSearch());
+        topBar.addView(searchActionBtn, LayoutHelper.createLinear(40, 40));
+
+        updateMainTabChips();
+        return topBar;
+    }
+
+    private TextView createMainTabChip(Context context, String title, int tab) {
+        TextView tv = new TextView(context);
+        tv.setText(title);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        tv.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        tv.setPadding(dp(12), dp(8), dp(12), dp(8));
+        tv.setOnClickListener(v -> switchMainTab(tab));
+        return tv;
+    }
+
+    private void updateMainTabChips() {
+        styleMainTabChip(mainTabHome, mainTab == MAIN_TAB_HOME);
+        styleMainTabChip(mainTabCollection, mainTab == MAIN_TAB_COLLECTION);
+    }
+
+    private void styleMainTabChip(TextView tv, boolean selected) {
+        if (tv == null) {
+            return;
+        }
+        tv.setTextColor(selected ? MD3_ON_SURFACE : MD3_ON_SURFACE_VARIANT);
+        tv.setAlpha(selected ? 1f : 0.72f);
+        if (selected) {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(18));
+            bg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+            tv.setBackground(bg);
+        } else {
+            tv.setBackground(null);
+        }
+    }
+
+    private void switchMainTab(int tab) {
+        if (mainTab == tab) {
+            return;
+        }
+        mainTab = tab;
+        updateMainTabChips();
+        showRootMusicPage();
+    }
+
+    /** Show Главная or Коллекция (hides detail/search/auth overlays). */
+    private void showRootMusicPage() {
+        if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
+        if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
+        if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
+        if (artistPageView != null) artistPageView.setVisibility(View.GONE);
+        if (searchView != null) searchView.setVisibility(View.GONE);
+        boolean auth = MglaYandexMusicStore.getInstance().isAuthorized();
+        if (authPromoView != null) {
+            authPromoView.setVisibility(auth ? View.GONE : View.VISIBLE);
+        }
+        if (musicRootColumn != null) {
+            musicRootColumn.setVisibility(auth ? View.VISIBLE : View.GONE);
+        }
+        if (!auth) {
+            return;
+        }
+        if (homeScrollView != null) {
+            homeScrollView.setVisibility(mainTab == MAIN_TAB_HOME ? View.VISIBLE : View.GONE);
+        }
+        if (collectionScrollView != null) {
+            collectionScrollView.setVisibility(mainTab == MAIN_TAB_COLLECTION ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private FrameLayout createWaveHeroCard(Context context, String statusText, View.OnClickListener click) {
+        FrameLayout card = new FrameLayout(context);
+        GradientDrawable waveGradient = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{MD3_PRIMARY_CONTAINER_MID, MD3_PRIMARY_CONTAINER, MD3_PRIMARY_CONTAINER_DEEP}
+        );
+        waveGradient.setCornerRadius(dp(28));
+        card.setBackground(waveGradient);
+        card.setPadding(dp(22), dp(20), dp(22), dp(20));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            card.setElevation(dp(2));
+        }
+
+        LinearLayout waveInner = new LinearLayout(context);
+        waveInner.setOrientation(LinearLayout.VERTICAL);
+        waveInner.setGravity(Gravity.CENTER);
+
+        TextView status = new TextView(context);
+        status.setText(statusText);
+        status.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        status.setLetterSpacing(0.02f);
+        status.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
+        status.setTextColor(MD3_ON_PRIMARY_CONTAINER);
+        waveInner.addView(status, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView title = new TextView(context);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
+        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        title.setTextColor(MD3_ON_PRIMARY_CONTAINER);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        waveInner.addView(title, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 6, 0, 0));
+
+        card.addView(waveInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setOnClickListener(click);
+        card.setTag(new TextView[]{status, title});
+        return card;
+    }
+
+    private ScrollView createHomePage(Context context) {
+        ScrollView scroll = createBlurAwareScrollView(context);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, islandBottomInset());
+
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(0, 0, 0, dp(24));
+
+        FrameLayout waveWrap = new FrameLayout(context);
+        waveWrap.setPadding(dp(16), dp(8), dp(16), dp(4));
+        homeWaveCard = createWaveHeroCard(context, "Моя волна",
+                v -> MglaYandexMusicPlayer.getInstance().toggleMyWave());
+        TextView[] tags = (TextView[]) homeWaveCard.getTag();
+        homeWaveStatus = tags[0];
+        homeWaveTitle = tags[1];
+        waveWrap.addView(homeWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 96));
+        content.addView(waveWrap, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        homeWaveSubtitle = new TextView(context);
+        homeWaveSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        homeWaveSubtitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
+        homeWaveSubtitle.setGravity(Gravity.CENTER);
+        homeWaveSubtitle.setPadding(dp(20), 0, dp(20), 0);
+        updateHomeWaveSubtitle();
+        updateHomeWaveButton();
+        content.addView(homeWaveSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 8, 0, 12));
+
+        content.addView(createSectionLabel(context, "По характеру"),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 8));
+        homeDiversityRow = createChipRowHost(context);
+        content.addView(wrapHorizontalChips(context, homeDiversityRow),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+
+        content.addView(createSectionLabel(context, "Под настроение"),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 8));
+        homeMoodRow = createChipRowHost(context);
+        content.addView(wrapHorizontalChips(context, homeMoodRow),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+
+        content.addView(createSectionLabel(context, "Язык"),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 8));
+        homeLanguageRow = createChipRowHost(context);
+        content.addView(wrapHorizontalChips(context, homeLanguageRow),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+
+        content.addView(createSectionLabel(context, "Под занятие"),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 8));
+        homeActivityRow = createChipRowHost(context);
+        content.addView(wrapHorizontalChips(context, homeActivityRow),
+                LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
+
+        scroll.addView(content);
+        bindWaveSettingChips();
+        loadWaveSettings();
+        return scroll;
+    }
+
+    private TextView createSectionLabel(Context context, String text) {
+        TextView tv = new TextView(context);
+        tv.setText(text);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        tv.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        tv.setTextColor(MD3_ON_SURFACE);
+        return tv;
+    }
+
+    private LinearLayout createChipRowHost(Context context) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), dp(2), dp(16), dp(2));
+        return row;
+    }
+
+    private HorizontalScrollView wrapHorizontalChips(Context context, LinearLayout row) {
+        HorizontalScrollView hsv = new HorizontalScrollView(context);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        hsv.setClipToPadding(false);
+        hsv.addView(row, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+        return hsv;
+    }
+
+    private void loadWaveSettings() {
+        MglaYandexMusicApi.fetchWaveSettings(new MglaYandexMusicApi.Callback<MglaYandexMusicModel.WaveSettingsData>() {
+            @Override
+            public void onSuccess(MglaYandexMusicModel.WaveSettingsData result) {
+                if (result != null) {
+                    waveSettings = result;
+                }
+                bindWaveSettingChips();
+                updateHomeWaveSubtitle();
+            }
+
+            @Override
+            public void onError(Exception error) {
+                waveSettings = MglaYandexMusicModel.WaveSettingsData.fallback();
+                bindWaveSettingChips();
+                updateHomeWaveSubtitle();
+            }
+        });
+    }
+
+    private void bindWaveSettingChips() {
+        MglaYandexMusicStore store = MglaYandexMusicStore.getInstance();
+        fillSettingChips(homeDiversityRow, waveSettings.diversities, store.getWaveDiversitySeed(), seed -> {
+            store.setWaveDiversitySeed(seed);
+            onWaveSettingChanged();
+        });
+        fillSettingChips(homeMoodRow, waveSettings.moodEnergies, store.getWaveMoodSeed(), seed -> {
+            store.setWaveMoodSeed(seed);
+            onWaveSettingChanged();
+        });
+        fillSettingChips(homeLanguageRow, waveSettings.languages, store.getWaveLanguageSeed(), seed -> {
+            store.setWaveLanguageSeed(seed);
+            onWaveSettingChanged();
+        });
+        fillActivityChips(homeActivityRow, waveSettings.activities);
+    }
+
+    private interface SeedPicker {
+        void onPick(String seed);
+    }
+
+    private void onWaveSettingChanged() {
+        updateHomeWaveSubtitle();
+        bindWaveSettingChips();
+        MglaYandexMusicPlayer.getInstance().restartPersonalWaveIfActive();
+    }
+
+    private void fillSettingChips(LinearLayout row, List<MglaYandexMusicModel.WaveOption> options,
+                                  String selectedSeed, SeedPicker picker) {
+        if (row == null) {
+            return;
+        }
+        row.removeAllViews();
+        if (options == null) {
+            return;
+        }
+        boolean hasExact = false;
+        for (MglaYandexMusicModel.WaveOption o : options) {
+            if (o != null && !TextUtils.isEmpty(selectedSeed) && selectedSeed.equals(o.seed)) {
+                hasExact = true;
+                break;
+            }
+        }
+        for (int i = 0; i < options.size(); i++) {
+            MglaYandexMusicModel.WaveOption o = options.get(i);
+            if (o == null || TextUtils.isEmpty(o.title) || TextUtils.isEmpty(o.seed)) {
+                continue;
+            }
+            boolean neutral = o.seed.endsWith(":default") || o.seed.endsWith(":all") || o.seed.endsWith(":any");
+            boolean selected = hasExact
+                    ? selectedSeed.equals(o.seed)
+                    : TextUtils.isEmpty(selectedSeed) && neutral;
+            final String seed = o.seed;
+            row.addView(createPresetCard(row.getContext(), o.title, o.seed, selected, v -> picker.onPick(seed)),
+                    LayoutHelper.createLinear(128, 112, 0, 0, 10, 0));
+        }
+    }
+
+    private void fillActivityChips(LinearLayout row, List<MglaYandexMusicModel.WaveOption> options) {
+        if (row == null) {
+            return;
+        }
+        row.removeAllViews();
+        if (options == null) {
+            return;
+        }
+        MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
+        String activeTitle = player.isMyWaveActive() ? player.getCurrentSourceTitle() : "";
+        for (MglaYandexMusicModel.WaveOption o : options) {
+            if (o == null || TextUtils.isEmpty(o.title) || TextUtils.isEmpty(o.seed)) {
+                continue;
+            }
+            boolean selected = !TextUtils.isEmpty(activeTitle) && activeTitle.equals(o.title);
+            final MglaYandexMusicModel.WaveOption opt = o;
+            row.addView(createPresetCard(row.getContext(), o.title, o.seed, selected, v -> {
+                List<String> seeds = new ArrayList<>();
+                seeds.add(opt.seed);
+                for (String s : MglaYandexMusicStore.getInstance().buildMyWaveSeeds()) {
+                    if (!"user:onyourwave".equals(s) && !seeds.contains(s)) {
+                        seeds.add(s);
+                    }
+                }
+                MglaYandexMusicPlayer.getInstance().playRotorSession(seeds, opt.title);
+                bindWaveSettingChips();
+                updateWaveButtons();
+            }), LayoutHelper.createLinear(128, 112, 0, 0, 10, 0));
+        }
+    }
+
+    /** Compact tile card for wave presets (character / mood / language / activity). */
+    private View createPresetCard(Context context, String title, String seed, boolean selected, View.OnClickListener click) {
+        final int[] palette = presetCardColors(seed);
+        FrameLayout card = new FrameLayout(context);
+        GradientDrawable bg = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                selected
+                        ? new int[]{MD3_PRIMARY_CONTAINER_MID, MD3_PRIMARY_CONTAINER, MD3_PRIMARY_CONTAINER_DEEP}
+                        : new int[]{palette[0], palette[1]}
+        );
+        bg.setCornerRadius(dp(22));
+        if (selected) {
+            bg.setStroke(dp(2), MD3_PRIMARY);
+        }
+        card.setBackground(bg);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            card.setElevation(selected ? dp(3) : dp(1));
+        }
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setOnClickListener(click);
+        card.setClipToPadding(false);
+        card.setClipChildren(false);
+
+        View blob = new View(context);
+        GradientDrawable blobBg = new GradientDrawable();
+        blobBg.setShape(GradientDrawable.OVAL);
+        blobBg.setColor(Theme.multAlpha(0xFFFFFFFF, selected ? 0.18f : 0.12f));
+        blob.setBackground(blobBg);
+        card.addView(blob, LayoutHelper.createFrame(56, 56, Gravity.TOP | Gravity.RIGHT, 0, -10, -14, 0));
+
+        LinearLayout col = new LinearLayout(context);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.BOTTOM);
+
+        TextView emoji = new TextView(context);
+        emoji.setText(presetCardEmoji(seed));
+        emoji.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
+        col.addView(emoji, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 10));
+
+        TextView tv = new TextView(context);
+        tv.setText(title);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        tv.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        tv.setTextColor(selected ? MD3_ON_PRIMARY_CONTAINER : 0xFFFFFFFF);
+        tv.setMaxLines(2);
+        tv.setEllipsize(TextUtils.TruncateAt.END);
+        col.addView(tv, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        card.addView(col, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        return card;
+    }
+
+    private static String presetCardEmoji(String seed) {
+        if (TextUtils.isEmpty(seed)) {
+            return "🎵";
+        }
+        String s = seed.toLowerCase();
+        if (s.contains("favorite")) return "❤️";
+        if (s.contains("popular")) return "🔥";
+        if (s.contains("discover")) return "✨";
+        if (s.contains("diversity") || s.endsWith(":default")) return "🎲";
+        if (s.contains(":fun")) return "🎉";
+        if (s.contains(":active")) return "⚡";
+        if (s.contains(":calm")) return "🌊";
+        if (s.contains(":sad")) return "🌙";
+        if (s.contains("mood") && s.endsWith(":all")) return "🎧";
+        if (s.contains("russian") && !s.contains("not")) return "🇷🇺";
+        if (s.contains("not-russian")) return "🌍";
+        if (s.contains("language") && s.endsWith(":any")) return "🗣️";
+        if (s.contains("wake-up")) return "☀️";
+        if (s.contains("workout")) return "💪";
+        if (s.contains("driving")) return "🚗";
+        if (s.contains("work")) return "💼";
+        if (s.contains("party")) return "🪩";
+        if (s.contains("romance")) return "💕";
+        if (s.contains("dinner")) return "🍽️";
+        if (s.contains("sleep")) return "😴";
+        if (s.startsWith("activity:")) return "▶️";
+        if (s.startsWith("mood:")) return "🙂";
+        return "🎵";
+    }
+
+    /** Soft gradient pair for unselected preset cards. */
+    private int[] presetCardColors(String seed) {
+        final int base = MD3_PRIMARY;
+        int hueShift;
+        if (TextUtils.isEmpty(seed)) {
+            hueShift = 0;
+        } else if (seed.contains("Diversity") || seed.contains("diversity")) {
+            hueShift = Math.abs(seed.hashCode() % 5) * 18;
+        } else if (seed.contains("Mood") || seed.contains("mood") || seed.startsWith("mood:")) {
+            hueShift = 40 + Math.abs(seed.hashCode() % 5) * 16;
+        } else if (seed.contains("Language") || seed.contains("language")) {
+            hueShift = 160 + Math.abs(seed.hashCode() % 4) * 12;
+        } else if (seed.startsWith("activity:")) {
+            hueShift = 200 + Math.abs(seed.hashCode() % 6) * 20;
+        } else {
+            hueShift = Math.abs(seed.hashCode() % 12) * 15;
+        }
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(base | 0xFF000000, hsv);
+        hsv[0] = (hsv[0] + hueShift) % 360f;
+        hsv[1] = Math.min(0.55f, Math.max(0.28f, hsv[1] * 0.75f));
+        hsv[2] = Math.min(0.72f, Math.max(0.42f, hsv[2] * 0.85f));
+        int c1 = android.graphics.Color.HSVToColor(hsv);
+        hsv[0] = (hsv[0] + 22f) % 360f;
+        hsv[2] = Math.max(0.28f, hsv[2] * 0.78f);
+        int c2 = android.graphics.Color.HSVToColor(hsv);
+        return new int[]{c1, c2};
     }
 
     private ScrollView createCollectionPage(Context context) {
@@ -496,75 +1035,15 @@ public class MglaMusicActivity extends BaseFragment implements
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(0, 0, 0, dp(24));
 
-        // Top app bar
-        LinearLayout topBar = new LinearLayout(context);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(dp(16), dp(10), dp(12), dp(8));
-
-        if (!hasMainTabs) {
-            topBar.addView(createMd3IconButton(context, R.drawable.ic_ab_back, v -> finishFragment()),
-                    LayoutHelper.createLinear(40, 40, 0, 0, 8, 0));
-        }
-
-        collectionTitleView = new TextView(context);
-        collectionTitleView.setText("Коллекция");
-        collectionTitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
-        collectionTitleView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        collectionTitleView.setTextColor(MD3_ON_SURFACE);
-        topBar.addView(collectionTitleView, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
-
-        profileActionBtn = createMd3IconButton(context, R.drawable.settings_account, v -> onProfileClicked());
-        topBar.addView(profileActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 6, 0));
-
-        equalizerActionBtn = createMd3IconButton(context, null, v -> onEqualizerClicked());
-        equalizerActionBtn.setImageDrawable(new SlidersDrawable(MD3_ON_SURFACE, MD3_SURFACE));
-        topBar.addView(equalizerActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 6, 0));
-
-        searchActionBtn = createMd3IconButton(context, R.drawable.outline_header_search, v -> openSearch());
-        topBar.addView(searchActionBtn, LayoutHelper.createLinear(40, 40));
-
-        content.addView(topBar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        // Hero: My Wave (primary container)
+        // Hero: collection wave
         FrameLayout waveCardWrapper = new FrameLayout(context);
         waveCardWrapper.setPadding(dp(16), dp(8), dp(16), dp(4));
 
-        collectionWaveCard = new FrameLayout(context);
-        GradientDrawable waveGradient = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{MD3_PRIMARY_CONTAINER_MID, MD3_PRIMARY_CONTAINER, MD3_PRIMARY_CONTAINER_DEEP}
-        );
-        waveGradient.setCornerRadius(dp(28));
-        collectionWaveCard.setBackground(waveGradient);
-        collectionWaveCard.setPadding(dp(22), dp(20), dp(22), dp(20));
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-            collectionWaveCard.setElevation(dp(2));
-        }
-
-        LinearLayout waveInner = new LinearLayout(context);
-        waveInner.setOrientation(LinearLayout.VERTICAL);
-        waveInner.setGravity(Gravity.CENTER);
-
-        collectionWaveStatus = new TextView(context);
-        collectionWaveStatus.setText("Моя волна по коллекции");
-        collectionWaveStatus.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-        collectionWaveStatus.setLetterSpacing(0.02f);
-        collectionWaveStatus.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.NORMAL);
-        collectionWaveStatus.setTextColor(MD3_ON_PRIMARY_CONTAINER);
-        waveInner.addView(collectionWaveStatus, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
-
-        collectionWaveTitle = new TextView(context);
-        collectionWaveTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
-        collectionWaveTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
-        collectionWaveTitle.setTextColor(MD3_ON_PRIMARY_CONTAINER);
-        collectionWaveTitle.setGravity(Gravity.CENTER_VERTICAL);
-        waveInner.addView(collectionWaveTitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 6, 0, 0));
-
-        collectionWaveCard.addView(waveInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-        collectionWaveCard.setClickable(true);
-        collectionWaveCard.setFocusable(true);
-        collectionWaveCard.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().toggleCollectionWave());
+        collectionWaveCard = createWaveHeroCard(context, "Моя волна по коллекции",
+                v -> MglaYandexMusicPlayer.getInstance().toggleCollectionWave());
+        TextView[] cTags = (TextView[]) collectionWaveCard.getTag();
+        collectionWaveStatus = cTags[0];
+        collectionWaveTitle = cTags[1];
 
         waveCardWrapper.addView(collectionWaveCard, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 96));
         content.addView(waveCardWrapper, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -1111,6 +1590,8 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private void showTrackDetailPage() {
+        if (musicRootColumn != null) musicRootColumn.setVisibility(View.GONE);
+        if (homeScrollView != null) homeScrollView.setVisibility(View.GONE);
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (searchView != null) searchView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
@@ -1144,7 +1625,7 @@ public class MglaMusicActivity extends BaseFragment implements
                 return;
             }
         }
-        if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+        showRootMusicPage();
     }
 
     // ==========================================
@@ -1205,10 +1686,12 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private void showFullPlaylists() {
+        if (musicRootColumn != null) musicRootColumn.setVisibility(View.GONE);
         if (searchView != null) searchView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
         if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
         if (artistPageView != null) artistPageView.setVisibility(View.GONE);
+        if (homeScrollView != null) homeScrollView.setVisibility(View.GONE);
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) {
             fullPlaylistsView.setVisibility(View.VISIBLE);
@@ -1224,7 +1707,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void closeFullPlaylists() {
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
-        if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+        showRootMusicPage();
     }
 
     private void refreshFullPlaylistsUi() {
@@ -1294,10 +1777,12 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private void showFullArtists() {
+        if (musicRootColumn != null) musicRootColumn.setVisibility(View.GONE);
         if (searchView != null) searchView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
         if (artistPageView != null) artistPageView.setVisibility(View.GONE);
+        if (homeScrollView != null) homeScrollView.setVisibility(View.GONE);
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullArtistsView != null) {
             fullArtistsView.setVisibility(View.VISIBLE);
@@ -1313,7 +1798,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void closeFullArtists() {
         if (fullArtistsView != null) fullArtistsView.setVisibility(View.GONE);
-        if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+        showRootMusicPage();
     }
 
     private void refreshFullArtistsUi() {
@@ -1803,12 +2288,12 @@ public class MglaMusicActivity extends BaseFragment implements
                 return;
             }
         }
-        if (collectionScrollView != null) {
-            collectionScrollView.setVisibility(View.VISIBLE);
-        }
+        showRootMusicPage();
     }
 
     private void hideAllContentPages() {
+        if (musicRootColumn != null) musicRootColumn.setVisibility(View.GONE);
+        if (homeScrollView != null) homeScrollView.setVisibility(View.GONE);
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
@@ -2054,6 +2539,8 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private void openSearch() {
+        if (musicRootColumn != null) musicRootColumn.setVisibility(View.GONE);
+        if (homeScrollView != null) homeScrollView.setVisibility(View.GONE);
         if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
         if (fullPlaylistsView != null) fullPlaylistsView.setVisibility(View.GONE);
@@ -2075,7 +2562,7 @@ public class MglaMusicActivity extends BaseFragment implements
             AndroidUtilities.hideKeyboard(searchInput);
         }
         if (searchView != null) searchView.setVisibility(View.GONE);
-        if (collectionScrollView != null) collectionScrollView.setVisibility(View.VISIBLE);
+        showRootMusicPage();
     }
 
     private void triggerSearch(String query) {
@@ -2282,21 +2769,22 @@ public class MglaMusicActivity extends BaseFragment implements
             if (artistPageView != null) artistPageView.setVisibility(View.GONE);
             if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
             if (searchView != null) searchView.setVisibility(View.GONE);
-        }
-        if (collectionScrollView != null) {
-            boolean showCollection = auth
-                    && (fullPlaylistsView == null || fullPlaylistsView.getVisibility() != View.VISIBLE)
-                    && (fullArtistsView == null || fullArtistsView.getVisibility() != View.VISIBLE)
-                    && (artistPageView == null || artistPageView.getVisibility() != View.VISIBLE)
-                    && (fullFavoritesView == null || fullFavoritesView.getVisibility() != View.VISIBLE)
-                    && (searchView == null || searchView.getVisibility() != View.VISIBLE);
-            collectionScrollView.setVisibility(showCollection ? View.VISIBLE : View.GONE);
-        }
-
-        if (auth) {
+            if (musicRootColumn != null) musicRootColumn.setVisibility(View.GONE);
+            if (homeScrollView != null) homeScrollView.setVisibility(View.GONE);
+            if (collectionScrollView != null) collectionScrollView.setVisibility(View.GONE);
+        } else {
+            boolean onDetail = (fullPlaylistsView != null && fullPlaylistsView.getVisibility() == View.VISIBLE)
+                    || (fullArtistsView != null && fullArtistsView.getVisibility() == View.VISIBLE)
+                    || (artistPageView != null && artistPageView.getVisibility() == View.VISIBLE)
+                    || (fullFavoritesView != null && fullFavoritesView.getVisibility() == View.VISIBLE)
+                    || (searchView != null && searchView.getVisibility() == View.VISIBLE);
+            if (!onDetail) {
+                showRootMusicPage();
+            }
             loadFavorites();
             loadPlaylists();
             loadArtists();
+            loadWaveSettings();
         }
     }
 
@@ -2472,13 +2960,17 @@ public class MglaMusicActivity extends BaseFragment implements
         AndroidUtilities.runOnUIThread(() -> {
             if (fullFavoritesAdapter != null) fullFavoritesAdapter.notifyDataSetChanged();
             if (searchAdapter != null) searchAdapter.notifyDataSetChanged();
-            updateCollectionWaveButton();
+            updateWaveButtons();
+            bindWaveSettingChips();
         });
     }
 
     @Override
     public void onPlaybackStateChanged(boolean isPlaying, boolean isBuffering) {
-        AndroidUtilities.runOnUIThread(this::updateCollectionWaveButton);
+        AndroidUtilities.runOnUIThread(() -> {
+            updateWaveButtons();
+            bindWaveSettingChips();
+        });
     }
 
     @Override
@@ -2492,7 +2984,9 @@ public class MglaMusicActivity extends BaseFragment implements
 
     @Override
     public void onParentScrollToTop() {
-        if (collectionScrollView != null && collectionScrollView.getVisibility() == View.VISIBLE) {
+        if (homeScrollView != null && homeScrollView.getVisibility() == View.VISIBLE) {
+            homeScrollView.smoothScrollTo(0, 0);
+        } else if (collectionScrollView != null && collectionScrollView.getVisibility() == View.VISIBLE) {
             collectionScrollView.smoothScrollTo(0, 0);
         } else if (fullFavoritesListView != null && fullFavoritesView.getVisibility() == View.VISIBLE) {
             fullFavoritesListView.smoothScrollToPosition(0);

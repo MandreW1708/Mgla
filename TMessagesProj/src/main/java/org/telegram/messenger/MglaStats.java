@@ -293,20 +293,14 @@ public final class MglaStats {
         final String host;
         final String path;
         final String token;
-        final String expectedPin;
-        final boolean pinDefaultHost;
         if (viaRelay) {
             host = MglaWsConfig.getRelayHost();
             path = "/mgla-ai/v1/stats-batch";
             token = MglaWsConfig.getRelayToken();
-            expectedPin = MglaWsConfig.RELAY_SPKI_SHA256_BASE64;
-            pinDefaultHost = MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host);
         } else {
             host = MglaWsConfig.getHubHost();
             path = "/mgla-stats/v1/batch";
             token = MglaWsConfig.getHubToken();
-            expectedPin = MglaWsConfig.HUB_SPKI_SHA256_BASE64;
-            pinDefaultHost = MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host);
         }
 
         String url = "https://" + host + path;
@@ -322,8 +316,13 @@ public final class MglaStats {
             byte[] body = json.getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
                 // getOutputStream completes the TLS handshake.
-                if (pinDefaultHost) {
-                    verifySpkiPin(conn.getServerCertificates(), expectedPin);
+                if (viaRelay) {
+                    String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+                    if (pins != null && pins.length > 0) {
+                        verifySpkiPin(conn.getServerCertificates(), pins[0]);
+                    }
+                } else if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
+                    verifySpkiPin(conn.getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
                 }
                 os.write(body);
             }

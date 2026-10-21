@@ -318,6 +318,56 @@ public final class MglaYandexMusicModel {
         }
     }
 
+    /** Single wave preset / activity / setting chip. */
+    public static class WaveOption implements Serializable {
+        public String title;
+        public String seed;
+
+        public WaveOption() {
+        }
+
+        public WaveOption(String title, String seed) {
+            this.title = title != null ? title : "";
+            this.seed = seed != null ? seed : "";
+        }
+    }
+
+    /** Parsed {@code /rotor/wave/settings} payload (activities + setting chips). */
+    public static class WaveSettingsData implements Serializable {
+        public final List<WaveOption> activities = new ArrayList<>();
+        public final List<WaveOption> diversities = new ArrayList<>();
+        public final List<WaveOption> moodEnergies = new ArrayList<>();
+        public final List<WaveOption> languages = new ArrayList<>();
+
+        public static WaveSettingsData fallback() {
+            WaveSettingsData d = new WaveSettingsData();
+            d.diversities.add(new WaveOption("Любимое", "settingDiversity:favorite"));
+            d.diversities.add(new WaveOption("Популярное", "settingDiversity:popular"));
+            d.diversities.add(new WaveOption("Незнакомое", "settingDiversity:discover"));
+            d.diversities.add(new WaveOption("Разное", "settingDiversity:default"));
+
+            d.moodEnergies.add(new WaveOption("Бодрое", "settingMoodEnergy:fun"));
+            d.moodEnergies.add(new WaveOption("Энергичное", "settingMoodEnergy:active"));
+            d.moodEnergies.add(new WaveOption("Спокойное", "settingMoodEnergy:calm"));
+            d.moodEnergies.add(new WaveOption("Грустное", "settingMoodEnergy:sad"));
+            d.moodEnergies.add(new WaveOption("Любое", "settingMoodEnergy:all"));
+
+            d.languages.add(new WaveOption("Русский", "settingLanguage:russian"));
+            d.languages.add(new WaveOption("Иностранный", "settingLanguage:not-russian"));
+            d.languages.add(new WaveOption("Любой", "settingLanguage:any"));
+
+            d.activities.add(new WaveOption("Просыпаюсь", "activity:wake-up"));
+            d.activities.add(new WaveOption("Тренировка", "activity:workout"));
+            d.activities.add(new WaveOption("За рулём", "activity:driving"));
+            d.activities.add(new WaveOption("Работа", "activity:work-background"));
+            d.activities.add(new WaveOption("Вечеринка", "activity:party"));
+            d.activities.add(new WaveOption("Романтика", "activity:romance"));
+            d.activities.add(new WaveOption("Ужин", "activity:dinner"));
+            d.activities.add(new WaveOption("Сон", "activity:sleep"));
+            return d;
+        }
+    }
+
     public static class UserInfo implements Serializable {
         public String uid;
         public String login;

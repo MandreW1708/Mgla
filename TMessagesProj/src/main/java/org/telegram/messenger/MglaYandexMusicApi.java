@@ -397,6 +397,132 @@ public final class MglaYandexMusicApi {
         }
     }
 
+    /**
+     * Wave contexts (activities) + diversity / mood / language chips.
+     * {@code GET /rotor/wave/settings?seeds=user:onyourwave}
+     */
+    public static void fetchWaveSettings(Callback<MglaYandexMusicModel.WaveSettingsData> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                String url = BASE_URL + "/rotor/wave/settings?seeds=" + Uri.encode("user:onyourwave");
+                HttpURLConnection conn = setupConnection(url, "GET");
+                String resp = readResponse(conn);
+                JSONObject root = new JSONObject(resp);
+                JSONObject result = root.optJSONObject("result");
+                if (result == null) {
+                    result = root;
+                }
+                MglaYandexMusicModel.WaveSettingsData data = parseWaveSettings(result);
+                if (data.activities.isEmpty() && data.diversities.isEmpty()
+                        && data.moodEnergies.isEmpty() && data.languages.isEmpty()) {
+                    data = MglaYandexMusicModel.WaveSettingsData.fallback();
+                } else {
+                    // Fill missing groups from fallback so UI always has chips.
+                    MglaYandexMusicModel.WaveSettingsData fb = MglaYandexMusicModel.WaveSettingsData.fallback();
+                    if (data.activities.isEmpty()) data.activities.addAll(fb.activities);
+                    if (data.diversities.isEmpty()) data.diversities.addAll(fb.diversities);
+                    if (data.moodEnergies.isEmpty()) data.moodEnergies.addAll(fb.moodEnergies);
+                    if (data.languages.isEmpty()) data.languages.addAll(fb.languages);
+                }
+                final MglaYandexMusicModel.WaveSettingsData out = data;
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(out);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(MglaYandexMusicModel.WaveSettingsData.fallback());
+                });
+            }
+        });
+    }
+
+    private static MglaYandexMusicModel.WaveSettingsData parseWaveSettings(JSONObject result) {
+        MglaYandexMusicModel.WaveSettingsData data = new MglaYandexMusicModel.WaveSettingsData();
+        if (result == null) {
+            return data;
+        }
+        JSONArray blocks = result.optJSONArray("blocks");
+        if (blocks != null) {
+            for (int i = 0; i < blocks.length(); i++) {
+                JSONObject block = blocks.optJSONObject(i);
+                if (block == null) continue;
+                JSONArray items = block.optJSONArray("items");
+                if (items == null) continue;
+                for (int j = 0; j < items.length(); j++) {
+                    JSONObject item = items.optJSONObject(j);
+                    if (item == null) continue;
+                    String name = item.optString("name", item.optString("title", ""));
+                    String seed = null;
+                    JSONObject id = item.optJSONObject("id");
+                    if (id != null) {
+                        String type = id.optString("type", "");
+                        String tag = id.optString("tag", "");
+                        if (!TextUtils.isEmpty(type) && !TextUtils.isEmpty(tag)) {
+                            seed = type + ":" + tag;
+                        }
+                    }
+                    if (TextUtils.isEmpty(seed)) {
+                        seed = item.optString("serializedSeed", item.optString("serialized_seed", null));
+                    }
+                    if (!TextUtils.isEmpty(name) && !TextUtils.isEmpty(seed)) {
+                        data.activities.add(new MglaYandexMusicModel.WaveOption(name, seed));
+                    }
+                }
+            }
+        }
+        JSONObject restrictions = result.optJSONObject("settingRestrictions");
+        if (restrictions == null) {
+            restrictions = result.optJSONObject("setting_restrictions");
+        }
+        if (restrictions != null) {
+            parseRestrictionEnum(restrictions.optJSONObject("diversity"), data.diversities);
+            parseRestrictionEnum(restrictions.optJSONObject("moodEnergy"), data.moodEnergies);
+            if (data.moodEnergies.isEmpty()) {
+                parseRestrictionEnum(restrictions.optJSONObject("mood_energy"), data.moodEnergies);
+            }
+            parseRestrictionEnum(restrictions.optJSONObject("language"), data.languages);
+        }
+        return data;
+    }
+
+    private static void parseRestrictionEnum(JSONObject enumObj, List<MglaYandexMusicModel.WaveOption> out) {
+        if (enumObj == null || out == null) {
+            return;
+        }
+        JSONArray values = enumObj.optJSONArray("possibleValues");
+        if (values == null) {
+            values = enumObj.optJSONArray("possible_values");
+        }
+        if (values == null) {
+            return;
+        }
+        for (int i = 0; i < values.length(); i++) {
+            JSONObject v = values.optJSONObject(i);
+            if (v == null) continue;
+            String name = v.optString("name", v.optString("value", ""));
+            String seed = v.optString("serializedSeed", v.optString("serialized_seed", null));
+            if (TextUtils.isEmpty(seed)) {
+                String value = v.optString("value", "");
+                // Infer seed prefix from common fields when serializedSeed is absent.
+                if (!TextUtils.isEmpty(value)) {
+                    if ("favorite".equals(value) || "popular".equals(value)
+                            || "discover".equals(value) || "default".equals(value)) {
+                        seed = "settingDiversity:" + value;
+                    } else if ("fun".equals(value) || "active".equals(value)
+                            || "calm".equals(value) || "sad".equals(value) || "all".equals(value)) {
+                        seed = "settingMoodEnergy:" + value;
+                    } else if ("russian".equals(value) || "not-russian".equals(value) || "any".equals(value)) {
+                        seed = "settingLanguage:" + value;
+                    }
+                }
+            }
+            if (!TextUtils.isEmpty(name) && !TextUtils.isEmpty(seed)) {
+                out.add(new MglaYandexMusicModel.WaveOption(name, seed));
+            }
+        }
+    }
+
     /** Start a recommendation wave session (Моя волна / wave by playlist/track/artist). */
     public static void startRotorSession(List<String> seeds, Callback<RotorBatch> callback) {
         Utilities.globalQueue.postRunnable(() -> {

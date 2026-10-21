@@ -182,10 +182,8 @@ public final class MglaAuth {
             if (!MglaWsConfig.isEnabled()) {
                 return false;
             }
-            // Ultra → native /mgla-auth on mglahub (not bot /mgla-ai/v1/auth/*).
-            if (MglaWsConfig.isUltraBypassEnabled()) {
-                return false;
-            }
+            // Same as features/AI: normal → mglabot /mgla-ai/v1/auth/*;
+            // Ultra → mglahub /mgla-ai/v1/auth/* (getRelayHost() is already the hub).
             if (TextUtils.isEmpty(MglaWsConfig.getRelayHost())) {
                 return false;
             }
@@ -251,14 +249,14 @@ public final class MglaAuth {
             conn.setRequestProperty("X-Mgla-Client", "mgla");
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
-                String expectedPin = viaRelay
-                    ? MglaWsConfig.RELAY_SPKI_SHA256_BASE64
-                    : MglaWsConfig.HUB_SPKI_SHA256_BASE64;
-                boolean pinHost = viaRelay
-                    ? MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)
-                    : MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host);
-                if (pinHost) {
-                    MglaUpdateChecker.verifySpkiPin(conn.getServerCertificates(), expectedPin);
+                if (viaRelay) {
+                    String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+                    if (pins != null && pins.length > 0) {
+                        MglaUpdateChecker.verifySpkiPin(conn.getServerCertificates(), pins[0]);
+                    }
+                } else if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
+                    MglaUpdateChecker.verifySpkiPin(
+                            conn.getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
                 }
                 os.write(payload);
             }

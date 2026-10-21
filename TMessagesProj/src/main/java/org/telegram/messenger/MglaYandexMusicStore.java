@@ -36,6 +36,11 @@ public final class MglaYandexMusicStore {
     private static final String KEY_SHUFFLE = "playback_shuffle";
     private static final String KEY_REPEAT = "playback_repeat";
 
+    /** My Wave setting seeds (settingDiversity:* / settingMoodEnergy:* / settingLanguage:*). */
+    private static final String KEY_WAVE_DIVERSITY = "wave_setting_diversity";
+    private static final String KEY_WAVE_MOOD = "wave_setting_mood";
+    private static final String KEY_WAVE_LANGUAGE = "wave_setting_language";
+
     public interface AuthListener {
         void onAuthStateChanged(boolean isAuthorized);
     }
@@ -282,6 +287,55 @@ public final class MglaYandexMusicStore {
             }
             prefs.edit().putString(KEY_CACHED_ARTISTS, arr.toString()).apply();
         } catch (Exception ignored) {
+        }
+    }
+
+    public String getWaveDiversitySeed() {
+        return prefs.getString(KEY_WAVE_DIVERSITY, "");
+    }
+
+    public void setWaveDiversitySeed(String seed) {
+        prefs.edit().putString(KEY_WAVE_DIVERSITY, seed != null ? seed : "").apply();
+    }
+
+    public String getWaveMoodSeed() {
+        return prefs.getString(KEY_WAVE_MOOD, "");
+    }
+
+    public void setWaveMoodSeed(String seed) {
+        prefs.edit().putString(KEY_WAVE_MOOD, seed != null ? seed : "").apply();
+    }
+
+    public String getWaveLanguageSeed() {
+        return prefs.getString(KEY_WAVE_LANGUAGE, "");
+    }
+
+    public void setWaveLanguageSeed(String seed) {
+        prefs.edit().putString(KEY_WAVE_LANGUAGE, seed != null ? seed : "").apply();
+    }
+
+    /**
+     * Seeds for personal «Моя волна»: always {@code user:onyourwave}, plus optional
+     * diversity / mood / language settings (skip neutral defaults).
+     */
+    public List<String> buildMyWaveSeeds() {
+        List<String> seeds = new ArrayList<>();
+        seeds.add("user:onyourwave");
+        appendWaveSettingSeed(seeds, getWaveDiversitySeed(), "settingDiversity:default");
+        appendWaveSettingSeed(seeds, getWaveMoodSeed(), "settingMoodEnergy:all");
+        appendWaveSettingSeed(seeds, getWaveLanguageSeed(), "settingLanguage:any");
+        return seeds;
+    }
+
+    private static void appendWaveSettingSeed(List<String> seeds, String seed, String neutral) {
+        if (TextUtils.isEmpty(seed)) {
+            return;
+        }
+        if (!TextUtils.isEmpty(neutral) && neutral.equals(seed)) {
+            return;
+        }
+        if (!seeds.contains(seed)) {
+            seeds.add(seed);
         }
     }
 

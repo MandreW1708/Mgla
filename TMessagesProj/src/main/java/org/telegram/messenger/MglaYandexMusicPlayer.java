@@ -141,6 +141,11 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         return isMyWaveActive && "Моя волна по коллекции".equals(currentSourceTitle);
     }
 
+    /** Personal «Моя волна» (home tab), not collection / activity / track wave. */
+    public boolean isPersonalWaveActive() {
+        return isMyWaveActive && "Моя волна".equals(currentSourceTitle);
+    }
+
     public String getCurrentSourceTitle() {
         return currentSourceTitle != null ? currentSourceTitle : "";
     }
@@ -223,9 +228,27 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     }
 
     public void playMyWave() {
-        List<String> seeds = new ArrayList<>();
-        seeds.add("user:onyourwave");
+        List<String> seeds = MglaYandexMusicStore.getInstance().buildMyWaveSeeds();
         playRotorSession(seeds, "Моя волна");
+    }
+
+    /** Start or pause/resume personal «Моя волна» with current saved settings. */
+    public void toggleMyWave() {
+        if (isPersonalWaveActive()) {
+            togglePlayPause();
+        } else {
+            playMyWave();
+        }
+    }
+
+    /**
+     * If personal wave is already playing, restart it so new diversity/mood/language
+     * settings take effect immediately.
+     */
+    public void restartPersonalWaveIfActive() {
+        if (isPersonalWaveActive()) {
+            playMyWave();
+        }
     }
 
     /**
