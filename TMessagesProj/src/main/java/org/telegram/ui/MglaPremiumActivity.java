@@ -553,8 +553,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             ));
             premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
                     FEATURE_PRIORITY_BYPASS, R.drawable.msg_premium_speed,
-                    "Приоритет и автообход",
-                    "Приоритетная скорость и подключение автообхода"
+                    "Приоритет подключения и увеличенная скорость скачивания",
+                    "Приоритет подключения и увеличенная скорость скачивания"
             ));
         }
     }
@@ -746,14 +746,13 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             return;
         }
 
-        String text = active >= PLAN_PREMIUM
-                ? "Улучшить до " + plan.title
-                : "Подписаться · " + plan.priceRub + " ₽/мес";
+        // Platega moderation path: tariff + concrete price + clickable pay → stub (no live checkout yet).
+        String text = "Оплатить · " + plan.priceRub + " ₽/мес";
         premiumButtonView.setButton(text, v -> {
             BulletinFactory.of(this)
                     .createSimpleBulletin(
-                            R.raw.contact_check,
-                            "Оплата в приложении скоро. Сейчас подписку выдаёт администратор.")
+                            R.raw.error,
+                            "Оплата пока недоступна. Подключение платёжной системы ещё не завершено.")
                     .show();
         }, animated);
     }
@@ -897,7 +896,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 } else if (plan.id == PLAN_PLUS) {
                     hint = "Premium+ включает всё из Premium и добавляет умные облачные ИИ-модели.";
                 } else {
-                    hint = "Premium Ultra включает всё из Premium и Premium+, плюс продвинутые модели, приоритет и автообход.";
+                    hint = "Premium Ultra включает всё из Premium и Premium+, плюс продвинутые модели, приоритет подключения и увеличенную скорость скачивания.";
                 }
                 privacyCell.setText(hint);
             }
@@ -1113,7 +1112,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             planId = plan.id;
             palette = PlanPalette.forPlan(plan.id);
             titleView.setText(plan.tabTitle);
-            priceView.setText(plan.priceRub + " ₽");
+            priceView.setText(plan.priceRub + " ₽/мес");
             rebuildShader(getWidth());
         }
 

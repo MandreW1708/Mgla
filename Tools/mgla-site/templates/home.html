@@ -42,7 +42,7 @@
       <div class="premium-card-top">
         <div class="premium-name">{{ plan.name }}</div>
         <div class="premium-tag">{{ plan.tagline }}</div>
-        <div class="premium-price"><span>{{ plan.price }}</span> ₽</div>
+        <div class="premium-price"><span>{{ plan.price }}</span> ₽/мес</div>
       </div>
       <ul class="premium-features">
         {% for f in plan.features %}
@@ -55,6 +55,14 @@
         </li>
         {% endfor %}
       </ul>
+      <div class="premium-card-action">
+        <button
+          type="button"
+          class="btn btn-primary premium-pay-btn"
+          data-plan="{{ plan.name }}"
+          data-price="{{ plan.price }}"
+        ><span>Оплатить · {{ plan.price }} ₽/мес</span></button>
+      </div>
     </article>
     {% endfor %}
   </div>
@@ -71,7 +79,7 @@
   <div class="contact-strip" data-reveal>
     <div>
       <strong>Связь</strong>
-      <span>Вопросы по клиенту, обходу и поддержке — в Telegram.</span>
+      <span>Вопросы по клиенту, подключению и поддержке — в Telegram.</span>
     </div>
     <a class="btn btn-primary" href="{{ home.contact_url }}" target="_blank" rel="noopener"><span>{{ home.contact_label }}</span></a>
   </div>

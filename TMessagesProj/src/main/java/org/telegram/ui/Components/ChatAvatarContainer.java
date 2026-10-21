@@ -697,8 +697,10 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int maxWidth = MeasureSpec.getSize(widthMeasureSpec) + titleTextView.getPaddingRight();
-        final boolean avatarInTitle = avatarImageView.getParent() == this && avatarImageView.getVisibility() == VISIBLE;
-        int avatarReserve = avatarInTitle ? 54 : 0;
+        // Measure avatar whenever it's attached — skipping leaves measuredHeight=0 and drops the
+        // title into the lower half of the action bar (broken Topics / forum header).
+        final boolean avatarInTitle = avatarImageView.getParent() == this && avatarImageView.getVisibility() != GONE;
+        int avatarReserve = avatarInTitle && avatarImageView.getVisibility() == VISIBLE ? 54 : 0;
         int availableWidth = maxWidth - dp(avatarReserve + 16);
         if (avatarInTitle) {
             avatarImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp), MeasureSpec.EXACTLY));
@@ -715,12 +717,27 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), subtitleHSpec);
         }
         if (glassCentered) {
-            final int glassW = getGlassLayoutWidth();
-            titleTextView.measure(MeasureSpec.makeMeasureSpec(glassW, MeasureSpec.EXACTLY), titleHSpec);
+            updateGlassTextGravity();
+            if (isGlassAtMaxWidth()) {
+                // Max pill: nick left-aligned + ellipsize. Status keeps its natural width and is
+                // centered via layout — measuring it to the full column with LEFT gravity
+                // shoved "в сети" to the left edge.
+                final int titleCol = getGlassTitleTextWidth();
+                titleTextView.measure(MeasureSpec.makeMeasureSpec(titleCol, MeasureSpec.EXACTLY), titleHSpec);
+            } else {
+                // Non-max: full nick/channel — measure wide enough that createLayout won't ellipsize
+                // (it subtracts side drawables from the EXACTLY width before laying out text).
+                final int titleNat = Math.max(1, getTitleNaturalWidth());
+                titleTextView.measure(MeasureSpec.makeMeasureSpec(titleNat, MeasureSpec.EXACTLY), titleHSpec);
+            }
+            // Status always: natural width (capped at max so long "Connecting…" can ellipsize),
+            // then centered in the pill by getGlassSubtitleLeft().
+            final int subCap = isGlassAtMaxWidth() ? getGlassCenteredTextWidth() : Integer.MAX_VALUE;
+            final int subNat = Math.max(1, Math.min(subCap, getSubtitleNaturalWidth()));
             if (subtitleTextView != null) {
-                subtitleTextView.measure(MeasureSpec.makeMeasureSpec(glassW, MeasureSpec.EXACTLY), subtitleHSpec);
+                subtitleTextView.measure(MeasureSpec.makeMeasureSpec(subNat, MeasureSpec.EXACTLY), subtitleHSpec);
             } else if (animatedSubtitleTextView != null) {
-                animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(glassW, MeasureSpec.EXACTLY), subtitleHSpec);
+                animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(subNat, MeasureSpec.EXACTLY), subtitleHSpec);
             }
         }
         if (communityItem != null) {
@@ -834,24 +851,23 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (!glassMode) {
             return;
         }
-        final boolean centered = !hasVisibleAvatar();
+        // LEFT + layout-centering: CENTER gravity with a tight EXACTLY width clips both ends
+        // under the rounded glass. Keep emoji/verified outside so createLayout doesn't steal
+        // their width from the letters (that was also chopping the nick).
         if (titleTextView != null) {
-            titleTextView.setGravity(centered ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT);
-            // Ellipsis (not fade) when the nick is longer than the glass.
-            titleTextView.setEllipsizeByGradient(!centered);
-            // Outside + CENTER parks the premium emoji on the far right of the view.
-            // Keep it inside so nick+emoji are one centered block and count toward width.
-            titleTextView.setRightDrawableOutside(!centered);
+            titleTextView.setGravity(Gravity.LEFT);
+            titleTextView.setEllipsizeByGradient(false);
+            titleTextView.setRightDrawableOutside(true);
         }
         if (subtitleTextView != null) {
-            subtitleTextView.setGravity(centered ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT);
-            subtitleTextView.setEllipsizeByGradient(!centered);
-            subtitleTextView.setPadding(0, 0, centered ? 0 : dp(10), 0);
+            subtitleTextView.setGravity(Gravity.LEFT);
+            subtitleTextView.setEllipsizeByGradient(false);
+            subtitleTextView.setPadding(0, 0, 0, 0);
         }
         if (animatedSubtitleTextView != null) {
-            animatedSubtitleTextView.setGravity(centered ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT);
-            animatedSubtitleTextView.setEllipsizeByGradient(!centered);
-            animatedSubtitleTextView.setPadding(0, 0, centered ? 0 : dp(10), 0);
+            animatedSubtitleTextView.setGravity(Gravity.LEFT);
+            animatedSubtitleTextView.setEllipsizeByGradient(false);
+            animatedSubtitleTextView.setPadding(0, 0, 0, 0);
         }
     }
 
@@ -859,13 +875,30 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (titleTextView == null) {
             return 0;
         }
-        // getExactWidth already includes emoji status / verified / mute drawables.
-        return Math.max(1, (int) Math.ceil(titleTextView.getExactWidth()));
+        // Must be text + side drawables: onMeasure/createLayout subtract drawables from the
+        // EXACTLY width before laying out letters — using only paint width makes both ends clip.
+        final int side = titleTextView.getSideDrawablesSize();
+        int textW;
+        if (titleTextView.getLayout() != null) {
+            textW = titleTextView.getTextWidth();
+        } else {
+            final CharSequence t = titleTextView.getText();
+            textW = t == null || t.length() == 0 ? 0 : (int) Math.ceil(titleTextView.getPaint().measureText(t.toString()));
+        }
+        return Math.max(1, textW + side);
     }
 
     private int getSubtitleNaturalWidth() {
         if (subtitleTextView != null && subtitleTextView.getVisibility() != GONE) {
-            return Math.max(1, (int) Math.ceil(subtitleTextView.getExactWidthIncludeDrawables()));
+            final int side = subtitleTextView.getSideDrawablesSize();
+            int textW;
+            if (subtitleTextView.getLayout() != null) {
+                textW = subtitleTextView.getTextWidth();
+            } else {
+                final CharSequence t = subtitleTextView.getText();
+                textW = t == null || t.length() == 0 ? 0 : (int) Math.ceil(subtitleTextView.getPaint().measureText(t.toString()));
+            }
+            return Math.max(1, textW + side);
         }
         if (animatedSubtitleTextView != null && animatedSubtitleTextView.getVisibility() != GONE) {
             final int w = Math.max(animatedSubtitleTextView.finalWidth(), animatedSubtitleTextView.width());
@@ -898,6 +931,9 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (avatarImageView.getMeasuredHeight() > 0) {
             return avatarImageView.getMeasuredHeight();
         }
+        if (hasVisibleAvatar()) {
+            return dp(avatarSizeInDp);
+        }
         if (glassMode && !hasVisibleAvatar()) {
             return dp(46);
         }
@@ -906,7 +942,19 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     private int getViewTop() {
         final int actionBarHeight = ActionBar.getCurrentActionBarHeight();
-        return (actionBarHeight - getLayoutAvatarHeight()) / 2 + (occupyStatusBar ? AndroidUtilities.statusBarHeight : 0);
+        int avatarH = getLayoutAvatarHeight();
+        // No avatar: keep viewTop small so the title can sit on the back-button row.
+        if (avatarH <= 0) {
+            avatarH = dp(36);
+        }
+        int top = (actionBarHeight - avatarH - 2) / 2;
+        if (top < 0) {
+            top = 0;
+        }
+        if (occupyStatusBar && getMeasuredHeight() > actionBarHeight + dp(8)) {
+            top += AndroidUtilities.statusBarHeight;
+        }
+        return top;
     }
 
     @Override
@@ -918,27 +966,26 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             avatarImageView.layout(leftPadding, viewTop, leftPadding + avatarImageView.getMeasuredWidth(), viewTop + avatarImageView.getMeasuredHeight());
             menuDotsImageView.layout(leftPadding, viewTop, leftPadding + menuDotsImageView.getMeasuredWidth(), viewTop + menuDotsImageView.getMeasuredHeight());
         }
+        // Keep X where it was: only shift right when the avatar is actually visible.
         int l = leftPadding + (hasVisibleAvatar() ? dp(glassMode ? 48.66f : 54) : 0) + rightAvatarPadding;
         final boolean glassTitleCentered = glassMode && !hasVisibleAvatar();
-        // Full glass width; CENTER gravity draws nick/status in the middle (measured EXACTLY to this).
-        final int glassW = glassTitleCentered ? titleTextView.getMeasuredWidth() : 0;
+        final int glassW = glassTitleCentered ? getGlassLayoutWidth() : 0;
         SimpleTextView titleTextLargerCopyView = this.titleTextLargerCopyView.get();
-        if (getSubtitleTextView().getVisibility() != GONE) {
-            int titleLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, titleTextView.getMeasuredWidth());
-            final int titleRight = titleLeft + (glassTitleCentered ? glassW : titleTextView.getMeasuredWidth());
-            titleTextView.layout(titleLeft, viewTop + dp(1.66f) - titleTextView.getPaddingTop(), titleRight, viewTop + titleTextView.getTextHeight() + dp(1.66f) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom());
-            if (titleTextLargerCopyView != null) {
-                int copyLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, titleTextLargerCopyView.getMeasuredWidth());
-                titleTextLargerCopyView.layout(copyLeft, viewTop + dp(1.66f), copyLeft + titleTextLargerCopyView.getMeasuredWidth(), viewTop + titleTextLargerCopyView.getTextHeight() + dp(1.66f));
-            }
-        } else {
-            int titleLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, titleTextView.getMeasuredWidth());
-            final int titleRight = titleLeft + (glassTitleCentered ? glassW : titleTextView.getMeasuredWidth());
-            titleTextView.layout(titleLeft, viewTop + dp(10) - titleTextView.getPaddingTop(), titleRight, viewTop + titleTextView.getTextHeight() + dp(10) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom());
-            if (titleTextLargerCopyView != null) {
-                int copyLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, titleTextLargerCopyView.getMeasuredWidth());
-                titleTextLargerCopyView.layout(copyLeft, viewTop + dp(10), copyLeft + titleTextLargerCopyView.getMeasuredWidth(), viewTop + titleTextLargerCopyView.getTextHeight() + dp(10));
-            }
+        // Non-glass (Topics etc.): raise title to the back-button row.
+        // Glass chat header keeps the two-line offsets.
+        final boolean raiseTitle = !glassMode;
+        final float titleY = raiseTitle ? -2f : (getSubtitleTextView().getVisibility() == GONE ? 10f : 1.66f);
+        final int titleTop = viewTop + dp(titleY) - titleTextView.getPaddingTop();
+        final int titleBottom = viewTop + titleTextView.getTextHeight() + dp(titleY) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom();
+        int titleLeft = glassTitleCentered
+                ? getGlassTitleLeft()
+                : (glassMode ? getCenteredTextLeft(l, titleTextView.getMeasuredWidth()) : l);
+        titleTextView.layout(titleLeft, titleTop, titleLeft + titleTextView.getMeasuredWidth(), titleBottom);
+        if (titleTextLargerCopyView != null) {
+            int copyLeft = glassTitleCentered
+                    ? getGlassTitleLeft()
+                    : (glassMode ? getCenteredTextLeft(l, titleTextLargerCopyView.getMeasuredWidth()) : l);
+            titleTextLargerCopyView.layout(copyLeft, viewTop + dp(titleY), copyLeft + titleTextLargerCopyView.getMeasuredWidth(), viewTop + titleTextLargerCopyView.getTextHeight() + dp(titleY));
         }
         if (communityItem != null) {
             communityItem.layout(
@@ -962,17 +1009,21 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             starFgItem.layout(leftPadding + dp(28), viewTop + dp(24), leftPadding + dp(28) + starFgItem.getMeasuredWidth(), viewTop + dp(24) + starFgItem.getMeasuredHeight());
         }
         if (subtitleTextView != null) {
-            int subtitleLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, subtitleTextView.getMeasuredWidth());
-            final int subtitleRight = subtitleLeft + (glassTitleCentered ? glassW : subtitleTextView.getMeasuredWidth());
-            subtitleTextView.layout(subtitleLeft, subtitleTop, subtitleRight, subtitleTop + subtitleTextView.getTextHeight());
+            int subtitleLeft = glassTitleCentered
+                    ? getGlassSubtitleLeft()
+                    : (glassMode ? getCenteredTextLeft(l, subtitleTextView.getMeasuredWidth()) : l);
+            subtitleTextView.layout(subtitleLeft, subtitleTop, subtitleLeft + subtitleTextView.getMeasuredWidth(), subtitleTop + subtitleTextView.getTextHeight());
         } else if (animatedSubtitleTextView != null) {
-            int subtitleLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, animatedSubtitleTextView.getMeasuredWidth());
-            final int subtitleRight = subtitleLeft + (glassTitleCentered ? glassW : animatedSubtitleTextView.getMeasuredWidth());
-            animatedSubtitleTextView.layout(subtitleLeft, subtitleTop, subtitleRight, subtitleTop + animatedSubtitleTextView.getTextHeight());
+            int subtitleLeft = glassTitleCentered
+                    ? getGlassSubtitleLeft()
+                    : (glassMode ? getCenteredTextLeft(l, animatedSubtitleTextView.getMeasuredWidth()) : l);
+            animatedSubtitleTextView.layout(subtitleLeft, subtitleTop, subtitleLeft + animatedSubtitleTextView.getMeasuredWidth(), subtitleTop + animatedSubtitleTextView.getTextHeight());
         }
         SimpleTextView subtitleTextLargerCopyView = this.subtitleTextLargerCopyView.get();
         if (subtitleTextLargerCopyView != null) {
-            int copyLeft = glassTitleCentered ? 0 : getCenteredTextLeft(l, subtitleTextLargerCopyView.getMeasuredWidth());
+            int copyLeft = glassTitleCentered
+                    ? getGlassSubtitleLeft()
+                    : (glassMode ? getCenteredTextLeft(l, subtitleTextLargerCopyView.getMeasuredWidth()) : l);
             subtitleTextLargerCopyView.layout(copyLeft, subtitleTop, copyLeft + subtitleTextLargerCopyView.getMeasuredWidth(), subtitleTop + subtitleTextLargerCopyView.getTextHeight());
         }
     }
@@ -1879,6 +1930,18 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
                (menuDotsImageView != null && menuDotsImageView.getVisibility() == VISIBLE && menuDotsImageView.getParent() == this);
     }
 
+    /** Floor for the glass nick pill — short names like "Pisun" look too tight without it. */
+    private static final int GLASS_MIN_WIDTH_DP = 132;
+    /**
+     * Horizontal padding inside the pill (symmetric). Glass radius is ~23dp and ActionBar adds
+     * only ~6dp outside visualWidth — need ≥~20dp/side here or letters sit under the oval.
+     */
+    private static final int GLASS_SIDE_INSET_DP = 48;
+    /** Left inset for long nick at max width — clears the rounded edge. */
+    private static final int GLASS_MAX_LEFT_INSET_DP = 22;
+    /** Right fade room when nick is left-aligned at max width. */
+    private static final int GLASS_MAX_RIGHT_INSET_DP = 22;
+
     public int getVisualWidth() {
         float width = Math.max(getTitleNaturalWidth(), getSubtitleNaturalWidth());
         if (hasVisibleAvatar()) {
@@ -1886,9 +1949,49 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         } else if (!glassMode) {
             width += dp(30);
         } else {
-            // Side inset so nick/status are not flush against the glass edge.
-            width += dp(24);
+            width += dp(GLASS_SIDE_INSET_DP);
+            width = Math.max(width, dp(GLASS_MIN_WIDTH_DP));
         }
         return (int) Math.ceil(width);
+    }
+
+    private boolean isGlassAtMaxWidth() {
+        return glassMode && !hasVisibleAvatar()
+                && getGlassLayoutWidth() >= getMaxGlassWidth() - dp(2);
+    }
+
+    /** Centered text column (status always; nick when not at max). */
+    private int getGlassCenteredTextWidth() {
+        return Math.max(dp(24), getGlassLayoutWidth() - dp(GLASS_SIDE_INSET_DP));
+    }
+
+    /** Nick text column — at max width left-aligned with side insets so start isn't clipped. */
+    private int getGlassTitleTextWidth() {
+        if (isGlassAtMaxWidth()) {
+            return Math.max(dp(24), getGlassLayoutWidth() - dp(GLASS_MAX_LEFT_INSET_DP) - dp(GLASS_MAX_RIGHT_INSET_DP));
+        }
+        return getGlassCenteredTextWidth();
+    }
+
+    private int getGlassTitleLeft() {
+        if (isGlassAtMaxWidth()) {
+            return dp(GLASS_MAX_LEFT_INSET_DP);
+        }
+        // Center the real measured nick — not a shrunk column that would clip sides.
+        final int titleW = titleTextView != null ? titleTextView.getMeasuredWidth() : getGlassCenteredTextWidth();
+        return Math.max(0, (getGlassLayoutWidth() - titleW) / 2);
+    }
+
+    private int getGlassSubtitleLeft() {
+        // Always center the real measured status — including at max width ("в сети", etc.).
+        final int subW;
+        if (subtitleTextView != null && subtitleTextView.getMeasuredWidth() > 0) {
+            subW = subtitleTextView.getMeasuredWidth();
+        } else if (animatedSubtitleTextView != null && animatedSubtitleTextView.getMeasuredWidth() > 0) {
+            subW = animatedSubtitleTextView.getMeasuredWidth();
+        } else {
+            subW = getGlassCenteredTextWidth();
+        }
+        return Math.max(0, (getGlassLayoutWidth() - subW) / 2);
     }
 }

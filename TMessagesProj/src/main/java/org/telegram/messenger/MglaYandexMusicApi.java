@@ -536,6 +536,88 @@ public final class MglaYandexMusicApi {
         return new RotorBatch(sessionId, batchId, tracks);
     }
 
+    /**
+     * Rotor session feedback: like / dislike / skip / trackStarted / trackFinished / radioStarted.
+     */
+    public static void sendRotorFeedback(String sessionId, String batchId, String eventType,
+                                         String trackId, float totalPlayedSeconds, Callback<Boolean> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                if (TextUtils.isEmpty(sessionId) || TextUtils.isEmpty(eventType)) {
+                    throw new Exception("Missing rotor feedback params");
+                }
+                JSONObject event = new JSONObject();
+                event.put("type", eventType);
+                event.put("timestamp", System.currentTimeMillis() / 1000.0);
+                if (!TextUtils.isEmpty(trackId)) {
+                    event.put("trackId", trackId);
+                }
+                if (totalPlayedSeconds >= 0 && ("skip".equals(eventType) || "trackFinished".equals(eventType)
+                        || "dislike".equals(eventType) || "like".equals(eventType))) {
+                    event.put("totalPlayedSeconds", Math.max(0.1, totalPlayedSeconds));
+                }
+                JSONObject body = new JSONObject();
+                body.put("event", event);
+                if (!TextUtils.isEmpty(batchId)) {
+                    body.put("batchId", batchId);
+                }
+
+                HttpURLConnection conn = setupConnection(
+                        BASE_URL + "/rotor/session/" + Uri.encode(sessionId) + "/feedback", "POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                OutputStream os = conn.getOutputStream();
+                os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                os.flush();
+                os.close();
+                readResponse(conn);
+
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(true);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
+    /** Persist track dislike in the user library (affects recommendations outside the session). */
+    public static void addTrackDislike(String trackId, Callback<Boolean> callback) {
+        if (TextUtils.isEmpty(trackId)) {
+            return;
+        }
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                MglaYandexMusicModel.UserInfo user = MglaYandexMusicStore.getInstance().getUserInfo();
+                String uid = user != null ? user.uid : "";
+                if (TextUtils.isEmpty(uid)) {
+                    throw new Exception("Cannot dislike: User ID is empty");
+                }
+                String url = BASE_URL + "/users/" + uid + "/dislikes/tracks/add-multiple";
+                String body = "track-ids=" + trackId;
+                HttpURLConnection conn = setupConnection(url, "POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                OutputStream os = conn.getOutputStream();
+                os.write(body.getBytes(StandardCharsets.UTF_8));
+                os.flush();
+                os.close();
+                readResponse(conn);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onSuccess(true);
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) callback.onError(e);
+                });
+            }
+        });
+    }
+
     private static List<MglaYandexMusicModel.Track> parseRotorSequence(JSONArray seq) {
         List<MglaYandexMusicModel.Track> list = new ArrayList<>();
         if (seq == null) {

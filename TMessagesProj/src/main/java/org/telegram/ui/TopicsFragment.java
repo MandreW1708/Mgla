@@ -877,6 +877,8 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
 
         avatarContainer = new ChatAvatarContainer(context, this, false, resourceProvider);
         avatarContainer.getAvatarImageView().setRoundRadius(AndroidUtilities.dp(16));
+        // Must match actionBar: in right-sliding preview the AB sits below the status bar,
+        // so avatar/title must NOT add statusBarHeight again (title sank under the back button).
         avatarContainer.setOccupyStatusBar(!AndroidUtilities.isTablet() && !inPreviewMode);
         avatarContainer.allowDrawStories = getDialogId() < 0;
         avatarContainer.setClipChildren(false);
@@ -4102,6 +4104,15 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
     @Override
     public SizeNotifierFrameLayout getContentView() {
         return contentView;
+    }
+
+    @Override
+    public void setInPreviewMode(boolean value) {
+        super.setInPreviewMode(value);
+        if (avatarContainer != null) {
+            avatarContainer.setOccupyStatusBar(!AndroidUtilities.isTablet() && !value);
+            avatarContainer.requestLayout();
+        }
     }
 
     @Override

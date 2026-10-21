@@ -200,7 +200,6 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
     private boolean previewGlassMode;
     private boolean suppressTitleGlass;
     private boolean glassOnlyBack;
-    private boolean glassModeIsForum;
 
     private ChatAvatarContainer chatAvatarContainer;
     private float frozenAvatarTranslationX;
@@ -238,16 +237,13 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         setBackground(null);
         setClipChildren(false);
         glassMode = true;
-        glassModeIsForum = isForum;
 
         glassDrawable = factory.create(this)
             .setColorProvider(colorProvider)
             .setPadding(dp(6));
-        if (isForum) {
-            glassDrawable.setRadius(dp(18.33f), dp(23), dp(23), dp(18.33f));
-        } else {
-            glassDrawable.setRadius(dp(23));
-        }
+        // Same capsule radius on all corners — forum used to flatten the left (18.33)
+        // to nest against the back button, which looks wrong on the floating nick/topic pill.
+        glassDrawable.setRadius(dp(23));
 
 
         glassDrawableBack = factory.create(this)
@@ -1290,13 +1286,6 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         alphaUpdate.addUpdateListener(anm -> {
             searchFieldVisibleAlpha = (float) anm.getAnimatedValue();
 
-            if (glassDrawable != null && glassModeIsForum) {
-                final float r1 = dp(23);
-                final float r2 = lerp(dp(18.33f), dp(23), searchFieldVisibleAlpha);
-                glassDrawable.setRadius(r2, r1, r1, r2);
-                invalidate();
-            }
-
             if (glassMode && menu != null) {
                 menu.setTranslationX(-lerp((float) dp(10), dp(5), searchFieldVisibleAlpha));
             }
@@ -2245,12 +2234,13 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
 
         final boolean hasAvatar = chatAvatarContainer.hasVisibleAvatar();
-        // Ceiling stays the previous full-width budget; glass may only shrink to fit the nick/subtitle.
+        // Ceiling stays the previous full-width budget; floor keeps short nicks from looking tiny.
         final int maxAvailable = previewGlassMode
             ? getMeasuredWidth() - dp(6) * 2
             : getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
         final int visualWidth = Math.max(0, chatAvatarContainer.getVisualWidth());
-        final int targetWidth = Math.min(maxAvailable, visualWidth);
+        final int minWidth = hasAvatar ? 0 : Math.min(maxAvailable, dp(132));
+        final int targetWidth = Math.min(maxAvailable, Math.max(minWidth, visualWidth));
         if (animated) {
             if (animatorAvatarContainerWidth.getToFactor() != targetWidth) {
                 animatorAvatarContainerWidth.animateTo(targetWidth);

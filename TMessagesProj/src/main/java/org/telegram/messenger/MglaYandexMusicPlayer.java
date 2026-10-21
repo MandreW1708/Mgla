@@ -45,6 +45,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     private String currentSourceTitle = "";
     private String currentRotorStation = "user:onyourwave";
     private String currentRotorSessionId;
+    private String currentRotorBatchId;
     private final List<String> currentRotorSeeds = new ArrayList<>();
     private boolean isRotorLoading;
     private boolean observersRegistered;
@@ -187,6 +188,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         ensureObservers();
         isMyWaveActive = false;
         currentRotorSessionId = null;
+        currentRotorBatchId = null;
         currentRotorSeeds.clear();
         waveSeedAfterQueue = thenWave && !TextUtils.isEmpty(track.id) ? track.id : null;
         currentSourceTitle = sourceTitle != null ? sourceTitle : "";
@@ -238,6 +240,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         currentSourceTitle = "Моя волна по коллекции";
         currentRotorStation = "collection";
         currentRotorSessionId = null;
+        currentRotorBatchId = null;
         currentRotorSeeds.clear();
         isBuffering = true;
         notifyPlaybackState(isPlaying, true);
@@ -297,6 +300,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         currentSourceTitle = !TextUtils.isEmpty(title) ? title : "Моя волна";
         currentRotorStation = seeds != null && !seeds.isEmpty() ? seeds.get(0) : "user:onyourwave";
         currentRotorSessionId = null;
+        currentRotorBatchId = null;
         currentRotorSeeds.clear();
         if (seeds != null) {
             currentRotorSeeds.addAll(seeds);
@@ -407,6 +411,9 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         if (batch == null) return;
         if (!TextUtils.isEmpty(batch.sessionId)) {
             currentRotorSessionId = batch.sessionId;
+        }
+        if (!TextUtils.isEmpty(batch.batchId)) {
+            currentRotorBatchId = batch.batchId;
         }
         applyRotorTracks(batch.tracks, append);
     }
@@ -607,6 +614,57 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         MglaYandexMusicStore.getInstance().setLiked(currentTrack.id, newLiked);
         notifyTrackChanged(currentTrack);
         MglaYandexMusicApi.toggleLike(currentTrack.id, newLiked, null);
+        if (isMyWaveActive && !TextUtils.isEmpty(currentRotorSessionId)) {
+            MglaYandexMusicApi.sendRotorFeedback(
+                    currentRotorSessionId,
+                    currentRotorBatchId,
+                    newLiked ? "like" : "unlike",
+                    currentTrack.id,
+                    getCurrentPosition() / 1000f,
+                    null);
+        }
+    }
+
+    /**
+     * Dislike current track: remove from «Мне нравится», tell the wave engine (if active),
+     * persist library dislike, and skip to the next track.
+     */
+    public void dislikeCurrentTrack() {
+        if (currentTrack == null) {
+            return;
+        }
+        final MglaYandexMusicModel.Track track = currentTrack;
+        final float playedSec = getCurrentPosition() / 1000f;
+
+        if (track.isLiked) {
+            track.isLiked = false;
+            MglaYandexMusicStore.getInstance().setLiked(track.id, false);
+            MglaYandexMusicApi.toggleLike(track.id, false, null);
+            notifyTrackChanged(track);
+        }
+
+        if (isMyWaveActive && !TextUtils.isEmpty(currentRotorSessionId)) {
+            MglaYandexMusicApi.sendRotorFeedback(
+                    currentRotorSessionId,
+                    currentRotorBatchId,
+                    "dislike",
+                    track.id,
+                    playedSec,
+                    null);
+        }
+        // Always register a library dislike so future recommendations account for it.
+        MglaYandexMusicApi.addTrackDislike(track.id, null);
+        next();
+    }
+
+    /** Start «Моя волна» seeded by the currently playing track. */
+    public void playWaveByCurrentTrack() {
+        if (currentTrack == null || TextUtils.isEmpty(currentTrack.id)) {
+            return;
+        }
+        List<String> seeds = new ArrayList<>();
+        seeds.add("track:" + currentTrack.id);
+        playRotorSession(seeds, "Моя волна по треку");
     }
 
     /** Drop Yandex session state without touching MediaController (Telegram media took over). */

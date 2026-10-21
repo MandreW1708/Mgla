@@ -22,7 +22,8 @@ import javax.net.ssl.HttpsURLConnection;
  *   <li>Ultra-обход → {@code mglahub.mooo.com/mgla-ai/…}</li>
  *   <li>обход выключен / на паузе (VPN) → не использовать; вызывающий бьёт в Gemini/OpenRouter напрямую</li>
  * </ul>
- * Features/stats/updates при Ultra — нативные пути хаба (см. {@link MglaRemoteConfig}).
+ * Features/stats/updates при обходе — {@code /mgla-ai/v1/*} на том же хосте
+ * (см. {@link MglaRemoteConfig#shouldFetchViaRelay()}).
  */
 public final class MglaHubHttp {
 

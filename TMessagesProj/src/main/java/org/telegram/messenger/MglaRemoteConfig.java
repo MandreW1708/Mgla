@@ -58,23 +58,16 @@ public final class MglaRemoteConfig {
     }
 
     /**
-     * Relay path when WS bypass is enabled and not suspended by VPN.
-     * VPN pause / relay off → direct mglahub (reachable via VPN or open net).
-     */
-    /**
      * Public for update checker and other hub polls that share the same routing.
      * <p>
-     * Normal bypass (mglabot): use {@code /mgla-ai/v1/*} proxies on the bot.
-     * Ultra bypass (mglahub): client is already on the hub — use native
-     * {@code /mgla-config}, {@code /mgla-stats}, {@code /mgla-updates}, {@code /mgla-auth}.
+     * When auto-bypass is on (and not paused by VPN), use {@code /mgla-ai/v1/*}
+     * on the current relay host — mglabot for normal bypass, mglahub for Ultra
+     * ({@link MglaWsConfig#getRelayHost()}). Same stack as AI. Bypass off / VPN
+     * pause → direct native hub paths ({@code /mgla-config}, {@code /mgla-updates}, …).
      */
     public static boolean shouldFetchViaRelay() {
         try {
             if (!MglaWsConfig.isEnabled() || !MglaWsConfig.isRelayConfigured()) {
-                return false;
-            }
-            // Ultra path lands on mglahub; bot-style /mgla-ai proxies are wrong there.
-            if (MglaWsConfig.isUltraBypassEnabled()) {
                 return false;
             }
             return !VpnMonitor.getInstance().isVpnActive();

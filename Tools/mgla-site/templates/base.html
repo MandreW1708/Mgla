@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="format-detection" content="telephone=no">
   <title>{% block title %}Mgla{% endblock %}</title>
-  <meta name="description" content="Mgla — клиент Telegram с обходом блокировок, ИИ и гибкими настройками.">
+  <meta name="description" content="Mgla — клиент Telegram с быстрым подключением, ИИ и гибкими настройками.">
   <link rel="icon" href="{{ url_for('static', filename='img/logo-sm.png') }}" type="image/png">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/logo-sm.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
@@ -54,7 +54,16 @@
       </div>
     </div>
   </footer>
+  <div id="pay-stub-modal" class="pay-stub-modal" hidden>
+    <div class="pay-stub-backdrop" data-pay-stub-close tabindex="-1"></div>
+    <div class="pay-stub-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-stub-title">
+      <h3 id="pay-stub-title">Оплата пока недоступна</h3>
+      <p id="pay-stub-text">Подключение платёжной системы ещё не завершено.</p>
+      <button type="button" class="btn btn-ghost" data-pay-stub-close><span>Понятно</span></button>
+    </div>
+  </div>
   <script src="{{ url_for('static', filename='js/mobile.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/fx.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/pay_stub.js') }}" defer></script>
 </body>
 </html>

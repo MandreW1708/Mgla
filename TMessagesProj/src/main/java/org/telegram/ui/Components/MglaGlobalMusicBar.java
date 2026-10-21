@@ -28,6 +28,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 
 import androidx.core.graphics.ColorUtils;
@@ -73,6 +74,11 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     private static boolean globallyVisible;
     /** Visible glass island width in px (no glow), updated on layout while shown. */
     private static int lastGlassWidthPx;
+    /** Last attached bar — used by the fullscreen player morph expand/collapse. */
+    private static WeakReference<MglaGlobalMusicBar> activeBarRef;
+    /** Last known glass island screen rect (valid even while alpha=0 under the player sheet). */
+    private static final RectF lastGlassScreenRect = new RectF();
+    private static boolean hasLastGlassScreenRect;
 
     /** Whether the global mini-player island is currently shown (for blur exclusion holes). */
     public static boolean isGloballyVisible() {
@@ -122,6 +128,71 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     /** How much to extend the bottom blur exclusion upward while the mini-player is visible. */
     public static int blurExclusionExtraDp() {
         return globallyVisible ? BAR_HEIGHT + TABS_GAP_DP : 0;
+    }
+
+    /**
+     * Fills {@code out} with the glass island rect in the coordinate space of {@code relativeTo}
+     * (typically the player sheet's root). Returns false if the bar is not on screen.
+     */
+    public static boolean fillExpandSourceRect(View relativeTo, RectF out) {
+        if (relativeTo == null || out == null) {
+            return false;
+        }
+        int[] dst = new int[2];
+        relativeTo.getLocationOnScreen(dst);
+
+        MglaGlobalMusicBar bar = activeBarRef != null ? activeBarRef.get() : null;
+        View island = bar != null ? bar.glassIsland : null;
+        if (bar != null && bar.getVisibility() == VISIBLE && island != null
+                && island.getWidth() > 0 && island.getHeight() > 0) {
+            int[] src = new int[2];
+            island.getLocationOnScreen(src);
+            out.set(
+                    src[0] - dst[0],
+                    src[1] - dst[1],
+                    src[0] - dst[0] + island.getWidth(),
+                    src[1] - dst[1] + island.getHeight()
+            );
+            if (out.width() > dp(40) && out.height() > dp(20)) {
+                lastGlassScreenRect.set(src[0], src[1], src[0] + island.getWidth(), src[1] + island.getHeight());
+                hasLastGlassScreenRect = true;
+                return true;
+            }
+        }
+
+        // Fallback: last laid-out screen rect (bar may be alpha=0 under the sheet).
+        if (hasLastGlassScreenRect && lastGlassScreenRect.width() > dp(40) && lastGlassScreenRect.height() > dp(20)) {
+            out.set(
+                    lastGlassScreenRect.left - dst[0],
+                    lastGlassScreenRect.top - dst[1],
+                    lastGlassScreenRect.right - dst[0],
+                    lastGlassScreenRect.bottom - dst[1]
+            );
+            return out.width() > dp(40) && out.height() > dp(20);
+        }
+        return false;
+    }
+
+    public static float getExpandSourceRadius() {
+        MglaGlobalMusicBar bar = activeBarRef != null ? activeBarRef.get() : null;
+        if (bar != null && bar.cornerRadius > 0) {
+            return bar.cornerRadius;
+        }
+        return dp(DialogsActivity.MAIN_TABS_HEIGHT / 2f);
+    }
+
+    /** Hide/show the mini-player under the expanding sheet so it doesn't double-draw. */
+    public static void setHiddenForPlayerExpand(boolean hidden) {
+        MglaGlobalMusicBar bar = activeBarRef != null ? activeBarRef.get() : null;
+        if (bar == null) {
+            return;
+        }
+        bar.animate().cancel();
+        if (hidden) {
+            bar.setAlpha(0f);
+        } else {
+            bar.setAlpha(1f);
+        }
     }
 
     private final Theme.ResourcesProvider resourcesProvider;
@@ -219,6 +290,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     public MglaGlobalMusicBar(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context);
         this.resourcesProvider = resourcesProvider;
+        activeBarRef = new WeakReference<>(this);
         setClipChildren(false);
         setClipToPadding(false);
         setClipToOutline(false);
@@ -768,6 +840,10 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         super.onLayout(changed, left, top, right, bottom);
         if (glassIsland != null && glassIsland.getWidth() > 0 && getVisibility() == VISIBLE) {
             lastGlassWidthPx = glassIsland.getWidth();
+            int[] loc = new int[2];
+            glassIsland.getLocationOnScreen(loc);
+            lastGlassScreenRect.set(loc[0], loc[1], loc[0] + glassIsland.getWidth(), loc[1] + glassIsland.getHeight());
+            hasLastGlassScreenRect = lastGlassScreenRect.width() > dp(40) && lastGlassScreenRect.height() > dp(20);
         }
         if (changed) {
             invalidateGlass();

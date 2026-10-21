@@ -366,6 +366,65 @@ a:hover { color: #bfdbfe; }
   background: linear-gradient(160deg, rgba(212, 175, 55, 0.22), transparent 70%);
 }
 
+.premium-card-action {
+  padding: 0 1.1rem 1.2rem;
+  margin-top: auto;
+}
+.premium-pay-btn {
+  width: 100%;
+  justify-content: center;
+  cursor: pointer;
+  border: 0;
+  font: inherit;
+}
+.premium-card.accent-blue .premium-pay-btn {
+  background: linear-gradient(135deg, #3b8cff, #1e5eff);
+}
+.premium-card.accent-red .premium-pay-btn {
+  background: linear-gradient(135deg, #ff5a5a, #e11d1d);
+}
+.premium-card.accent-gold .premium-pay-btn {
+  background: linear-gradient(135deg, #e8c547, #b8860b);
+  color: #1a1408;
+}
+
+.pay-stub-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+}
+.pay-stub-modal[hidden] {
+  display: none !important;
+}
+.pay-stub-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 4, 10, 0.72);
+  backdrop-filter: blur(6px);
+}
+.pay-stub-dialog {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 1.35rem 1.4rem 1.25rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(12, 16, 26, 0.96);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.pay-stub-dialog h3 {
+  margin: 0 0 0.55rem;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+.pay-stub-dialog p {
+  margin: 0 0 1.1rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .premium-legal {
   margin-top: 1.35rem;
   padding: 1.15rem 1.25rem;

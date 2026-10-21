@@ -26,8 +26,9 @@ import java.util.Base64;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Polls mglahub (or mglabot when auto-bypass is active — over HTTPS on the WS route,
- * through the WEB proxy update tunnel on the WEB route) for a newer build.
+ * Polls for a newer build: with auto-bypass on — {@code /mgla-ai/v1/update-*} on the
+ * current relay host (mglabot or Ultra mglahub, same stack as AI); WEB route on bot
+ * may use the mgla-upd tunnel; bypass off — native hub {@code /mgla-updates/*}.
  * Hub decides by app versionName and/or versionCode; Mgla version is display-only.
  */
 public final class MglaUpdateChecker {
@@ -250,8 +251,9 @@ public final class MglaUpdateChecker {
     public enum Channel { HUB, RELAY, WEB }
 
     /**
-     * Авто-обход на резервном WEB proxy mglabot (туннель обновлений).
-     * Ultra WEB на mglahub сюда не входит — у хаба нет mgla-upd туннеля.
+     * Авто-обход на резервном WEB proxy mglabot (туннель mgla-upd).
+     * Ultra WEB на mglahub сюда не входит — update-tunnel только на боте;
+     * при Ultra используется Channel.RELAY → {@code /mgla-ai/v1/update-*} на хабе.
      */
     private static boolean isWebRouteActive() {
         try {
@@ -347,8 +349,11 @@ public final class MglaUpdateChecker {
                 return;
             }
             String host = conn.getURL().getHost();
-            if (channel == Channel.RELAY && MglaWsConfig.DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
-                verifySpkiPin(((HttpsURLConnection) conn).getServerCertificates(), MglaWsConfig.RELAY_SPKI_SHA256_BASE64);
+            if (channel == Channel.RELAY) {
+                String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+                if (pins != null && pins.length > 0) {
+                    verifySpkiPin(((HttpsURLConnection) conn).getServerCertificates(), pins[0]);
+                }
             } else if (channel == Channel.HUB && MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
                 verifySpkiPin(((HttpsURLConnection) conn).getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
             }

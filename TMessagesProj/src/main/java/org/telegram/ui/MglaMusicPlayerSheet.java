@@ -3,7 +3,11 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
 import android.animation.ArgbEvaluator;
+import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
@@ -85,7 +89,9 @@ import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CastMediaRouteButton;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.ItemOptions;
+import org.telegram.ui.Components.AnimationProperties;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.MglaMd3SeekBar;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.Forum.ForumUtilities;
@@ -160,12 +166,30 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private CharSequence lastTitleShown;
     private CharSequence lastArtistShown;
 
+    /** Morph expand/collapse from the mini-player island. */
+    private final RectF morphFrom = new RectF();
+    private final RectF morphTo = new RectF();
+    private final RectF morphCurrent = new RectF();
+    private final RectF savedMorphFrom = new RectF();
+    private final Path morphClipPath = new Path();
+    private float morphFromRadius;
+    private float savedMorphFromRadius;
+    private float morphProgress = 1f;
+    private boolean morphActive;
+    private boolean usedMorphOpen;
+    private boolean hasSavedMorphFrom;
+    private boolean morphCloseStarted;
+    private boolean morphCloseFinishing;
+    private boolean sheetCleanupDone;
+
     public MglaMusicPlayerSheet(Context context) {
         super(context, false);
         this.player = MglaYandexMusicPlayer.getInstance();
         setApplyTopPadding(false);
         setApplyBottomPadding(false);
         setCanDismissWithSwipe(true);
+        setOpenNoDelay(true);
+        openDuration = 520;
         // Edge-to-edge sheet without FLAG_FULLSCREEN so the status bar stays visible.
         fullWidth = true;
         occupyNavigationBar = true;
@@ -201,7 +225,23 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         int padH = dp(20);
         int bottomPad = dp(16) + AndroidUtilities.navigationBarHeight;
 
-        root = new FrameLayout(context);
+        // Clip in draw() — containerView has hasOverlappingRendering=false so clipToOutline is a no-op.
+        root = new FrameLayout(context) {
+            @Override
+            public void draw(Canvas canvas) {
+                if (morphActive) {
+                    morphClipPath.reset();
+                    float r = Math.max(0f, morphFromRadius * (1f - morphProgress));
+                    morphClipPath.addRoundRect(morphCurrent, r, r, Path.Direction.CW);
+                    canvas.save();
+                    canvas.clipPath(morphClipPath);
+                    super.draw(canvas);
+                    canvas.restore();
+                } else {
+                    super.draw(canvas);
+                }
+            }
+        };
         root.setLayoutParams(new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 Math.max(fullH, dp(640))
@@ -377,7 +417,14 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER_VERTICAL);
 
-        dislikeButton = iconButton(context, R.drawable.msg_voice_muted, v -> skipNext());
+        dislikeButton = iconButton(context, R.drawable.mgla_media_dislike, v -> {
+            if (!isYandexMode()) {
+                return;
+            }
+            bouncePress(dislikeButton);
+            player.dislikeCurrentTrack();
+            updateLikeButton();
+        });
         controls.addView(dislikeButton, LayoutHelper.createLinear(48, 48, Gravity.CENTER));
 
         prevBtn = iconButton(context, R.drawable.ic_action_previous, v -> {
@@ -550,9 +597,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         waveIslandText.setEllipsize(TextUtils.TruncateAt.END);
         ((FrameLayout) waveIsland).addView(waveIslandText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
         waveIsland.setOnClickListener(v -> {
-            if (isYandexMode() && !player.isMyWaveActive()) {
-                player.playMyWave();
+            if (!isYandexMode()) {
+                return;
             }
+            player.playWaveByCurrentTrack();
         });
         contentLayout.addView(waveIsland, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 56));
 
@@ -741,6 +789,12 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (openAnimationPlayed || !MglaPlayerConfig.isOpenAnimationEnabled() || contentLayout == null) {
             return;
         }
+        // Morph open already handles the reveal — only start cover pulse.
+        if (usedMorphOpen) {
+            openAnimationPlayed = true;
+            startCoverPulseAfterOpen(0);
+            return;
+        }
         openAnimationPlayed = true;
         final View[] staged = new View[]{coverWrap, titleView, artistView, seekBar, playPauseFab, pillsRow, waveIsland};
         long delay = 0;
@@ -760,6 +814,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                     .start();
             delay += MglaPlayerConfig.scaleDuration(45);
         }
+        startCoverPulseAfterOpen(delay + MglaPlayerConfig.scaleDuration(420));
+    }
+
+    private void startCoverPulseAfterOpen(long delayMs) {
         root.postDelayed(() -> {
             boolean playing;
             if (isYandexMode()) {
@@ -769,7 +827,326 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 playing = m != null && !MediaController.getInstance().isMessagePaused();
             }
             updateCoverPulse(playing);
-        }, delay + MglaPlayerConfig.scaleDuration(420));
+        }, delayMs);
+    }
+
+    private boolean resolveMorphBounds(int w, int h) {
+        morphTo.set(0, 0, w, h);
+        if (MglaGlobalMusicBar.fillExpandSourceRect(root, morphFrom)) {
+            fitMorphFromIntoSheet(w, h);
+            if (morphFrom.width() >= dp(48) && morphFrom.height() >= dp(24)) {
+                morphFromRadius = Math.min(MglaGlobalMusicBar.getExpandSourceRadius(), morphFrom.height() / 2f);
+                savedMorphFrom.set(morphFrom);
+                savedMorphFromRadius = morphFromRadius;
+                hasSavedMorphFrom = true;
+                return true;
+            }
+        }
+        // Live capture often fails on close (bar under dialog / slightly outside clip).
+        // Reuse the rect from a successful open morph.
+        if (hasSavedMorphFrom && savedMorphFrom.width() >= dp(48) && savedMorphFrom.height() >= dp(24)) {
+            morphFrom.set(savedMorphFrom);
+            fitMorphFromIntoSheet(w, h);
+            morphFromRadius = Math.min(savedMorphFromRadius, morphFrom.height() / 2f);
+            return morphFrom.width() >= dp(48) && morphFrom.height() >= dp(24);
+        }
+        return false;
+    }
+
+    /** Slide the source rect inside the sheet without collapsing it to zero. */
+    private void fitMorphFromIntoSheet(int w, int h) {
+        final float bw = morphFrom.width();
+        final float bh = morphFrom.height();
+        if (bw <= 0 || bh <= 0) {
+            return;
+        }
+        if (morphFrom.left < 0) {
+            morphFrom.left = 0;
+            morphFrom.right = Math.min(w, bw);
+        }
+        if (morphFrom.top < 0) {
+            morphFrom.top = 0;
+            morphFrom.bottom = Math.min(h, bh);
+        }
+        if (morphFrom.right > w) {
+            morphFrom.right = w;
+            morphFrom.left = Math.max(0, w - bw);
+        }
+        if (morphFrom.bottom > h) {
+            morphFrom.bottom = h;
+            morphFrom.top = Math.max(0, h - bh);
+        }
+    }
+
+    private boolean captureMorphSourceRect() {
+        if (root == null || containerView == null) {
+            return false;
+        }
+        int w = root.getMeasuredWidth();
+        int h = root.getMeasuredHeight();
+        if (w <= 0 || h <= 0) {
+            w = containerView.getMeasuredWidth();
+            h = containerView.getMeasuredHeight();
+        }
+        if (w <= 0 || h <= 0) {
+            return false;
+        }
+        return resolveMorphBounds(w, h);
+    }
+
+    private void beginMorphChrome() {
+        // containerView's solid black bg would show unclipped; paint black on root instead.
+        if (containerView != null) {
+            containerView.setBackgroundColor(Color.TRANSPARENT);
+        }
+        if (root != null) {
+            root.setBackgroundColor(Color.BLACK);
+        }
+        morphActive = true;
+    }
+
+    private void applyMorphProgress(float t) {
+        morphProgress = Utilities.clamp(t, 1f, 0f);
+        morphCurrent.left = AndroidUtilities.lerp(morphFrom.left, morphTo.left, morphProgress);
+        morphCurrent.top = AndroidUtilities.lerp(morphFrom.top, morphTo.top, morphProgress);
+        morphCurrent.right = AndroidUtilities.lerp(morphFrom.right, morphTo.right, morphProgress);
+        morphCurrent.bottom = AndroidUtilities.lerp(morphFrom.bottom, morphTo.bottom, morphProgress);
+
+        if (contentLayout != null) {
+            float contentT = Utilities.clamp((morphProgress - 0.1f) / 0.5f, 1f, 0f);
+            contentT = CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(contentT);
+            contentLayout.setAlpha(contentT);
+            float scale = 0.94f + 0.06f * contentT;
+            contentLayout.setPivotX(Math.max(1f, contentLayout.getWidth() / 2f));
+            contentLayout.setPivotY(Math.max(1f, contentLayout.getHeight() * 0.28f));
+            contentLayout.setScaleX(scale);
+            contentLayout.setScaleY(scale);
+        }
+        if (ambientBg != null) {
+            ambientBg.setAlpha(0.4f + 0.6f * morphProgress);
+        }
+        if (root != null) {
+            root.invalidate();
+        }
+        if (container != null) {
+            container.invalidate();
+        }
+    }
+
+    private void clearMorphClip() {
+        morphActive = false;
+        morphProgress = 1f;
+        if (containerView != null) {
+            containerView.setBackgroundDrawable(shadowDrawable);
+        }
+        if (root != null) {
+            root.setBackgroundColor(Color.TRANSPARENT);
+            root.invalidate();
+        }
+        if (contentLayout != null) {
+            contentLayout.setAlpha(1f);
+            contentLayout.setScaleX(1f);
+            contentLayout.setScaleY(1f);
+        }
+        if (ambientBg != null) {
+            ambientBg.setAlpha(1f);
+        }
+    }
+
+    @Override
+    protected boolean onCustomOpenAnimation() {
+        if (!MglaPlayerConfig.isOpenAnimationEnabled() || containerView == null || root == null) {
+            return false;
+        }
+
+        final float savedTy = containerView.getTranslationY();
+        final float savedTx = containerView.getTranslationX();
+        containerView.setTranslationY(0);
+        containerView.setTranslationX(0);
+        containerView.setAlpha(1f);
+        onContainerViewTranslation();
+
+        if (!captureMorphSourceRect()) {
+            containerView.setTranslationY(savedTy);
+            containerView.setTranslationX(savedTx);
+            onContainerViewTranslation();
+            return false;
+        }
+
+        usedMorphOpen = true;
+        beginMorphChrome();
+        applyMorphProgress(0f);
+        MglaGlobalMusicBar.setHiddenForPlayerExpand(true);
+
+        if (useHardwareLayer && container != null) {
+            container.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
+        currentSheetAnimationType = 1;
+
+        ValueAnimator morph = ValueAnimator.ofFloat(0f, 1f);
+        morph.addUpdateListener(a -> applyMorphProgress((float) a.getAnimatedValue()));
+
+        if (navigationBarAnimation != null) {
+            navigationBarAnimation.cancel();
+        }
+        navigationBarAnimation = ValueAnimator.ofFloat(navigationBarAlpha, 1f);
+        navigationBarAnimation.addUpdateListener(a -> {
+            navigationBarAlpha = (float) a.getAnimatedValue();
+            if (container != null) {
+                container.invalidate();
+            }
+        });
+
+        currentSheetAnimation = new AnimatorSet();
+        currentSheetAnimation.playTogether(
+                morph,
+                ObjectAnimator.ofInt(backDrawable, AnimationProperties.COLOR_DRAWABLE_ALPHA, dimBehind ? dimBehindAlpha : 0),
+                navigationBarAnimation
+        );
+        currentSheetAnimation.setDuration(MglaPlayerConfig.scaleDuration(520));
+        currentSheetAnimation.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        currentSheetAnimation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (currentSheetAnimation != null && currentSheetAnimation.equals(animation)) {
+                    currentSheetAnimation = null;
+                    currentSheetAnimationType = 0;
+                }
+                clearMorphClip();
+                onOpenAnimationEnd();
+                if (delegate != null) {
+                    delegate.onOpenAnimationEnd();
+                }
+                if (useHardwareLayer && container != null) {
+                    container.setLayerType(View.LAYER_TYPE_NONE, null);
+                }
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 512);
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                if (currentSheetAnimation != null && currentSheetAnimation.equals(animation)) {
+                    currentSheetAnimation = null;
+                    currentSheetAnimationType = 0;
+                }
+            }
+        });
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, 512);
+        currentSheetAnimation.start();
+        return true;
+    }
+
+    /**
+     * Morph close is owned by {@link #dismiss()} so swipe-to-dismiss (which sets
+     * allowCustomAnimation=false) still gets the reverse expand animation.
+     */
+    @Override
+    protected boolean onCustomCloseAnimation() {
+        return false;
+    }
+
+    private boolean shouldMorphClose() {
+        return (usedMorphOpen || hasSavedMorphFrom)
+                && (usedMorphOpen || MglaPlayerConfig.isOpenAnimationEnabled())
+                && containerView != null
+                && root != null;
+    }
+
+    private boolean startMorphCloseAnimation() {
+        if (!shouldMorphClose()) {
+            return false;
+        }
+
+        // Undo any in-progress swipe translation before reverse-morphing.
+        containerView.setTranslationY(0);
+        containerView.setTranslationX(0);
+        containerView.setAlpha(1f);
+        containerView.setVisibility(View.VISIBLE);
+        onContainerViewTranslation();
+
+        MglaGlobalMusicBar.setHiddenForPlayerExpand(false);
+
+        if (!captureMorphSourceRect()) {
+            return false;
+        }
+
+        beginMorphChrome();
+        applyMorphProgress(1f);
+        currentSheetAnimationType = 2;
+
+        ValueAnimator morph = ValueAnimator.ofFloat(1f, 0f);
+        morph.addUpdateListener(a -> applyMorphProgress((float) a.getAnimatedValue()));
+
+        if (navigationBarAnimation != null) {
+            navigationBarAnimation.cancel();
+        }
+        navigationBarAnimation = ValueAnimator.ofFloat(navigationBarAlpha, 0f);
+        navigationBarAnimation.addUpdateListener(a -> {
+            navigationBarAlpha = (float) a.getAnimatedValue();
+            if (container != null) {
+                container.invalidate();
+            }
+        });
+
+        if (currentSheetAnimation != null) {
+            currentSheetAnimation.cancel();
+        }
+        currentSheetAnimation = new AnimatorSet();
+        currentSheetAnimation.playTogether(
+                morph,
+                ObjectAnimator.ofInt(backDrawable, AnimationProperties.COLOR_DRAWABLE_ALPHA, 0),
+                navigationBarAnimation
+        );
+        currentSheetAnimation.setDuration(MglaPlayerConfig.scaleDuration(420));
+        currentSheetAnimation.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        currentSheetAnimation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (currentSheetAnimation != null && currentSheetAnimation.equals(animation)) {
+                    currentSheetAnimation = null;
+                    currentSheetAnimationType = 0;
+                }
+                finishMorphClose();
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 512);
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                if (currentSheetAnimation != null && currentSheetAnimation.equals(animation)) {
+                    currentSheetAnimation = null;
+                    currentSheetAnimationType = 0;
+                }
+            }
+        });
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, 512);
+        currentSheetAnimation.start();
+        return true;
+    }
+
+    /** Hide the sheet while still clipped small — never expand it back before window teardown. */
+    private void finishMorphClose() {
+        if (morphCloseFinishing) {
+            return;
+        }
+        morphCloseFinishing = true;
+
+        if (containerView != null) {
+            containerView.setVisibility(View.INVISIBLE);
+            containerView.setAlpha(0f);
+        }
+        if (root != null) {
+            root.setVisibility(View.INVISIBLE);
+        }
+        if (container != null) {
+            container.setAlpha(0f);
+        }
+        try {
+            backDrawable.setAlpha(0);
+        } catch (Throwable ignored) {
+        }
+        MglaGlobalMusicBar.setHiddenForPlayerExpand(false);
+        skipDismissAnimation();
+        dismiss();
     }
 
     private void refreshUi() {
@@ -896,7 +1273,12 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             setTrackTexts("Нет трека", "");
             coverImage.setImageResource(R.drawable.bot_music);
             artistAvatar.setImageResource(R.drawable.bot_music);
-            waveIslandText.setText("Моя волна");
+            if (waveIslandText != null) {
+                waveIslandText.setText("Запустить волну по треку");
+            }
+            if (sourceTitle != null) {
+                sourceTitle.setText("Яндекс Музыка");
+            }
             return;
         }
         setTrackTexts(track.title, track.artist);
@@ -906,7 +1288,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (TextUtils.isEmpty(source)) {
             source = player.isMyWaveActive() ? "Моя волна" : "Яндекс Музыка";
         }
-        sourceTitle.setText(source);
+        // Header above cover: show wave context when a wave is playing.
+        if (sourceTitle != null) {
+            sourceTitle.setText(source);
+        }
 
         String coverUrl = track.getCoverUrl(400);
         // Load square bitmap; rounded corners come from coverWrap clipPath.
@@ -914,10 +1299,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         MglaMusicImageHelper.bindCircleCover(artistAvatar, track.getCoverUrl(100), R.drawable.bot_music);
         extractAmbientColors(coverUrl);
 
-        if (player.isMyWaveActive()) {
-            waveIslandText.setText("▶  Моя волна по треку  ·  " + track.title);
-        } else {
-            waveIslandText.setText("▶  " + source + "  ·  " + track.title);
+        if (waveIslandText != null) {
+            waveIslandText.setText("Запустить волну по треку");
         }
 
         updateLikeButton();
@@ -2043,7 +2426,19 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 ambientBg.invalidate();
             }
         }
-        root.post(this::playOpenAnimation);
+    }
+
+    @Override
+    public void onOpenAnimationEnd() {
+        playOpenAnimation();
+    }
+
+    @Override
+    public void dismissInternal() {
+        MglaGlobalMusicBar.setHiddenForPlayerExpand(false);
+        // Safe now that the window is going away — no fullscreen flash.
+        clearMorphClip();
+        super.dismissInternal();
     }
 
     @Override
@@ -2089,8 +2484,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         AndroidUtilities.runOnUIThread(this::refreshUi);
     }
 
-    @Override
-    public void dismiss() {
+    private void cleanupSheetResources() {
+        if (sheetCleanupDone) {
+            return;
+        }
+        sheetCleanupDone = true;
         if (ambientBg != null) {
             ambientBg.stop();
         }
@@ -2104,14 +2502,42 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         }
         unregisterObservers();
         player.removeListener(this);
-        super.dismiss();
-        // Restore MainTabs transparent system bars after the sheet window closes.
+    }
+
+    private void restoreSystemBarsAfterDismiss() {
         try {
             if (LaunchActivity.instance != null) {
                 LaunchActivity.instance.checkSystemBarColors(true, true, true);
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    @Override
+    public void dismiss() {
+        cleanupSheetResources();
+
+        // Finishing after reverse-morph: tear down the window without another animation.
+        if (morphCloseFinishing) {
+            super.dismiss();
+            restoreSystemBarsAfterDismiss();
+            return;
+        }
+
+        // Already reverse-morphing (ignore swipe/double-tap).
+        if (morphCloseStarted) {
+            return;
+        }
+
+        // Own the close morph here so swipe (allowCustomAnimation=false) still animates correctly.
+        if (startMorphCloseAnimation()) {
+            morphCloseStarted = true;
+            return;
+        }
+
+        MglaGlobalMusicBar.setHiddenForPlayerExpand(false);
+        super.dismiss();
+        restoreSystemBarsAfterDismiss();
     }
 
     /**

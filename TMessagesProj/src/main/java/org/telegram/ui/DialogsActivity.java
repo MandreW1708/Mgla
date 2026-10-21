@@ -1691,6 +1691,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionBar.setTranslationY(0);
         }
         containersAlpha *= (1f - factorSearch);
+        // Topics panel uses a transparent ActionBar — hide Dialogs "Mgla" + premium status with it.
+        final float rightSlidingProgress = getRightSlidingProgress();
         final float mglaTitleOffset = getMglaSideMenuTitleOffset();
         if (containersAlpha != 1f) {
             actionBar.getTitlesContainer().setPivotY(AndroidUtilities.statusBarHeight);
@@ -1704,7 +1706,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionBar.getAdditionalSubTitleOverlayContainer().setScaleY(s);
             actionBar.getAdditionalSubTitleOverlayContainer().setScaleX(s);
 
-            final float titleAlpha = containersAlpha * (1f - progressToActionMode);
+            final float titleAlpha = containersAlpha * (1f - progressToActionMode) * (1f - rightSlidingProgress);
             actionBar.getTitlesContainer().setAlpha(titleAlpha);
             actionBar.getTitlesContainer().setVisibility(titleAlpha > 0 ? View.VISIBLE : View.INVISIBLE);
             actionBar.getAdditionalSubTitleOverlayContainer().setAlpha(titleAlpha);
@@ -1717,7 +1719,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             actionBar.getAdditionalSubTitleOverlayContainer().setScaleY(1f);
             actionBar.getAdditionalSubTitleOverlayContainer().setScaleX(1f);
 
-            final float titleAlpha = 1f - progressToActionMode;
+            final float titleAlpha = (1f - progressToActionMode) * (1f - rightSlidingProgress);
             actionBar.getTitlesContainer().setAlpha(titleAlpha);
             actionBar.getTitlesContainer().setVisibility(titleAlpha > 0 ? View.VISIBLE : View.INVISIBLE);
             actionBar.getAdditionalSubTitleOverlayContainer().setAlpha(titleAlpha);
@@ -5697,11 +5699,24 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     fragmentView.invalidate();
                 }
 
+                final float titleHide = 1f - progress;
+                // Fade the whole titles container — Topics AB is transparent and titleTextView
+                // alpha alone gets reset by overlays / action mode, leaking "Mgla" + status.
+                if (actionBar.getTitlesContainer() != null) {
+                    actionBar.getTitlesContainer().setAlpha(titleHide * (1f - progressToActionMode));
+                    actionBar.getTitlesContainer().setVisibility(titleHide > 0f ? View.VISIBLE : View.INVISIBLE);
+                }
+                if (actionBar.getAdditionalSubTitleOverlayContainer() != null) {
+                    actionBar.getAdditionalSubTitleOverlayContainer().setAlpha(titleHide * (1f - progressToActionMode));
+                    actionBar.getAdditionalSubTitleOverlayContainer().setVisibility(titleHide > 0f ? View.VISIBLE : View.INVISIBLE);
+                }
                 if (actionBar.getTitleTextView() != null) {
-                    actionBar.getTitleTextView().setAlpha(1f - progress);
-                    if (actionBar.getTitleTextView().getAlpha() > 0) {
-                        actionBar.getTitleTextView().setVisibility(View.VISIBLE);
-                    }
+                    actionBar.getTitleTextView().setAlpha(titleHide);
+                    actionBar.getTitleTextView().setVisibility(titleHide > 0f ? View.VISIBLE : View.INVISIBLE);
+                }
+                if (animatedStatusView != null) {
+                    animatedStatusView.setAlpha(titleHide);
+                    animatedStatusView.setVisibility(titleHide > 0f ? View.VISIBLE : View.INVISIBLE);
                 }
                 if (actionBar.getBackButton() != null) {
                     actionBar.getBackButton().setAlpha(progress == 1f ? 0f : 1f);
