@@ -47896,13 +47896,7 @@ public class ChatActivity extends BaseFragment implements
         inputIslandHeightCurrent = calculateInputIslandHeight(false);
         inputIslandHeightTarget = calculateInputIslandHeight(true);
 
-        // Овал поля — без запаса под Whisper; общая высота острова учитывает кнопку над скрепкой
-        float bubbleHeight = inputIslandHeightCurrent;
-        if (chatActivityEnterView != null) {
-            bubbleHeight = Math.max(dp(ChatActivityEnterView.DEFAULT_HEIGHT),
-                inputIslandHeightCurrent - chatActivityEnterView.getDictationStackHeight());
-        }
-        chatInputViewsContainer.setInputBubbleHeight(bubbleHeight);
+        chatInputViewsContainer.setInputBubbleHeight(inputIslandHeightCurrent);
         updateInputBubbleOffsets();
         updatePagedownButtonsPosition();
         updateBotforumTabsBottomMargin();
@@ -47914,9 +47908,8 @@ public class ChatActivity extends BaseFragment implements
 
     private static final Rect clipBoundsRect = new Rect();
     private void checkUi_BlurHeight() {
-        // inputIslandHeightCurrent включает стек Whisper над скрепкой
         final float inputHeight = windowInsetsStateHolder.getAnimatedMaxBottomInset()
-            + dp(9) + inputIslandHeightCurrent + dp(7)
+            + dp(9) + chatInputViewsContainer.getInputBubbleHeight() + dp(7)
             + getTopicTabsSideSize(TopicsTabsView.Position.BOTTOM);
 
         chatActivityFadeView.setFadeZoneBottom((int) inputHeight);
@@ -47936,7 +47929,7 @@ public class ChatActivity extends BaseFragment implements
         if (emptyViewContainer != null) {
             emptyViewContainer.setTranslationY(-0.5f * (dp(9)
                 + windowInsetsStateHolder.getAnimatedImeBottomInset()
-                + inputIslandHeightCurrent
+                + chatInputViewsContainer.getInputBubbleHeight()
             ));
         }
     }

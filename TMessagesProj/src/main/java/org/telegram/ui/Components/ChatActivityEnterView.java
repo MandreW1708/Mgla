@@ -117,8 +117,6 @@ import org.telegram.ui.recyclerview.ChatListItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import org.telegram.messenger.AccountInstance;
-import org.telegram.messenger.MglaWhisperDictationConfig;
-import org.telegram.messenger.MglaWhisperNative;
 import org.telegram.messenger.MglaStats;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -649,11 +647,6 @@ public class ChatActivityEnterView extends FrameLayout implements
     private ViewPropertyAnimator attachButtonAnimator;
     private View attachButton;
     private View.OnClickListener attachButtonClickListener;
-    private ImageView whisperDictationButton;
-    private MglaWhisperDictationController whisperDictationController;
-    private final MglaWhisperDictationGlow whisperDictationGlow = new MglaWhisperDictationGlow();
-    private int dictationInsertStart = -1;
-    private int dictationInsertLength;
     private AiButtonDrawable aiButtonIcon;
     private ImageView aiButton;
     private ImageView richButton;
@@ -2714,7 +2707,6 @@ public class ChatActivityEnterView extends FrameLayout implements
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.didUpdatePremiumGiftFieldIcon);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.emojiLoaded);
-        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
 
         parentActivity = context;
         parentFragment = fragment;
@@ -3000,60 +2992,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             updateStaticAttachLayout();
             updateStaticAttachButton();
             updateFieldRight(1);
-
-            whisperDictationButton = new ImageView(context);
-            whisperDictationButton.setScaleType(ImageView.ScaleType.CENTER);
-            whisperDictationButton.setImageResource(R.drawable.input_whisper);
-            whisperDictationButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
-            whisperDictationButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), Theme.RIPPLE_MASK_CIRCLE_20DP, dp(22)));
-            whisperDictationButton.setContentDescription("Whisper — голос в текст");
-            whisperDictationButton.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-            ScaleStateListAnimator.apply(whisperDictationButton);
-            // Стек над скрепкой: запас высоты всегда (не зависит от multiline)
-            textFieldContainer.addView(whisperDictationButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, getDictationStackDp()));
-            whisperDictationButton.setOnClickListener(v -> onWhisperDictationClick());
-            whisperDictationButton.setVisibility(View.GONE);
-            whisperDictationController = new MglaWhisperDictationController();
-            whisperDictationController.setListener(new MglaWhisperDictationController.Listener() {
-                @Override
-                public void onPartial(String text) {
-                    applyDictationText(text, false);
-                }
-
-                @Override
-                public void onFinal(String text) {
-                    applyDictationText(text, true);
-                    setWhisperDictationGlow(false);
-                    updateWhisperDictationButtonVisual(false, false);
-                }
-
-                @Override
-                public void onError(String message) {
-                    setWhisperDictationGlow(false);
-                    updateWhisperDictationButtonVisual(false, false);
-                    dictationInsertStart = -1;
-                    dictationInsertLength = 0;
-                    if (message != null && parentFragment != null) {
-                        BulletinFactory.of(parentFragment).createSimpleBulletin(R.raw.error, message).show();
-                    }
-                }
-
-                @Override
-                public void onStateChanged(boolean recording, boolean processing) {
-                    setWhisperDictationGlow(recording || processing);
-                    updateWhisperDictationButtonVisual(recording, processing);
-                    if (recording && dictationInsertStart < 0 && messageEditText != null) {
-                        dictationInsertStart = messageEditText.getSelectionEnd();
-                        if (dictationInsertStart < 0) {
-                            dictationInsertStart = messageEditText.length();
-                        }
-                        dictationInsertLength = 0;
-                    }
-                }
-            });
-            updateWhisperDictationButton();
         }
-
         aiButton = new ImageView(context);
         aiButton.setImageDrawable(aiButtonIcon = new AiButtonDrawable(context));
         aiButton.setScaleType(ImageView.ScaleType.CENTER);
@@ -6779,7 +6718,6 @@ public class ChatActivityEnterView extends FrameLayout implements
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.didUpdatePremiumGiftFieldIcon);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.emojiLoaded);
-        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
         if (emojiView != null) {
             emojiView.onDestroy();
         }
@@ -6894,7 +6832,6 @@ public class ChatActivityEnterView extends FrameLayout implements
 
     public void onResume() {
         isPaused = false;
-        updateWhisperDictationButton();
         if (hideKeyboardRunnable != null) {
             AndroidUtilities.cancelRunOnUIThread(hideKeyboardRunnable);
             hideKeyboardRunnable = null;
@@ -13749,9 +13686,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     @SuppressWarnings("unchecked")
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
-        if (id == NotificationCenter.mglaHeaderSettingsChanged) {
-            updateWhisperDictationButton();
-        } else if (id == NotificationCenter.emojiLoaded) {
+        if (id == NotificationCenter.emojiLoaded) {
             if (emojiView != null) {
                 emojiView.invalidateViews();
             }
@@ -14026,8 +13961,6 @@ public class ChatActivityEnterView extends FrameLayout implements
                 pendingLocationButton = null;
                 pendingMessageObject = null;
             }
-        } else if (requestCode == 97) {
-            onWhisperDictationPermissionResult(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED);
         }
     }
 
@@ -15142,148 +15075,8 @@ public class ChatActivityEnterView extends FrameLayout implements
             super.dispatchDraw(canvas);
             canvas.restore();
         }
-        if (whisperDictationGlow.isActive() && messageEditTextContainer != null) {
-            whisperDictationGlow.draw(canvas, this, messageEditTextContainer, resourcesProvider);
-        }
     }
 
-    private void onWhisperDictationClick() {
-        if (whisperDictationController == null) {
-            return;
-        }
-        if (whisperDictationController.isBusy()) {
-            if (whisperDictationController.isRecording()) {
-                whisperDictationController.stopAndTranscribe();
-            }
-            return;
-        }
-        if (!MglaWhisperNative.isAvailable()) {
-            if (parentFragment != null) {
-                BulletinFactory.of(parentFragment).createSimpleBulletin(R.raw.error, "Библиотека Whisper недоступна").show();
-            }
-            return;
-        }
-        if (parentActivity == null) {
-            return;
-        }
-        if (Build.VERSION.SDK_INT >= 23 && parentActivity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            parentActivity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 97);
-            return;
-        }
-        if (recordingAudioVideo) {
-            return;
-        }
-        whisperDictationController.start();
-    }
-
-    public void onWhisperDictationPermissionResult(boolean granted) {
-        if (granted && whisperDictationController != null && !whisperDictationController.isBusy()) {
-            whisperDictationController.start();
-        }
-    }
-
-    private static int getDictationStackDp() {
-        return DEFAULT_HEIGHT + 6;
-    }
-
-    /** Запас высоты под кнопку Whisper над скрепкой (0 если скрыта). */
-    public float getDictationStackHeight() {
-        if (whisperDictationButton != null && whisperDictationButton.getVisibility() == View.VISIBLE) {
-            return dp(getDictationStackDp());
-        }
-        return 0;
-    }
-
-    private void updateWhisperDictationButton() {
-        if (whisperDictationButton == null || textFieldContainer == null) {
-            return;
-        }
-        boolean show = MglaWhisperDictationConfig.isPrefEnabled() && !isLiveComment && attachButton != null && isChat;
-        final boolean wasVisible = whisperDictationButton.getVisibility() == View.VISIBLE;
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) whisperDictationButton.getLayoutParams();
-        final int bottomMargin = show ? dp(getDictationStackDp()) : 0;
-        if (lp != null && (lp.bottomMargin != bottomMargin || lp.gravity != (Gravity.BOTTOM | Gravity.LEFT))) {
-            lp.bottomMargin = bottomMargin;
-            lp.width = dp(DEFAULT_HEIGHT);
-            lp.height = dp(DEFAULT_HEIGHT);
-            lp.gravity = Gravity.BOTTOM | Gravity.LEFT;
-            whisperDictationButton.setLayoutParams(lp);
-        }
-        whisperDictationButton.setVisibility(show ? View.VISIBLE : View.GONE);
-        whisperDictationButton.setTranslationY(0);
-        whisperDictationButton.setTranslationX(0);
-        if (show) {
-            whisperDictationButton.setAlpha(1f);
-            whisperDictationButton.setScaleX(1f);
-            whisperDictationButton.setScaleY(1f);
-            if (whisperDictationController == null || !whisperDictationController.isBusy()) {
-                updateWhisperDictationButtonVisual(false, false);
-            }
-            if (attachButton != null) {
-                attachButton.bringToFront();
-            }
-            whisperDictationButton.bringToFront();
-            textFieldContainer.requestLayout();
-            requestLayout();
-        } else if (whisperDictationController != null && whisperDictationController.isBusy()) {
-            whisperDictationController.cancel();
-            setWhisperDictationGlow(false);
-        }
-        if (wasVisible != show) {
-            checkUi_IslandTotalHeight();
-        }
-    }
-
-    private void updateWhisperDictationButtonVisual(boolean recording, boolean processing) {
-        if (whisperDictationButton == null) {
-            return;
-        }
-        int colorKey = (recording || processing) ? Theme.key_chat_messagePanelVoiceBackground : Theme.key_glass_defaultIcon;
-        whisperDictationButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(colorKey), PorterDuff.Mode.SRC_IN));
-        whisperDictationButton.setAlpha(processing ? 0.7f : 1f);
-        whisperDictationButton.setScaleX(recording ? 1.08f : 1f);
-        whisperDictationButton.setScaleY(recording ? 1.08f : 1f);
-    }
-
-    private void setWhisperDictationGlow(boolean active) {
-        whisperDictationGlow.setActive(active);
-        invalidate();
-    }
-
-    private void applyDictationText(String text, boolean isFinal) {
-        if (messageEditText == null || text == null) {
-            return;
-        }
-        if (dictationInsertStart < 0) {
-            dictationInsertStart = messageEditText.getSelectionEnd();
-            if (dictationInsertStart < 0) {
-                dictationInsertStart = messageEditText.length();
-            }
-            dictationInsertLength = 0;
-        }
-        Editable editable = messageEditText.getText();
-        if (editable == null) {
-            return;
-        }
-        int start = Math.min(dictationInsertStart, editable.length());
-        int end = Math.min(start + dictationInsertLength, editable.length());
-        String insert = text;
-        if (start > 0 && insert.length() > 0 && !Character.isWhitespace(editable.charAt(start - 1)) && !Character.isWhitespace(insert.charAt(0))) {
-            insert = " " + insert;
-        }
-        try {
-            editable.replace(start, end, insert);
-            dictationInsertLength = insert.length();
-            int sel = start + dictationInsertLength;
-            messageEditText.setSelection(Math.min(sel, messageEditText.length()));
-        } catch (Throwable e) {
-            FileLog.e(e);
-        }
-        if (isFinal) {
-            dictationInsertStart = -1;
-            dictationInsertLength = 0;
-        }
-    }
 
     private int getThemedColor(int key) {
         if (resourcesProvider != null) {
@@ -15752,7 +15545,6 @@ public class ChatActivityEnterView extends FrameLayout implements
         attachButton.bringToFront();
         updateStaticAttachLayout();
         updateStaticAttachButton();
-        updateWhisperDictationButton();
     }
 
     private void updateStaticAttachButton() {
@@ -16697,19 +16489,9 @@ public class ChatActivityEnterView extends FrameLayout implements
             animatorTopViewVisibility.getFloatValue();
 
         // + стек Whisper над скрепкой — чтобы кнопка была видна при стандартной высоте поля
-        return fieldHeight + (topView != null ? topView.getMeasuredHeight() : 0) * topViewVisibility + getDictationStackHeight();
-    }
-
-    /** Высота стеклянного овала без запаса под Whisper (кнопка рисуется над овалом). */
-    public float getIslandBubbleHeight(boolean target) {
-        final float fieldHeight = target ?
-            animatorInputFieldHeight.getToFactor():
-            animatorInputFieldHeight.getFactor();
-        final float topViewVisibility = target ?
-            (animatorTopViewVisibility.getValue() ? 1 : 0):
-            animatorTopViewVisibility.getFloatValue();
         return fieldHeight + (topView != null ? topView.getMeasuredHeight() : 0) * topViewVisibility;
     }
+
 
 
     private float currentIslandTotalHeight;

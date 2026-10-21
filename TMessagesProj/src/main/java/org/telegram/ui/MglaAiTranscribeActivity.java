@@ -20,17 +20,14 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaFeatureFlags;
-import org.telegram.messenger.MglaWhisperDictationConfig;
 import org.telegram.messenger.MglaWhisperModelsManager;
 import org.telegram.messenger.MglaWhisperNative;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
-import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.BulletinFactory;
@@ -55,20 +52,12 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
 
     private static final int ROW_FALLBACK = 11;
     private static final int ROW_SHADOW_3 = 12;
-
-    private static final int ROW_DICTATION_HEADER = 13;
-    private static final int ROW_DICTATION_ENABLED = 14;
-    private static final int ROW_DICTATION_LIVE = 15;
-    private static final int ROW_DICTATION_MODEL = 16;
-    private static final int ROW_DICTATION_INFO = 17;
-    private static final int ROW_COUNT = 18;
+    private static final int ROW_COUNT = 13;
 
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_TEXT = 1;
-    private static final int VIEW_TYPE_INFO = 2;
-    private static final int VIEW_TYPE_RADIO = 3;
-    private static final int VIEW_TYPE_SHADOW = 4;
-    private static final int VIEW_TYPE_HEADER = 5;
+    private static final int VIEW_TYPE_RADIO = 2;
+    private static final int VIEW_TYPE_SHADOW = 3;
 
     private static final float ALPHA_ACTIVE = 1f;
     private static final float ALPHA_DIMMED = 0.38f;
@@ -123,8 +112,7 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
                     int position = parent.getChildAdapterPosition(child);
                     if (position != ROW_GEMINI && position != ROW_API_KEY
                             && position != ROW_WHISPER && position != ROW_WHISPER_MODEL
-                            && position != ROW_WHISPER_LANG
-                            && position != ROW_DICTATION_ENABLED && position != ROW_DICTATION_LIVE) {
+                            && position != ROW_WHISPER_LANG) {
                         continue;
                     }
                     float bottom = child.getBottom() + child.getTranslationY();
@@ -149,8 +137,8 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
                     return;
                 }
                 showTextInputDialog("Модель Gemini", "ai_transcribe_model", "gemini-2.0-flash", false);
-            } else if (position == ROW_WHISPER_MODEL || position == ROW_DICTATION_MODEL) {
-                if (position == ROW_WHISPER_MODEL && !isWhisper()) {
+            } else if (position == ROW_WHISPER_MODEL) {
+                if (!isWhisper()) {
                     return;
                 }
                 presentFragment(new MglaWhisperModelsActivity());
@@ -161,37 +149,6 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
                 showLanguageDialog();
             } else if (position == ROW_FALLBACK) {
                 toggleSwitch(view, "ai_transcribe_fallback_telegram", true);
-            } else if (position == ROW_DICTATION_ENABLED) {
-                if (!MglaWhisperNative.isAvailable()) {
-                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Библиотека Whisper недоступна").show();
-                    return;
-                }
-                boolean next = !prefs.getBoolean(MglaWhisperDictationConfig.PREF_ENABLED, false);
-                if (next && !MglaFeatureFlags.isAllowed(MglaWhisperDictationConfig.PREF_ENABLED)) {
-                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Функция отключена администратором").show();
-                    return;
-                }
-                if (next && MglaWhisperModelsManager.getLoadedModel(context) == null) {
-                    BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Сначала скачайте модель Whisper").show();
-                    presentFragment(new MglaWhisperModelsActivity());
-                    return;
-                }
-                MglaWhisperDictationConfig.setEnabled(next);
-                if (next) {
-                    WhisperTranscriber.preloadSelected();
-                }
-                if (view instanceof TextCheckCell) {
-                    ((TextCheckCell) view).setChecked(next);
-                }
-                if (listView.getAdapter() != null) {
-                    listView.getAdapter().notifyDataSetChanged();
-                }
-            } else if (position == ROW_DICTATION_LIVE) {
-                boolean next = !MglaWhisperDictationConfig.isLiveEnabled();
-                MglaWhisperDictationConfig.setLiveEnabled(next);
-                if (view instanceof TextCheckCell) {
-                    ((TextCheckCell) view).setChecked(next);
-                }
             }
         });
 
@@ -205,7 +162,7 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         if (listView != null && listView.getAdapter() != null) {
             listView.getAdapter().notifyDataSetChanged();
         }
-        if (isWhisper() || MglaWhisperDictationConfig.isEnabled()) {
+        if (isWhisper()) {
             WhisperTranscriber.preloadSelected();
         }
     }
@@ -347,9 +304,7 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             if (position == ROW_ENABLED || position == ROW_FALLBACK
-                    || position == ROW_GEMINI || position == ROW_WHISPER
-                    || position == ROW_DICTATION_ENABLED || position == ROW_DICTATION_LIVE
-                    || position == ROW_DICTATION_MODEL) {
+                    || position == ROW_GEMINI || position == ROW_WHISPER) {
                 return true;
             }
             if (isWhisper()) {
@@ -367,16 +322,12 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
         public int getItemViewType(int position) {
             if (position == ROW_SHADOW_0 || position == ROW_SHADOW_1 || position == ROW_SHADOW_2 || position == ROW_SHADOW_3) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == ROW_DICTATION_HEADER) {
-                return VIEW_TYPE_HEADER;
             } else if (position == ROW_GEMINI || position == ROW_WHISPER) {
                 return VIEW_TYPE_RADIO;
             } else if (position == ROW_API_KEY || position == ROW_GEMINI_MODEL
                     || position == ROW_WHISPER_MODEL || position == ROW_WHISPER_LANG
-                    || position == ROW_WHISPER_STATUS || position == ROW_DICTATION_MODEL) {
+                    || position == ROW_WHISPER_STATUS) {
                 return VIEW_TYPE_TEXT;
-            } else if (position == ROW_DICTATION_INFO) {
-                return VIEW_TYPE_INFO;
             }
             return VIEW_TYPE_CHECK;
         }
@@ -387,17 +338,12 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
             View view;
             if (viewType == VIEW_TYPE_SHADOW) {
                 view = new ShadowSectionCell(context);
-            } else if (viewType == VIEW_TYPE_HEADER) {
-                view = new HeaderCell(context, 22);
-                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else if (viewType == VIEW_TYPE_TEXT) {
                 view = new TextSettingsCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else if (viewType == VIEW_TYPE_RADIO) {
                 view = new RadioCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-            } else if (viewType == VIEW_TYPE_INFO) {
-                view = new TextInfoPrivacyCell(context);
             } else {
                 view = new TextCheckCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -442,24 +388,6 @@ public class MglaAiTranscribeActivity extends MglaBaseSettingsActivity {
             } else if (position == ROW_FALLBACK) {
                 TextCheckCell cell = (TextCheckCell) holder.itemView;
                 cell.setTextAndCheck("Fallback на Telegram", prefs.getBoolean("ai_transcribe_fallback_telegram", true), false);
-            } else if (position == ROW_DICTATION_HEADER) {
-                ((HeaderCell) holder.itemView).setText("Из голоса в текст");
-            } else if (position == ROW_DICTATION_ENABLED) {
-                TextCheckCell cell = (TextCheckCell) holder.itemView;
-                cell.setTextAndValueAndCheck("Голосовой ввод", "Кнопка Whisper над скрепкой",
-                    MglaFeatureFlags.isAllowed(MglaWhisperDictationConfig.PREF_ENABLED)
-                        && prefs.getBoolean(MglaWhisperDictationConfig.PREF_ENABLED, false), false, true);
-            } else if (position == ROW_DICTATION_LIVE) {
-                TextCheckCell cell = (TextCheckCell) holder.itemView;
-                cell.setTextAndValueAndCheck("Живая расшифровка", "Текст появляется во время речи",
-                    MglaWhisperDictationConfig.isLiveEnabled(), false, true);
-            } else if (position == ROW_DICTATION_MODEL) {
-                TextSettingsCell cell = (TextSettingsCell) holder.itemView;
-                cell.setTextAndValue("Модель Whisper", MglaWhisperModelsManager.getSelectedModelTitle(), false);
-                cell.setCanDisable(false);
-            } else if (position == ROW_DICTATION_INFO) {
-                TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
-                cell.setText("Нажмите кнопку Whisper над скрепкой, чтобы начать запись. Повторное нажатие останавливает запись и вставляет текст в поле ввода. Используются те же локальные модели Whisper, что и для расшифровки голосовых.");
             }
             applyBlockAlpha(holder.itemView, position);
         }

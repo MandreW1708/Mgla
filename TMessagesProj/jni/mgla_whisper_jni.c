@@ -83,7 +83,7 @@ Java_org_telegram_messenger_MglaWhisperNative_nativeFree(JNIEnv *env, jclass cla
 
 JNIEXPORT jstring JNICALL
 Java_org_telegram_messenger_MglaWhisperNative_nativeTranscribe(
-        JNIEnv *env, jclass clazz, jlong handle, jfloatArray audio, jstring language, jint threads, jint maxTokens) {
+        JNIEnv *env, jclass clazz, jlong handle, jfloatArray audio, jstring language, jint threads) {
     (void) clazz;
     if (handle == 0 || audio == NULL) {
         return NULL;
@@ -117,17 +117,13 @@ Java_org_telegram_messenger_MglaWhisperNative_nativeTranscribe(
     params.n_threads = n_threads;
     params.offset_ms = 0;
     params.no_context = true;
-    // Voice notes / dictation: skip timestamp decoding and multi-pass temperature fallbacks.
+    // Voice notes are short: skip timestamp decoding and multi-pass temperature fallbacks.
     params.no_timestamps = true;
     params.single_segment = true;
     params.temperature = 0.0f;
     params.temperature_inc = 0.0f;
     params.greedy.best_of = 1;
-    // Short dictation rarely needs hundreds of tokens — caps decode time hard.
-    params.max_tokens = maxTokens > 0 ? maxTokens : 224;
-    if (params.max_tokens > 224) {
-        params.max_tokens = 224;
-    }
+    params.max_tokens = 224;
     params.audio_ctx = audio_ctx_for_samples((int) n);
     if (lang != NULL && lang[0] != '\0' && strcmp(lang, "auto") != 0) {
         params.language = lang;
