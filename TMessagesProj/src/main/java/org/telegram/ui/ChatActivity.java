@@ -4340,10 +4340,20 @@ public class ChatActivity extends BaseFragment implements
         avatarContainer.allowDrawStories = dialog_id < 0 && !isTopic;
         avatarContainer.setClipChildren(false);
         updateTopicTitleIcon();
-        avatarContainer.setGlassMode();
-        if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
-            avatarContainer.getAvatarImageView().setVisibility(View.GONE);
-            avatarContainer.updateGlassLayout();
+        final boolean glassChatHeader = org.telegram.ui.MglaGlassConfig.isGlassChatHeaderEnabled();
+        final boolean telegramHeader = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled();
+        final boolean floatingGlassHeader = glassChatHeader || telegramHeader;
+        if (floatingGlassHeader) {
+            if (telegramHeader) {
+                // Literal upstream Telegram glass header: avatar stays in the title pill.
+                avatarContainer.setStockTelegramGlass(true);
+            } else {
+                avatarContainer.setGlassMode();
+                if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+                    avatarContainer.getAvatarImageView().setVisibility(View.GONE);
+                    avatarContainer.updateGlassLayout();
+                }
+            }
         }
 
         if (inPreviewMode || inBubbleMode || isInsideContainer) {
@@ -4403,7 +4413,7 @@ public class ChatActivity extends BaseFragment implements
             getConnectionsManager().bindRequestToGuid(req, classGuid);
         } else {
             if (true) {
-                if (inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
+                if (glassChatHeader && inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser)) {
                     actionBar.setPreviewGlassMode(true);
                     actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, dp(6), 0, dp(6), 0));
                 } else {
@@ -4449,9 +4459,12 @@ public class ChatActivity extends BaseFragment implements
                 audioCallIconItem = menu.lazilyAddItem(call, R.drawable.call, themeDelegate);
                 audioCallIconItem.setContentDescription(LocaleController.getString(R.string.Call));
                 userFull = getMessagesController().getUserFull(currentUser.id);
-                if (userFull != null && userFull.phone_calls_available) {
+                // Telegram header: always show call next to ⋮ (shortens the nick pill).
+                final boolean telegramCallIcon = telegramHeader && !currentUser.self && !UserObject.isDeleted(currentUser);
+                if (telegramCallIcon || (userFull != null && userFull.phone_calls_available)) {
                     showAudioCallAsIcon = !inPreviewMode;
                     audioCallIconItem.setVisibility(View.VISIBLE);
+                    audioCallIconItem.createView();
                 } else {
                     showAudioCallAsIcon = false;
                     audioCallIconItem.setVisibility(View.GONE);
@@ -4747,21 +4760,26 @@ public class ChatActivity extends BaseFragment implements
             attachItem.setVisibility(View.GONE);
         }
 
-        // Replace the right "more" icon with the current peer avatar while keeping the menu item itself.
-        // Materialize the attach item first so it stays to the left of this slot.
+        // Standard/Clean: peer avatar replaces ⋮ on the right. Telegram: avatar stays in the nick pill.
         if (attachItem != null) {
             attachItem.createView();
         }
-        if (headerItem != null) {
+        if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()) {
+            ensureTelegramTitleAvatar();
+        } else if (headerItem != null) {
             ensureRightHeaderAvatarAttached();
         }
         updateRightAvatar();
         menu.setOnLayoutListener(() -> {
-            ensureRightHeaderAvatarAttached();
-            if (headerItem != null && headerItem.getVisibility() == View.VISIBLE) {
-                final BackupImageView avatarView = getRightHeaderAvatar();
-                if (avatarView != null && !avatarView.hasBitmapImage()) {
-                    checkAndUpdateAvatar();
+            if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()) {
+                ensureTelegramTitleAvatar();
+            } else {
+                ensureRightHeaderAvatarAttached();
+                if (headerItem != null && headerItem.getVisibility() == View.VISIBLE) {
+                    final BackupImageView avatarView = getRightHeaderAvatar();
+                    if (avatarView != null && !avatarView.hasBitmapImage()) {
+                        checkAndUpdateAvatar();
+                    }
                 }
             }
         });
@@ -4808,29 +4826,50 @@ public class ChatActivity extends BaseFragment implements
 
         contentView.setOccupyStatusBar(!inBubbleMode && !isInsideContainer && !inPreviewMode);
 
-        actionBar.setupGlass(
-            glassBackgroundDrawableFactory,
-            BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate),
-            ChatObject.isForum(currentChat));
+        if (floatingGlassHeader) {
+            actionBar.setupGlass(
+                glassBackgroundDrawableFactory,
+                BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate),
+                ChatObject.isForum(currentChat));
+        }
         if (chatMode == MODE_PINNED) {
             actionBar.setChatAvatarContainer(avatarContainer);
             avatarContainer.setActionBar(actionBar);
         } else if (chatMode == MODE_WELCOME_MESSAGES) {
             actionBar.setChatAvatarContainer(avatarContainer);
-            actionBar.setForcedMenuWidth(dp(46));
-            actionBar.doNotDrawGlassMenu = true;
+            if (floatingGlassHeader) {
+                actionBar.setForcedMenuWidth(dp(46));
+                actionBar.doNotDrawGlassMenu = true;
+            }
             avatarContainer.setActionBar(actionBar);
         } else if (isComments) {
             actionBar.setChatAvatarContainer(avatarContainer);
-            actionBar.setForcedMenuMinWidth(dp(46));
+            if (floatingGlassHeader) {
+                actionBar.setForcedMenuMinWidth(dp(46));
+            }
             avatarContainer.setActionBar(actionBar);
         } else {
             actionBar.setChatAvatarContainer(avatarContainer);
             avatarContainer.setActionBar(actionBar);
-            if (!isTopic && !UserObject.isBotForum(currentUser)) {
-                avatarContainer.setLeftPadding(0);
+            if (floatingGlassHeader) {
+                // Custom Mgla nick-pill only.
+                if (glassChatHeader && !isTopic && !UserObject.isBotForum(currentUser)) {
+                    avatarContainer.setLeftPadding(0);
+                }
+                if (telegramHeader && currentUser != null && !currentUser.self) {
+                    // Reserve call+⋮ width so the nick pill stays short and the call icon stays visible.
+                    actionBar.setForcedMenuMinWidth(dp(88));
+                    ensureTelegramCallIconVisible();
+                    if (avatarContainer.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
+                        ((ViewGroup.MarginLayoutParams) avatarContainer.getLayoutParams()).rightMargin = dp(92);
+                    }
+                    if (actionBar.createMenu() != null) {
+                        actionBar.createMenu().bringToFront();
+                    }
+                }
+                actionBar.checkAvatarContainerWidth(false);
+                actionBar.checkMenuItemsWidth();
             }
-            actionBar.checkAvatarContainerWidth(false);
         }
         updateBackButtonUnreadBadge();
 
@@ -18753,12 +18792,21 @@ public class ChatActivity extends BaseFragment implements
                         searchIconItem.setVisibility(View.GONE);
                     }
                 }
-                if (audioCallIconItem != null) {
-                    audioCallIconItem.setVisibility(View.GONE);
+                if (!actionBar.isSearchFieldVisible() && audioCallIconItem != null) {
+                    if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+                            && currentUser != null && !currentUser.self && !UserObject.isDeleted(currentUser) && !inPreviewMode) {
+                        showAudioCallAsIcon = true;
+                        audioCallIconItem.createView();
+                        audioCallIconItem.setVisibility(View.VISIBLE);
+                    } else {
+                        audioCallIconItem.setVisibility((showAudioCallAsIcon && !showSearchAsIcon) ? View.VISIBLE : View.GONE);
+                    }
                 }
                 if (headerItem != null) {
                     TLRPC.UserFull userInfo = getCurrentUserInfo();
-                    if (userInfo != null && userInfo.phone_calls_available) {
+                    if (showAudioCallAsIcon) {
+                        headerItem.hideSubItem(call);
+                    } else if (userInfo != null && userInfo.phone_calls_available) {
                         headerItem.showSubItem(call, true);
                         if (userInfo.video_calls_available) {
                             headerItem.showSubItem(video_call, true);
@@ -20146,7 +20194,11 @@ public class ChatActivity extends BaseFragment implements
         updateRightAvatar();
     }
 
+    /** Standard/Clean: avatar sits in the right menu slot. Telegram: avatar stays in the nick pill. */
     private boolean useHeaderAvatarSlot() {
+        if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()) {
+            return false;
+        }
         return headerItem != null && !inPreviewMode && !isTopic && !UserObject.isBotForum(currentUser);
     }
 
@@ -20160,6 +20212,7 @@ public class ChatActivity extends BaseFragment implements
     // Mgla: updates the right header avatar (chat/channel photo) to match the current peer.
     private void ensureRightHeaderAvatarAttached() {
         if (!useHeaderAvatarSlot()) {
+            ensureTelegramTitleAvatar();
             return;
         }
         final BackupImageView avatarView = getRightHeaderAvatar();
@@ -20187,12 +20240,42 @@ public class ChatActivity extends BaseFragment implements
         }
     }
 
+    /** Telegram header: peer avatar left inside the nick pill; restore ⋮ on the right oval. */
+    private void ensureTelegramTitleAvatar() {
+        if (!org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled() || avatarContainer == null) {
+            return;
+        }
+        avatarContainer.ensureAvatarInsideTitlePill();
+        if (headerItem != null && headerItem.getIconView() != null) {
+            headerItem.getIconView().setVisibility(View.VISIBLE);
+        }
+        ensureTelegramCallIconVisible();
+        if (actionBar != null) {
+            actionBar.checkAvatarContainerWidth(false);
+            actionBar.checkMenuItemsWidth();
+        }
+    }
+
+    /** Telegram header: keep call icon visible next to ⋮ so the right oval matches stock. */
+    private void ensureTelegramCallIconVisible() {
+        if (!org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()) {
+            return;
+        }
+        if (audioCallIconItem == null || currentUser == null || currentUser.self || UserObject.isDeleted(currentUser) || inPreviewMode) {
+            return;
+        }
+        showAudioCallAsIcon = true;
+        audioCallIconItem.createView();
+        audioCallIconItem.setVisibility(View.VISIBLE);
+    }
+
     private void updateRightAvatar() {
         updateRightAvatar(false);
     }
 
     private void updateRightAvatar(boolean force) {
         if (!useHeaderAvatarSlot()) {
+            ensureTelegramTitleAvatar();
             return;
         }
         ensureRightHeaderAvatarAttached();
@@ -24586,8 +24669,10 @@ public class ChatActivity extends BaseFragment implements
                     }
                 }
                 if (headerItem != null) {
-                    showAudioCallAsIcon = userInfo.phone_calls_available && !inPreviewMode;
-                    if (userInfo.phone_calls_available) {
+                    final boolean telegramCallIcon = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+                            && currentUser != null && !currentUser.self && !UserObject.isDeleted(currentUser);
+                    showAudioCallAsIcon = (telegramCallIcon || userInfo.phone_calls_available) && !inPreviewMode;
+                    if (userInfo.phone_calls_available || telegramCallIcon) {
                         if (showAudioCallAsIcon) {
                             if (audioCallIconItem != null) {
                                 View item = audioCallIconItem.createView();

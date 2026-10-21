@@ -30,6 +30,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -266,6 +267,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         }
         avatarImageView.setContentDescription(getString(R.string.AccDescrProfilePicture));
         avatarImageView.setRoundRadius(dp(21));
+        addView(avatarImageView);
         menuDotsImageView = new ImageView(context);
         menuDotsImageView.setImageResource(R.drawable.ic_ab_other);
         menuDotsImageView.setScaleType(ImageView.ScaleType.CENTER);
@@ -696,6 +698,42 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        if (stockTelegramGlass) {
+            // Literal upstream ChatAvatarContainer.onMeasure (glass + avatar).
+            final int width = MeasureSpec.getSize(widthMeasureSpec);
+            final int availableWidth = width - dp((avatarImageView.getVisibility() == VISIBLE ? 54 : 0) + 16);
+            avatarImageView.measure(MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp) - 2, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(avatarSizeInDp) - 2, MeasureSpec.EXACTLY));
+            titleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(24 + 8), MeasureSpec.AT_MOST));
+            if (subtitleTextView != null) {
+                subtitleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
+            } else if (animatedSubtitleTextView != null) {
+                animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.AT_MOST));
+            }
+            if (communityItem != null) {
+                communityItem.measure(MeasureSpec.makeMeasureSpec(dp(14), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(14), MeasureSpec.EXACTLY));
+            }
+            if (timeItem != null) {
+                timeItem.measure(MeasureSpec.makeMeasureSpec(dp(34), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(34), MeasureSpec.EXACTLY));
+            }
+            if (starBgItem != null) {
+                starBgItem.measure(MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.EXACTLY));
+            }
+            if (starFgItem != null) {
+                starFgItem.measure(MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.EXACTLY));
+            }
+            setMeasuredDimension(width, MeasureSpec.getSize(heightMeasureSpec));
+            if (lastWidth != -1 && lastWidth != width && lastWidth > width) {
+                fadeOutToLessWidth(lastWidth);
+            }
+            SimpleTextView titleTextLargerCopyView = this.titleTextLargerCopyView.get();
+            if (titleTextLargerCopyView != null) {
+                int largerAvailableWidth = largerWidth - dp((avatarImageView.getVisibility() == VISIBLE ? 54 : 0) + 16);
+                titleTextLargerCopyView.measure(MeasureSpec.makeMeasureSpec(largerAvailableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(dp(24), MeasureSpec.AT_MOST));
+            }
+            lastWidth = width;
+            return;
+        }
+
         int maxWidth = MeasureSpec.getSize(widthMeasureSpec) + titleTextView.getPaddingRight();
         // Measure avatar whenever it's attached — skipping leaves measuredHeight=0 and drops the
         // title into the lower half of the action bar (broken Topics / forum header).
@@ -823,7 +861,59 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     }
 
     private boolean glassMode;
+    /** Upstream Telegram glass: avatar + left title inside the pill (not Mgla centered nick). */
+    private boolean stockTelegramGlass;
+
     public void setGlassMode() {
+        setGlassModeInternal(false);
+    }
+
+    /**
+     * Telegram header: wide glass nick pill with avatar on the left, nick + status beside it.
+     * Right-side call/more oval is drawn by ActionBar menu glass separately.
+     */
+    public void setStockTelegramGlass(boolean enabled) {
+        stockTelegramGlass = enabled;
+        setGlassModeInternal(enabled);
+        if (enabled) {
+            // Inset from the nick-pill edge (paired with ActionBar telegram translationX).
+            leftPadding = dp(6);
+            ensureAvatarInsideTitlePill();
+            if (menuDotsImageView != null) {
+                menuDotsImageView.setVisibility(GONE);
+            }
+        }
+        requestLayout();
+        checkActionBar(false);
+    }
+
+    /** Put peer avatar back into the title pill (left of nick) after Mgla right-slot detach. */
+    public void ensureAvatarInsideTitlePill() {
+        if (avatarImageView == null || avatarImageIsHidden) {
+            return;
+        }
+        if (avatarImageView.getParent() != this) {
+            if (avatarImageView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) avatarImageView.getParent()).removeView(avatarImageView);
+            }
+            addView(avatarImageView, 0);
+        }
+        avatarImageView.setRoundRadius(dp(21));
+        avatarImageView.setSize(dp(avatarSizeInDp), dp(avatarSizeInDp));
+        avatarImageView.setClickable(true);
+        avatarImageView.setFocusable(true);
+        avatarImageView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        avatarImageView.setVisibility(VISIBLE);
+        avatarImageView.bringToFront();
+        requestLayout();
+        checkActionBar(false);
+    }
+
+    public boolean isStockTelegramGlass() {
+        return stockTelegramGlass;
+    }
+
+    private void setGlassModeInternal(boolean stock) {
         if (titleTextView != null) {
             titleTextView.setTextSizePx(dp(17.5f));
         }
@@ -831,6 +921,25 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             subtitleTextView.setTextSizePx(dp(13.5f));
         }
         glassMode = true;
+        if (stock) {
+            // Upstream keeps default leftPadding (8dp) and LEFT gravity + ellipsize.
+            if (titleTextView != null) {
+                titleTextView.setGravity(Gravity.LEFT);
+                titleTextView.setEllipsizeByGradient(true);
+                titleTextView.setRightDrawableOutside(true);
+            }
+            if (subtitleTextView != null) {
+                subtitleTextView.setGravity(Gravity.LEFT);
+                subtitleTextView.setEllipsizeByGradient(true);
+                subtitleTextView.setPadding(0, 0, dp(10), 0);
+            }
+            if (animatedSubtitleTextView != null) {
+                animatedSubtitleTextView.setGravity(Gravity.LEFT);
+                animatedSubtitleTextView.setEllipsizeByGradient(true);
+                animatedSubtitleTextView.setPadding(0, 0, dp(10), 0);
+            }
+            return;
+        }
         // Match ActionBar glass pin: translation uses leftPadding against (p + dp(3)).
         if (!hasVisibleAvatar()) {
             leftPadding = dp(3);
@@ -839,6 +948,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     }
 
     public void updateGlassLayout() {
+        if (stockTelegramGlass) {
+            requestLayout();
+            checkActionBar(true);
+            return;
+        }
         if (glassMode && !hasVisibleAvatar()) {
             leftPadding = dp(3);
         }
@@ -848,7 +962,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     }
 
     private void updateGlassTextGravity() {
-        if (!glassMode) {
+        if (!glassMode || stockTelegramGlass) {
             return;
         }
         // LEFT + layout-centering: CENTER gravity with a tight EXACTLY width clips both ends
@@ -959,6 +1073,62 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        if (stockTelegramGlass) {
+            // Literal upstream ChatAvatarContainer.onLayout (glass + avatar, left title).
+            final int actionBarHeight = ActionBar.getCurrentActionBarHeight();
+            final int viewTop = (actionBarHeight - avatarImageView.getMeasuredHeight() - 2) / 2
+                    + (occupyStatusBar ? AndroidUtilities.statusBarHeight : 0);
+            final int subtitleTop = viewTop + dp(glassMode ? 23.66f : 24);
+
+            // Avatar slightly inset from the left edge of the nick pill.
+            final int avatarLeft = leftPadding;
+            avatarImageView.layout(avatarLeft, 1 + viewTop, avatarLeft + avatarImageView.getMeasuredWidth(), 1 + viewTop + avatarImageView.getMeasuredHeight());
+            int l = leftPadding + (avatarImageView.getVisibility() == VISIBLE ? dp(glassMode ? 46 : 55) : dp(glassMode ? 13 : 1)) + rightAvatarPadding;
+            SimpleTextView titleTextLargerCopyView = this.titleTextLargerCopyView.get();
+            if (getSubtitleTextView().getVisibility() != GONE) {
+                titleTextView.layout(l, viewTop + dp(1.66f) - titleTextView.getPaddingTop(), l + titleTextView.getMeasuredWidth(), viewTop + titleTextView.getTextHeight() + dp(1.66f) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom());
+                if (titleTextLargerCopyView != null) {
+                    titleTextLargerCopyView.layout(l, viewTop + dp(1.66f), l + titleTextLargerCopyView.getMeasuredWidth(), viewTop + titleTextLargerCopyView.getTextHeight() + dp(1.66f));
+                }
+            } else {
+                titleTextView.layout(l, viewTop + dp(11) - titleTextView.getPaddingTop(), l + titleTextView.getMeasuredWidth(), viewTop + titleTextView.getTextHeight() + dp(11) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom());
+                if (titleTextLargerCopyView != null) {
+                    titleTextLargerCopyView.layout(l, viewTop + dp(10), l + titleTextLargerCopyView.getMeasuredWidth(), viewTop + titleTextLargerCopyView.getTextHeight() + dp(10));
+                }
+            }
+            if (communityItem != null) {
+                communityItem.layout(
+                        leftPadding + dp(29f),
+                        viewTop + dp(27.33f),
+                        leftPadding + dp(29f) + communityItem.getMeasuredWidth(),
+                        viewTop + dp(27.33f) + communityItem.getMeasuredHeight());
+            }
+            if (timeItem != null) {
+                timeItem.layout(
+                        leftPadding + dp(19.333f),
+                        viewTop - dp(8),
+                        leftPadding + dp(19.333f) + timeItem.getMeasuredWidth(),
+                        viewTop - dp(8) + timeItem.getMeasuredHeight()
+                );
+            }
+            if (starBgItem != null) {
+                starBgItem.layout(leftPadding + dp(28), viewTop + dp(24), leftPadding + dp(28) + starBgItem.getMeasuredWidth(), viewTop + dp(24) + starBgItem.getMeasuredHeight());
+            }
+            if (starFgItem != null) {
+                starFgItem.layout(leftPadding + dp(28), viewTop + dp(24), leftPadding + dp(28) + starFgItem.getMeasuredWidth(), viewTop + dp(24) + starFgItem.getMeasuredHeight());
+            }
+            if (subtitleTextView != null) {
+                subtitleTextView.layout(l, subtitleTop, l + subtitleTextView.getMeasuredWidth(), subtitleTop + subtitleTextView.getTextHeight());
+            } else if (animatedSubtitleTextView != null) {
+                animatedSubtitleTextView.layout(l, subtitleTop, l + animatedSubtitleTextView.getMeasuredWidth(), subtitleTop + animatedSubtitleTextView.getTextHeight());
+            }
+            SimpleTextView subtitleTextLargerCopyView = this.subtitleTextLargerCopyView.get();
+            if (subtitleTextLargerCopyView != null) {
+                subtitleTextLargerCopyView.layout(l, subtitleTop, l + subtitleTextLargerCopyView.getMeasuredWidth(), subtitleTop + subtitleTextLargerCopyView.getTextHeight());
+            }
+            return;
+        }
+
         final int viewTop = getViewTop();
         final int subtitleTop = viewTop + dp(glassMode ? 23.66f : 24);
 
@@ -969,7 +1139,6 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         // Keep X where it was: only shift right when the avatar is actually visible.
         int l = leftPadding + (hasVisibleAvatar() ? dp(glassMode ? 48.66f : 54) : 0) + rightAvatarPadding;
         final boolean glassTitleCentered = glassMode && !hasVisibleAvatar();
-        final int glassW = glassTitleCentered ? getGlassLayoutWidth() : 0;
         SimpleTextView titleTextLargerCopyView = this.titleTextLargerCopyView.get();
         // Non-glass (Topics etc.): raise title to the back-button row.
         // Glass chat header keeps the two-line offsets.
@@ -1943,6 +2112,22 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     private static final int GLASS_MAX_RIGHT_INSET_DP = 22;
 
     public int getVisualWidth() {
+        if (stockTelegramGlass) {
+            // Literal upstream ChatAvatarContainer.getVisualWidth.
+            float width = 0;
+            if (titleTextView != null) {
+                width = Math.max(width, titleTextView.getExactWidthIncludeDrawables());
+            }
+            if (subtitleTextView != null) {
+                width = Math.max(width, subtitleTextView.getExactWidthIncludeDrawables());
+            }
+            if (hasVisibleAvatar()) {
+                width += dp(52 + 18);
+            } else {
+                width += dp(34);
+            }
+            return (int) width;
+        }
         float width = Math.max(getTitleNaturalWidth(), getSubtitleNaturalWidth());
         if (hasVisibleAvatar()) {
             width += dp(52 + 12);

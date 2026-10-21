@@ -79,6 +79,14 @@ public class MglaGlassConfig {
     public static final String PREF_MD3_SWITCHES = "md3_switches";
     public static final String PREF_EDITED_ICON = "edited_icon_enabled";
     public static final String PREF_CLEAN_HEADER = "clean_header_enabled";
+    /** Chat action-bar style: glass standard / glass clean / stock Telegram. */
+    public static final String PREF_CHAT_HEADER_STYLE = "chat_header_style";
+    /** Floating liquid-glass nick pill (current default). */
+    public static final int HEADER_STYLE_STANDARD = 0;
+    /** Same glass pill with optional element hiding («Чистая»). */
+    public static final int HEADER_STYLE_CLEAN = 1;
+    /** Stock Telegram liquid-glass header: back circle + avatar/title pill + menu pill. */
+    public static final int HEADER_STYLE_TELEGRAM = 2;
     public static final String PREF_CLEAN_HEADER_HIDE_BACK_BTN = "clean_header_hide_back_btn";
     public static final String PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK = "clean_header_hide_title_block";
     public static final String PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK = "clean_header_hide_pinned_block";
@@ -106,6 +114,7 @@ public class MglaGlassConfig {
     private static boolean editedIcon;
     private static boolean customNotificationIcon = true;
     private static boolean cleanHeader;
+    private static int chatHeaderStyle = HEADER_STYLE_STANDARD;
     private static boolean cleanHeaderHideBackBtn = true;
     private static boolean cleanHeaderHideTitleBlock = true;
     private static boolean cleanHeaderHidePinnedBlock = true;
@@ -130,6 +139,13 @@ public class MglaGlassConfig {
         md3Switches = p.getBoolean(PREF_MD3_SWITCHES, false);
         editedIcon = p.getBoolean(PREF_EDITED_ICON, false);
         cleanHeader = p.getBoolean(PREF_CLEAN_HEADER, false);
+        if (p.contains(PREF_CHAT_HEADER_STYLE)) {
+            chatHeaderStyle = clampHeaderStyle(p.getInt(PREF_CHAT_HEADER_STYLE, HEADER_STYLE_STANDARD));
+        } else {
+            // Migrate from the old boolean: clean on → CLEAN, otherwise STANDARD.
+            chatHeaderStyle = cleanHeader ? HEADER_STYLE_CLEAN : HEADER_STYLE_STANDARD;
+        }
+        cleanHeader = chatHeaderStyle == HEADER_STYLE_CLEAN;
         cleanHeaderHideBackBtn = p.getBoolean(PREF_CLEAN_HEADER_HIDE_BACK_BTN, true);
         cleanHeaderHideTitleBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_TITLE_BLOCK, true);
         cleanHeaderHidePinnedBlock = p.getBoolean(PREF_CLEAN_HEADER_HIDE_PINNED_BLOCK, true);
@@ -184,19 +200,56 @@ public class MglaGlassConfig {
         notifyGlassAppearanceChanged();
     }
 
+    private static int clampHeaderStyle(int style) {
+        if (style < HEADER_STYLE_STANDARD || style > HEADER_STYLE_TELEGRAM) {
+            return HEADER_STYLE_STANDARD;
+        }
+        return style;
+    }
+
+    public static int getChatHeaderStyle() {
+        ensureCache();
+        return chatHeaderStyle;
+    }
+
+    public static void setChatHeaderStyle(int style) {
+        ensureCache();
+        style = clampHeaderStyle(style);
+        if (chatHeaderStyle == style) {
+            return;
+        }
+        chatHeaderStyle = style;
+        cleanHeader = style == HEADER_STYLE_CLEAN;
+        getPrefs().edit()
+                .putInt(PREF_CHAT_HEADER_STYLE, style)
+                .putBoolean(PREF_CLEAN_HEADER, cleanHeader)
+                .apply();
+        notifyGlassAppearanceChanged();
+    }
+
+    /** Mgla floating liquid-glass header (Standard / Clean) — custom nick-pill layout. */
+    public static boolean isGlassChatHeaderEnabled() {
+        final int style = getChatHeaderStyle();
+        return style == HEADER_STYLE_STANDARD || style == HEADER_STYLE_CLEAN;
+    }
+
+    /** Stock Telegram chat header (avatar + left title inside the glass pill). */
+    public static boolean isTelegramHeaderEnabled() {
+        return getChatHeaderStyle() == HEADER_STYLE_TELEGRAM;
+    }
+
+    /** Any floating glass header (Standard, Clean, or stock Telegram). */
+    public static boolean isFloatingGlassHeaderEnabled() {
+        return isGlassChatHeaderEnabled() || isTelegramHeaderEnabled();
+    }
+
     public static boolean isCleanHeaderEnabled() {
         ensureCache();
-        return cleanHeader;
+        return chatHeaderStyle == HEADER_STYLE_CLEAN;
     }
 
     public static void setCleanHeaderEnabled(boolean enabled) {
-        ensureCache();
-        if (cleanHeader == enabled) {
-            return;
-        }
-        cleanHeader = enabled;
-        getPrefs().edit().putBoolean(PREF_CLEAN_HEADER, enabled).apply();
-        notifyGlassAppearanceChanged();
+        setChatHeaderStyle(enabled ? HEADER_STYLE_CLEAN : HEADER_STYLE_STANDARD);
     }
 
     public static boolean isCleanHeaderHideBackBtnEnabled() {

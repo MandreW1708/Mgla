@@ -57,17 +57,25 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         LinearLayout headerStyleBlock = createBlock(context, "Вид шапки");
 
+        final int headerStyle = MglaGlassConfig.getChatHeaderStyle();
+
         RadioCell standardCell = new RadioCell(context);
         standardCell.setBackground(null);
-        standardCell.setText("Стандартная", !MglaGlassConfig.isCleanHeaderEnabled(), false);
+        standardCell.setText("Стандартная", headerStyle == MglaGlassConfig.HEADER_STYLE_STANDARD, false);
 
         RadioCell cleanCell = new RadioCell(context);
         cleanCell.setBackground(null);
-        cleanCell.setText("Чистая", MglaGlassConfig.isCleanHeaderEnabled(), false);
+        cleanCell.setText("Чистая", headerStyle == MglaGlassConfig.HEADER_STYLE_CLEAN, false);
+
+        RadioCell telegramCell = new RadioCell(context);
+        telegramCell.setBackground(null);
+        telegramCell.setText("Telegram", headerStyle == MglaGlassConfig.HEADER_STYLE_TELEGRAM, false);
 
         headerStyleBlock.addView(standardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         headerStyleBlock.addView(MglaUi.createDivider(context));
         headerStyleBlock.addView(cleanCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        headerStyleBlock.addView(MglaUi.createDivider(context));
+        headerStyleBlock.addView(telegramCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         LinearLayout cleanSettingsBlock = MglaUi.createBlock(context, null);
 
@@ -81,20 +89,29 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
         rootLayout.addView(headerStyleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
         rootLayout.addView(cleanSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
         
-        cleanSettingsBlock.setVisibility(MglaGlassConfig.isCleanHeaderEnabled() ? android.view.View.VISIBLE : android.view.View.GONE);
+        cleanSettingsBlock.setVisibility(headerStyle == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+
+        final Runnable applyHeaderRadios = () -> {
+            final int style = MglaGlassConfig.getChatHeaderStyle();
+            standardCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_STANDARD, true);
+            cleanCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_CLEAN, true);
+            telegramCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_TELEGRAM, true);
+            cleanSettingsBlock.setVisibility(style == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+        };
 
         standardCell.setOnClickListener(v -> {
-            MglaGlassConfig.setCleanHeaderEnabled(false);
-            standardCell.setChecked(true, true);
-            cleanCell.setChecked(false, true);
-            cleanSettingsBlock.setVisibility(android.view.View.GONE);
+            MglaGlassConfig.setChatHeaderStyle(MglaGlassConfig.HEADER_STYLE_STANDARD);
+            applyHeaderRadios.run();
         });
 
         cleanCell.setOnClickListener(v -> {
-            MglaGlassConfig.setCleanHeaderEnabled(true);
-            standardCell.setChecked(false, true);
-            cleanCell.setChecked(true, true);
-            cleanSettingsBlock.setVisibility(android.view.View.VISIBLE);
+            MglaGlassConfig.setChatHeaderStyle(MglaGlassConfig.HEADER_STYLE_CLEAN);
+            applyHeaderRadios.run();
+        });
+
+        telegramCell.setOnClickListener(v -> {
+            MglaGlassConfig.setChatHeaderStyle(MglaGlassConfig.HEADER_STYLE_TELEGRAM);
+            applyHeaderRadios.run();
         });
 
         LinearLayout glassBlock = createBlock(context, "Внешний вид");

@@ -241,10 +241,13 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         glassDrawable = factory.create(this)
             .setColorProvider(colorProvider)
             .setPadding(dp(6));
-        // Same capsule radius on all corners — forum used to flatten the left (18.33)
-        // to nest against the back button, which looks wrong on the floating nick/topic pill.
-        glassDrawable.setRadius(dp(23));
-
+        if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled() && isForum) {
+            // Stock Telegram forum glass: slightly flatter left edge next to the back circle.
+            glassDrawable.setRadius(dp(18.33f), dp(23), dp(23), dp(18.33f));
+        } else {
+            // Mgla nick/topic pill: full capsule on all corners.
+            glassDrawable.setRadius(dp(23));
+        }
 
         glassDrawableBack = factory.create(this)
             .setColorProvider(colorProvider)
@@ -2234,13 +2237,19 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
 
         final boolean hasAvatar = chatAvatarContainer.hasVisibleAvatar();
-        // Ceiling stays the previous full-width budget; floor keeps short nicks from looking tiny.
         final int maxAvailable = previewGlassMode
             ? getMeasuredWidth() - dp(6) * 2
             : getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
-        final int visualWidth = Math.max(0, chatAvatarContainer.getVisualWidth());
-        final int minWidth = hasAvatar ? 0 : Math.min(maxAvailable, dp(132));
-        final int targetWidth = Math.min(maxAvailable, Math.max(minWidth, visualWidth));
+        final int targetWidth;
+        if (chatAvatarContainer.isStockTelegramGlass()) {
+            // Telegram header: keep the nick pill as wide as the slot between back and menu.
+            targetWidth = Math.max(0, maxAvailable);
+        } else {
+            // Ceiling stays the previous full-width budget; floor keeps short nicks from looking tiny.
+            final int visualWidth = Math.max(0, chatAvatarContainer.getVisualWidth());
+            final int minWidth = hasAvatar ? 0 : Math.min(maxAvailable, dp(132));
+            targetWidth = Math.min(maxAvailable, Math.max(minWidth, visualWidth));
+        }
         if (animated) {
             if (animatorAvatarContainerWidth.getToFactor() != targetWidth) {
                 animatorAvatarContainerWidth.animateTo(targetWidth);
@@ -2375,15 +2384,79 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             final int rightDefault = getWidth() - rightOffset;
             final int widthDefault = rightDefault - leftDefault;
             final int left, right;
-            if (chatAvatarContainer != null) {
-                final int width = lerp(Math.min(widthDefault, (int) animatorAvatarContainerWidth.getFactor() + p * 2), widthDefault, Math.max(searchFactor, actionModeFactor));
-                left = (rightDefault + leftDefault - width) / 2;
-                right = left + width;
 
-                final float translationX = left
-                    - ((MarginLayoutParams)(chatAvatarContainer.getLayoutParams())).leftMargin
-                    - chatAvatarContainer.getLeftPadding()
-                    + p + dp(3);
+            // Resolve menu glass horizontal span early so Telegram title can mirror the same gap.
+            int menuGlassLeft = getWidth() - Math.max(s, menuWidth) - p * 2;
+            int menuGlassRight = getWidth();
+            final float[] menuItemBoundsEarly = new float[2];
+            final float[] actionItemBoundsEarly = new float[2];
+            final boolean hasMenuItemsEarly = computeActionBarMenuItemBounds(menu, menuItemBoundsEarly);
+            final boolean hasActionItemsEarly = actionMode != null
+                && actionMode.getVisibility() != GONE
+                && computeActionBarMenuItemBounds(actionMode, actionItemBoundsEarly);
+            float menuItemsLeft = 0;
+            float menuItemsRight = 0;
+            boolean foundMenuItem = false;
+            if (hasMenuItemsEarly && hasActionItemsEarly && actionModeFactor > 0f) {
+                menuItemsLeft = lerp(menuItemBoundsEarly[0], actionItemBoundsEarly[0], actionModeFactor);
+                menuItemsRight = lerp(menuItemBoundsEarly[1], actionItemBoundsEarly[1], actionModeFactor);
+                foundMenuItem = true;
+            } else if (hasActionItemsEarly && (actionModeVisible || actionModeFactor > 0.5f)) {
+                menuItemsLeft = actionItemBoundsEarly[0];
+                menuItemsRight = actionItemBoundsEarly[1];
+                foundMenuItem = true;
+            } else if (hasMenuItemsEarly) {
+                menuItemsLeft = menuItemBoundsEarly[0];
+                menuItemsRight = menuItemBoundsEarly[1];
+                foundMenuItem = true;
+            }
+            if (foundMenuItem) {
+                final float itemsWidth = menuItemsRight - menuItemsLeft;
+                if (itemsWidth <= s + dp(2)) {
+                    final float centerX = (menuItemsLeft + menuItemsRight) / 2f;
+                    menuGlassLeft = Math.round(centerX - s / 2f - p);
+                    menuGlassRight = Math.round(centerX + s / 2f + p);
+                } else {
+                    menuGlassLeft = Math.round(menuItemsLeft - p);
+                    menuGlassRight = Math.round(menuItemsRight + p);
+                }
+            }
+
+            if (chatAvatarContainer != null) {
+                final boolean stockTelegram = chatAvatarContainer.isStockTelegramGlass();
+                final int width;
+                if (stockTelegram && Math.max(searchFactor, actionModeFactor) < 0.01f) {
+                    // Glass padding p: visual edge is inset from bounds.
+                    // Equal VISUAL gaps on both sides; frosted title stops before call icon.
+                    final int visualGap = dp(2);
+                    final int menuContentLeft = foundMenuItem
+                            ? Math.round(menuItemsLeft)
+                            : (menuGlassLeft + p);
+                    // back visual right = s+p; title visual left = left+p → left = s+visualGap
+                    left = hasBackButton ? (s + visualGap) : visualGap;
+                    // title visual right = menuContentLeft - visualGap → right = that + p
+                    right = Math.max(left + s, menuContentLeft - visualGap + p);
+                    width = right - left;
+                } else {
+                    width = lerp(Math.min(widthDefault, (int) animatorAvatarContainerWidth.getFactor() + p * 2), widthDefault, Math.max(searchFactor, actionModeFactor));
+                    left = (rightDefault + leftDefault - width) / 2;
+                    right = left + width;
+                }
+
+                // Telegram: avatar sits a bit inside the pill (not cancelled by leftPadding).
+                // Standard/Clean: usual glass pin against leftPadding.
+                final float translationX;
+                if (stockTelegram) {
+                    // screenX = left + dp(2) + leftPadding → slight inset past visual edge (visual starts at left+p).
+                    translationX = left
+                        - ((MarginLayoutParams) (chatAvatarContainer.getLayoutParams())).leftMargin
+                        + dp(2);
+                } else {
+                    translationX = left
+                        - ((MarginLayoutParams) (chatAvatarContainer.getLayoutParams())).leftMargin
+                        - chatAvatarContainer.getLeftPadding()
+                        + p + dp(3);
+                }
                 // Freeze X while action mode morphs the title glass — otherwise the avatar/title
                 // slides sideways as the pill expands (looks like it vanishes from the sides).
                 if (actionModeFactor <= 0.001f) {
@@ -2426,8 +2499,8 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
         }
         if (glassDrawableMenu != null && menuWidth > 0 && !glassOnlyBack && !doNotDrawGlassMenu) {
-            // Align menu glass to on-screen items. During action mode, morph from the avatar
-            // disc to the full action-button strip (copy/forward/delete/…).
+            // menuGlassLeft/Right already resolved above for equal Telegram gaps; recompute if title
+            // glass was skipped (no chatAvatarContainer / preview path).
             int menuGlassLeft = getWidth() - Math.max(s, menuWidth) - p * 2;
             int menuGlassRight = getWidth();
             final float[] menuItemBounds = new float[2];
