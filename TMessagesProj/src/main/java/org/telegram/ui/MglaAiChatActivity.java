@@ -211,10 +211,14 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                     blur3_InvalidateBlur();
                     final int width = getMeasuredWidth();
                     final int height = getMeasuredHeight();
+                    // Capture page content for the bottom tabs/player liquid glass even when
+                    // chat-blur (action-bar frosted) is off — otherwise islands stay flat.
+                    final boolean drawGlassContent = SharedConfig.chatBlurEnabled()
+                            || LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS);
                     if (iBlur3SourceGlassFrosted != null && !iBlur3SourceGlassFrosted.inRecording()) {
                         final Canvas c = iBlur3SourceGlassFrosted.beginRecording(width, height);
                         c.drawColor(getThemedColor(Theme.key_windowBackgroundGray));
-                        if (SharedConfig.chatBlurEnabled()) {
+                        if (drawGlassContent) {
                             scrollableViewNoiseSuppressor.draw(c, DownscaleScrollableNoiseSuppressor.DRAW_FROSTED_GLASS);
                         }
                         iBlur3SourceGlassFrosted.endRecording();
@@ -222,12 +226,13 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                     if (iBlur3SourceGlass != null && !iBlur3SourceGlass.inRecording()) {
                         final Canvas c = iBlur3SourceGlass.beginRecording(width, height);
                         c.drawColor(getThemedColor(Theme.key_windowBackgroundGray));
-                        if (SharedConfig.chatBlurEnabled()) {
+                        if (drawGlassContent) {
                             scrollableViewNoiseSuppressor.draw(c, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
                         }
                         iBlur3SourceGlass.endRecording();
                     }
                     iBlur3Invalidated = false;
+                    MainTabsActivity.notifyTabGlassFrom(MglaAiChatActivity.this);
                 }
                 super.dispatchDraw(canvas);
             }

@@ -155,32 +155,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             iBlur3SourceTabGlass.setupRenderer(new RenderNodeWithHash.Renderer() {
                 @Override
                 public void renderNodeCalculateHash(IBlur3Hash hash) {
-                    hash.add(getThemedColor(Theme.key_windowBackgroundWhite));
-                    hash.add(SharedConfig.chatBlurEnabled());
-
-                    for (int a = 0, N = fragmentsArr.size(); a < N; a++) {
-                        final FragmentState state = fragmentsArr.valueAt(a);
-                        final BaseFragment fragment = state.fragment;
-                        if (fragment.fragmentView == null) {
-                            continue;
-                        }
-                        if (!ViewPositionWatcher.computeRectInParent(fragment.fragmentView, contentView, fragmentPosition)) {
-                            continue;
-                        }
-                        if (fragmentPosition.right <= 0 || fragmentPosition.left >= fragmentView.getMeasuredWidth()) {
-                            continue;
-                        }
-
-                        if (fragment instanceof TabFragmentDelegate) {
-                            TabFragmentDelegate delegate = (TabFragmentDelegate) fragment;
-                            BlurredBackgroundSourceRenderNode source = delegate.getGlassSource();
-                            if (source != null) {
-                                hash.addF(fragmentPosition.left);
-                                hash.addF(fragmentPosition.top);
-                                hash.add(fragment.getClassGuid());
-                            }
-                        }
-                    }
+                    // Always re-composite: child tabs (AI/Music/Tasks/…) refresh their glass
+                    // sources while scrolling, but position/classGuid alone would keep a stale frame.
+                    hash.unsupported();
                 }
 
                 @Override
@@ -1631,6 +1608,47 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         iBlur3SourceTabGlass.setSize(width, height);
         iBlur3SourceTabGlass.updateDisplayListIfNeeded();
+    }
+
+    /**
+     * Called by tab fragments after they refresh {@link TabFragmentDelegate#getGlassSource()}
+     * (typically at the end of their {@code dispatchDraw}). Re-composites the bottom island /
+     * player liquid glass and invalidates those views. Safe while the pager child is drawing:
+     * islands are drawn after the pager, so they pick up the new frame in the same pass.
+     */
+    public void notifyTabGlassContentChanged() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || iBlur3SourceTabGlass == null) {
+            return;
+        }
+        blur3_invalidateBlur();
+        iBlur3SourceTabGlass.invalidateDisplayListForDrawables();
+        if (tabsView != null) {
+            tabsView.invalidate();
+        }
+        if (searchButton != null) {
+            searchButton.invalidate();
+        }
+        if (globalMusicBar != null) {
+            globalMusicBar.invalidateGlass();
+        }
+    }
+
+    /** Find the hosting {@link MainTabsActivity} and refresh its bottom liquid glass. */
+    public static void notifyTabGlassFrom(BaseFragment fragment) {
+        if (fragment == null || fragment.getParentLayout() == null) {
+            return;
+        }
+        final java.util.List<BaseFragment> stack = fragment.getParentLayout().getFragmentStack();
+        if (stack == null) {
+            return;
+        }
+        for (int i = stack.size() - 1; i >= 0; i--) {
+            final BaseFragment f = stack.get(i);
+            if (f instanceof MainTabsActivity) {
+                ((MainTabsActivity) f).notifyTabGlassContentChanged();
+                return;
+            }
+        }
     }
 
     private void blur3_updateFadeColors() {

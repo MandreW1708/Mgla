@@ -6,7 +6,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -23,17 +25,20 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MglaTask;
 import org.telegram.messenger.MglaTaskRepeat;
 import org.telegram.messenger.MglaTasksReminderScheduler;
 import org.telegram.messenger.MglaTasksStorage;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.AlertDialog;
@@ -47,6 +52,11 @@ import org.telegram.ui.Components.MglaTaskEditSheet;
 import org.telegram.ui.Components.MglaTaskGroupsSheet;
 import org.telegram.ui.Components.MglaTasksCalendarView;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
+import org.telegram.ui.Components.blur3.ViewGroupPartRenderer;
+import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceRenderNode;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -71,6 +81,18 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private int selectedTab; // 0 = list, 1 = calendar
 
     private FrameLayout rootLayout;
+
+    /* Liquid glass source for MainTabs bottom island + player */
+    private final @NonNull BlurredBackgroundSourceColor iBlur3SourceColor;
+    private final @Nullable DownscaleScrollableNoiseSuppressor scrollableViewNoiseSuppressor;
+    private final @Nullable BlurredBackgroundSourceRenderNode iBlur3SourceGlassFrosted;
+    private final @Nullable BlurredBackgroundSourceRenderNode iBlur3SourceGlass;
+    private IBlur3Capture iBlur3CaptureList;
+    private IBlur3Capture iBlur3CaptureDay;
+    private boolean iBlur3Invalidated;
+    private final ArrayList<RectF> iBlur3Positions = new ArrayList<>();
+    private final RectF iBlur3PositionActionBar = new RectF();
+    private final RectF iBlur3PositionMainTabs = new RectF();
     private SegmentedControl segmentedControl;
     private HorizontalScrollView tabsScroll;
     private LinearLayout tabsRow;
@@ -116,6 +138,19 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         if (args != null) {
             hasMainTabs = args.getBoolean("hasMainTabs", false);
         }
+        iBlur3SourceColor = new BlurredBackgroundSourceColor();
+        iBlur3SourceColor.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            scrollableViewNoiseSuppressor = new DownscaleScrollableNoiseSuppressor();
+            iBlur3SourceGlassFrosted = new BlurredBackgroundSourceRenderNode(null);
+            iBlur3SourceGlass = new BlurredBackgroundSourceRenderNode(null);
+        } else {
+            scrollableViewNoiseSuppressor = null;
+            iBlur3SourceGlassFrosted = null;
+            iBlur3SourceGlass = null;
+        }
+        iBlur3Positions.add(iBlur3PositionActionBar);
+        iBlur3Positions.add(iBlur3PositionMainTabs);
     }
 
     private int islandBottomInset() {
@@ -191,7 +226,38 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         toggleDoneItem = menu.addSubItem(MENU_TOGGLE_DONE, "");
         updateToggleDoneItem();
 
-        rootLayout = new FrameLayout(context);
+        rootLayout = new FrameLayout(context) {
+            @Override
+            protected void dispatchDraw(@NonNull Canvas canvas) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                    blur3_InvalidateBlur();
+                    final int width = getMeasuredWidth();
+                    final int height = getMeasuredHeight();
+                    final int bg = Theme.getColor(Theme.key_windowBackgroundWhite);
+                    final boolean drawGlassContent = SharedConfig.chatBlurEnabled()
+                            || LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS);
+                    if (iBlur3SourceGlassFrosted != null && !iBlur3SourceGlassFrosted.inRecording()) {
+                        final Canvas c = iBlur3SourceGlassFrosted.beginRecording(width, height);
+                        c.drawColor(bg);
+                        if (drawGlassContent) {
+                            scrollableViewNoiseSuppressor.draw(c, DownscaleScrollableNoiseSuppressor.DRAW_FROSTED_GLASS);
+                        }
+                        iBlur3SourceGlassFrosted.endRecording();
+                    }
+                    if (iBlur3SourceGlass != null && !iBlur3SourceGlass.inRecording()) {
+                        final Canvas c = iBlur3SourceGlass.beginRecording(width, height);
+                        c.drawColor(bg);
+                        if (drawGlassContent) {
+                            scrollableViewNoiseSuppressor.draw(c, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
+                        }
+                        iBlur3SourceGlass.endRecording();
+                    }
+                    iBlur3Invalidated = false;
+                    MainTabsActivity.notifyTabGlassFrom(MglaTasksActivity.this);
+                }
+                super.dispatchDraw(canvas);
+            }
+        };
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
 
         LinearLayout contentLayout = new LinearLayout(context);
@@ -249,6 +315,18 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             }
             return false;
         });
+        listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                    scrollableViewNoiseSuppressor.onScrolled(dx, dy);
+                    blur3_InvalidateBlur();
+                    if (rootLayout != null) {
+                        rootLayout.invalidate();
+                    }
+                }
+            }
+        });
         listPage.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         emptyView = new LinearLayout(context);
@@ -304,6 +382,18 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             }
             return false;
         });
+        dayListView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                    scrollableViewNoiseSuppressor.onScrolled(dx, dy);
+                    blur3_InvalidateBlur();
+                    if (rootLayout != null) {
+                        rootLayout.invalidate();
+                    }
+                }
+            }
+        });
         dayListContainer.addView(dayListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         dayEmptyView = new TextView(context);
         dayEmptyView.setText("Нет задач на этот день");
@@ -337,8 +427,47 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         MglaTasksStorage.getInstance().ensureLoaded(this::reloadData);
         MglaGlobalMusicBar.addGlobalVisibilityListener(musicBarVisibilityListener);
 
+        // Capture lists for the bottom tabs/player liquid glass.
+        iBlur3CaptureList = new ViewGroupPartRenderer(listView, rootLayout, listView::drawChild);
+        iBlur3CaptureDay = new ViewGroupPartRenderer(dayListView, rootLayout, dayListView::drawChild);
+
         fragmentView = rootLayout;
         return fragmentView;
+    }
+
+    private void blur3_InvalidateBlur() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || scrollableViewNoiseSuppressor == null || fragmentView == null) {
+            return;
+        }
+        final IBlur3Capture capture = selectedTab == 1 && iBlur3CaptureDay != null
+                ? iBlur3CaptureDay
+                : iBlur3CaptureList;
+        if (capture == null) {
+            return;
+        }
+        final int additionalList = dp(48);
+        final int nav = AndroidUtilities.navigationBarHeight;
+        final int mainTabBottom = fragmentView.getMeasuredHeight() - nav - dp(DialogsActivity.MAIN_TABS_MARGIN);
+        final int mainTabTop = mainTabBottom - dp(DialogsActivity.MAIN_TABS_HEIGHT)
+                - dp(MglaGlobalMusicBar.blurExclusionExtraDp());
+
+        final int actionBarBottom = ActionBar.getCurrentActionBarHeight()
+                + (actionBar != null && actionBar.getOccupyStatusBar() ? AndroidUtilities.statusBarHeight : 0);
+        iBlur3PositionActionBar.set(0, -additionalList, fragmentView.getMeasuredWidth(), actionBarBottom + additionalList);
+        if (hasMainTabs) {
+            iBlur3PositionMainTabs.set(0, mainTabTop, fragmentView.getMeasuredWidth(), mainTabBottom);
+            iBlur3PositionMainTabs.inset(0, LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0 : -dp(48));
+        } else {
+            iBlur3PositionMainTabs.setEmpty();
+        }
+        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, hasMainTabs ? 2 : 1);
+        scrollableViewNoiseSuppressor.invalidateResultRenderNodes(
+                capture, fragmentView.getMeasuredWidth(), fragmentView.getMeasuredHeight());
+    }
+
+    @Override
+    public BlurredBackgroundSourceRenderNode getGlassSource() {
+        return iBlur3SourceGlass;
     }
 
     @Override
@@ -381,6 +510,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             View child = pagesLayout.getChildAt(a);
             boolean list = "list".equals(child.getTag());
             child.setVisibility((selectedTab == 0) == list ? View.VISIBLE : View.GONE);
+        }
+        iBlur3Invalidated = true;
+        if (rootLayout != null) {
+            rootLayout.invalidate();
         }
     }
 

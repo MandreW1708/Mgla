@@ -13,6 +13,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -38,6 +39,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -45,12 +47,14 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MglaMusicImageHelper;
 import org.telegram.messenger.MglaYandexMusicApi;
 import org.telegram.messenger.MglaYandexMusicModel;
 import org.telegram.messenger.MglaYandexMusicPlayer;
 import org.telegram.messenger.MglaYandexMusicStore;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.VpnMonitor;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -58,6 +62,11 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
+import org.telegram.ui.Components.blur3.ViewGroupPartRenderer;
+import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceRenderNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -91,6 +100,17 @@ public class MglaMusicActivity extends BaseFragment implements
     // Root views
     private FrameLayout rootLayout;
     private FrameLayout mainContainer;
+
+    /* Liquid glass source for MainTabs bottom island + player */
+    private final @NonNull BlurredBackgroundSourceColor iBlur3SourceColor;
+    private final @Nullable DownscaleScrollableNoiseSuppressor scrollableViewNoiseSuppressor;
+    private final @Nullable BlurredBackgroundSourceRenderNode iBlur3SourceGlassFrosted;
+    private final @Nullable BlurredBackgroundSourceRenderNode iBlur3SourceGlass;
+    private IBlur3Capture iBlur3Capture;
+    private boolean iBlur3Invalidated;
+    private final ArrayList<RectF> iBlur3Positions = new ArrayList<>();
+    private final RectF iBlur3PositionActionBar = new RectF();
+    private final RectF iBlur3PositionMainTabs = new RectF();
 
     // Pages
     private ScrollView collectionScrollView;
@@ -210,6 +230,19 @@ public class MglaMusicActivity extends BaseFragment implements
         if (args != null) {
             hasMainTabs = args.getBoolean("hasMainTabs", false);
         }
+        iBlur3SourceColor = new BlurredBackgroundSourceColor();
+        iBlur3SourceColor.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            scrollableViewNoiseSuppressor = new DownscaleScrollableNoiseSuppressor();
+            iBlur3SourceGlassFrosted = new BlurredBackgroundSourceRenderNode(null);
+            iBlur3SourceGlass = new BlurredBackgroundSourceRenderNode(null);
+        } else {
+            scrollableViewNoiseSuppressor = null;
+            iBlur3SourceGlassFrosted = null;
+            iBlur3SourceGlass = null;
+        }
+        iBlur3Positions.add(iBlur3PositionActionBar);
+        iBlur3Positions.add(iBlur3PositionMainTabs);
     }
 
     @Override
@@ -290,8 +323,39 @@ public class MglaMusicActivity extends BaseFragment implements
     public View createView(Context context) {
         actionBar.setAddToContainer(false);
         resolveThemeColors();
+        iBlur3SourceColor.setColor(MD3_SURFACE);
 
-        rootLayout = new FrameLayout(context);
+        rootLayout = new FrameLayout(context) {
+            @Override
+            protected void dispatchDraw(@NonNull Canvas canvas) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                    blur3_InvalidateBlur();
+                    final int width = getMeasuredWidth();
+                    final int height = getMeasuredHeight();
+                    final boolean drawGlassContent = SharedConfig.chatBlurEnabled()
+                            || LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS);
+                    if (iBlur3SourceGlassFrosted != null && !iBlur3SourceGlassFrosted.inRecording()) {
+                        final Canvas c = iBlur3SourceGlassFrosted.beginRecording(width, height);
+                        c.drawColor(MD3_SURFACE);
+                        if (drawGlassContent) {
+                            scrollableViewNoiseSuppressor.draw(c, DownscaleScrollableNoiseSuppressor.DRAW_FROSTED_GLASS);
+                        }
+                        iBlur3SourceGlassFrosted.endRecording();
+                    }
+                    if (iBlur3SourceGlass != null && !iBlur3SourceGlass.inRecording()) {
+                        final Canvas c = iBlur3SourceGlass.beginRecording(width, height);
+                        c.drawColor(MD3_SURFACE);
+                        if (drawGlassContent) {
+                            scrollableViewNoiseSuppressor.draw(c, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
+                        }
+                        iBlur3SourceGlass.endRecording();
+                    }
+                    iBlur3Invalidated = false;
+                    MainTabsActivity.notifyTabGlassFrom(MglaMusicActivity.this);
+                }
+                super.dispatchDraw(canvas);
+            }
+        };
         rootLayout.setBackgroundColor(MD3_SURFACE);
 
         mainContainer = new FrameLayout(context);
@@ -333,11 +397,81 @@ public class MglaMusicActivity extends BaseFragment implements
         mainContainer.addView(authPromoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         rootLayout.addView(mainContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // FrameLayout.drawChild is protected — draw children explicitly for the glass capture.
+        iBlur3Capture = new ViewGroupPartRenderer(mainContainer, rootLayout, (canvas, child, drawingTime) -> {
+            int save = canvas.save();
+            canvas.translate(child.getLeft(), child.getTop());
+            child.draw(canvas);
+            canvas.restoreToCount(save);
+            return true;
+        });
 
         updateAuthState();
 
         fragmentView = rootLayout;
         return fragmentView;
+    }
+
+    private ScrollView createBlurAwareScrollView(Context context) {
+        return new ScrollView(context) {
+            @Override
+            protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+                super.onScrollChanged(l, t, oldl, oldt);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                    scrollableViewNoiseSuppressor.onScrolled(l - oldl, t - oldt);
+                    iBlur3Invalidated = true;
+                    if (rootLayout != null) {
+                        rootLayout.invalidate();
+                    }
+                }
+            }
+        };
+    }
+
+    private void attachBlurScrollListener(RecyclerView list) {
+        if (list == null || scrollableViewNoiseSuppressor == null) {
+            return;
+        }
+        list.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    scrollableViewNoiseSuppressor.onScrolled(dx, dy);
+                    blur3_InvalidateBlur();
+                    if (rootLayout != null) {
+                        rootLayout.invalidate();
+                    }
+                }
+            }
+        });
+    }
+
+    private void blur3_InvalidateBlur() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || scrollableViewNoiseSuppressor == null || fragmentView == null) {
+            return;
+        }
+        final int additionalList = dp(48);
+        final int nav = AndroidUtilities.navigationBarHeight;
+        final int mainTabBottom = fragmentView.getMeasuredHeight() - nav - dp(DialogsActivity.MAIN_TABS_MARGIN);
+        final int mainTabTop = mainTabBottom - dp(DialogsActivity.MAIN_TABS_HEIGHT)
+                - dp(MglaGlobalMusicBar.blurExclusionExtraDp());
+
+        iBlur3PositionActionBar.set(0, -additionalList, fragmentView.getMeasuredWidth(),
+                AndroidUtilities.statusBarHeight + additionalList);
+        if (hasMainTabs) {
+            iBlur3PositionMainTabs.set(0, mainTabTop, fragmentView.getMeasuredWidth(), mainTabBottom);
+            iBlur3PositionMainTabs.inset(0, LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0 : -dp(48));
+        } else {
+            iBlur3PositionMainTabs.setEmpty();
+        }
+        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, hasMainTabs ? 2 : 1);
+        scrollableViewNoiseSuppressor.invalidateResultRenderNodes(
+                iBlur3Capture, fragmentView.getMeasuredWidth(), fragmentView.getMeasuredHeight());
+    }
+
+    @Override
+    public BlurredBackgroundSourceRenderNode getGlassSource() {
+        return iBlur3SourceGlass;
     }
 
     // ==========================================
@@ -352,7 +486,7 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private ScrollView createCollectionPage(Context context) {
-        ScrollView scroll = new ScrollView(context);
+        ScrollView scroll = createBlurAwareScrollView(context);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.setClipToPadding(false);
@@ -952,6 +1086,7 @@ public class MglaMusicActivity extends BaseFragment implements
         fullFavoritesAdapter = new FullTrackAdapter(detailTracks, (track, position) ->
                 MglaYandexMusicPlayer.getInstance().playTrack(track, new ArrayList<>(detailTracks), detailSourceTitle));
         fullFavoritesListView.setAdapter(fullFavoritesAdapter);
+        attachBlurScrollListener(fullFavoritesListView);
         layout.addView(fullFavoritesListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
@@ -1063,6 +1198,7 @@ public class MglaMusicActivity extends BaseFragment implements
             }
             openPlaylist(playlistsList.get(position));
         });
+        attachBlurScrollListener(fullPlaylistsListView);
         layout.addView(fullPlaylistsListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
@@ -1151,6 +1287,7 @@ public class MglaMusicActivity extends BaseFragment implements
             }
             openArtist(artistsList.get(position));
         });
+        attachBlurScrollListener(fullArtistsListView);
         layout.addView(fullArtistsListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
@@ -1275,7 +1412,7 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private ScrollView createArtistPage(Context context) {
-        ScrollView scroll = new ScrollView(context);
+        ScrollView scroll = createBlurAwareScrollView(context);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.setClipToPadding(false);
@@ -1814,6 +1951,7 @@ public class MglaMusicActivity extends BaseFragment implements
         searchAdapter = new SearchAdapter();
         searchListView.setAdapter(searchAdapter);
         searchListView.setOnItemClickListener((view, position) -> onSearchRowClicked(position));
+        attachBlurScrollListener(searchListView);
         layout.addView(searchListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
         return layout;
@@ -1982,7 +2120,7 @@ public class MglaMusicActivity extends BaseFragment implements
     // ==========================================
 
     private View createAuthPromoPage(Context context) {
-        ScrollView scroll = new ScrollView(context);
+        ScrollView scroll = createBlurAwareScrollView(context);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(MD3_SURFACE);
         scroll.setClipToPadding(false);
