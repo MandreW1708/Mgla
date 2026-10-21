@@ -22490,6 +22490,9 @@ public class ChatActivity extends BaseFragment implements
             }
         } else if (id == NotificationCenter.updateInterfaces) {
             int updateMask = (Integer) args[0];
+            if ((updateMask & MessagesController.UPDATE_MASK_READ_DIALOG_MESSAGE) != 0) {
+                updateBackButtonUnreadBadge();
+            }
             if ((updateMask & MessagesController.UPDATE_MASK_NAME) != 0 || (updateMask & MessagesController.UPDATE_MASK_CHAT_NAME) != 0 || (updateMask & MessagesController.UPDATE_MASK_EMOJI_STATUS) != 0) {
                 if (currentChat != null) {
                     TLRPC.Chat chat = getMessagesController().getChat(currentChat.id);
@@ -47869,7 +47872,9 @@ public class ChatActivity extends BaseFragment implements
         if (actionBar == null || inPreviewMode || inBubbleMode || isInsideContainer) {
             return;
         }
-        actionBar.setBackUnreadCount(NotificationsController.getInstance(currentAccount).getTotalUnreadCount());
+        // mainUnreadCount совпадает со счётчиком на вкладке «Чаты» и уже исключает
+        // скрытые чаты; raw push total_unread_count мог оставлять призрачную «1»
+        actionBar.setBackUnreadCount(NotificationsController.getInstance(currentAccount).getBackButtonUnreadCount());
     }
 
     private void updateInputBubbleOffsets() {

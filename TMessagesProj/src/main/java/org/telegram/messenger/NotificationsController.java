@@ -963,6 +963,7 @@ public class NotificationsController extends BaseController implements Notificat
     public void processReadMessages(LongSparseIntArray inbox, long dialogId, int maxDate, int maxId, boolean isPopup) {
         ArrayList<MessageObject> popupArrayRemove = new ArrayList<>(0);
         notificationsQueue.postRunnable(() -> {
+            HashSet<Long> affectedDialogs = new HashSet<>();
             if (inbox != null) {
                 for (int b = 0; b < inbox.size(); b++) {
                     long key = inbox.keyAt(b);
@@ -974,6 +975,7 @@ public class NotificationsController extends BaseController implements Notificat
                                 personalCount--;
                             }
                             popupArrayRemove.add(messageObject);
+                            affectedDialogs.add(messageObject.getDialogId());
                             long did;
                             if (messageObject.isStoryReactionPush) {
                                 did = messageObject.getDialogId();
@@ -1038,18 +1040,73 @@ public class NotificationsController extends BaseController implements Notificat
                             pushMessages.remove(a);
                             delayedPushMessages.remove(messageObject);
                             popupArrayRemove.add(messageObject);
+                            affectedDialogs.add(dialogId);
                             a--;
                         }
                     }
                 }
             }
             if (!popupArrayRemove.isEmpty()) {
+                // processReadMessages раньше только выкидывал сообщения из pushMessages,
+                // не трогая pushDialogs/total_unread_count и не вызывая showOrUpdate —
+                // из‑за этого сводка в шторке и счётчик могли «зависнуть» до следующего
+                // processDialogsUpdateRead (который приходит не всегда, напр. после
+                // updateReadHistory через markAsReadMessagesInbox).
+                int old_unread_count = total_unread_count;
+                LongSparseArray<ArrayList<Integer>> deletedByDialog = new LongSparseArray<>();
+                for (int i = 0; i < popupArrayRemove.size(); i++) {
+                    MessageObject removed = popupArrayRemove.get(i);
+                    long removedDid = removed.getDialogId();
+                    ArrayList<Integer> ids = deletedByDialog.get(removedDid);
+                    if (ids == null) {
+                        ids = new ArrayList<>();
+                        deletedByDialog.put(removedDid, ids);
+                    }
+                    ids.add(removed.getId());
+                }
+                for (int i = 0; i < deletedByDialog.size(); i++) {
+                    getMessagesStorage().deletePushMessages(deletedByDialog.keyAt(i), deletedByDialog.valueAt(i));
+                }
+                for (long did : affectedDialogs) {
+                    boolean stillHas = false;
+                    for (int i = 0; i < pushMessages.size(); i++) {
+                        MessageObject msg = pushMessages.get(i);
+                        if (msg.getDialogId() == did && !msg.isStoryReactionPush) {
+                            stillHas = true;
+                            break;
+                        }
+                    }
+                    if (!stillHas) {
+                        Integer currentCount = pushDialogs.get(did);
+                        if (currentCount != null) {
+                            if (getMessagesController().isForum(did)) {
+                                total_unread_count -= currentCount > 0 ? 1 : 0;
+                            } else if (!getMessagesController().isCommunity(did)) {
+                                total_unread_count -= currentCount;
+                            }
+                            pushDialogs.remove(did);
+                            pushDialogsOverrideMention.remove(did);
+                            smartNotificationsDialogs.remove(did);
+                        }
+                    }
+                }
                 AndroidUtilities.runOnUIThread(() -> {
                     for (int a = 0, size = popupArrayRemove.size(); a < size; a++) {
                         popupMessages.remove(popupArrayRemove.get(a));
                     }
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.pushMessagesUpdated);
                 });
+                showOrUpdateNotification(false);
+                if (old_unread_count != total_unread_count) {
+                    int pushDialogsCount = pushDialogs.size();
+                    AndroidUtilities.runOnUIThread(() -> {
+                        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.notificationsCountUpdated, currentAccount);
+                        getNotificationCenter().postNotificationName(NotificationCenter.dialogsUnreadCounterChanged, pushDialogsCount);
+                    });
+                    if (showBadgeNumber) {
+                        setBadge(getTotalAllUnreadCount());
+                    }
+                }
             }
         });
     }
@@ -1508,6 +1565,16 @@ public class NotificationsController extends BaseController implements Notificat
         return total_unread_count;
     }
 
+    /**
+     * Unread count for the chat back-button badge.
+     * Uses the same main-list counter as tabs/side menu (excludes hidden chats and
+     * muted-by-default), not the raw push/notification counter which can desync
+     * and leave a sticky "1" with an empty chat list.
+     */
+    public int getBackButtonUnreadCount() {
+        return getMessagesStorage().getMainUnreadCount();
+    }
+
     public void processDialogsUpdateRead(LongSparseIntArray dialogsToUpdate) {
         ArrayList<MessageObject> popupArrayToRemove = new ArrayList<>();
         notificationsQueue.postRunnable(() -> {
@@ -1651,6 +1718,21 @@ public class NotificationsController extends BaseController implements Notificat
             TLRPC.Dialog liveDialog = getMessagesController().dialogs_dict.get(dialogs.keyAt(a));
             liveUnreadCounts.put(dialogs.keyAt(a), liveDialog != null ? liveDialog.unread_count : -1);
         }
+        // снимок live unread и для push-строк, которых может не быть в dialogs (unread_push_messages)
+        if (push != null) {
+            for (int a = 0; a < push.size(); a++) {
+                MessageObject messageObject = push.get(a);
+                if (messageObject == null) {
+                    continue;
+                }
+                long pushDialogId = messageObject.getDialogId();
+                if (liveUnreadCounts.indexOfKey(pushDialogId) < 0) {
+                    TLRPC.Dialog liveDialog = getMessagesController().dialogs_dict.get(pushDialogId);
+                    liveUnreadCounts.put(pushDialogId, liveDialog != null ? liveDialog.unread_count : -1);
+                }
+            }
+        }
+        final boolean dialogsReady = getMessagesController().dialogsLoaded;
 
         notificationsQueue.postRunnable(() -> {
             pushDialogs.clear();
@@ -1687,7 +1769,7 @@ public class NotificationsController extends BaseController implements Notificat
                     MessageObject messageObject = new MessageObject(currentAccount, message, false, false);
                     long dialog_id = messageObject.getDialogId();
                     long original_dialog_id = dialog_id;
-                    if (liveUnreadCounts.get(original_dialog_id, -1) == 0) {
+                    if (isStalePushUnread(liveUnreadCounts.get(original_dialog_id, -1), dialogsReady, dialogs.indexOfKey(original_dialog_id) >= 0)) {
                         continue;
                     }
                     if (isPersonalMessage(messageObject)) {
@@ -1744,7 +1826,7 @@ public class NotificationsController extends BaseController implements Notificat
                 if (!value) {
                     continue;
                 }
-                if (liveUnreadCounts.get(dialog_id, -1) == 0) {
+                if (isStalePushUnread(liveUnreadCounts.get(dialog_id, -1), dialogsReady, true)) {
                     // в приложении диалог уже прочитан — устаревший unread_count из БД игнорируем
                     continue;
                 }
@@ -1766,7 +1848,17 @@ public class NotificationsController extends BaseController implements Notificat
                     if (pushMessagesDict.indexOfKey(mid) >= 0) {
                         continue;
                     }
-                    if (liveUnreadCounts.get(messageObject.getDialogId(), -1) == 0) {
+                    long pushDialogId = messageObject.getDialogId();
+                    int liveUnread = liveUnreadCounts.get(pushDialogId, -1);
+                    boolean inDbUnread = dialogs.indexOfKey(pushDialogId) >= 0;
+                    if (liveUnread == 0) {
+                        continue;
+                    }
+                    // leftover unread_push_messages без живого/DB unread раньше проходили
+                    // при live==-1 и поднимали призрачную сводку; реакции оставляем —
+                    // они могут жить без dialog.unread_count
+                    if (!messageObject.isReactionPush && !messageObject.isStoryReactionPush
+                            && isStalePushUnread(liveUnread, dialogsReady, inDbUnread)) {
                         continue;
                     }
                     if (isPersonalMessage(messageObject)) {
@@ -3552,13 +3644,114 @@ public class NotificationsController extends BaseController implements Notificat
         if (TextUtils.isEmpty(name)) {
             return false;
         }
-        for (int i = 0; i < name.length(); i++) {
-            char c = name.charAt(i);
+        String trimmed = name.trim();
+        // на MIUI/POCO одиночный символ (часто «'») уезжает в шапку сводки отдельным титулом
+        if (trimmed.length() <= 1) {
+            return false;
+        }
+        int alnum = 0;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
             if (Character.isLetterOrDigit(c)) {
-                return true;
+                alnum++;
             }
         }
-        return false;
+        return alnum >= 2;
+    }
+
+    /**
+     * liveUnread: unread_count из dialogs_dict (−1 если диалога ещё нет в памяти).
+     * inDbUnreadDialogs: диалог был в выборке dialogs WHERE unread_count > 0.
+     */
+    private static boolean isStalePushUnread(int liveUnread, boolean dialogsReady, boolean inDbUnreadDialogs) {
+        if (liveUnread == 0) {
+            return true;
+        }
+        // диалоги уже загружены, живого unread нет и в БД диалог не числится непрочитанным —
+        // это осиротевшая push-строка, а не реальное уведомление после reboot
+        return liveUnread < 0 && dialogsReady && !inDbUnreadDialogs;
+    }
+
+    /**
+     * Убирает из push-состояния диалоги, которые в MessagesController уже прочитаны.
+     * Вызывать с notificationsQueue перед показом/снятием сводки.
+     */
+    private void prunePushStateAgainstLiveDialogs() {
+        if (pushDialogs.size() == 0) {
+            return;
+        }
+        ArrayList<Long> toClear = null;
+        for (int i = 0; i < pushDialogs.size(); i++) {
+            long did = pushDialogs.keyAt(i);
+            TLRPC.Dialog liveDialog = getMessagesController().dialogs_dict.get(did);
+            if (liveDialog == null) {
+                continue;
+            }
+            if (liveDialog.unread_count > 0 || liveDialog.unread_mark) {
+                continue;
+            }
+            Integer override = pushDialogsOverrideMention.get(did);
+            if (override != null && override != 0) {
+                continue;
+            }
+            if (toClear == null) {
+                toClear = new ArrayList<>();
+            }
+            toClear.add(did);
+        }
+        if (toClear == null) {
+            return;
+        }
+        for (int i = 0; i < toClear.size(); i++) {
+            long did = toClear.get(i);
+            Integer currentCount = pushDialogs.get(did);
+            if (currentCount != null) {
+                if (getMessagesController().isForum(did)) {
+                    total_unread_count -= currentCount > 0 ? 1 : 0;
+                } else if (!getMessagesController().isCommunity(did)) {
+                    total_unread_count -= currentCount;
+                }
+            }
+            pushDialogs.remove(did);
+            pushDialogsOverrideMention.remove(did);
+            smartNotificationsDialogs.remove(did);
+            ArrayList<Integer> removedIds = null;
+            for (int a = 0; a < pushMessages.size(); a++) {
+                MessageObject messageObject = pushMessages.get(a);
+                if (messageObject.getDialogId() != did || messageObject.isStoryReactionPush) {
+                    continue;
+                }
+                if (isPersonalMessage(messageObject)) {
+                    personalCount--;
+                }
+                long dictKey;
+                if (messageObject.messageOwner.peer_id.channel_id != 0) {
+                    dictKey = -messageObject.messageOwner.peer_id.channel_id;
+                } else {
+                    dictKey = 0;
+                }
+                SparseArray<MessageObject> sparseArray = pushMessagesDict.get(dictKey);
+                if (sparseArray != null) {
+                    sparseArray.remove(messageObject.getId());
+                    if (sparseArray.size() == 0) {
+                        pushMessagesDict.remove(dictKey);
+                    }
+                }
+                delayedPushMessages.remove(messageObject);
+                if (removedIds == null) {
+                    removedIds = new ArrayList<>();
+                }
+                removedIds.add(messageObject.getId());
+                pushMessages.remove(a);
+                a--;
+            }
+            if (removedIds != null) {
+                getMessagesStorage().deletePushMessages(did, removedIds);
+            }
+        }
+        if (total_unread_count < 0) {
+            total_unread_count = 0;
+        }
     }
 
     public ArrayList<MessageObject> getPushMessagesSnapshot() {
@@ -4360,6 +4553,23 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     private void showOrUpdateNotification(boolean notifyAboutLast) {
+        // Тихие апдейты (прочтение/пересборка): вычищаем диалоги, уже прочитанные в UI.
+        // На notifyAboutLast=true НЕ трогаем — FCM мог добавить push раньше, чем
+        // MessagesController успел поднять dialog.unread_count, prune снял бы живое уведомление.
+        if (!notifyAboutLast) {
+            int unreadBeforePrune = total_unread_count;
+            prunePushStateAgainstLiveDialogs();
+            if (unreadBeforePrune != total_unread_count) {
+                int pushDialogsCount = pushDialogs.size();
+                AndroidUtilities.runOnUIThread(() -> {
+                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.notificationsCountUpdated, currentAccount);
+                    getNotificationCenter().postNotificationName(NotificationCenter.dialogsUnreadCounterChanged, pushDialogsCount);
+                });
+                if (showBadgeNumber) {
+                    setBadge(getTotalAllUnreadCount());
+                }
+            }
+        }
         if (!getUserConfig().isClientActivated() || pushMessages.isEmpty() && storyPushMessages.isEmpty() || !SharedConfig.showNotificationsForAllAccounts && currentAccount != UserConfig.selectedAccount) {
             dismissNotification();
             return;
