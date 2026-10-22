@@ -53,7 +53,12 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         LinearLayout rootLayout = new LinearLayout(context);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setLayoutTransition(new android.animation.LayoutTransition());
+        // CHANGING animations fight ItemTouchHelper in «Нижний островок» (drag resets).
+        android.animation.LayoutTransition layoutTransition = new android.animation.LayoutTransition();
+        layoutTransition.disableTransitionType(android.animation.LayoutTransition.CHANGING);
+        layoutTransition.disableTransitionType(android.animation.LayoutTransition.CHANGE_APPEARING);
+        layoutTransition.disableTransitionType(android.animation.LayoutTransition.CHANGE_DISAPPEARING);
+        rootLayout.setLayoutTransition(layoutTransition);
         rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
 

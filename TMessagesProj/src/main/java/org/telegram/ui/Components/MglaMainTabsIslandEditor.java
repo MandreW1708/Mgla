@@ -12,18 +12,13 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-
-import androidx.annotation.NonNull;
-import androidx.recyclerview.widget.ItemTouchHelper;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaMainTabsConfig;
@@ -37,8 +32,11 @@ import org.telegram.ui.DialogsActivity;
 import java.util.ArrayList;
 
 /**
- * Interactive preview of the bottom main-tabs island: long-press drag to reorder,
- * tap to remove (except locked {@link MglaMainTabsConfig#isLocked}), chips below to add.
+ * Interactive preview of the bottom main-tabs island: drag to reorder, tap to remove
+ * (except locked {@link MglaMainTabsConfig#isLocked}), chips below to add.
+ * <p>
+ * Plain {@link LinearLayout} — RecyclerListView + ItemTouchHelper was unreliable
+ * inside the appearance {@link android.widget.ScrollView}.
  */
 @SuppressLint("ViewConstructor")
 public class MglaMainTabsIslandEditor extends LinearLayout {
@@ -53,21 +51,25 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
 
     private final ArrayList<TabId> order = new ArrayList<>();
     private final LinearLayout chipsRow;
-    private final RecyclerListView dragList;
-    private final TabsAdapter adapter;
+    private final LinearLayout tabsRow;
     private final LinearLayout previewRow;
     private final FrameLayout islandWrap;
     private final FrameLayout searchButtonPreview;
-    private final ItemTouchHelper touchHelper;
     private int previewSelected = 0;
-    private boolean dragging;
     private boolean searchButtonEnabled;
+
+    private int dragFrom = -1;
+    private float dragAnchorX;
+    private float dragStartRawX;
+    private boolean dragActive;
+    private final int touchSlop;
 
     public MglaMainTabsIslandEditor(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, Listener listener) {
         super(context);
         this.resourcesProvider = resourcesProvider;
         this.currentAccount = currentAccount;
         this.listener = listener;
+        this.touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         setOrientation(VERTICAL);
 
         boolean showCalls = UserConfig.getInstance(currentAccount).showCallsTab;
@@ -78,7 +80,7 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         TextView hintView = new TextView(context);
         hintView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         hintView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
-        hintView.setText("Удерживайте и перетаскивайте, чтобы менять порядок. Нажмите, чтобы убрать. Максимум 7 вкладок.");
+        hintView.setText("Перетащите вкладку, чтобы изменить порядок. Нажмите, чтобы убрать. Максимум 7 вкладок.");
         hintView.setPadding(dp(4), 0, dp(4), dp(10));
         addView(hintView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -88,9 +90,9 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         previewRow.setClipChildren(false);
 
         islandWrap = new FrameLayout(context);
-        GradientDrawable islandBg = createIslandBackground();
-        islandWrap.setBackground(islandBg);
+        islandWrap.setBackground(createIslandBackground());
         islandWrap.setPadding(dp(4), dp(4), dp(4), dp(4));
+        islandWrap.setClipChildren(false);
 
         searchButtonPreview = new FrameLayout(context);
         searchButtonPreview.setBackground(createIslandBackground());
@@ -102,168 +104,12 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         searchButtonPreview.addView(searchIcon, LayoutHelper.createFrame(24, 24, Gravity.CENTER));
         searchButtonEnabled = MglaMainTabsConfig.isSearchButtonEnabled();
 
-        dragList = new RecyclerListView(context) {
-            @Override
-            protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-                super.onSizeChanged(w, h, oldw, oldh);
-                if (w != oldw && adapter != null && !dragging) {
-                    adapter.notifyDataSetChanged();
-                }
-            }
+        tabsRow = new LinearLayout(context);
+        tabsRow.setOrientation(HORIZONTAL);
+        tabsRow.setGravity(Gravity.CENTER_VERTICAL);
+        tabsRow.setClipChildren(false);
+        islandWrap.addView(tabsRow, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, DialogsActivity.MAIN_TABS_HEIGHT));
 
-            @Override
-            public boolean onInterceptTouchEvent(MotionEvent e) {
-                if (dragging) {
-                    ViewParent parent = getParent();
-                    while (parent != null) {
-                        parent.requestDisallowInterceptTouchEvent(true);
-                        parent = parent.getParent();
-                    }
-                }
-                return super.onInterceptTouchEvent(e);
-            }
-
-            @Override
-            public boolean onTouchEvent(MotionEvent e) {
-                if (dragging) {
-                    ViewParent parent = getParent();
-                    while (parent != null) {
-                        parent.requestDisallowInterceptTouchEvent(true);
-                        parent = parent.getParent();
-                    }
-                }
-                return super.onTouchEvent(e);
-            }
-        };
-        dragList.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false));
-        dragList.setClipToPadding(false);
-        dragList.setOverScrollMode(OVER_SCROLL_NEVER);
-        dragList.setNestedScrollingEnabled(false);
-        dragList.setHasFixedSize(true);
-        adapter = new TabsAdapter();
-        adapter.setHasStableIds(true);
-        dragList.setAdapter(adapter);
-
-        touchHelper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
-            @Override
-            public int getMovementFlags(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
-                return makeMovementFlags(ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT, 0);
-            }
-
-            @Override
-            public boolean onMove(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder, @NonNull RecyclerView.ViewHolder target) {
-                int from = viewHolder.getAdapterPosition();
-                int to = target.getAdapterPosition();
-                if (from < 0 || to < 0 || from >= order.size() || to >= order.size() || from == to) {
-                    return false;
-                }
-                TabId moved = order.remove(from);
-                order.add(to, moved);
-                if (previewSelected == from) {
-                    previewSelected = to;
-                } else if (from < previewSelected && to >= previewSelected) {
-                    previewSelected--;
-                } else if (from > previewSelected && to <= previewSelected) {
-                    previewSelected++;
-                }
-                // Only notifyItemMoved — notifyItemChanged / notifyDataSetChanged break multi-step drag.
-                adapter.notifyItemMoved(from, to);
-                return true;
-            }
-
-            @Override
-            public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int direction) {
-            }
-
-            @Override
-            public boolean isLongPressDragEnabled() {
-                // Manual startDrag via long-click — RecyclerListView fights auto long-press drag.
-                return false;
-            }
-
-            @Override
-            public boolean canDropOver(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder current, @NonNull RecyclerView.ViewHolder target) {
-                return true;
-            }
-
-            @Override
-            public void onSelectedChanged(RecyclerView.ViewHolder viewHolder, int actionState) {
-                super.onSelectedChanged(viewHolder, actionState);
-                dragging = actionState == ItemTouchHelper.ACTION_STATE_DRAG;
-                if (dragging && viewHolder != null) {
-                    viewHolder.itemView.setAlpha(0.85f);
-                    viewHolder.itemView.setScaleX(1.06f);
-                    viewHolder.itemView.setScaleY(1.06f);
-                    ViewParent parent = dragList.getParent();
-                    while (parent != null) {
-                        parent.requestDisallowInterceptTouchEvent(true);
-                        parent = parent.getParent();
-                    }
-                }
-            }
-
-            @Override
-            public void clearView(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
-                super.clearView(recyclerView, viewHolder);
-                viewHolder.itemView.setAlpha(1f);
-                viewHolder.itemView.setScaleX(1f);
-                viewHolder.itemView.setScaleY(1f);
-                dragging = false;
-                // Refresh selection ovals once drag finished; avoid mid-drag notifyDataSetChanged.
-                adapter.notifyDataSetChanged();
-                persist();
-            }
-
-            @Override
-            public int interpolateOutOfBoundsScroll(@NonNull RecyclerView recyclerView, int viewSize, int viewSizeOutOfBounds, int totalSize, long msSinceStartScroll) {
-                // Stronger horizontal auto-scroll so you can drag across several positions.
-                int direction = (int) Math.signum(viewSizeOutOfBounds);
-                int abs = Math.min(dp(28), Math.abs(viewSizeOutOfBounds));
-                return direction * Math.max(dp(8), abs);
-            }
-        });
-        touchHelper.attachToRecyclerView(dragList);
-
-        dragList.setOnItemLongClickListener((view, position) -> {
-            if (position < 0 || position >= order.size()) {
-                return false;
-            }
-            RecyclerView.ViewHolder holder = dragList.findContainingViewHolder(view);
-            if (holder == null) {
-                holder = dragList.findViewHolderForAdapterPosition(position);
-            }
-            if (holder != null) {
-                touchHelper.startDrag(holder);
-                dragList.cancelClickRunnables(true);
-                return true;
-            }
-            return false;
-        });
-
-        dragList.setOnItemClickListener((view, position) -> {
-            if (dragging || position < 0 || position >= order.size()) {
-                return;
-            }
-            TabId id = order.get(position);
-            if (MglaMainTabsConfig.isLocked(id)) {
-                previewSelected = position;
-                adapter.notifyDataSetChanged();
-                if (id == TabId.CHATS) {
-                    showHint("А как ты тогда попадешь в чаты?");
-                } else if (id == TabId.SETTINGS) {
-                    showHint("А как ты тогда попадешь в настройки?");
-                }
-                return;
-            }
-            order.remove(position);
-            ensureRequiredTabs();
-            ensurePreviewIndex();
-            adapter.notifyDataSetChanged();
-            rebuildChips();
-            persist();
-        });
-
-        islandWrap.addView(dragList, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, DialogsActivity.MAIN_TABS_HEIGHT));
         previewRow.setGravity(Gravity.CENTER);
         previewRow.addView(islandWrap, LayoutHelper.createLinear(0, DialogsActivity.MAIN_TABS_HEIGHT + 8, 1f, Gravity.CENTER_VERTICAL));
         previewRow.addView(searchButtonPreview, LayoutHelper.createLinear(
@@ -273,6 +119,16 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
                 MglaMainTabsConfig.SEARCH_BUTTON_GAP, 0, 0, 0));
         applySearchButtonPreview();
         addView(previewRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, DialogsActivity.MAIN_TABS_HEIGHT + 8, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
+        // Width is 0 in the constructor — rebuild once the island has a real size.
+        islandWrap.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int w = r - l;
+            int ow = or - ol;
+            if (w > 0 && w != ow && !dragActive) {
+                // post: mutating children during layout leaves the row blank.
+                v.post(this::rebuildTabs);
+            }
+        });
 
         TextView availableTitle = new TextView(context);
         availableTitle.setText("Добавить");
@@ -290,6 +146,7 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         chipsScroll.addView(chipsRow, LayoutHelper.createScroll(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
         addView(chipsScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        rebuildTabs();
         rebuildChips();
     }
 
@@ -303,8 +160,8 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
 
     private void applySearchButtonPreview() {
         searchButtonPreview.setVisibility(searchButtonEnabled ? VISIBLE : GONE);
-        if (adapter != null && !dragging) {
-            adapter.notifyDataSetChanged();
+        if (!dragActive) {
+            rebuildTabs();
         }
         previewRow.requestLayout();
     }
@@ -335,6 +192,167 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
             int chats = order.indexOf(TabId.CHATS);
             previewSelected = chats >= 0 ? chats : 0;
         }
+    }
+
+    private void disallowParentIntercept() {
+        ViewParent parent = getParent();
+        while (parent != null) {
+            parent.requestDisallowInterceptTouchEvent(true);
+            parent = parent.getParent();
+        }
+    }
+
+    private int tabCellWidth() {
+        int avail = tabsRow.getWidth();
+        if (avail <= 0 && islandWrap.getWidth() > 0) {
+            avail = islandWrap.getWidth() - islandWrap.getPaddingLeft() - islandWrap.getPaddingRight();
+        }
+        if (avail <= 0) {
+            avail = AndroidUtilities.displaySize.x - dp(64);
+            if (searchButtonEnabled) {
+                avail -= dp(MglaMainTabsConfig.SEARCH_BUTTON_SIZE + MglaMainTabsConfig.SEARCH_BUTTON_GAP);
+            }
+        }
+        return Math.max(dp(40), avail / Math.max(1, order.size()));
+    }
+
+    private void rebuildTabs() {
+        tabsRow.removeAllViews();
+        final int cellW = tabCellWidth();
+        final int total = order.size();
+        for (int i = 0; i < total; i++) {
+            final TabId id = order.get(i);
+            EditorTabCell cell = new EditorTabCell(getContext());
+            cell.bind(id, i == previewSelected, total);
+            cell.setTag(i);
+            cell.setOnClickListener(null);
+            cell.setOnTouchListener(this::handleTabTouch);
+            tabsRow.addView(cell, new LinearLayout.LayoutParams(cellW, dp(DialogsActivity.MAIN_TABS_HEIGHT)));
+        }
+    }
+
+    private boolean handleTabTouch(View v, MotionEvent event) {
+        if (!(v instanceof EditorTabCell)) {
+            return false;
+        }
+        EditorTabCell cell = (EditorTabCell) v;
+        Object tag = cell.getTag();
+        if (!(tag instanceof Integer)) {
+            return false;
+        }
+        int index = (Integer) tag;
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                dragFrom = index;
+                dragStartRawX = event.getRawX();
+                dragAnchorX = event.getRawX();
+                dragActive = false;
+                cell.setPressed(true);
+                return true; // own the whole gesture (tap or drag)
+            case MotionEvent.ACTION_MOVE:
+                if (dragFrom < 0) {
+                    return true;
+                }
+                float dx = event.getRawX() - dragStartRawX;
+                if (!dragActive) {
+                    if (Math.abs(dx) < touchSlop) {
+                        return true;
+                    }
+                    // Press + move past slop → drag.
+                    dragActive = true;
+                    cell.setPressed(false);
+                    cell.animate().cancel();
+                    cell.setAlpha(0.85f);
+                    cell.setScaleX(1.06f);
+                    cell.setScaleY(1.06f);
+                    cell.setTranslationZ(dp(8)); // don't bringToFront — that reorders LinearLayout children
+                    disallowParentIntercept();
+                }
+                cell.setTranslationX(event.getRawX() - dragAnchorX);
+                return true;
+            case MotionEvent.ACTION_UP:
+                cell.setPressed(false);
+                if (dragActive) {
+                    commitDrag(cell, event.getRawX());
+                } else {
+                    tryRemoveAt(index);
+                }
+                dragFrom = -1;
+                dragActive = false;
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                cell.setPressed(false);
+                if (dragActive) {
+                    // Cancel without committing a new order.
+                    cell.setTranslationZ(0);
+                    cell.setTranslationX(0);
+                    cell.setScaleX(1f);
+                    cell.setScaleY(1f);
+                    cell.setAlpha(1f);
+                }
+                dragFrom = -1;
+                dragActive = false;
+                return true;
+        }
+        return false;
+    }
+
+    private void commitDrag(EditorTabCell cell, float rawX) {
+        int target = dragFrom;
+        int[] loc = new int[2];
+        for (int i = 0; i < tabsRow.getChildCount(); i++) {
+            View other = tabsRow.getChildAt(i);
+            other.getLocationOnScreen(loc);
+            float left = loc[0];
+            float right = left + other.getWidth();
+            float mid = (left + right) / 2f;
+            if (rawX < mid) {
+                target = i;
+                break;
+            }
+            target = i;
+        }
+        if (dragFrom >= 0 && target >= 0 && target < order.size() && target != dragFrom) {
+            TabId moved = order.remove(dragFrom);
+            order.add(target, moved);
+            if (previewSelected == dragFrom) {
+                previewSelected = target;
+            } else if (dragFrom < previewSelected && target >= previewSelected) {
+                previewSelected--;
+            } else if (dragFrom > previewSelected && target <= previewSelected) {
+                previewSelected++;
+            }
+        }
+        cell.setTranslationZ(0);
+        cell.setTranslationX(0);
+        cell.setScaleX(1f);
+        cell.setScaleY(1f);
+        cell.setAlpha(1f);
+        rebuildTabs();
+        persist();
+    }
+
+    private void tryRemoveAt(int position) {
+        if (position < 0 || position >= order.size()) {
+            return;
+        }
+        TabId id = order.get(position);
+        if (MglaMainTabsConfig.isLocked(id)) {
+            previewSelected = position;
+            rebuildTabs();
+            if (id == TabId.CHATS) {
+                showHint("А как ты тогда попадешь в чаты?");
+            } else if (id == TabId.SETTINGS) {
+                showHint("А как ты тогда попадешь в настройки?");
+            }
+            return;
+        }
+        order.remove(position);
+        ensureRequiredTabs();
+        ensurePreviewIndex();
+        rebuildTabs();
+        rebuildChips();
+        persist();
     }
 
     private void rebuildChips() {
@@ -376,7 +394,7 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
                     return;
                 }
                 order.add(addId);
-                adapter.notifyDataSetChanged();
+                rebuildTabs();
                 rebuildChips();
                 persist();
             });
@@ -428,64 +446,25 @@ public class MglaMainTabsIslandEditor extends LinearLayout {
         }
     }
 
-    private int tabCellWidth() {
-        int avail = dragList.getWidth();
-        if (avail <= 0 && islandWrap.getWidth() > 0) {
-            avail = islandWrap.getWidth() - islandWrap.getPaddingLeft() - islandWrap.getPaddingRight();
-        }
-        if (avail <= 0) {
-            avail = AndroidUtilities.displaySize.x - dp(64);
-            if (searchButtonEnabled) {
-                avail -= dp(MglaMainTabsConfig.SEARCH_BUTTON_SIZE + MglaMainTabsConfig.SEARCH_BUTTON_GAP);
-            }
-        }
-        return Math.max(dp(40), avail / Math.max(1, order.size()));
-    }
-
-    private class TabsAdapter extends RecyclerListView.SelectionAdapter {
-        @Override
-        public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return true;
-        }
-
-        @NonNull
-        @Override
-        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            EditorTabCell cell = new EditorTabCell(parent.getContext());
-            cell.setLayoutParams(new RecyclerView.LayoutParams(tabCellWidth(), dp(DialogsActivity.MAIN_TABS_HEIGHT)));
-            return new RecyclerListView.Holder(cell);
-        }
-
-        @Override
-        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            ViewGroup.LayoutParams lp = holder.itemView.getLayoutParams();
-            if (lp != null) {
-                lp.width = tabCellWidth();
-                holder.itemView.setLayoutParams(lp);
-            }
-            ((EditorTabCell) holder.itemView).bind(order.get(position), position == previewSelected, order.size());
-        }
-
-        @Override
-        public int getItemCount() {
-            return order.size();
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return order.get(position).ordinal();
-        }
-    }
-
     private class EditorTabCell extends FrameLayout {
         public EditorTabCell(Context context) {
             super(context);
+            setClickable(true);
+            setFocusable(true);
+            setClipChildren(false);
+            setClipToPadding(false);
+            setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
         }
 
         void bind(TabId id, boolean selected, int total) {
             removeAllViews();
             GlassTabView view = createTabView(getContext(), resourcesProvider, currentAccount, id);
+            // Keep enabled so Lottie/icons actually draw; block input on the cell instead.
+            view.setClickable(false);
+            view.setFocusable(false);
+            view.setDuplicateParentStateEnabled(false);
             view.setSelected(selected, false);
+            view.updateColorsLottie();
             if (total >= 6) {
                 view.setTextSizeDp(0);
             } else if (total >= 5) {

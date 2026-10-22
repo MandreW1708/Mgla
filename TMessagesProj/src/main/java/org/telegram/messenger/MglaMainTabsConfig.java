@@ -20,6 +20,8 @@ public final class MglaMainTabsConfig {
     private static final String KEY_ORDER = "main_tabs_order";
     private static final String KEY_CUSTOMIZED = "main_tabs_customized";
     private static final String KEY_SEARCH_BUTTON = "main_tabs_search_button";
+    /** User explicitly removed ИИ while entitled — don't auto-seed it back. */
+    private static final String KEY_AI_OPT_OUT = "main_tabs_ai_opt_out";
 
     public static final int MIN_TABS = 2;
     public static final int MAX_TABS = 7;
@@ -156,10 +158,13 @@ public final class MglaMainTabsConfig {
             }
             sb.append(cleaned.get(i).key);
         }
-        p.edit()
+        SharedPreferences.Editor ed = p.edit()
                 .putBoolean(KEY_CUSTOMIZED, true)
-                .putString(KEY_ORDER, sb.toString())
-                .apply();
+                .putString(KEY_ORDER, sb.toString());
+        if (MglaSubscription.canAccessAiSection()) {
+            ed.putBoolean(KEY_AI_OPT_OUT, !cleaned.contains(TabId.AI));
+        }
+        ed.apply();
         AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaMainTabsChanged));
     }
@@ -169,7 +174,12 @@ public final class MglaMainTabsConfig {
         if (p == null) {
             return;
         }
-        p.edit().remove(KEY_CUSTOMIZED).remove(KEY_ORDER).remove(KEY_SEARCH_BUTTON).apply();
+        p.edit()
+                .remove(KEY_CUSTOMIZED)
+                .remove(KEY_ORDER)
+                .remove(KEY_SEARCH_BUTTON)
+                .remove(KEY_AI_OPT_OUT)
+                .apply();
         AndroidUtilities.runOnUIThread(() ->
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaMainTabsChanged));
     }
@@ -209,9 +219,13 @@ public final class MglaMainTabsConfig {
         return list;
     }
 
-    /** After a paid plan unlock, make sure ИИ is on the island (without dropping locked tabs). */
+    /** After a paid-plan unlock, seed ИИ unless the user already opted out. */
     public static void ensureAiTabIncluded() {
         if (!MglaSubscription.canAccessAiSection()) {
+            return;
+        }
+        SharedPreferences p = prefs();
+        if (p != null && p.getBoolean(KEY_AI_OPT_OUT, false)) {
             return;
         }
         ArrayList<TabId> order = getEnabledTabs(true);
