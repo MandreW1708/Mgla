@@ -37,6 +37,7 @@ import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MglaAiChatService;
 import org.telegram.messenger.MglaAiChatStorage;
 import org.telegram.messenger.MglaAiLimits;
+import org.telegram.messenger.MglaAiReasoning;
 import org.telegram.messenger.MglaLocalChatRuntime;
 import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.MglaSubscription;
@@ -102,7 +103,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     private final ArrayList<String> attachedPhotos = new ArrayList<>();
     private MglaAiChatStorage.Chat chat;
     private MglaAiChatService.Request request;
-    private TextView streamedBubble;
+    /** Assistant stream container (reasoning + answer) or a plain status TextView. */
+    private View streamedBubble;
     private String streamedText = "";
 
     private final @NonNull BlurredBackgroundSourceColor iBlur3SourceColor;
@@ -802,29 +804,202 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
 
     private void addBubble(String role, String value, boolean animate) {
         boolean mine = "user".equals(role);
-        int bubbleColor = Theme.getColor(mine ? Theme.key_featuredStickers_addButton : Theme.key_windowBackgroundWhite);
-        TextView b = text("", 16, Theme.key_windowBackgroundWhiteBlackText);
-        b.setTextColor(ColorUtils.calculateLuminance(bubbleColor) < .42f ? Color.WHITE : 0xFF17212B);
-        b.setLineSpacing(dp(2), 1);
-        b.setPadding(dp(14), dp(10), dp(14), dp(10));
-        b.setBackground(round(bubbleColor, mine ? 22 : 18));
-        // Assistant replies: full Markdown. User bubbles stay plain text.
+        View bubble;
         if (mine) {
+            int bubbleColor = Theme.getColor(Theme.key_featuredStickers_addButton);
+            TextView b = text("", 16, Theme.key_windowBackgroundWhiteBlackText);
+            b.setTextColor(ColorUtils.calculateLuminance(bubbleColor) < .42f ? Color.WHITE : 0xFF17212B);
+            b.setLineSpacing(dp(2), 1);
+            b.setPadding(dp(14), dp(10), dp(14), dp(10));
+            b.setBackground(round(bubbleColor, 22));
             b.setText(value);
+            bubble = b;
         } else {
-            applyAssistantMarkdown(b, value);
+            bubble = createAssistantBubble(value, false);
         }
-        messages.addView(b, LayoutHelper.createLinear(
+        messages.addView(bubble, LayoutHelper.createLinear(
                 LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
                 mine ? Gravity.RIGHT : Gravity.LEFT,
                 mine ? dp(40) : 0, 0, mine ? 0 : dp(40), dp(10)
         ));
         if (animate) {
-            b.setAlpha(0);
-            b.setTranslationY(dp(10));
-            b.animate().alpha(1).translationY(0).setDuration(180).start();
+            bubble.setAlpha(0);
+            bubble.setTranslationY(dp(10));
+            bubble.animate().alpha(1).translationY(0).setDuration(180).start();
         }
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    /**
+     * Assistant bubble: optional collapsible «Рассуждение» quote + final answer (Markdown).
+     */
+    private LinearLayout createAssistantBubble(String raw, boolean streaming) {
+        Context c = getContext();
+        if (c == null) {
+            c = ApplicationLoader.applicationContext;
+        }
+        LinearLayout box = new LinearLayout(c);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int bubbleColor = Theme.getColor(Theme.key_windowBackgroundWhite);
+        box.setBackground(round(bubbleColor, 18));
+        box.setPadding(dp(12), dp(8), dp(12), dp(10));
+        box.setMinimumWidth(dp(120));
+
+        final int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
+        FrameLayout reasonCard = new FrameLayout(c) {
+            private final Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+            @Override
+            protected void dispatchDraw(Canvas canvas) {
+                if (getVisibility() == View.VISIBLE) {
+                    bar.setColor(accent);
+                    float h = getHeight();
+                    if (h > dp(8)) {
+                        canvas.drawRoundRect(0, dp(4), dp(3), h - dp(4), dp(1.5f), dp(1.5f), bar);
+                    }
+                }
+                super.dispatchDraw(canvas);
+            }
+        };
+        reasonCard.setVisibility(View.GONE);
+        GradientDrawable reasonBg = new GradientDrawable();
+        reasonBg.setCornerRadius(dp(12));
+        reasonBg.setColor(ColorUtils.setAlphaComponent(accent, 22));
+        reasonCard.setBackground(reasonBg);
+        reasonCard.setPadding(dp(10), dp(6), dp(8), dp(6));
+
+        LinearLayout reasonInner = new LinearLayout(c);
+        reasonInner.setOrientation(LinearLayout.VERTICAL);
+        reasonInner.setPadding(dp(6), 0, 0, 0);
+
+        LinearLayout reasonHeader = new LinearLayout(c);
+        reasonHeader.setOrientation(LinearLayout.HORIZONTAL);
+        reasonHeader.setGravity(Gravity.CENTER_VERTICAL);
+        reasonHeader.setPadding(0, dp(2), 0, dp(2));
+
+        TextView chevron = text("▸", 13, Theme.key_windowBackgroundWhiteBlueText);
+        chevron.setPadding(0, 0, dp(6), 0);
+        TextView reasonTitle = text("Рассуждение", 13, Theme.key_windowBackgroundWhiteBlueText);
+        reasonTitle.setTypeface(AndroidUtilities.bold());
+        reasonHeader.addView(chevron, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        reasonHeader.addView(reasonTitle, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        TextView reasonBody = text("", 13, Theme.key_windowBackgroundWhiteGrayText);
+        reasonBody.setLineSpacing(dp(2), 1f);
+        reasonBody.setPadding(0, dp(4), 0, dp(2));
+        reasonBody.setVisibility(View.GONE);
+
+        reasonInner.addView(reasonHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        reasonInner.addView(reasonBody, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        reasonCard.addView(reasonInner, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView answer = text("", 16, Theme.key_windowBackgroundWhiteBlackText);
+        answer.setLineSpacing(dp(2), 1);
+        if (ColorUtils.calculateLuminance(bubbleColor) < .42f) {
+            answer.setTextColor(Color.WHITE);
+        }
+
+        box.addView(reasonCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8));
+        box.addView(answer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        AssistantBubbleParts parts = new AssistantBubbleParts(reasonCard, reasonTitle, reasonBody, answer, chevron);
+        View.OnClickListener toggle = v -> {
+            parts.userToggled = true;
+            parts.expanded = !parts.expanded;
+            parts.applyExpand();
+        };
+        reasonHeader.setOnClickListener(toggle);
+        reasonCard.setOnClickListener(toggle);
+        box.setTag(parts);
+        bindAssistantContent(box, raw != null ? raw : "", streaming);
+        return box;
+    }
+
+    private static final class AssistantBubbleParts {
+        final FrameLayout reasonCard;
+        final TextView reasonTitle;
+        final TextView reasonBody;
+        final TextView answer;
+        final TextView chevron;
+        boolean expanded;
+        boolean userToggled;
+        /** After first collapse-on-complete, don't force-collapse again. */
+        boolean collapsedAfterComplete;
+
+        AssistantBubbleParts(FrameLayout reasonCard, TextView reasonTitle, TextView reasonBody,
+                             TextView answer, TextView chevron) {
+            this.reasonCard = reasonCard;
+            this.reasonTitle = reasonTitle;
+            this.reasonBody = reasonBody;
+            this.answer = answer;
+            this.chevron = chevron;
+        }
+
+        void applyExpand() {
+            reasonBody.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            chevron.setText(expanded ? "▾" : "▸");
+        }
+    }
+
+    private AssistantBubbleParts assistantParts(View bubble) {
+        if (bubble == null) {
+            return null;
+        }
+        Object tag = bubble.getTag();
+        return tag instanceof AssistantBubbleParts ? (AssistantBubbleParts) tag : null;
+    }
+
+    private void bindAssistantContent(View bubble, String raw, boolean streaming) {
+        if (bubble == null) {
+            return;
+        }
+        AssistantBubbleParts parts = assistantParts(bubble);
+        if (parts == null) {
+            if (bubble instanceof TextView) {
+                ((TextView) bubble).setText(raw);
+            }
+            return;
+        }
+        MglaAiReasoning.Parts parsed = MglaAiReasoning.parse(raw);
+        boolean showReason = parsed.hasReasoning();
+        parts.reasonCard.setVisibility(showReason ? View.VISIBLE : View.GONE);
+        if (showReason) {
+            String body = !TextUtils.isEmpty(parsed.reasoning)
+                    ? parsed.reasoning
+                    : (parsed.reasoningOpen ? "…" : "");
+            parts.reasonBody.setText(body);
+            parts.reasonTitle.setText(parsed.reasoningOpen ? "Думает…" : "Рассуждение");
+            if (!parts.userToggled) {
+                if (streaming && parsed.reasoningOpen) {
+                    parts.expanded = true;
+                } else if (!streaming && !parsed.reasoningOpen && !parts.collapsedAfterComplete) {
+                    parts.expanded = false;
+                    parts.collapsedAfterComplete = true;
+                } else if (!streaming && parsed.reasoningOpen) {
+                    parts.expanded = true;
+                }
+            }
+            parts.applyExpand();
+        }
+        String answerText = parsed.answer;
+        if (TextUtils.isEmpty(answerText)) {
+            if (!showReason && streaming && !TextUtils.isEmpty(raw)) {
+                // Status placeholder («Генерирую…») before first tokens.
+                parts.answer.setVisibility(View.VISIBLE);
+                parts.answer.setText(raw);
+            } else {
+                parts.answer.setVisibility(View.GONE);
+            }
+            return;
+        }
+        parts.answer.setVisibility(View.VISIBLE);
+        if (streaming) {
+            parts.answer.setText(answerText);
+        } else if (!answerText.startsWith("Ошибка:")) {
+            applyAssistantMarkdown(parts.answer, answerText);
+        } else {
+            parts.answer.setText(answerText);
+        }
     }
 
     private void applyAssistantMarkdown(TextView bubble, String markdown) {
@@ -832,7 +1007,6 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             return;
         }
         MglaAiMarkdown.setMarkdown(bubble, markdown != null ? markdown : "", true);
-        // Re-apply bubble text color after Markwon theme spans (code/quote keep their own).
         int bubbleColor = Theme.getColor(Theme.key_windowBackgroundWhite);
         if (ColorUtils.calculateLuminance(bubbleColor) < .42f) {
             bubble.setTextColor(Color.WHITE);
@@ -935,7 +1109,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         addBubble("user", value, true);
         chat.messages.add(new MglaAiChatStorage.Message("assistant", "", System.currentTimeMillis()));
         addBubble("assistant", "Генерирую…", true);
-        streamedBubble = (TextView) messages.getChildAt(messages.getChildCount() - 1);
+        streamedBubble = messages.getChildAt(messages.getChildCount() - 1);
         streamedText = "";
         send.setText("■");
         // OpenRouter has no user-facing AI settings — fixed defaults only.
@@ -957,7 +1131,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                     @Override
                     public void onStatus(String status) {
                         if (streamedBubble != null && streamedText.length() == 0 && !TextUtils.isEmpty(status)) {
-                            streamedBubble.setText(status);
+                            bindAssistantContent(streamedBubble, status, true);
                         }
                     }
 
@@ -967,7 +1141,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                         if (streamedBubble != null) {
                             // Plain while streaming so unfinished fences/lists don't glitch;
                             // full Markdown is applied in finishRequest().
-                            streamedBubble.setText(streamedText);
+                            bindAssistantContent(streamedBubble, streamedText, true);
                         }
                         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
                     }
@@ -987,7 +1161,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                             streamedText = streamedText + "\n\n⚠️ " + msg;
                         }
                         if (streamedBubble != null) {
-                            streamedBubble.setText(streamedText);
+                            bindAssistantContent(streamedBubble, streamedText, false);
                         }
                         finishRequest();
                     }
@@ -1001,11 +1175,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         if (!chat.messages.isEmpty()) {
             chat.messages.get(chat.messages.size() - 1).text = streamedText;
         }
-        if (streamedBubble != null && !TextUtils.isEmpty(streamedText)
-                && !streamedText.startsWith("Ошибка:")) {
-            applyAssistantMarkdown(streamedBubble, streamedText);
-        } else if (streamedBubble != null) {
-            streamedBubble.setText(streamedText);
+        if (streamedBubble != null) {
+            bindAssistantContent(streamedBubble, streamedText, false);
         }
         request = null;
         if (send != null) {
@@ -1031,7 +1202,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             if (chat != null && !chat.messages.isEmpty()) {
                 chat.messages.get(chat.messages.size() - 1).text = streamedText;
             }
-            applyAssistantMarkdown(streamedBubble, streamedText);
+            bindAssistantContent(streamedBubble, streamedText, false);
             MglaAiChatStorage.save(currentAccount, chat);
             rememberCurrentChat();
         }
@@ -1648,10 +1819,10 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(24), dp(4), dp(24), dp(6));
         EditText temperature = settingField(c, form, "Температура (0 = точнее)", String.valueOf(MglaLocalChatRuntime.temperature()), String.valueOf(MglaLocalChatRuntime.DEFAULT_TEMPERATURE));
-        EditText tokens = settingField(c, form, "Макс. токенов ответа", String.valueOf(MglaLocalChatRuntime.maxTokens()), String.valueOf(MglaLocalChatRuntime.DEFAULT_MAX_TOKENS));
-        EditText context = settingField(c, form, "Контекст (256–2048)", String.valueOf(MglaLocalChatRuntime.contextTokens()), String.valueOf(MglaLocalChatRuntime.DEFAULT_CONTEXT));
+        EditText tokens = settingField(c, form, "Макс. токенов (с учётом рассуждения, до 2048)", String.valueOf(MglaLocalChatRuntime.maxTokens()), String.valueOf(MglaLocalChatRuntime.DEFAULT_MAX_TOKENS));
+        EditText context = settingField(c, form, "Контекст (512–2048)", String.valueOf(MglaLocalChatRuntime.contextTokens()), String.valueOf(MglaLocalChatRuntime.DEFAULT_CONTEXT));
         EditText threads = settingField(c, form, "Потоки CPU (1–2)", String.valueOf(MglaLocalChatRuntime.threads()), String.valueOf(MglaLocalChatRuntime.defaultThreads()));
-        TextView note = text("Модель выгружается только вручную кнопкой в шапке чата.", 12, Theme.key_dialogTextGray2);
+        TextView note = text("Модель выгружается только вручную кнопкой в шапке чата. Для reasoning‑моделей лучше 1024–2048 токенов — иначе ответ обрежется после </think>.", 12, Theme.key_dialogTextGray2);
         note.setPadding(0, dp(12), 0, 0);
         form.addView(note, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         new AlertDialog.Builder(c).setTitle("Настройки локальной модели").setView(form)
@@ -1666,8 +1837,8 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
             try {
                 prefs().edit()
                         .putFloat("ai_chat_temperature", Math.max(0, Math.min(1.0f, Float.parseFloat(temperature.getText().toString()))))
-                        .putInt("ai_chat_max_tokens", Math.max(16, Math.min(256, Integer.parseInt(tokens.getText().toString()))))
-                        .putInt("ai_local_context", Math.max(256, Math.min(2048, Integer.parseInt(context.getText().toString()))))
+                        .putInt("ai_chat_max_tokens", Math.max(64, Math.min(2048, Integer.parseInt(tokens.getText().toString()))))
+                        .putInt("ai_local_context", Math.max(512, Math.min(2048, Integer.parseInt(context.getText().toString()))))
                         .putInt("ai_local_threads", Math.max(1, Math.min(2, Integer.parseInt(threads.getText().toString()))))
                         .apply();
             } catch (Throwable ignore) {

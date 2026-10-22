@@ -357,7 +357,8 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
 
     std::string output;
     int n_past = (int) input.size();
-    int limit = std::max(8, std::min(512, (int) max_tokens));
+    // Allow long CoT + answer (Qwen3 / reasoning GGUFs); still capped by n_ctx.
+    int limit = std::max(8, std::min(2048, (int) max_tokens));
     int generated = 0;
 
     for (int i = 0; i < limit && n_past < rt->n_ctx - 1; i++) {
@@ -512,7 +513,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeComplete(
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     std::string output;
     int n_past = (int) input.size();
-    int limit = std::max(8, std::min(512, (int) max_tokens));
+    int limit = std::max(8, std::min(2048, (int) max_tokens));
     for (int i = 0; i < limit && n_past < rt->n_ctx - 1; i++) {
         if (rt->abort.load()) {
             break;

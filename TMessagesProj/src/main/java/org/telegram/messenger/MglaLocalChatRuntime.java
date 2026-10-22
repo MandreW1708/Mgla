@@ -23,11 +23,11 @@ public final class MglaLocalChatRuntime {
     /** User dismissed the «model still in RAM» banner until next load. */
     private static volatile boolean ramWarningDismissed;
 
-    /** Tuned for phone-sized instruct GGUF (Qwen2.5 0.5B / SmolLM2, etc.). */
+    /** Tuned for phone-sized instruct GGUF; higher max for reasoning models (Qwen3…). */
     public static final float DEFAULT_TEMPERATURE = 0f; // greedy — стабильнее на 0.5B
-    public static final int DEFAULT_MAX_TOKENS = 128;
-    public static final int DEFAULT_CONTEXT = 512;
-    private static final int DEFAULTS_VERSION = 5;
+    public static final int DEFAULT_MAX_TOKENS = 1024;
+    public static final int DEFAULT_CONTEXT = 1536;
+    private static final int DEFAULTS_VERSION = 7;
 
     public interface LoadCallback {
         void onProgress(String status);
@@ -96,12 +96,13 @@ public final class MglaLocalChatRuntime {
 
     public static int maxTokens() {
         ensureLocalDefaults();
-        return Math.max(16, Math.min(256, prefs().getInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)));
+        // Reasoning models spend many tokens on <think> before the answer.
+        return Math.max(64, Math.min(2048, prefs().getInt("ai_chat_max_tokens", DEFAULT_MAX_TOKENS)));
     }
 
     public static int contextTokens() {
         ensureLocalDefaults();
-        return Math.max(256, Math.min(2048, prefs().getInt("ai_local_context", DEFAULT_CONTEXT)));
+        return Math.max(512, Math.min(4096, prefs().getInt("ai_local_context", DEFAULT_CONTEXT)));
     }
 
     public static int threads() {
@@ -316,7 +317,7 @@ public final class MglaLocalChatRuntime {
         FileLog.d("MglaLocal prompt chars=" + prompt.length() + " msgs=" + forPrompt.size());
 
         float temp = Math.max(0f, Math.min(0.8f, temperature));
-        int tokens = Math.max(16, Math.min(256, maxTokens));
+        int tokens = Math.max(64, Math.min(2048, maxTokens));
         final AtomicBoolean gotToken = new AtomicBoolean(false);
 
         int generated = MglaLlamaNative.generate(h, prompt, tokens, temp, new MglaLlamaNative.TokenSink() {
@@ -395,7 +396,14 @@ public final class MglaLocalChatRuntime {
                 continue;
             }
             roles.add("assistant".equals(m.role) ? "assistant" : "user");
-            texts.add(m.text.trim());
+            // Don't burn context on prior CoT — only the final answer matters for history.
+            String turn = "assistant".equals(m.role)
+                    ? MglaAiReasoning.stripForContext(m.text)
+                    : m.text.trim();
+            if (TextUtils.isEmpty(turn)) {
+                continue;
+            }
+            texts.add(turn);
         }
         if (!roles.isEmpty()) {
             String nativePrompt = MglaLlamaNative.applyChatTemplate(
@@ -427,8 +435,12 @@ public final class MglaLocalChatRuntime {
                     continue;
                 }
                 boolean assistant = "assistant".equals(m.role);
+                String turn = assistant ? MglaAiReasoning.stripForContext(m.text) : m.text.trim();
+                if (TextUtils.isEmpty(turn)) {
+                    continue;
+                }
                 p.append("<start_of_turn>").append(assistant ? "model" : "user").append('\n')
-                        .append(m.text.trim()).append("<end_of_turn>\n");
+                        .append(turn).append("<end_of_turn>\n");
             }
             p.append("<start_of_turn>model\n");
             return p.toString();
@@ -444,9 +456,13 @@ public final class MglaLocalChatRuntime {
                     continue;
                 }
                 boolean assistant = "assistant".equals(m.role);
+                String turn = assistant ? MglaAiReasoning.stripForContext(m.text) : m.text.trim();
+                if (TextUtils.isEmpty(turn)) {
+                    continue;
+                }
                 p.append("<|start_header_id|>").append(assistant ? "assistant" : "user")
                         .append("<|end_header_id|>\n\n")
-                        .append(m.text.trim()).append("<|eot_id|>");
+                        .append(turn).append("<|eot_id|>");
             }
             p.append("<|start_header_id|>assistant<|end_header_id|>\n\n");
             return p.toString();
@@ -460,14 +476,18 @@ public final class MglaLocalChatRuntime {
                     continue;
                 }
                 boolean assistant = "assistant".equals(m.role);
+                String turn = assistant ? MglaAiReasoning.stripForContext(m.text) : m.text.trim();
+                if (TextUtils.isEmpty(turn)) {
+                    continue;
+                }
                 p.append(assistant ? "<|assistant|>\n" : "<|user|>\n")
-                        .append(m.text.trim()).append("<|end|>\n");
+                        .append(turn).append("<|end|>\n");
             }
             p.append("<|assistant|>\n");
             return p.toString();
         }
 
-        // Default ChatML — Qwen2 / Qwen2.5 / SmolLM2 / many OpenChat-style GGUFs.
+        // Default ChatML — Qwen2 / Qwen2.5 / Qwen3 / SmolLM2 / many OpenChat-style GGUFs.
         p.append("<|im_start|>system\n").append(system).append("<|im_end|>\n");
         for (int i = start; i < messages.size(); i++) {
             MglaAiChatStorage.Message m = messages.get(i);
@@ -475,8 +495,12 @@ public final class MglaLocalChatRuntime {
                 continue;
             }
             boolean assistant = "assistant".equals(m.role);
+            String turn = assistant ? MglaAiReasoning.stripForContext(m.text) : m.text.trim();
+            if (TextUtils.isEmpty(turn)) {
+                continue;
+            }
             p.append("<|im_start|>").append(assistant ? "assistant" : "user").append('\n')
-                    .append(m.text.trim())
+                    .append(turn)
                     .append("<|im_end|>\n");
         }
         p.append("<|im_start|>assistant\n");
