@@ -10,8 +10,10 @@ import org.telegram.messenger.BuildConfig;
 /**
  * Настройки WS-обхода и хаба (статистика).
  * <p>
- * Обход: {@link #getRelayHost()} → обычно {@code mglabot.mooo.com} ({@code /apiws}).
- * Ultra-обход: тот же path на {@link #getHubHost()} ({@code mglahub.mooo.com}), только для Ultra.
+ * Обычный обход (всем): {@link #REGION_DE} «Германия1» ({@code mglabot}) или
+ * {@link #REGION_HUB} «Германия2» ({@code mglahub}), path {@code /apiws}.
+ * Ultra-обход: {@link #FINLAND_RELAY_HOST} ({@code fin.mgla.mooo.com}), только для Ultra;
+ * выбор региона при Ultra не используется.
  * Статистика: напрямую хаб ({@code /mgla-stats/}), либо через релей {@code /mgla-ai/v1/stats-batch}.
  * Хосты/токены — из {@code BuildConfig} / {@code local.properties}, prefs могут переопределить.
  */
@@ -19,7 +21,16 @@ public final class MglaWsConfig {
 
     public static final String PREFS = "mgla_config";
 
+    /** Обычный обход: Германия1 (mglabot.mooo.com). */
+    public static final String REGION_DE = "de";
+    /** Обычный обход: Германия2 (mglahub.mooo.com). */
+    public static final String REGION_HUB = "hub";
+    /** @deprecated Pref value from older builds; migrated to {@link #REGION_DE}. */
+    public static final String REGION_FI = "fi";
+
     public static final String DEFAULT_RELAY_HOST = "mglabot.mooo.com";
+    /** Ultra-обход (платный): Финляндия. */
+    public static final String FINLAND_RELAY_HOST = "fin.mgla.mooo.com";
     public static final String DEFAULT_HUB_HOST = "mglahub.mooo.com";
 
     /**
@@ -35,6 +46,7 @@ public final class MglaWsConfig {
 
     private static final String PREF_ENABLED = "ws_enabled";
     private static final String PREF_ULTRA_BYPASS = "ws_ultra_bypass";
+    private static final String PREF_BYPASS_REGION = "ws_bypass_region";
     private static final String PREF_PORT = "ws_port";
     private static final String PREF_SECRET = "ws_secret";
     private static final String PREF_RELAY_HOST = "ws_relay_host";
@@ -76,17 +88,13 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Ultra path via mglahub: preference on and at least one account has Ultra.
-     * Clears the preference automatically when Ultra is gone.
+     * Ultra path via Finland ({@link #FINLAND_RELAY_HOST}): preference on and Ultra sub.
+     * Does <b>not</b> clear the preference when Ultra is temporarily missing from
+     * local cache (features poll glitch) — otherwise the toggle never comes back.
      */
     public static boolean isUltraBypassEnabled() {
-        if (!org.telegram.messenger.MglaSubscription.hasUltraOnAnyAccount()) {
-            if (isUltraBypassPrefEnabled()) {
-                getPrefs().edit().putBoolean(PREF_ULTRA_BYPASS, false).apply();
-            }
-            return false;
-        }
-        return isUltraBypassPrefEnabled();
+        return isUltraBypassPrefEnabled()
+                && org.telegram.messenger.MglaSubscription.hasUltraOnAnyAccount();
     }
 
     public static void setUltraBypassEnabled(boolean enabled) {
@@ -94,6 +102,41 @@ public final class MglaWsConfig {
             enabled = false;
         }
         getPrefs().edit().putBoolean(PREF_ULTRA_BYPASS, enabled).apply();
+    }
+
+    /**
+     * Region for normal (non-Ultra) bypass: {@link #REGION_DE} or {@link #REGION_HUB}.
+     * Ignored while {@link #isUltraBypassEnabled()} — traffic goes to Finland.
+     */
+    public static String getBypassRegion() {
+        String r = getPrefs().getString(PREF_BYPASS_REGION, REGION_DE);
+        if (REGION_HUB.equalsIgnoreCase(r)) {
+            return REGION_HUB;
+        }
+        // Older builds stored Finland as a free region — map to Germany1.
+        if (REGION_FI.equalsIgnoreCase(r)) {
+            getPrefs().edit().putString(PREF_BYPASS_REGION, REGION_DE).apply();
+        }
+        return REGION_DE;
+    }
+
+    public static void setBypassRegion(String region) {
+        String norm = REGION_HUB.equalsIgnoreCase(region) ? REGION_HUB : REGION_DE;
+        getPrefs().edit().putString(PREF_BYPASS_REGION, norm).apply();
+    }
+
+    /** Human label for the region picker (RU). */
+    public static String getBypassRegionLabel() {
+        return REGION_HUB.equals(getBypassRegion()) ? "Германия2" : "Германия1";
+    }
+
+    /** Host for the selected normal-bypass region (never Ultra Finland). */
+    public static String getRegionRelayHost() {
+        if (REGION_HUB.equals(getBypassRegion())) {
+            return getHubHost();
+        }
+        String fromBuild = BuildConfig.MGLA_WS_RELAY_HOST;
+        return TextUtils.isEmpty(fromBuild) ? DEFAULT_RELAY_HOST : fromBuild.trim();
     }
 
     public static int getPort() {
@@ -123,14 +166,13 @@ public final class MglaWsConfig {
 
     public static String getRelayHost() {
         if (isUltraBypassEnabled()) {
-            return getHubHost();
+            return FINLAND_RELAY_HOST;
         }
         String override = getPrefs().getString(PREF_RELAY_HOST, null);
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
         }
-        String fromBuild = BuildConfig.MGLA_WS_RELAY_HOST;
-        return TextUtils.isEmpty(fromBuild) ? DEFAULT_RELAY_HOST : fromBuild.trim();
+        return getRegionRelayHost();
     }
 
     /** TLS pin for the host returned by {@link #getRelayHost()}, or null for system CAs. */
@@ -140,6 +182,10 @@ public final class MglaWsConfig {
         }
         if (DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
             return new String[]{RELAY_SPKI_SHA256_BASE64};
+        }
+        // Finland (Ultra) uses Let's Encrypt — system CAs until a dedicated pin is published.
+        if (FINLAND_RELAY_HOST.equalsIgnoreCase(host)) {
+            return null;
         }
         String hub = getHubHost();
         if (DEFAULT_HUB_HOST.equalsIgnoreCase(host)
@@ -156,14 +202,13 @@ public final class MglaWsConfig {
     /**
      * Токен текущего обхода:
      * <ul>
-     *   <li>Ultra → JWT / {@code MGLA_HUB_TOKEN} (mglahub)</li>
-     *   <li>обычный → JWT / {@code MGLA_WS_RELAY_TOKEN} (mglabot)</li>
+     *   <li>Ultra (Finland) / Германия1 → JWT / {@code MGLA_WS_RELAY_TOKEN} (тот же, что на fin.mgla / mglabot)</li>
+     *   <li>Германия2 → JWT / {@code MGLA_HUB_TOKEN} (mglahub)</li>
      * </ul>
-     * Using the bot token against the hub (or vice versa) causes auth failures and
-     * looks like “Ultra constantly disconnects”.
+     * Using the bot token against the hub (or vice versa) causes auth failures.
      */
     public static String getRelayToken() {
-        if (isUltraBypassEnabled()) {
+        if (!isUltraBypassEnabled() && REGION_HUB.equals(getBypassRegion())) {
             return getHubToken();
         }
         try {
@@ -205,18 +250,19 @@ public final class MglaWsConfig {
 
     /**
      * Адрес запасного WEB proxy в форме {@code host/path} (без https://).
-     * Ultra-обход → отдельный proxy на хабе; обычный авто-обход → mglabot.
+     * Ultra → Finland; Германия2 → хаб; Германия1 → mglabot.
      */
     public static String getWebProxyHost() {
         if (isUltraBypassEnabled()) {
-            String ultra = BuildConfig.MGLA_ULTRA_WEB_PROXY_HOST;
-            if (!TextUtils.isEmpty(ultra)) {
-                return ultra.trim();
+            return FINLAND_RELAY_HOST + "/tgweb";
+        }
+        if (REGION_HUB.equals(getBypassRegion())) {
+            String hubProxy = BuildConfig.MGLA_ULTRA_WEB_PROXY_HOST;
+            if (!TextUtils.isEmpty(hubProxy)) {
+                return hubProxy.trim();
             }
             String hub = getHubHost();
-            if (!TextUtils.isEmpty(hub)) {
-                return hub.trim() + "/tgweb";
-            }
+            return TextUtils.isEmpty(hub) ? "" : hub.trim() + "/tgweb";
         }
         String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
         return fromBuild == null ? "" : fromBuild.trim();
@@ -224,12 +270,14 @@ public final class MglaWsConfig {
 
     /** Секрет WEB proxy: 32 hex (как в profiles.json tproxy-server). */
     public static String getWebProxySecret() {
-        if (isUltraBypassEnabled()) {
-            String ultra = BuildConfig.MGLA_ULTRA_WEB_PROXY_SECRET;
-            if (!TextUtils.isEmpty(ultra)) {
-                return ultra.trim().toLowerCase(java.util.Locale.US);
+        // Германия2 (хаб) — отдельный secret профиля mgla на mglahub.
+        if (!isUltraBypassEnabled() && REGION_HUB.equals(getBypassRegion())) {
+            String hub = BuildConfig.MGLA_ULTRA_WEB_PROXY_SECRET;
+            if (!TextUtils.isEmpty(hub)) {
+                return hub.trim().toLowerCase(java.util.Locale.US);
             }
         }
+        // Ultra (Finland) и Германия1 — один secret с mglabot / fin.mgla.
         String fromBuild = BuildConfig.MGLA_WEB_PROXY_SECRET;
         return fromBuild == null ? "" : fromBuild.trim().toLowerCase(java.util.Locale.US);
     }
@@ -239,10 +287,14 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Хост WEB proxy для туннеля обновлений (всегда mglabot — туннель mgla-upd там).
-     * Не путать с {@link #getWebProxyHost()} для Telegram-трафика Ultra.
+     * Хост WEB proxy для туннеля обновлений.
+     * Ultra → Finland (профиль mgla-upd); обычный → mglabot (туннель там же).
+     * Германия2 на WEB: туннель обновлений всё ещё на боте (на хабе его нет).
      */
     public static String getWebUpdateProxyHost() {
+        if (isUltraBypassEnabled()) {
+            return FINLAND_RELAY_HOST + "/tgweb";
+        }
         String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
         return fromBuild == null ? "" : fromBuild.trim();
     }

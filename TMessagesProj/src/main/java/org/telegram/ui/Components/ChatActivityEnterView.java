@@ -2730,14 +2730,16 @@ public class ChatActivityEnterView extends FrameLayout implements
         };
         textFieldContainer.setClipChildren(false);
         textFieldContainer.setClipToPadding(false);
-        textFieldContainer.setPadding(0, dp(1), 0, 0);
-        addView(textFieldContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 0, 1, 0, 0));
+        // Telegram: no extra top inset so the 44dp row sits optically centered in the glass pill.
+        final int fieldTopInset = useTelegramBottomPanelLayout() ? 0 : 1;
+        textFieldContainer.setPadding(0, dp(fieldTopInset), 0, 0);
+        addView(textFieldContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 0, fieldTopInset, 0, 0));
 
         FrameLayout frameLayout = messageEditTextContainer = new FrameLayout(context) {
             @Override
             protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                final int height = Math.max(dp(DEFAULT_HEIGHT), getMeasuredHeight());
+                final int height = Math.max(getPanelRowHeight(), getMeasuredHeight());
                 if (animatorInputFieldHeight.getFactor() > 0) {
                     animatorInputFieldHeight.animateTo(height);
                 } else {
@@ -2773,17 +2775,20 @@ public class ChatActivityEnterView extends FrameLayout implements
                 return super.drawChild(canvas, child, drawingTime);
             }
         };
-        frameLayout.setClipChildren(!useStaticSendButton());
+        // Stock Telegram / non-static: don't clip send overlays. Static Mgla: also unclipped.
+        frameLayout.setClipChildren(false);
+        final int rowH = getPanelRowHeightDp();
         int leftInputOffset;
         if (useStaticAttachButton()) {
             leftInputOffset = DEFAULT_HEIGHT + STATIC_ATTACH_GAP - INPUT_BUBBLE_CONTENT_SIDE_TUCK;
-        } else if (useTelegramBottomPanelLayout()) {
-            // Stock Telegram: field pill is full-width; attach sits inside on the right.
-            leftInputOffset = 0;
         } else {
-            leftInputOffset = isChat ? DEFAULT_HEIGHT + STATIC_ATTACH_GAP : 0;
+            // Stock Telegram: no left attach circle — field starts at 0.
+            leftInputOffset = 0;
         }
-        int rightInputOffset = useStaticSendButton() ? (DEFAULT_HEIGHT + STATIC_SEND_GAP - INPUT_BUBBLE_CONTENT_SIDE_TUCK) : DEFAULT_HEIGHT;
+        // Stock Telegram: reserve row height on the right for send/mic inside the glass pill.
+        final int rightInputOffset = useStaticSendButton()
+                ? (DEFAULT_HEIGHT + STATIC_SEND_GAP - INPUT_BUBBLE_CONTENT_SIDE_TUCK)
+                : rowH;
         textFieldContainer.addView(frameLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, leftInputOffset, 0, rightInputOffset, 0));
 
         emojiButton = new ChatActivityEnterViewAnimatedIconView(context) {
@@ -2800,6 +2805,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         };
         emojiButton.setContentDescription(getString(R.string.AccDescrEmojiButton));
         emojiButton.setFocusable(true);
+        // Telegram: match AI-editor control size (38dp) inside the 44dp row.
+        final int emojiSize = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : rowH;
         int padding = dp(6.5f);
         emojiButton.setPadding(padding, padding, padding, padding);
         emojiButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_glass_defaultIcon), PorterDuff.Mode.SRC_IN));
@@ -2837,7 +2844,10 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
             }
         });
-        messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, isChat ? INPUT_INNER_BUTTON_LEFT_MARGIN : 2, 0, 0, 0));
+        final int emojiGravity = useTelegramBottomPanelLayout()
+                ? (Gravity.CENTER_VERTICAL | Gravity.LEFT)
+                : (Gravity.BOTTOM | Gravity.LEFT);
+        messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(emojiSize, emojiSize, emojiGravity, isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2, 0, 0, 0));
         setEmojiButtonImage(false, false);
 
         // AI Editor robot button (to the right of emoji)
@@ -2899,7 +2909,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                 });
                 parentFragment.showDialog(menu.create());
             });
-            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 58, 0, 0, 0));
+            // Same 38dp size as emoji; sit after emoji in the 44dp Telegram row.
+            final int aiSize = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : rowH;
+            final int aiLeft = (isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2) + emojiSize;
+            final int aiGravity = useTelegramBottomPanelLayout()
+                    ? (Gravity.CENTER_VERTICAL | Gravity.LEFT)
+                    : (Gravity.BOTTOM | Gravity.LEFT);
+            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(aiSize, aiSize, aiGravity, aiLeft, 0, 0, 0));
         }
         deleteRichDraftButton = new ImageView(context);
         deleteRichDraftButton.setScaleType(ImageView.ScaleType.CENTER);
@@ -2922,7 +2938,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 .makeRed(AlertDialog.BUTTON_POSITIVE)
                 .show();
         });
-        messageEditTextContainer.addView(deleteRichDraftButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 2, 0, 0, 0));
+        messageEditTextContainer.addView(deleteRichDraftButton, LayoutHelper.createFrame(rowH, rowH, Gravity.BOTTOM | Gravity.LEFT, 2, 0, 0, 0));
 
 
         if (isChat) {
@@ -2938,7 +2954,10 @@ public class ChatActivityEnterView extends FrameLayout implements
             attachLayout.setOrientation(LinearLayout.HORIZONTAL);
             attachLayout.setEnabled(false);
             attachLayout.setClipChildren(false);
-            messageEditTextContainer.addView(attachLayout, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.RIGHT, 0, 0, 8, 0));
+            attachLayout.setGravity(Gravity.CENTER_VERTICAL);
+            // Stock Telegram: attachLayout sits left of the send slot.
+            final int attachRightPad = useStaticAttachButton() ? 8 : rowH;
+            messageEditTextContainer.addView(attachLayout, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, rowH, Gravity.BOTTOM | Gravity.RIGHT, 0, 0, attachRightPad, 0));
 
 
 
@@ -2996,8 +3015,8 @@ public class ChatActivityEnterView extends FrameLayout implements
             attachButton.setOnClickListener(attachButtonClickListener);
             attachButton.setContentDescription(getString(R.string.AccDescrAttachButton));
             if (useTelegramBottomPanelLayout()) {
-                // Stock Telegram: paperclip sits in attachLayout inside the field pill (right).
-                attachLayout.addView(attachButton, LayoutHelper.createLinear(DEFAULT_HEIGHT, DEFAULT_HEIGHT));
+                // Stock Telegram: paperclip inside the field on the right (just left of send).
+                messageEditTextContainer.addView(attachButton, LayoutHelper.createFrame(rowH, rowH, Gravity.BOTTOM | Gravity.RIGHT));
             } else {
                 // Mgla Standard: separate glass circle to the left of the field pill.
                 textFieldContainer.addView(attachButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.LEFT, 0, 0, 0, 0));
@@ -3133,7 +3152,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         };
         sendButtonContainer.setClipChildren(false);
         sendButtonContainer.setClipToPadding(false);
-        textFieldContainer.addView(sendButtonContainer, LayoutHelper.createFrame(100, DEFAULT_HEIGHT, Gravity.BOTTOM | Gravity.RIGHT));
+        textFieldContainer.addView(sendButtonContainer, LayoutHelper.createFrame(100, rowH, Gravity.BOTTOM | Gravity.RIGHT));
 
         audioVideoButtonContainer = new FrameLayout(context) {
 
@@ -3390,18 +3409,21 @@ public class ChatActivityEnterView extends FrameLayout implements
                         }
                     }
 
+                    // Stock Telegram mic disc: 38dp in the (possibly 44dp) slot, vertically centered.
                     final float r = dpf2(19);
                     paint.setColor(getThemedColor(Theme.key_chat_messagePanelSend));
                     final float margin = dpf2(3);
                     final float height = dpf2(38);
                     final float width = dpf2(38);
+                    final float top = getMeasuredHeight() >= height + margin * 2f
+                            ? (getMeasuredHeight() - height) / 2f
+                            : (getMeasuredHeight() - height - margin);
                     backgroundRect.set(
                             getMeasuredWidth() - width - margin,
-                            getMeasuredHeight() - height - margin,
+                            top,
                             getMeasuredWidth() - margin,
-                            getMeasuredHeight() - margin
+                            top + height
                     );
-
                     canvas.save();
                     canvas.scale(s, s, backgroundRect.centerX(), backgroundRect.centerY());
                     canvas.drawRoundRect(backgroundRect, r, r, paint);
@@ -3411,7 +3433,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
         };
         audioVideoButtonContainer.setSoundEffectsEnabled(false);
-        sendButtonContainer.addView(audioVideoButtonContainer, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT, Gravity.RIGHT | Gravity.BOTTOM));
+        sendButtonContainer.addView(audioVideoButtonContainer, LayoutHelper.createFrame(rowH, rowH, Gravity.RIGHT | Gravity.BOTTOM));
         audioVideoButtonContainer.setFocusable(true);
         audioVideoButtonContainer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
 
@@ -3609,7 +3631,7 @@ public class ChatActivityEnterView extends FrameLayout implements
 //        audioVideoSendButton.setAccessibilityDelegate(mediaMessageButtonsDelegate);
         padding = dp(10f);
         audioVideoSendButton.setPadding(padding, padding, padding, padding);
-        audioVideoButtonContainer.addView(audioVideoSendButton, LayoutHelper.createFrame(DEFAULT_HEIGHT, DEFAULT_HEIGHT));
+        audioVideoButtonContainer.addView(audioVideoSendButton, LayoutHelper.createFrame(rowH, rowH));
 
         cancelBotButton = new ImageView(context);
         cancelBotButton.setVisibility(INVISIBLE);
@@ -3682,7 +3704,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         if (useStaticSendButton()) {
             sendButton.setExternalGlassBackground(true);
         }
-        sendButtonContainer.addView(sendButton, LayoutHelper.createFrame(100, DEFAULT_HEIGHT, Gravity.RIGHT | Gravity.BOTTOM));
+        // Stock Telegram: 100×44 SendButton; disc is 38dp with 3dp inset inside the taller slot.
+        sendButtonContainer.addView(sendButton, LayoutHelper.createFrame(100, rowH, Gravity.RIGHT | Gravity.BOTTOM));
         sendButton.setOnClickListener(view -> {
             if ((messageSendPreview != null && messageSendPreview.isShowing()) || (runningAnimationAudio != null && runningAnimationAudio.isRunning()) || moveToSendStateRunnable != null) {
                 return;
@@ -6003,8 +6026,13 @@ public class ChatActivityEnterView extends FrameLayout implements
         messageEditText.setSingleLine(false);
         messageEditText.setMaxLines(6);
         messageEditText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, INPUT_TEXT_SIZE_DP);
-        messageEditText.setGravity(Gravity.BOTTOM);
-        messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), 0, dp(INPUT_TEXT_PADDING_BOTTOM));
+        messageEditText.setGravity(Gravity.CENTER_VERTICAL);
+        // Telegram 44dp row: no vertical padding — CENTER_VERTICAL centers hint/text in the slot.
+        if (useTelegramBottomPanelLayout()) {
+            messageEditText.setPadding(0, 0, 0, 0);
+        } else {
+            messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), 0, dp(INPUT_TEXT_PADDING_BOTTOM));
+        }
         messageEditText.setBackgroundDrawable(null);
         messageEditText.setTextColor(getThemedColor(Theme.key_chat_messagePanelText));
         messageEditText.setLinkTextColor(getThemedColor(Theme.key_chat_messageLinkOut));
@@ -6013,11 +6041,14 @@ public class ChatActivityEnterView extends FrameLayout implements
         messageEditText.setHintTextColor(getThemedColor(Theme.key_chat_messagePanelHint));
         messageEditText.setCursorColor(getThemedColor(Theme.key_chat_messagePanelCursor));
         messageEditText.setHandlesColor(getThemedColor(Theme.key_chat_TextSelectionCursor));
-        int msgLeftMargin = INPUT_INNER_BUTTON_LEFT_MARGIN + DEFAULT_HEIGHT + 2;
+        final int leftChrome = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : getPanelRowHeightDp();
+        int msgLeftMargin = (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) + leftChrome + 2;
         if (aiEditorButton != null) {
-            msgLeftMargin += DEFAULT_HEIGHT + dp(12) + dp(1) - dp(3);
+            msgLeftMargin += leftChrome + dp(12) + dp(1) - dp(3);
         }
-        messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, useStaticSendButton() ? INPUT_INNER_BUTTON_RIGHT_MARGIN : (isChat ? 50 : 2), 1.5f));
+        messageEditText.setMinimumHeight(getPanelRowHeight());
+        final float textBottomMargin = useTelegramBottomPanelLayout() ? 0 : 1.5f;
+        messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, useStaticSendButton() ? INPUT_INNER_BUTTON_RIGHT_MARGIN : (isChat ? 50 : 2), textBottomMargin));
         if (aiEditorButton != null) {
             aiEditorButton.bringToFront();
         }
@@ -6672,11 +6703,22 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     public static final int DEFAULT_HEIGHT = 38;
+    /** Stock Telegram (DrKLO) input row height — send/mic circle is 38dp inset in this 44dp slot. */
+    private static final int TELEGRAM_ROW_HEIGHT = 44;
     private static final int INPUT_TEXT_SIZE_DP = 16;
     private static final int INPUT_TEXT_PADDING_TOP = 7;
     private static final int INPUT_TEXT_PADDING_BOTTOM = 8;
     private static final int INPUT_INNER_SEND_RESERVED = DEFAULT_HEIGHT + 6;
     private static final int STATIC_ATTACH_GAP = 0;
+
+    /** Row height for the active bottom-panel style (stock Telegram uses 44). */
+    private int getPanelRowHeightDp() {
+        return useTelegramBottomPanelLayout() ? TELEGRAM_ROW_HEIGHT : DEFAULT_HEIGHT;
+    }
+
+    private int getPanelRowHeight() {
+        return dp(getPanelRowHeightDp());
+    }
     private static final int STATIC_SEND_GAP = 0;
     private static final int INPUT_BUBBLE_SIDE_TUCK = 4;
     private static final int INPUT_BUBBLE_CONTENT_SIDE_TUCK = 2;
@@ -9001,6 +9043,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         int padding = visible ? dp(slowModeButton.isPremiumMode ? 26 : 16) : 0;
         if (messageEditText != null && messageEditText.getPaddingRight() != padding) {
             if (isStories) {
+                messageEditText.setPadding(0, 0, padding, 0);
+            } else if (useTelegramBottomPanelLayout()) {
                 messageEditText.setPadding(0, 0, padding, 0);
             } else {
                 messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), padding, dp(INPUT_TEXT_PADDING_BOTTOM));
@@ -15240,11 +15284,21 @@ public class ChatActivityEnterView extends FrameLayout implements
         return true;
     }
 
+    /** Public for ChatActivity glass-bubble offset math. */
+    public boolean isTelegramBottomPanelLayout() {
+        return useTelegramBottomPanelLayout();
+    }
+
     private boolean useStaticAttachButton() {
         return isChat && !isLiveComment && !useTelegramBottomPanelLayout();
     }
 
     public float getStaticAttachBubbleLeftOffset() {
+        // Telegram pill is full-bleed inside the 7dp enter-view margins — no extra inset,
+        // otherwise send/mic sit past the rounded glass and look clipped.
+        if (useTelegramBottomPanelLayout()) {
+            return 0f;
+        }
         float dynamicPadding = org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress;
         if (!useStaticAttachButton() || attachButton == null || attachButton.getVisibility() != View.VISIBLE || attachButton.getAlpha() < 0.5f) {
             return dynamicPadding;
@@ -15318,7 +15372,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         if (aiEditorButton != null && !isStories) {
             FrameLayout.LayoutParams aiLp = (FrameLayout.LayoutParams) aiEditorButton.getLayoutParams();
             // Sit just after the emoji button (same size), not overlapping it / the hint.
-            final int aiLeft = getInputInnerButtonLeftMargin() + dp(DEFAULT_HEIGHT);
+            final int aiLeft = (useTelegramBottomPanelLayout() ? dp(3) : getInputInnerButtonLeftMargin())
+                    + dp(useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : getPanelRowHeightDp());
             if (aiLp.leftMargin != aiLeft) {
                 aiLp.leftMargin = aiLeft;
                 aiEditorButton.setLayoutParams(aiLp);
@@ -15390,7 +15445,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         if (aiEditorButton != null) {
             FrameLayout.LayoutParams aiLp = (FrameLayout.LayoutParams) aiEditorButton.getLayoutParams();
             // Expanded only: AI sits after emoji, same as chats.
-            final int aiLeft = getInputInnerButtonLeftMargin() + dp(DEFAULT_HEIGHT);
+            final int aiLeft = (useTelegramBottomPanelLayout() ? dp(3) : getInputInnerButtonLeftMargin())
+                    + dp(useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : getPanelRowHeightDp());
             if (aiLp.leftMargin != aiLeft) {
                 aiLp.leftMargin = aiLeft;
                 aiEditorButton.setLayoutParams(aiLp);
@@ -15405,11 +15461,12 @@ public class ChatActivityEnterView extends FrameLayout implements
 
         if (messageEditText != null && !collapsed) {
             FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) messageEditText.getLayoutParams();
-            final int textLeft = getInputInnerButtonLeftMargin() + dp(2) + dp(DEFAULT_HEIGHT) // emoji
-                + (aiEditorButton != null ? dp(DEFAULT_HEIGHT) : 0);
+            final int emojiLeft = useTelegramBottomPanelLayout() ? dp(3) : getInputInnerButtonLeftMargin();
+            final int chrome = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : getPanelRowHeightDp();
+            final int textLeft = emojiLeft + dp(2) + dp(chrome)
+                + (aiEditorButton != null ? dp(chrome) : 0);
             final int textRight = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(isChat ? 50 : 2);
-            // Match the 38dp button row so single-line text sits on the same optical center.
-            final int lineH = dp(DEFAULT_HEIGHT);
+            final int lineH = getPanelRowHeight();
             if (textLp.leftMargin != textLeft || textLp.rightMargin != textRight || textLp.height != LayoutHelper.WRAP_CONTENT || textLp.gravity != Gravity.BOTTOM || textLp.bottomMargin != 0) {
                 textLp.leftMargin = textLeft;
                 textLp.rightMargin = textRight;
@@ -15462,6 +15519,9 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     public float getStaticSendBubbleRightOffset() {
+        if (useTelegramBottomPanelLayout()) {
+            return 0f;
+        }
         float dynamicPadding = org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress;
         boolean rightButtonVisible = sendButtonContainer != null && sendButtonContainer.getVisibility() == VISIBLE && sendButtonContainer.getAlpha() >= 0.5f;
         if (!rightButtonVisible && doneButton != null && doneButton.getVisibility() == VISIBLE) {
@@ -15996,6 +16056,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
             updateColors();
             checkBackgroundRect();
+            // Stock Telegram (DrKLO): round rect background unless an external glass circle is used (Mgla Standard).
             if (isNewDesignSendButton && !externalGlassBackground) {
                 canvas.drawRoundRect(backgroundRect, dp(RADIUS), dp(RADIUS), backgroundPaint);
             }
@@ -16349,24 +16410,28 @@ public class ChatActivityEnterView extends FrameLayout implements
         private static final int RADIUS = 19;
 
         private void checkBackgroundRect() {
+            // Stock Telegram (DrKLO): 38dp disc. In the 44dp row it sits with equal 3dp inset.
+            // Mgla Standard external-glass: centered in the view.
             final float margin = dpf2(3);
             final float height = dpf2(38);
             final float width = lerp(
-                Math.max(height, dpf2(10 + 10) + priceText.getCurrentWidth()),
-                height, sameWidthFactor);
-            if (externalGlassBackground) {
+                    Math.max(height, dpf2(10 + 10) + priceText.getCurrentWidth()),
+                    height, sameWidthFactor);
+            if (externalGlassBackground || centerBackground) {
                 backgroundRect.set(
                         (getMeasuredWidth() - width) / 2f,
                         (getMeasuredHeight() - height) / 2f,
                         (getMeasuredWidth() + width) / 2f,
                         (getMeasuredHeight() + height) / 2f
                 );
-            } else if (centerBackground) {
+            } else if (getMeasuredHeight() >= height + margin * 2f) {
+                // Taller slot (44): vertically center the disc, keep right inset.
+                final float top = (getMeasuredHeight() - height) / 2f;
                 backgroundRect.set(
-                        (getMeasuredWidth() - width) / 2f,
-                        (getMeasuredHeight() - height) / 2f,
-                        (getMeasuredWidth() + width) / 2f,
-                        (getMeasuredHeight() + height) / 2f
+                        getMeasuredWidth() - width - margin,
+                        top,
+                        getMeasuredWidth() - margin,
+                        top + height
                 );
             } else {
                 backgroundRect.set(
@@ -16584,15 +16649,24 @@ public class ChatActivityEnterView extends FrameLayout implements
     private boolean inputFieldShortProgressInitialized = false;
     private float inputFieldShortProgress = 1f; // 1 = short (keyboard closed), 0 = full (keyboard open)
     private android.animation.ValueAnimator inputFieldShortAnimator;
+
+    /** Telegram bottom panel keeps a fixed full-width pill — no keyboard lengthen animation. */
+    private boolean shouldAnimateInputFieldShort() {
+        return !useTelegramBottomPanelLayout();
+    }
     
     private void updateInputFieldShortProgress(float progress) {
+        if (!shouldAnimateInputFieldShort()) {
+            progress = 0f;
+        }
         if (inputFieldShortProgressInitialized && Math.abs(inputFieldShortProgress - progress) < 0.001f) return;
         inputFieldShortProgressInitialized = true;
         inputFieldShortProgress = progress;
         
         if (textFieldContainer != null) {
             int p = (int) (org.telegram.messenger.AndroidUtilities.dp(20) * inputFieldShortProgress);
-            textFieldContainer.setPadding(p, 0, p, 0);
+            final int top = useTelegramBottomPanelLayout() ? 0 : textFieldContainer.getPaddingTop();
+            textFieldContainer.setPadding(p, top, p, 0);
             if (topView != null) {
                 topView.setPadding(p, 0, p, 0);
             }
@@ -16608,6 +16682,14 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
     
     private void animateInputFieldShortProgress(float targetProgress) {
+        if (!shouldAnimateInputFieldShort()) {
+            if (inputFieldShortAnimator != null) {
+                inputFieldShortAnimator.cancel();
+                inputFieldShortAnimator = null;
+            }
+            updateInputFieldShortProgress(0f);
+            return;
+        }
         if (inputFieldShortAnimator != null) {
             inputFieldShortAnimator.cancel();
         }

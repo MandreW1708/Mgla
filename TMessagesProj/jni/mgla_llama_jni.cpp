@@ -223,7 +223,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeLoad(JNIEnv * env, jclass, jst
         if (!model) {
             set_last_error(
                     "не удалось открыть GGUF (файл битый, архитектура не поддерживается "
-                    "или не хватает памяти). Используйте SmolLM2 / Qwen2.5 из каталога.");
+                    "или не хватает памяти). Возьмите модель из каталога (Gemma 2/3, Qwen2.5/3…).");
             return 0;
         }
 
@@ -330,7 +330,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
     emit_phase(bridge, "prompt");
 
     llama_batch batch = llama_batch_init(std::max(rt->n_batch, 64), 0, 1);
-    llama_kv_cache_clear(rt->ctx);
+    llama_kv_self_clear(rt->ctx);
     llama_set_n_threads(rt->ctx, rt->threads, rt->threads);
 
     if (!decode_tokens(rt, batch, input, 0)) {
@@ -373,10 +373,17 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
         }
 
         std::string piece = token_piece(vocab, token);
-        // Strip ChatML control markers if the model echoes them mid-stream.
+        // Stop on common chat control tokens (ChatML / Gemma / Llama-3 / Phi / …).
         if (piece.find("<|im_end|>") != std::string::npos
                 || piece.find("<|im_start|>") != std::string::npos
-                || piece.find("<|endoftext|>") != std::string::npos) {
+                || piece.find("<|endoftext|>") != std::string::npos
+                || piece.find("<end_of_turn>") != std::string::npos
+                || piece.find("<start_of_turn>") != std::string::npos
+                || piece.find("<|eot_id|>") != std::string::npos
+                || piece.find("<|end_of_text|>") != std::string::npos
+                || piece.find("<|end|>") != std::string::npos
+                || piece.find("<|assistant|>") != std::string::npos
+                || piece.find("<|user|>") != std::string::npos) {
             break;
         }
         output += piece;
@@ -411,7 +418,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
                 alt.erase(alt.begin(), alt.end() - (rt->n_ctx - 8));
             }
             llama_batch batch2 = llama_batch_init(std::max(rt->n_batch, 64), 0, 1);
-            llama_kv_cache_clear(rt->ctx);
+            llama_kv_self_clear(rt->ctx);
             if (decode_tokens(rt, batch2, alt, 0)) {
                 llama_sampler * sampler2 = llama_sampler_chain_init(llama_sampler_chain_default_params());
                 llama_sampler_chain_add(sampler2, llama_sampler_init_greedy());
@@ -494,7 +501,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeComplete(
         input.erase(input.begin(), input.end() - (rt->n_ctx - 8));
     }
     llama_batch batch = llama_batch_init(std::max(rt->n_batch, 64), 0, 1);
-    llama_kv_cache_clear(rt->ctx);
+    llama_kv_self_clear(rt->ctx);
     llama_set_n_threads(rt->ctx, rt->threads, rt->threads);
     if (!decode_tokens(rt, batch, input, 0)) {
         llama_batch_free(batch);
@@ -539,6 +546,109 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeComplete(
         return nullptr;
     }
     return utf8_to_jstring(env, output);
+}
+
+/**
+ * Format messages with the GGUF's chat template (Gemma / Llama-3 / ChatML / Phi / …).
+ * roles/texts are parallel String arrays. Returns null on failure (caller falls back).
+ */
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_telegram_messenger_MglaLlamaNative_nativeApplyChatTemplate(
+        JNIEnv * env, jclass, jlong handle, jobjectArray roles, jobjectArray texts, jboolean addAssistant) {
+    clear_last_error();
+    runtime * rt = (runtime *) (intptr_t) handle;
+    if (!rt || !rt->model || !roles || !texts) {
+        set_last_error("нет загруженной модели для шаблона");
+        return nullptr;
+    }
+    const jsize n = env->GetArrayLength(roles);
+    if (n <= 0 || n != env->GetArrayLength(texts)) {
+        set_last_error("пустые сообщения для шаблона");
+        return nullptr;
+    }
+
+    std::vector<std::string> role_storage;
+    std::vector<std::string> text_storage;
+    std::vector<llama_chat_message> msgs;
+    role_storage.reserve((size_t) n + 1);
+    text_storage.reserve((size_t) n + 1);
+    msgs.reserve((size_t) n + 1);
+
+    // Leading system message improves Instruct models across families.
+    role_storage.emplace_back("system");
+    text_storage.emplace_back("Ты полезный ассистент. Отвечай кратко на языке пользователя.");
+    msgs.push_back({role_storage.back().c_str(), text_storage.back().c_str()});
+
+    for (jsize i = 0; i < n; i++) {
+        auto roleObj = (jstring) env->GetObjectArrayElement(roles, i);
+        auto textObj = (jstring) env->GetObjectArrayElement(texts, i);
+        if (!roleObj || !textObj) {
+            if (roleObj) env->DeleteLocalRef(roleObj);
+            if (textObj) env->DeleteLocalRef(textObj);
+            continue;
+        }
+        const char * roleUtf = env->GetStringUTFChars(roleObj, nullptr);
+        const char * textUtf = env->GetStringUTFChars(textObj, nullptr);
+        std::string role = roleUtf ? roleUtf : "user";
+        std::string text = textUtf ? textUtf : "";
+        if (roleUtf) env->ReleaseStringUTFChars(roleObj, roleUtf);
+        if (textUtf) env->ReleaseStringUTFChars(textObj, textUtf);
+        env->DeleteLocalRef(roleObj);
+        env->DeleteLocalRef(textObj);
+        if (text.empty()) {
+            continue;
+        }
+        if (role != "assistant" && role != "system") {
+            role = "user";
+        }
+        role_storage.push_back(std::move(role));
+        text_storage.push_back(std::move(text));
+        msgs.push_back({role_storage.back().c_str(), text_storage.back().c_str()});
+    }
+    if (msgs.size() <= 1) {
+        set_last_error("нет пользовательских сообщений");
+        return nullptr;
+    }
+
+    const char * embedded = llama_model_chat_template(rt->model, nullptr);
+    // Prefer GGUF jinja (detected as ChatML / Gemma / Llama-3 / …), then short aliases.
+    const char * try_tmpls[] = {
+            embedded,
+            "chatml",
+            "llama3",
+            "gemma",
+            "phi3",
+            "zephyr",
+    };
+
+    std::string formatted;
+    bool ok = false;
+    for (const char * cur : try_tmpls) {
+        if (cur == nullptr || cur[0] == '\0') {
+            continue;
+        }
+        int32_t need = llama_chat_apply_template(cur, msgs.data(), msgs.size(), addAssistant != 0, nullptr, 0);
+        if (need < 0) {
+            continue;
+        }
+        std::vector<char> buf((size_t) need + 1);
+        int32_t wrote = llama_chat_apply_template(cur, msgs.data(), msgs.size(), addAssistant != 0, buf.data(), (int32_t) buf.size());
+        if (wrote < 0) {
+            continue;
+        }
+        formatted.assign(buf.data(), (size_t) std::min(wrote, (int32_t) buf.size()));
+        if (formatted.empty()) {
+            continue;
+        }
+        ok = true;
+        LOGI("chat template ok chars=%d", (int) formatted.size());
+        break;
+    }
+    if (!ok) {
+        set_last_error("шаблон чата модели не распознан");
+        return nullptr;
+    }
+    return utf8_to_jstring(env, formatted);
 }
 
 extern "C" JNIEXPORT void JNICALL

@@ -294,18 +294,25 @@ public final class MglaSubscription {
     }
 
     /**
-     * Ultra-обход is install-wide: turn it off and reconnect to the standard
-     * relay when no account still has Ultra.
+     * Ultra-обход is install-wide. Keep the user's {@code ws_ultra_bypass} pref;
+     * only switch the relay host when effective Ultra path changes (entitlement
+     * flicker must not wipe the toggle — otherwise Ultra never auto-returns).
      */
+    private static volatile Boolean lastUltraPathEffective;
+
     public static void enforceUltraBypassEligibility() {
         try {
-            if (hasUltraOnAnyAccount()) {
+            boolean effective = org.telegram.utils.wsbypass.MglaWsConfig.isUltraBypassPrefEnabled()
+                    && hasUltraOnAnyAccount();
+            Boolean prev = lastUltraPathEffective;
+            if (prev != null && prev == effective) {
                 return;
             }
-            if (!org.telegram.utils.wsbypass.MglaWsConfig.isUltraBypassPrefEnabled()) {
+            lastUltraPathEffective = effective;
+            if (prev == null && effective) {
+                // Cold start already on Ultra path — no reconnect needed.
                 return;
             }
-            org.telegram.utils.wsbypass.MglaWsConfig.setUltraBypassEnabled(false);
             org.telegram.utils.wsbypass.MglaWsBypass.getInstance().onRelayHostChanged();
         } catch (Throwable e) {
             FileLog.e(e);

@@ -565,7 +565,7 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
                     break;
                 case ROW_NOTE:
                     TextInfoPrivacyCell note = new TextInfoPrivacyCell(context);
-                    note.setText("Поиск показывает только модели, совместимые с локальным рантаймом (чат и Chat DNA): без Gemma 3 / Qwen3, до ~2,4 ГБ. Рекомендованные из каталога всегда подходят.");
+                    note.setText("Поиск: Instruct GGUF до ~2,8 ГБ (Gemma 2/3, Qwen2.5/3, Llama 3.x, Nemotron, Phi…). Каталог ниже — проверенные модели.");
                     view = note;
                     break;
                 case ROW_SEARCH:

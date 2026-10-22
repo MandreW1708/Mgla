@@ -61,7 +61,7 @@ public final class MglaRemoteConfig {
      * Public for update checker and other hub polls that share the same routing.
      * <p>
      * When auto-bypass is on (and not paused by VPN), use {@code /mgla-ai/v1/*}
-     * on the current relay host — mglabot for normal bypass, mglahub for Ultra
+     * on the current relay host — Germany1/2 for normal bypass, Finland for Ultra
      * ({@link MglaWsConfig#getRelayHost()}). Same stack as AI. Bypass off / VPN
      * pause → direct native hub paths ({@code /mgla-config}, {@code /mgla-updates}, …).
      */

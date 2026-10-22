@@ -53,8 +53,8 @@ public class MglaLocalModelsManager {
     }
 
     /**
-     * Only architectures supported by the bundled talk-llama snapshot
-     * (llama / qwen2 / gemma2 / … — not qwen3 or gemma3).
+     * Phone-friendly Instruct GGUFs for the bundled llama.cpp (b5092+):
+     * Gemma 2/3, Qwen2.5/3, Llama 3.x, Nemotron, Phi, …
      */
     public static final ModelInfo[] CATALOG = {
         new ModelInfo(
@@ -76,11 +76,59 @@ public class MglaLocalModelsManager {
             "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
             670_000_000L),
         new ModelInfo(
+            "llama32-1b",
+            "Llama 3.2 1B Instruct",
+            "Meta Llama 3.2 — быстрый и аккуратный чат",
+            "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+            800_000_000L),
+        new ModelInfo(
             "smollm2-1.7b",
             "SmolLM2 1.7B Instruct",
-            "Максимальное качество среди мини-моделей, вес ~1 ГБ",
+            "Качественная мини-модель, вес ~1 ГБ",
             "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF/resolve/main/smollm2-1.7b-instruct-q4_k_m.gguf",
             1_100_000_000L),
+        new ModelInfo(
+            "qwen25-1.5b",
+            "Qwen2.5 1.5B Instruct",
+            "Лучший баланс качества и скорости среди Qwen2.5",
+            "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+            1_100_000_000L),
+        new ModelInfo(
+            "gemma2-2b",
+            "Gemma 2 2B Instruct",
+            "Google Gemma 2 — сильное понимание и рассуждение",
+            "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+            1_700_000_000L),
+        new ModelInfo(
+            "gemma3-1b",
+            "Gemma 3 1B Instruct",
+            "Google Gemma 3 — новая архитектура, компактный Instruct",
+            "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf",
+            800_000_000L),
+        new ModelInfo(
+            "qwen3-0.6b",
+            "Qwen3 0.6B",
+            "Qwen3 — новая линейка, хороший русский на телефоне",
+            "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",
+            500_000_000L),
+        new ModelInfo(
+            "qwen3-1.7b",
+            "Qwen3 1.7B",
+            "Qwen3 1.7B — сильнее 0.6B при умеренном весе",
+            "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
+            1_200_000_000L),
+        new ModelInfo(
+            "phi35-mini",
+            "Phi-3.5 Mini Instruct",
+            "Microsoft Phi-3.5 — компактная сильная instruct-модель",
+            "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
+            2_200_000_000L),
+        new ModelInfo(
+            "nemotron-mini-4b",
+            "Nemotron Mini 4B Instruct",
+            "NVIDIA Nemotron Mini — качественные ответы на телефоне",
+            "https://huggingface.co/bartowski/Nemotron-Mini-4B-Instruct-GGUF/resolve/main/Nemotron-Mini-4B-Instruct-Q4_K_M.gguf",
+            2_700_000_000L),
     };
 
     public interface DownloadCallback {
@@ -178,15 +226,18 @@ public class MglaLocalModelsManager {
      * Hard cap for on-device GGUF (chat + Chat DNA). Larger files are hidden
      * from HuggingFace search and refused at select/load time.
      */
-    public static final long MAX_MODEL_BYTES = 2_400_000_000L;
+    /** Allow popular ~2–4B Q4_K_M GGUFs (Gemma 2 / Phi / Nemotron Mini). */
+    public static final long MAX_MODEL_BYTES = 2_800_000_000L;
 
     private static final Pattern WEIGHT_PATTERN =
             Pattern.compile("(?i)(\\d+(?:\\.\\d+)?)\\s?([mb])(?![a-z0-9])");
 
-    /** Families the bundled llama.cpp cannot run (name / repo heuristics). */
+    /**
+     * Families still unsupported by the phone runtime (too new / heavy / vision-only).
+     * Gemma 3 and Qwen3 are supported since the mgla-llama.cpp b5092 vendor bump.
+     */
     private static final String[] UNSUPPORTED_NAME_MARKERS = {
-            "gemma-3", "gemma3", "gemma_3", "gemma3n",
-            "qwen3", "qwen-3", "qwen_3",
+            "gemma3n", "gemma-3n",
             "deepseek-r1", "deepseek_r1",
             "llama-4", "llama4",
     };
@@ -233,7 +284,7 @@ public class MglaLocalModelsManager {
 
     /**
      * Whether a HuggingFace repo id looks runnable on-device (before download).
-     * Used by search so Gemma 3 / huge models never appear in the list.
+     * Allows Gemma 2/3, Qwen2/3, Llama 3.x, Nemotron, Phi; blocks Llama 4 / Gemma3n / huge weights.
      */
     public static boolean isSearchRepoCompatible(String repoId) {
         if (TextUtils.isEmpty(repoId)) {
@@ -245,9 +296,15 @@ public class MglaLocalModelsManager {
                 return false;
             }
         }
-        // Explicit param counts that will not fit / are too slow on phones.
+        // Prefer instruct / chat / it variants for usable replies.
+        boolean instructish = id.contains("instruct") || id.contains("-it") || id.contains("_it")
+                || id.contains("chat") || id.contains("nemotron") || id.contains("qwen3");
+        if (!instructish && (id.contains("base") || id.contains("pretrain"))) {
+            return false;
+        }
+        // Param heuristic: up to ~4B may fit as Q4_K_M under {@link #MAX_MODEL_BYTES}.
         Double billions = parseParamBillions(id);
-        if (billions != null && billions >= 3.0) {
+        if (billions != null && billions > 4.5) {
             return false;
         }
         return true;
@@ -286,13 +343,12 @@ public class MglaLocalModelsManager {
         }
     }
 
-    /**
-     * Architectures known to the bundled talk-llama / ggml snapshot.
-     * Gemma 3 / Qwen 3 are NOT here — that matches the user's failed gemma-3-4b.
-     */
+    /** Architectures known to the vendored llama.cpp (b5092+). */
     private static final Set<String> SUPPORTED_ARCH = new HashSet<>(Arrays.asList(
             "llama", "qwen", "qwen2", "qwen2moe", "qwen2vl",
-            "gemma", "gemma2", "phi2", "phi3", "phimoe",
+            "qwen3", "qwen3moe",
+            "gemma", "gemma2", "gemma3",
+            "phi2", "phi3", "phimoe",
             "mistral", "mixtral", "starcoder", "starcoder2",
             "falcon", "gpt2", "gptj", "gptneox", "mpt",
             "baichuan", "internlm2", "minicpm", "minicpm3",
@@ -302,7 +358,8 @@ public class MglaLocalModelsManager {
             "codeshell", "chatglm", "bitnet", "arctic", "exaone",
             "rwkv6", "rwkv6qwen2", "chameleon", "wavtokenizer-dec",
             "bert", "nomic-bert", "jina-bert-v2", "bloom", "jais",
-            "dbrx", "mamba", "xverse", "grok", "deci"
+            "dbrx", "mamba", "xverse", "grok", "deci",
+            "llama2", "llama3", "gemma1"
     ));
 
     /**
@@ -377,7 +434,7 @@ public class MglaLocalModelsManager {
         if (modelFile.length() > MAX_MODEL_BYTES) {
             return "Модель слишком большая для телефона (~"
                     + formatSize(modelFile.length())
-                    + "). Возьмите модель ≤1–2 ГБ из каталога (SmolLM2 / Qwen2.5).";
+                    + "). Возьмите модель ≤2.8 ГБ из каталога (Gemma 2 / Qwen2.5 / Llama 3.2 / Nemotron).";
         }
         String arch = readGgufArchitecture(modelFile);
         if (TextUtils.isEmpty(arch)) {
@@ -387,16 +444,8 @@ public class MglaLocalModelsManager {
         if (SUPPORTED_ARCH.contains(lower)) {
             return null;
         }
-        if (lower.startsWith("gemma3") || "gemma3".equals(lower)) {
-            return "Архитектура Gemma 3 (" + arch + ") не поддерживается текущим локальным рантаймом. "
-                    + "Скачайте SmolLM2, Qwen2.5 или TinyLlama из каталога.";
-        }
-        if (lower.startsWith("qwen3") || "qwen3".equals(lower)) {
-            return "Архитектура Qwen3 не поддерживается текущим локальным рантаймом. "
-                    + "Скачайте Qwen2.5 или SmolLM2 из каталога.";
-        }
         return "Архитектура «" + arch + "» не поддерживается. "
-                + "Используйте модель из каталога (llama / qwen2 / gemma2 / …).";
+                + "Используйте модель из каталога (Gemma 2/3, Qwen2.5/3, Llama 3.2, Nemotron, Phi).";
     }
 
     private static String readGgufString(ByteBuffer buf) {

@@ -161,11 +161,11 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
             applyBottomPanelRadios.run();
         });
 
-        // Order: header → bottom panel → clean (if any) → glass.
+        // Order: header → clean (if any) → bottom panel → glass.
         rootLayout.addView(headerStyleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
-        rootLayout.addView(bottomPanelBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
         rootLayout.addView(cleanSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
         cleanSettingsBlock.setVisibility(headerStyle == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+        rootLayout.addView(bottomPanelBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout glassBlock = createBlock(context, "Внешний вид");
 

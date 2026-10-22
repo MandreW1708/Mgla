@@ -19,7 +19,7 @@ import javax.net.ssl.HttpsURLConnection;
  * HTTPS к ИИ-прокси на хосте текущего обхода:
  * <ul>
  *   <li>обычный обход → {@code mglabot.mooo.com/mgla-ai/…}</li>
- *   <li>Ultra-обход → {@code mglahub.mooo.com/mgla-ai/…}</li>
+ *   <li>Ultra-обход → {@code fin.mgla.mooo.com/mgla-ai/…}</li>
  *   <li>обход выключен / на паузе (VPN) → не использовать; вызывающий бьёт в Gemini/OpenRouter напрямую</li>
  * </ul>
  * Features/stats/updates при обходе — {@code /mgla-ai/v1/*} на том же хосте
@@ -46,7 +46,7 @@ public final class MglaHubHttp {
     }
 
     /**
-     * Gemini / OpenRouter через обход: обычный → mglabot, Ultra → mglahub.
+     * Gemini / OpenRouter через обход: обычный → выбранный DE-сервер, Ultra → Finland.
      * {@code false} если обход выключен или на паузе из‑за VPN — тогда напрямую к API.
      */
     public static boolean shouldProxyAi() {
@@ -69,7 +69,7 @@ public final class MglaHubHttp {
     }
 
     private static Response request(String method, String path, byte[] jsonBody, int connectTimeoutMs, int readTimeoutMs) throws Exception {
-        // Ultra → hub host; normal bypass → mglabot. Same /mgla-ai paths on both.
+        // Ultra → Finland; normal → Germany1/2. Same /mgla-ai paths on all.
         String host = MglaWsConfig.getRelayHost();
         String normalized = path.startsWith("/") ? path : ("/" + path);
         URL url = new URL("https://" + host + normalized);

@@ -65,6 +65,22 @@ public final class MglaLlamaNative {
         return nativeGenerate(handle, prompt, maxTokens, temperature, sink);
     }
 
+    /**
+     * Format chat turns with the loaded GGUF's template (Gemma / Llama-3 / ChatML / Phi / …).
+     * @return formatted prompt, or null if the template could not be applied
+     */
+    public static String applyChatTemplate(long handle, String[] roles, String[] texts, boolean addAssistant) {
+        if (!available || handle == 0 || roles == null || texts == null) {
+            return null;
+        }
+        try {
+            return nativeApplyChatTemplate(handle, roles, texts, addAssistant);
+        } catch (Throwable e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
     public static String complete(long handle, String prompt, int maxTokens, float temperature) {
         return available ? nativeComplete(handle, prompt, maxTokens, temperature) : null;
     }
@@ -90,6 +106,8 @@ public final class MglaLlamaNative {
     private static native String nativeLastError();
 
     private static native int nativeGenerate(long handle, String prompt, int maxTokens, float temperature, TokenSink sink);
+
+    private static native String nativeApplyChatTemplate(long handle, String[] roles, String[] texts, boolean addAssistant);
 
     private static native String nativeComplete(long handle, String prompt, int maxTokens, float temperature);
 

@@ -47981,8 +47981,14 @@ public class ChatActivity extends BaseFragment implements
         float attachLeft = 0;
         float sendRight = 0;
         if (chatActivityEnterView != null) {
-            attachLeft = dp(7) + chatActivityEnterView.getStaticAttachBubbleLeftOffset();
-            sendRight = dp(7) + chatActivityEnterView.getStaticSendBubbleRightOffset();
+            if (chatActivityEnterView.isTelegramBottomPanelLayout()) {
+                // Full-bleed glass over the enter view (already margin 7) so send/mic aren't cropped.
+                attachLeft = 0;
+                sendRight = 0;
+            } else {
+                attachLeft = dp(7) + chatActivityEnterView.getStaticAttachBubbleLeftOffset();
+                sendRight = dp(7) + chatActivityEnterView.getStaticSendBubbleRightOffset();
+            }
         }
         chatInputViewsContainer.setInputBubbleOffsets(
             Math.max(inputBubbleOffsetLeftFromChannel, attachLeft),

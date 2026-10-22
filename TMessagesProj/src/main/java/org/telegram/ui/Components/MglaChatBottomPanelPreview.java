@@ -89,7 +89,7 @@ public class MglaChatBottomPanelPreview extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(96) + getPaddingTop() + getPaddingBottom());
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(100) + getPaddingTop() + getPaddingBottom());
     }
 
     @Override
@@ -97,7 +97,7 @@ public class MglaChatBottomPanelPreview extends View {
         final int pl = getPaddingLeft();
         final int pt = getPaddingTop();
         final int w = getWidth() - pl - getPaddingRight();
-        final int h = dp(96);
+        final int h = dp(100);
         if (w <= 0 || h <= 0) {
             return;
         }
@@ -132,7 +132,7 @@ public class MglaChatBottomPanelPreview extends View {
         accentPaint.setColor(accent);
 
         final float pad = dp(10);
-        final float pillH = dp(38);
+        final float pillH = style == MglaGlassConfig.BOTTOM_PANEL_STYLE_TELEGRAM ? dp(44) : dp(38);
         final float rowTop = h - pad - pillH;
 
         if (animProgress < 1f && fromStyle != style) {
@@ -163,8 +163,11 @@ public class MglaChatBottomPanelPreview extends View {
             drawEmoji(canvas, pad + dp(18), rowTop + pillH / 2f);
             hintPaint.setTextAlign(Paint.Align.LEFT);
             canvas.drawText("Сообщение", pad + dp(38), rowTop + pillH / 2f + dp(4.5f), hintPaint);
-            drawAttach(canvas, w - pad - dp(52), rowTop + pillH / 2f);
-            drawSend(canvas, w - pad - dp(20), rowTop + pillH / 2f, true);
+            // Stock: 38dp disc with ~3dp inset inside the 44dp pill.
+            final float sendInset = dp(3);
+            final float sendR = dp(19);
+            drawAttach(canvas, w - pad - sendInset - sendR * 2f - dp(18), rowTop + pillH / 2f);
+            drawSend(canvas, w - pad - sendInset - sendR, rowTop + pillH / 2f, true);
         } else {
             // Mgla Standard: attach circle | field pill | send circle
             rect.set(pad, rowTop, pad + circle, rowTop + pillH);
@@ -216,8 +219,6 @@ public class MglaChatBottomPanelPreview extends View {
         if (filledAccent) {
             canvas.drawCircle(cx, cy, dp(14), accentPaint);
         }
-        final int prev = iconPaint.getColor();
-        iconPaint.setColor(0xFFFFFFFF);
         path.reset();
         path.moveTo(cx - dp(5), cy + dp(4));
         path.lineTo(cx - dp(5), cy - dp(2));
@@ -225,6 +226,5 @@ public class MglaChatBottomPanelPreview extends View {
         path.close();
         fillPaint.setColor(0xFFFFFFFF);
         canvas.drawPath(path, fillPaint);
-        iconPaint.setColor(prev);
     }
 }

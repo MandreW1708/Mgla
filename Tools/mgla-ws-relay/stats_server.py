@@ -46,6 +46,15 @@ REPORT_PASSWORD = os.environ.get("MGLA_STATS_REPORT_PASSWORD", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 HUB_SYNC_TOKEN = os.environ.get("MGLA_HUB_SYNC_TOKEN", "").strip()
 BOT_AI_URL = os.environ.get("MGLA_BOT_AI_URL", "").strip().rstrip("/")
+# Extra bypass bots (comma-separated), e.g. Finland: https://fin.mgla.mooo.com
+_BOT_AI_EXTRA = os.environ.get("MGLA_BOT_AI_URLS", "").strip()
+BOT_AI_URLS = []
+if BOT_AI_URL:
+    BOT_AI_URLS.append(BOT_AI_URL)
+for _u in _BOT_AI_EXTRA.split(","):
+    _u = _u.strip().rstrip("/")
+    if _u and _u not in BOT_AI_URLS:
+        BOT_AI_URLS.append(_u)
 # Optional separate token for server→hub entitlements (defaults to sync / ws token).
 ENTITLEMENTS_TOKEN = (
     os.environ.get("MGLA_HUB_ENTITLEMENTS_TOKEN", "").strip()
@@ -522,11 +531,11 @@ _last_push_status = {"ok": None, "msg": "", "at": 0.0}
 
 
 def push_models_to_bot(models=None, plans=None):
-    """Push OpenRouter model lists (all plans) to mglabot. Returns (ok, message).
+    """Push OpenRouter model lists (all plans) to all bypass bots. Returns (ok, message).
 
-    Does not touch hub WS/relay — HTTPS only to MGLA_BOT_AI_URL.
+    Does not touch hub WS/relay — HTTPS only to MGLA_BOT_AI_URL / MGLA_BOT_AI_URLS.
     """
-    if not BOT_AI_URL:
+    if not BOT_AI_URLS:
         return False, "MGLA_BOT_AI_URL не задан"
     if not HUB_SYNC_TOKEN:
         return False, "MGLA_HUB_SYNC_TOKEN не задан"
@@ -544,37 +553,22 @@ def push_models_to_bot(models=None, plans=None):
     }
     hub_admin.validate_plans_disjoint(plans)
     free_models = list(plans.get(hub_admin.PLAN_FREE) or [])
-    url = BOT_AI_URL.rstrip("/") + "/mgla-ai/v1/admin/models"
-    body = json.dumps(
-        {
-            # Legacy field: free plan only (old bots).
-            "models": free_models,
-            # Own lists only; Premium aliases Free on the bot.
-            "plans": plans,
-            "aliases": dict(hub_admin.PLAN_MODELS_ALIAS),
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "X-Mgla-Sync-Token": HUB_SYNC_TOKEN,
-        },
-    )
-    try:
-        # Short timeout: never stall the hub admin / entitlements threads.
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            if resp.status != 200:
-                return False, f"mglabot HTTP {resp.status}: {raw[:200]}"
-            return True, "модели запушены на mglabot"
-    except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", errors="replace")[:300]
-        return False, f"mglabot HTTP {e.code}: {err}"
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return False, f"mglabot недоступен: {e}"
+    parts = []
+    any_ok = False
+    for base in BOT_AI_URLS:
+        ok, msg = _push_models_http(
+            base.rstrip("/") + "/mgla-ai/v1/admin/models",
+            plans,
+            free_models,
+            HUB_SYNC_TOKEN,
+        )
+        host = base.replace("https://", "").replace("http://", "").split("/")[0]
+        parts.append(f"{host}={'ok' if ok else msg}")
+        any_ok = any_ok or ok
+    summary = "; ".join(parts)
+    if any_ok:
+        return True, f"модели запушены: {summary}"
+    return False, summary
 
 
 def _push_models_http(url: str, plans: dict, free_models: list, sync_token: str):

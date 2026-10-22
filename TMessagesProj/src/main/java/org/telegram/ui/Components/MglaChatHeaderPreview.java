@@ -121,9 +121,11 @@ public class MglaChatHeaderPreview extends View {
         }
     }
 
+    private static final int PREVIEW_HEIGHT_DP = 148;
+
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(132) + getPaddingTop() + getPaddingBottom());
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(PREVIEW_HEIGHT_DP) + getPaddingTop() + getPaddingBottom());
     }
 
     @Override
@@ -131,7 +133,7 @@ public class MglaChatHeaderPreview extends View {
         final int pl = getPaddingLeft();
         final int pt = getPaddingTop();
         final int w = getWidth() - pl - getPaddingRight();
-        final int h = dp(132);
+        final int h = dp(PREVIEW_HEIGHT_DP);
         if (w <= 0 || h <= 0) {
             return;
         }
@@ -220,28 +222,46 @@ public class MglaChatHeaderPreview extends View {
         }
 
         rect.set(menuLeft, rowTop, menuRight, rowTop + pillH);
-        drawGlass(canvas, rect, pillH / 2f);
         if (telegram) {
+            drawGlass(canvas, rect, pillH / 2f);
             drawCallAndMore(canvas, rect);
         } else {
-            drawMoreDots(canvas, rect.centerX(), rect.centerY());
+            // Standard / Clean: peer avatar in the right slot (not ⋮).
+            drawRightAvatar(canvas, rect);
         }
 
         final float secondaryTop = rowTop + pillH + dp(10);
-        final float secondaryH = dp(22);
+        final float pinnedH = dp(36);
+        final float translationH = dp(22);
 
-        rect.set(pad, secondaryTop, w - pad, secondaryTop + secondaryH);
+        rect.set(pad, secondaryTop, w - pad, secondaryTop + pinnedH);
         if (showPinnedGlass) {
-            drawGlass(canvas, rect, dp(11));
+            drawGlass(canvas, rect, dp(12));
         }
         captionPaint.setTextAlign(Paint.Align.LEFT);
         canvas.drawText("Закреплённое сообщение", rect.left + dp(10), rect.centerY() + dp(3.5f), captionPaint);
 
-        rect.set(pad, secondaryTop + secondaryH + dp(5), w - pad, secondaryTop + secondaryH * 2 + dp(5));
+        rect.set(pad, secondaryTop + pinnedH + dp(5), w - pad, secondaryTop + pinnedH + dp(5) + translationH);
         if (showTranslationGlass) {
             drawGlass(canvas, rect, dp(11));
         }
         canvas.drawText("Панель перевода", rect.left + dp(10), rect.centerY() + dp(3.5f), captionPaint);
+    }
+
+    private void drawRightAvatar(Canvas canvas, RectF slot) {
+        final float size = Math.min(slot.width(), slot.height()) - dp(2);
+        final float cx = slot.centerX();
+        final float cy = slot.centerY();
+        canvas.drawCircle(cx, cy, size / 2f, avatarPaint);
+
+        final int saved = titlePaint.getColor();
+        final float savedSize = titlePaint.getTextSize();
+        titlePaint.setColor(0xFFFFFFFF);
+        titlePaint.setTextAlign(Paint.Align.CENTER);
+        titlePaint.setTextSize(dpf2(12));
+        canvas.drawText("M", cx, cy + dp(4), titlePaint);
+        titlePaint.setTextSize(savedSize);
+        titlePaint.setColor(saved);
     }
 
     private void drawGlass(Canvas canvas, RectF r, float radius) {

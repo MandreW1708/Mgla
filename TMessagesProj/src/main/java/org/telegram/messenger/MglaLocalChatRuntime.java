@@ -312,7 +312,7 @@ public final class MglaLocalChatRuntime {
             }
             forPrompt.add(m);
         }
-        String prompt = buildPrompt(forPrompt);
+        String prompt = buildPrompt(h, model, forPrompt);
         FileLog.d("MglaLocal prompt chars=" + prompt.length() + " msgs=" + forPrompt.size());
 
         float temp = Math.max(0f, Math.min(0.8f, temperature));
@@ -382,18 +382,96 @@ public final class MglaLocalChatRuntime {
     }
 
     /**
-     * ChatML — нужен Qwen2.5 / SmolLM2 Instruct. Старый «Пользователь:/Ассистент:»
-     * часто давал мгновенный EOS и пустой ответ.
+     * Prefer the GGUF-embedded chat template (Gemma / Llama-3 / ChatML / Phi / Nemotron).
+     * Fall back to an architecture-aware Java template if native apply fails.
      */
-    private static String buildPrompt(ArrayList<MglaAiChatStorage.Message> messages) {
-        StringBuilder p = new StringBuilder();
-        p.append("<|im_start|>system\n")
-                .append("Ты полезный ассистент. Отвечай кратко на языке пользователя.")
-                .append("<|im_end|>\n");
+    private static String buildPrompt(long handle, File modelFile, ArrayList<MglaAiChatStorage.Message> messages) {
         int start = Math.max(0, messages.size() - 12);
+        ArrayList<String> roles = new ArrayList<>();
+        ArrayList<String> texts = new ArrayList<>();
         for (int i = start; i < messages.size(); i++) {
             MglaAiChatStorage.Message m = messages.get(i);
-            if (TextUtils.isEmpty(m.text)) {
+            if (m == null || TextUtils.isEmpty(m.text)) {
+                continue;
+            }
+            roles.add("assistant".equals(m.role) ? "assistant" : "user");
+            texts.add(m.text.trim());
+        }
+        if (!roles.isEmpty()) {
+            String nativePrompt = MglaLlamaNative.applyChatTemplate(
+                    handle,
+                    roles.toArray(new String[0]),
+                    texts.toArray(new String[0]),
+                    true
+            );
+            if (!TextUtils.isEmpty(nativePrompt)) {
+                return nativePrompt;
+            }
+        }
+        String arch = MglaLocalModelsManager.readGgufArchitecture(modelFile);
+        return buildPromptFallback(arch, messages, start);
+    }
+
+    /** Manual templates when llama_chat_apply_template cannot detect the GGUF jinja. */
+    private static String buildPromptFallback(String arch, ArrayList<MglaAiChatStorage.Message> messages, int start) {
+        String lower = arch != null ? arch.toLowerCase(java.util.Locale.US) : "";
+        final String system = "Ты полезный ассистент. Отвечай кратко на языке пользователя.";
+        StringBuilder p = new StringBuilder();
+
+        if (lower.contains("gemma")) {
+            // Gemma / Gemma 2 / Gemma 3 Instruct
+            p.append("<start_of_turn>user\n").append(system).append("<end_of_turn>\n");
+            for (int i = start; i < messages.size(); i++) {
+                MglaAiChatStorage.Message m = messages.get(i);
+                if (m == null || TextUtils.isEmpty(m.text)) {
+                    continue;
+                }
+                boolean assistant = "assistant".equals(m.role);
+                p.append("<start_of_turn>").append(assistant ? "model" : "user").append('\n')
+                        .append(m.text.trim()).append("<end_of_turn>\n");
+            }
+            p.append("<start_of_turn>model\n");
+            return p.toString();
+        }
+
+        if (lower.contains("llama") || lower.contains("nemotron") || lower.contains("granite")) {
+            // Llama 3 / 3.1 / 3.2 / Nemotron Instruct
+            p.append("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n")
+                    .append(system).append("<|eot_id|>");
+            for (int i = start; i < messages.size(); i++) {
+                MglaAiChatStorage.Message m = messages.get(i);
+                if (m == null || TextUtils.isEmpty(m.text)) {
+                    continue;
+                }
+                boolean assistant = "assistant".equals(m.role);
+                p.append("<|start_header_id|>").append(assistant ? "assistant" : "user")
+                        .append("<|end_header_id|>\n\n")
+                        .append(m.text.trim()).append("<|eot_id|>");
+            }
+            p.append("<|start_header_id|>assistant<|end_header_id|>\n\n");
+            return p.toString();
+        }
+
+        if (lower.contains("phi")) {
+            p.append("<|system|>\n").append(system).append("<|end|>\n");
+            for (int i = start; i < messages.size(); i++) {
+                MglaAiChatStorage.Message m = messages.get(i);
+                if (m == null || TextUtils.isEmpty(m.text)) {
+                    continue;
+                }
+                boolean assistant = "assistant".equals(m.role);
+                p.append(assistant ? "<|assistant|>\n" : "<|user|>\n")
+                        .append(m.text.trim()).append("<|end|>\n");
+            }
+            p.append("<|assistant|>\n");
+            return p.toString();
+        }
+
+        // Default ChatML — Qwen2 / Qwen2.5 / SmolLM2 / many OpenChat-style GGUFs.
+        p.append("<|im_start|>system\n").append(system).append("<|im_end|>\n");
+        for (int i = start; i < messages.size(); i++) {
+            MglaAiChatStorage.Message m = messages.get(i);
+            if (m == null || TextUtils.isEmpty(m.text)) {
                 continue;
             }
             boolean assistant = "assistant".equals(m.role);

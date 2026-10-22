@@ -52,6 +52,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
 
     private TextCheckCell wsMasterCell;
     private TextCheckCell wsUltraCell;
+    private TextSettingsCell wsServerCell;
     private TextView wsStatusValue;
     private TextSettingsCell wsTelegramCell;
     private TextSettingsCell wsProxyCell;
@@ -205,6 +206,22 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         });
         wsBlock.addView(wsUltraCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         wsBlock.addView(MglaUi.createDivider(context));
+
+        wsServerCell = new TextSettingsCell(context);
+        wsServerCell.setBackground(null);
+        wsServerCell.setTextAndValue("Сервер обхода", MglaWsConfig.getBypassRegionLabel(), true);
+        wsServerCell.setOnClickListener(v -> {
+            if (MglaWsConfig.isUltraBypassEnabled()) {
+                BulletinFactory.of(this).createSimpleBulletin(
+                    R.raw.error,
+                    "При Ultra-обходе трафик идёт через Финляндию (fin.mgla)"
+                ).show();
+                return;
+            }
+            showBypassServerPicker();
+        });
+        wsBlock.addView(wsServerCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        wsBlock.addView(MglaUi.createDivider(context));
         wsBlock.addView(createStatusRow(context, status -> wsStatusValue = status),
             LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         wsBlock.addView(MglaUi.createDivider(context));
@@ -225,7 +242,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
         TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Основной маршрут — WebSocket-релей. Ultra-обход направляет трафик на выделенный сервер только для подписчиков Ultra. Пинг обновляется раз в 30 мин (нажмите чтобы обновить). Если релей не подключается, обход сам переходит на резервный WEB proxy. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
+        wsInfo.setText("Основной маршрут — WebSocket-релей. Серверы для всех: Германия1 (mglabot) и Германия2 (mglahub). Ultra-обход (подписка Ultra) направляет трафик через Финляндию — при этом выбор сервера недоступен. Пинг обновляется раз в 30 мин (нажмите чтобы обновить). Если релей не подключается, обход сам переходит на резервный WEB proxy. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
         rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
@@ -394,6 +411,37 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         showDialog(builder.create());
     }
 
+    private void showBypassServerPicker() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final String[] regions = {MglaWsConfig.REGION_DE, MglaWsConfig.REGION_HUB};
+        final String current = MglaWsConfig.getBypassRegion();
+        final CharSequence[] labels = {
+            "Германия1 (mglabot)" + (MglaWsConfig.REGION_DE.equals(current) ? "  ✓" : ""),
+            "Германия2 (mglahub)" + (MglaWsConfig.REGION_HUB.equals(current) ? "  ✓" : "")
+        };
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle("Сервер обхода");
+        builder.setItems(labels, (dialog, which) -> {
+            if (which < 0 || which >= regions.length) {
+                return;
+            }
+            String next = regions[which];
+            if (next.equals(MglaWsConfig.getBypassRegion())) {
+                return;
+            }
+            MglaWsConfig.setBypassRegion(next);
+            MglaWsBypass mgr = MglaWsBypass.getInstance();
+            if (mgr.isEnabled()) {
+                mgr.onRelayHostChanged();
+            }
+            refreshDynamic();
+        });
+        builder.setNegativeButton("Отмена", null);
+        showDialog(builder.create());
+    }
+
     // ---------------------------------------------------------------- refresh
 
     private TextSettingsCell createStatCell(Context context, LinearLayout block, String title) {
@@ -424,6 +472,13 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             boolean ultraOn = MglaWsConfig.isUltraBypassEnabled();
             wsUltraCell.setTextAndCheck(ultraBypassLabel(wsUltraCell.getContext()), ultraOn, false);
         }
+        if (wsServerCell != null) {
+            boolean ultraOn = MglaWsConfig.isUltraBypassEnabled();
+            String value = ultraOn ? "Финляндия · Ultra" : MglaWsConfig.getBypassRegionLabel();
+            wsServerCell.setTextAndValue("Сервер обхода", value, true);
+            wsServerCell.setEnabled(!ultraOn);
+            wsServerCell.setAlpha(ultraOn ? 0.4f : 1f);
+        }
         if (wsStatusValue != null) {
             wsStatusValue.setText(ws.getStatusText());
         }
@@ -439,8 +494,10 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             } else if (MglaWsConfig.isUltraBypassEnabled()) {
                 routeText = "Ultra · " + MglaWsConfig.getRelayHost();
             } else {
+                String region = MglaWsConfig.getBypassRegionLabel();
                 routeText = ws.isServerRunning() && ws.getPort() > 0
-                    ? "WS · " + WsBypassCore.LOCAL_PROXY_HOST + ":" + ws.getPort() : "WS";
+                    ? "WS · " + region + " · " + WsBypassCore.LOCAL_PROXY_HOST + ":" + ws.getPort()
+                    : "WS · " + region;
             }
             wsProxyCell.setValue(routeText, false);
         }

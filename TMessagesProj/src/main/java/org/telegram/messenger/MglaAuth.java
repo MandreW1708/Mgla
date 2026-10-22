@@ -183,7 +183,7 @@ public final class MglaAuth {
                 return false;
             }
             // Same as features/AI: normal → mglabot /mgla-ai/v1/auth/*;
-            // Ultra → mglahub /mgla-ai/v1/auth/* (getRelayHost() is already the hub).
+            // Ultra → fin.mgla /mgla-ai/v1/auth/* (getRelayHost() is already Finland).
             if (TextUtils.isEmpty(MglaWsConfig.getRelayHost())) {
                 return false;
             }
