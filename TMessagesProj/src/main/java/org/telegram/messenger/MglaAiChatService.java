@@ -36,9 +36,10 @@ public final class MglaAiChatService {
     public static final String STATUS_DOWN = "down";
     private static final String URL_CHAT = "https://openrouter.ai/api/v1/chat/completions";
     private static final String PREFS = "mgla_config";
-    private static final String KEY_MODELS_CACHE = "ai_openrouter_models_cache_v5";
-    private static final String KEY_MODELS_CACHE_AT = "ai_openrouter_models_cache_at_v5";
-    private static final String KEY_MODELS_CACHE_PLAN = "ai_openrouter_models_cache_plan_v5";
+    // v6: invalidate caches that may hold a truncated Ultra list (pre hub-direct fetch).
+    private static final String KEY_MODELS_CACHE = "ai_openrouter_models_cache_v6";
+    private static final String KEY_MODELS_CACHE_AT = "ai_openrouter_models_cache_at_v6";
+    private static final String KEY_MODELS_CACHE_PLAN = "ai_openrouter_models_cache_plan_v6";
     private static final long MODELS_CACHE_TTL_MS = 5L * 60L * 1000L;
     /** Last-resort id only for direct OpenRouter HTTP when model string is empty — never for the picker. */
     private static final String DIRECT_OPENROUTER_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
@@ -372,16 +373,16 @@ public final class MglaAiChatService {
         ArrayList<ModelInfo> out = new ArrayList<>();
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         if (plans != null) {
-            if (MglaSubscription.PLAN_PREMIUM_ULTRA.equals(plan)) {
-                // Prefer server-merged plans.ultra.models; also fold Plus/Free for old bots.
-                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_ULTRA);
-                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS);
-                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE);
-            } else if (MglaSubscription.PLAN_PREMIUM_PLUS.equals(plan)) {
-                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS);
-                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE);
-            } else {
-                appendPlanModels(out, seen, plans, plan);
+            // Server already merges inheritance into plans[plan].models (Ultra = U+Plus+Free).
+            appendPlanModels(out, seen, plans, plan, false);
+            // Old bots: models[] was own-only — fold lower tiers / own[] explicitly.
+            if (out.size() <= 1 && MglaSubscription.PLAN_PREMIUM_ULTRA.equals(plan)) {
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_ULTRA, true);
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS, true);
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE, true);
+            } else if (out.size() <= 1 && MglaSubscription.PLAN_PREMIUM_PLUS.equals(plan)) {
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_PREMIUM_PLUS, true);
+                appendPlanModels(out, seen, plans, MglaSubscription.PLAN_FREE, true);
             }
         }
         if (out.isEmpty()) {
@@ -391,12 +392,16 @@ public final class MglaAiChatService {
     }
 
     private static void appendPlanModels(ArrayList<ModelInfo> out, java.util.HashSet<String> seen,
-                                         JSONObject plans, String planId) {
+                                         JSONObject plans, String planId, boolean preferOwn) {
         JSONObject entry = plans.optJSONObject(planId);
         if (entry == null) {
             return;
         }
-        ArrayList<ModelInfo> chunk = parseModelsArray(entry.optJSONArray("models"), planId);
+        JSONArray arr = preferOwn ? entry.optJSONArray("own") : null;
+        if (arr == null || arr.length() == 0) {
+            arr = entry.optJSONArray("models");
+        }
+        ArrayList<ModelInfo> chunk = parseModelsArray(arr, planId);
         for (ModelInfo info : chunk) {
             if (seen.add(info.id)) {
                 out.add(info);
@@ -448,7 +453,8 @@ public final class MglaAiChatService {
 
     private static void streamOpenRouter(String model, ArrayList<MglaAiChatStorage.Message> messages, ArrayList<String> imagePaths, float temperature, int maxTokens, Request request, Callback callback) throws Exception {
         if (TextUtils.isEmpty(BuildConfig.OPENROUTER_API_KEY)) {
-            if (MglaHubHttp.shouldProxyAi()) {
+            // Bypass on → current relay; bypass off → mglahub (see MglaHubHttp).
+            if (MglaHubHttp.isConfigured()) {
                 streamOpenRouterViaHub(model, messages, request, callback);
                 return;
             }
@@ -662,6 +668,9 @@ public final class MglaAiChatService {
                 if (TextUtils.isEmpty(m.text)) {
                     continue;
                 }
+                if ("system".equals(m.role)) {
+                    continue;
+                }
                 transcript.append("assistant".equals(m.role) ? "Ассистент: " : "Пользователь: ")
                         .append(m.text).append('\n');
             }
@@ -689,7 +698,7 @@ public final class MglaAiChatService {
         int used = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
             MglaAiChatStorage.Message m = messages.get(i);
-            if (TextUtils.isEmpty(m.text)) {
+            if (TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
                 continue;
             }
             String text = m.text;
@@ -702,7 +711,8 @@ public final class MglaAiChatService {
                 cost = text.length();
             }
             JSONObject item = new JSONObject();
-            item.put("role", m.role);
+            // Only user/assistant — never forward leftover system seeds.
+            item.put("role", "assistant".equals(m.role) ? "assistant" : "user");
             if (i == lastUserMessage && imagePaths != null && !imagePaths.isEmpty() && MglaSubscription.canAttachMedia()) {
                 JSONArray content = new JSONArray();
                 content.put(new JSONObject().put("type", "text").put("text", text));

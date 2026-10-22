@@ -15,6 +15,7 @@ import org.telegram.tgnet.TLRPC;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -638,6 +639,10 @@ public class MglaDeletedStorage {
     /**
      * Messages for the open chat window. {@code includeNewer}/{@code includeOlder} widen the window
      * past the loaded ids, which is what makes a deleted newest message reappear at the bottom.
+     * <p>
+     * Prefer {@link #loadForChatWindow} when the caller already has the loaded mid set: a single
+     * {@code ORDER BY date DESC LIMIT N} over a wide mid span starves older archived rows when the
+     * dialog has many recent deletions, which leaves visible holes in the timeline.
      */
     public static ArrayList<TLRPC.Message> loadInRange(
         SQLiteDatabase database,
@@ -650,33 +655,138 @@ public class MglaDeletedStorage {
         boolean includeNewer,
         int limit
     ) {
+        return loadWhere(
+            database, currentAccount, dialogId, topicId,
+            buildInRangeWhere(topicId, minId, maxId, includeOlder, includeNewer),
+            limit
+        );
+    }
+
+    /**
+     * Fill archived deletions into a chat page without starving mid-range gaps: load each
+     * consecutive mid gap separately (plus optional older/newer edges), ordered by mid.
+     */
+    public static ArrayList<TLRPC.Message> loadForChatWindow(
+        SQLiteDatabase database,
+        int currentAccount,
+        long dialogId,
+        long topicId,
+        Collection<Integer> loadedIds,
+        boolean includeOlder,
+        boolean includeNewer,
+        int perGapLimit
+    ) {
         ArrayList<TLRPC.Message> result = new ArrayList<>();
         if (database == null || dialogId == 0 || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
             return result;
         }
+        HashSet<Integer> seen = new HashSet<>();
+        int limit = Math.max(1, perGapLimit);
+        if (loadedIds == null || loadedIds.isEmpty()) {
+            if (!includeOlder && !includeNewer) {
+                return result;
+            }
+            appendUnique(result, seen, loadWhere(
+                database, currentAccount, dialogId, topicId,
+                buildInRangeWhere(topicId, Integer.MAX_VALUE, Integer.MIN_VALUE, includeOlder, includeNewer),
+                limit
+            ));
+            return result;
+        }
+        ArrayList<Integer> sorted = new ArrayList<>(loadedIds);
+        Collections.sort(sorted);
+        int minLoadedId = sorted.get(0);
+        int maxLoadedId = sorted.get(sorted.size() - 1);
+        for (int i = 0, N = sorted.size() - 1; i < N; i++) {
+            int lo = sorted.get(i);
+            int hi = sorted.get(i + 1);
+            if (hi - lo <= 1) {
+                continue;
+            }
+            StringBuilder where = new StringBuilder("uid = ?");
+            if (topicId != 0) {
+                where.append(" AND topic_id = ?");
+            }
+            where.append(" AND mid > ").append(lo).append(" AND mid < ").append(hi);
+            appendUnique(result, seen, loadWhere(
+                database, currentAccount, dialogId, topicId, where.toString(), limit
+            ));
+        }
+        if (includeOlder) {
+            StringBuilder where = new StringBuilder("uid = ?");
+            if (topicId != 0) {
+                where.append(" AND topic_id = ?");
+            }
+            where.append(" AND mid < ").append(minLoadedId);
+            appendUnique(result, seen, loadWhere(
+                database, currentAccount, dialogId, topicId, where.toString(), limit
+            ));
+        }
+        if (includeNewer) {
+            StringBuilder where = new StringBuilder("uid = ?");
+            if (topicId != 0) {
+                where.append(" AND topic_id = ?");
+            }
+            where.append(" AND mid > ").append(maxLoadedId);
+            appendUnique(result, seen, loadWhere(
+                database, currentAccount, dialogId, topicId, where.toString(), limit
+            ));
+        }
+        return result;
+    }
+
+    private static String buildInRangeWhere(
+        long topicId, int minId, int maxId, boolean includeOlder, boolean includeNewer
+    ) {
         StringBuilder where = new StringBuilder("uid = ?");
         if (topicId != 0) {
             where.append(" AND topic_id = ?");
         }
         if (minId == Integer.MAX_VALUE || maxId == Integer.MIN_VALUE) {
-            // Nothing loaded yet: only meaningful when the window is unbounded on either side.
             if (!includeNewer && !includeOlder) {
-                return result;
+                return null;
             }
-        } else {
-            where.append(" AND (mid BETWEEN ").append(minId).append(" AND ").append(maxId);
-            if (includeNewer) {
-                where.append(" OR mid > ").append(maxId);
-            }
-            if (includeOlder) {
-                where.append(" OR mid < ").append(minId);
-            }
-            where.append(')');
+            return where.toString();
         }
+        where.append(" AND (mid BETWEEN ").append(minId).append(" AND ").append(maxId);
+        if (includeNewer) {
+            where.append(" OR mid > ").append(maxId);
+        }
+        if (includeOlder) {
+            where.append(" OR mid < ").append(minId);
+        }
+        where.append(')');
+        return where.toString();
+    }
 
+    private static void appendUnique(
+        ArrayList<TLRPC.Message> out, HashSet<Integer> seen, ArrayList<TLRPC.Message> batch
+    ) {
+        for (int a = 0, N = batch.size(); a < N; a++) {
+            TLRPC.Message message = batch.get(a);
+            if (message == null || !seen.add(message.id)) {
+                continue;
+            }
+            out.add(message);
+        }
+    }
+
+    private static ArrayList<TLRPC.Message> loadWhere(
+        SQLiteDatabase database,
+        int currentAccount,
+        long dialogId,
+        long topicId,
+        String where,
+        int limit
+    ) {
+        ArrayList<TLRPC.Message> result = new ArrayList<>();
+        if (database == null || where == null) {
+            return result;
+        }
         SQLiteCursor cursor = null;
         try {
-            String sql = "SELECT data FROM " + TABLE + " WHERE " + where + " ORDER BY date DESC, mid DESC LIMIT ?";
+            // mid order keeps gap fills contiguous; date DESC starved older archived rows in wide windows.
+            String sql = "SELECT data FROM " + TABLE + " WHERE " + where + " ORDER BY mid ASC LIMIT ?";
             if (topicId != 0) {
                 cursor = database.queryFinalized(sql, dialogId, topicId, Math.max(1, limit));
             } else {

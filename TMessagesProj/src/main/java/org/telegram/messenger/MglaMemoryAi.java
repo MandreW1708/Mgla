@@ -160,7 +160,8 @@ public class MglaMemoryAi {
     // ——— OpenRouter ———
 
     private static String callOpenRouter(String systemPrompt, String userText, int maxTokens, double temperature) throws Exception {
-        if (MglaHubHttp.shouldProxyAi()) {
+        // Bypass → relay; no bypass → mglahub (MglaHubHttp routes). Same Free utility key.
+        if (MglaHubHttp.isConfigured()) {
             String lang = "ru";
             try {
                 lang = org.telegram.messenger.LocaleController.getInstance().getCurrentLocaleInfo().shortName;

@@ -21724,7 +21724,9 @@ public class ChatActivity extends BaseFragment implements
                 endReached[loadIndex] = true;
                 cacheEndReached[loadIndex] = true;
             }
-            if (!MessageObject.isEphemeralMessageId(messageId)) {
+            // Local-only archived deletions must not move the load cursor — an older saved
+            // deletion on the page would make maxMessageId jump past live history still on the server.
+            if (!MessageObject.isEphemeralMessageId(messageId) && !obj.mglaDeleted) {
                 if (messageId > 0) {
                     maxMessageId[loadIndex] = Math.min(messageId, maxMessageId[loadIndex]);
                     minMessageId[loadIndex] = Math.max(messageId, minMessageId[loadIndex]);
@@ -22089,7 +22091,16 @@ public class ChatActivity extends BaseFragment implements
             }
             loadingForward = false;
         } else {
-            if (messArr.size() < count && load_type != 3 && load_type != 4) {
+            int solidCount = 0;
+            for (int a = 0, N = messArr.size(); a < N; a++) {
+                MessageObject mo = messArr.get(a);
+                if (mo != null && !mo.mglaDeleted) {
+                    solidCount++;
+                }
+            }
+            // Archived overlays must not pad the page to `count` — that kept cacheEndReached false
+            // and blocked the server refill that restores history between saved deletions.
+            if (solidCount < count && load_type != 3 && load_type != 4) {
                 if (isCache) {
                     if (currentEncryptedChat != null || loadIndex == 1 && mergeDialogId != 0 && isEnd) {
                         endReached[loadIndex] = true;
@@ -22097,7 +22108,7 @@ public class ChatActivity extends BaseFragment implements
                     if (load_type != 2) {
                         cacheEndReached[loadIndex] = true;
                     }
-                } else if (load_type != 2 || messArr.size() == 0 && messages.isEmpty()) {
+                } else if (load_type != 2 || solidCount == 0 && messages.isEmpty()) {
                     endReached[loadIndex] = true;
                 }
             }

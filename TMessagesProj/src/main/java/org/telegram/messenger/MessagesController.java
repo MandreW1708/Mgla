@@ -12058,6 +12058,11 @@ public class MessagesController extends BaseController implements NotificationCe
                     if (message.id < 0) {
                         continue;
                     }
+                    // Local-only deleted archive copies are not on the server — hashing them
+                    // poisons the cache-sync hash and can leave the UI on a sparse page.
+                    if (message.mglaDeleted) {
+                        continue;
+                    }
                     if (includePeers) {
                         hash = MediaDataController.calcHash(hash, Math.abs(DialogObject.getPeerDialogId(message.peer_id)));
                     }
@@ -12132,6 +12137,27 @@ public class MessagesController extends BaseController implements NotificationCe
             }
             if (mode == ChatActivity.MODE_SAVED) {
                 getSavedMessagesController().update(threadMessageId, messagesRes);
+            }
+            // After putMessages: overlay archived deletions for UI only (not written to messages_v2).
+            if (mode == ChatActivity.MODE_DEFAULT && (threadMessageId == 0 || isTopic)
+                    && !DialogObject.isEncryptedDialog(dialogId)
+                    && MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+                getMessagesStorage().mergeArchivedDeletedIntoMessages(
+                    messagesRes, dialogId, isTopic ? threadMessageId : 0, false, last_message_id
+                );
+                size = messagesRes.messages.size();
+                for (int a = 0, N = messagesRes.users.size(); a < N; a++) {
+                    TLRPC.User u = messagesRes.users.get(a);
+                    if (u != null) {
+                        usersDict.put(u.id, u);
+                    }
+                }
+                for (int a = 0, N = messagesRes.chats.size(); a < N; a++) {
+                    TLRPC.Chat c = messagesRes.chats.get(a);
+                    if (c != null) {
+                        chatsDict.put(c.id, c);
+                    }
+                }
             }
         }
 

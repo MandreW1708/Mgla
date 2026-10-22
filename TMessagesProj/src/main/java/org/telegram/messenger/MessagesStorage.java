@@ -9849,68 +9849,27 @@ public class MessagesStorage extends BaseController {
                 }
 
 
+                // Snapshot DB-only range before archive merge. Expanding minId/maxId with archived
+                // mids must not satisfy stock "range covers target" — that blocked server refill and
+                // left a sparse page looking like a truncated chat (clearing the archive fixed it).
+                final int dbMinId = minId;
+                final int dbMaxId = maxId;
+                final int dbMessagesCount = messagesCount;
+
                 // Mgla: fold archived deleted messages back into the window so they keep their
                 // original place in the timeline. Thread (comment) views are skipped because the
                 // archive is keyed by dialog/topic, not by thread.
                 if (mode == ChatActivity.MODE_DEFAULT && (threadMessageId == 0 || isTopic)
                         && !DialogObject.isEncryptedDialog(dialogId)
                         && MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
-                    int minLoadedId = Integer.MAX_VALUE;
-                    int maxLoadedId = Integer.MIN_VALUE;
-                    HashSet<Integer> loadedIds = new HashSet<>();
-                    for (int a = 0, N = res.messages.size(); a < N; a++) {
-                        TLRPC.Message m = res.messages.get(a);
-                        if (m == null || m.id <= 0 || MessageObject.isEphemeralMessageId(m.id)) {
-                            continue;
-                        }
-                        minLoadedId = Math.min(minLoadedId, m.id);
-                        maxLoadedId = Math.max(maxLoadedId, m.id);
-                        loadedIds.add(m.id);
-                    }
-                    // A deleted newest message has no loaded id above it, so widen the window at
-                    // the bottom whenever this page reaches the dialog's last message.
-                    boolean atNewestEdge = last_message_id <= 0
-                        || maxLoadedId == Integer.MIN_VALUE
-                        || maxLoadedId >= last_message_id;
-                    ArrayList<TLRPC.Message> archived = MglaDeletedStorage.loadInRange(
-                        database, currentAccount, dialogId, isTopic ? threadMessageId : 0,
-                        minLoadedId, maxLoadedId, isEnd, atNewestEdge, 500
+                    // includeOlder=false: never pull archived mids older than this DB page onto the
+                    // newest window. That poisoned ChatActivity maxMessageId and skipped the live
+                    // history between an old saved deletion and the first DB row (17:28→23:35).
+                    // Gap-fill inside the loaded mid set still restores in-place deletions.
+                    messagesCount += foldArchivedDeletedIntoMessagesInternal(
+                        res, dialogId, isTopic ? threadMessageId : 0, false, last_message_id,
+                        max_id, load_type, usersToLoad, chatsToLoad, animatedEmojiToLoad
                     );
-                    // LOAD_AROUND_MESSAGE / open-by-link targets max_id. If that message exists only
-                    // in the deleted archive, neighbors alone are not enough — include it explicitly
-                    // so ChatActivity does not show MessageNotFound for a saved deletion.
-                    if (max_id > 0 && !loadedIds.contains(max_id)
-                            && (load_type == LOAD_AROUND_MESSAGE || load_type == LOAD_AROUND_DATE)) {
-                        TLRPC.Message aroundArchived = MglaDeletedStorage.loadMessage(
-                            database, currentAccount, dialogId, max_id);
-                        if (aroundArchived != null) {
-                            archived.add(aroundArchived);
-                        }
-                    }
-                    for (int a = 0, N = archived.size(); a < N; a++) {
-                        TLRPC.Message archivedMessage = archived.get(a);
-                        if (archivedMessage == null) {
-                            continue;
-                        }
-                        if (loadedIds.contains(archivedMessage.id)) {
-                            // Once-media stays in messages_v2 as an emptied stub; swap it for the
-                            // archived full copy so it reappears like other saved deletions.
-                            for (int i = 0, M = res.messages.size(); i < M; i++) {
-                                TLRPC.Message existing = res.messages.get(i);
-                                if (existing != null && existing.id == archivedMessage.id
-                                        && MglaDeletedStorage.isEmptiedDisappearingMedia(existing)) {
-                                    addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
-                                    res.messages.set(i, archivedMessage);
-                                    break;
-                                }
-                            }
-                            continue;
-                        }
-                        loadedIds.add(archivedMessage.id);
-                        addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
-                        res.messages.add(archivedMessage);
-                        messagesCount++;
-                    }
                 }
 
                 Collections.sort(res.messages, (lhs, rhs) -> {
@@ -9971,15 +9930,30 @@ public class MessagesStorage extends BaseController {
                         }
                     }
 
+                    // Stock "cache miss around target → clear and refetch from server".
+                    // Use DB-only min/max/count. Only keep an archive-only page for preserved
+                    // dialogs whose messages_v2 was wiped (peer delete-for-all / self wipe keep).
+                    boolean pageHasMglaDeleted = false;
+                    for (int a = 0, N = res.messages.size(); a < N; a++) {
+                        TLRPC.Message m = res.messages.get(a);
+                        if (m != null && m.mglaDeleted) {
+                            pageHasMglaDeleted = true;
+                            break;
+                        }
+                    }
+                    final boolean keepArchivedPage = dbMessagesCount == 0
+                        && pageHasMglaDeleted
+                        && MglaDeletedStorage.isDialogPreserved(currentAccount, dialogId);
+
                     if ((load_type == 3 || load_type == 4 || load_type == 2 && queryFromServer && !unreadCountIsLocal) && !res.messages.isEmpty()) {
-                        if (!(minId <= max_id_query && maxId >= max_id_query)) {
+                        if (!keepArchivedPage && !(dbMinId <= max_id_query && dbMaxId >= max_id_query)) {
                             usersToLoad.clear();
                             chatsToLoad.clear();
                             res.messages.clear();
                             messagesCount = 0;
                         }
                     }
-                    if ((load_type == 4 || load_type == 3) && res.messages.size() == 1) {
+                    if ((load_type == 4 || load_type == 3) && dbMessagesCount == 1 && !keepArchivedPage) {
                         res.messages.clear();
                         messagesCount = 0;
                     }
@@ -10142,6 +10116,137 @@ public class MessagesStorage extends BaseController {
                 processMessagesRunnable.run();
             });
         });
+    }
+
+    /**
+     * After a server history page is stored, fold archived deletions into {@code res} for the UI
+     * only (must run after {@link #putMessages} so archived rows are not written back to messages_v2).
+     * Safe to call from stageQueue — waits on the storage queue.
+     */
+    public void mergeArchivedDeletedIntoMessages(
+        TLRPC.messages_Messages res,
+        long dialogId,
+        long topicId,
+        boolean isEnd,
+        int lastMessageId
+    ) {
+        if (res == null || dialogId == 0 || DialogObject.isEncryptedDialog(dialogId)
+                || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            return;
+        }
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        ArrayList<Long> usersToLoad = new ArrayList<>();
+        ArrayList<Long> chatsToLoad = new ArrayList<>();
+        ArrayList<Long> animatedEmojiToLoad = new ArrayList<>();
+        storageQueue.postRunnable(() -> {
+            try {
+                foldArchivedDeletedIntoMessagesInternal(
+                    res, dialogId, topicId, isEnd, lastMessageId, 0, 0,
+                    usersToLoad, chatsToLoad, animatedEmojiToLoad
+                );
+                if (!usersToLoad.isEmpty()) {
+                    getUsersInternal(usersToLoad, res.users);
+                }
+                if (!chatsToLoad.isEmpty()) {
+                    getChatsInternal(TextUtils.join(",", chatsToLoad), res.chats);
+                }
+                if (!animatedEmojiToLoad.isEmpty()) {
+                    if (res.animatedEmoji == null) {
+                        res.animatedEmoji = new ArrayList<>();
+                    }
+                    getAnimatedEmoji(TextUtils.join(",", animatedEmojiToLoad), res.animatedEmoji);
+                }
+                Collections.sort(res.messages, (lhs, rhs) -> {
+                    if (lhs.id > 0 && rhs.id > 0) {
+                        return Integer.compare(rhs.id, lhs.id);
+                    }
+                    if (lhs.id < 0 && rhs.id < 0) {
+                        return Integer.compare(lhs.id, rhs.id);
+                    }
+                    return Integer.compare(rhs.date, lhs.date);
+                });
+            } catch (Exception e) {
+                checkSQLException(e);
+            } finally {
+                countDownLatch.countDown();
+            }
+        });
+        try {
+            countDownLatch.await();
+        } catch (Exception e) {
+            checkSQLException(e);
+        }
+    }
+
+    /**
+     * @return number of newly appended archived messages (stub swaps do not count).
+     */
+    private int foldArchivedDeletedIntoMessagesInternal(
+        TLRPC.messages_Messages res,
+        long dialogId,
+        long topicId,
+        boolean isEnd,
+        int lastMessageId,
+        int maxIdTarget,
+        int load_type,
+        ArrayList<Long> usersToLoad,
+        ArrayList<Long> chatsToLoad,
+        ArrayList<Long> animatedEmojiToLoad
+    ) {
+        if (res == null || database == null) {
+            return 0;
+        }
+        int minLoadedId = Integer.MAX_VALUE;
+        int maxLoadedId = Integer.MIN_VALUE;
+        HashSet<Integer> loadedIds = new HashSet<>();
+        for (int a = 0, N = res.messages.size(); a < N; a++) {
+            TLRPC.Message m = res.messages.get(a);
+            if (m == null || m.id <= 0 || MessageObject.isEphemeralMessageId(m.id)) {
+                continue;
+            }
+            minLoadedId = Math.min(minLoadedId, m.id);
+            maxLoadedId = Math.max(maxLoadedId, m.id);
+            loadedIds.add(m.id);
+        }
+        boolean atNewestEdge = lastMessageId <= 0
+            || maxLoadedId == Integer.MIN_VALUE
+            || maxLoadedId >= lastMessageId;
+        ArrayList<TLRPC.Message> archived = MglaDeletedStorage.loadForChatWindow(
+            database, currentAccount, dialogId, topicId,
+            loadedIds, isEnd, atNewestEdge, 200
+        );
+        if (maxIdTarget > 0 && !loadedIds.contains(maxIdTarget)
+                && (load_type == LOAD_AROUND_MESSAGE || load_type == LOAD_AROUND_DATE)) {
+            TLRPC.Message aroundArchived = MglaDeletedStorage.loadMessage(
+                database, currentAccount, dialogId, maxIdTarget);
+            if (aroundArchived != null) {
+                archived.add(aroundArchived);
+            }
+        }
+        int added = 0;
+        for (int a = 0, N = archived.size(); a < N; a++) {
+            TLRPC.Message archivedMessage = archived.get(a);
+            if (archivedMessage == null) {
+                continue;
+            }
+            if (loadedIds.contains(archivedMessage.id)) {
+                for (int i = 0, M = res.messages.size(); i < M; i++) {
+                    TLRPC.Message existing = res.messages.get(i);
+                    if (existing != null && existing.id == archivedMessage.id
+                            && MglaDeletedStorage.isEmptiedDisappearingMedia(existing)) {
+                        addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
+                        res.messages.set(i, archivedMessage);
+                        break;
+                    }
+                }
+                continue;
+            }
+            loadedIds.add(archivedMessage.id);
+            addUsersAndChatsFromMessage(archivedMessage, usersToLoad, chatsToLoad, animatedEmojiToLoad);
+            res.messages.add(archivedMessage);
+            added++;
+        }
+        return added;
     }
 
     public void clearSentMedia() {

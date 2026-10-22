@@ -50,6 +50,8 @@ public final class MglaLocalChatRuntime {
      * Fixes empty replies from too-hot sampling / oversized context on tiny models.
      */
     public static void ensureLocalDefaults() {
+        // Always scrub retired GGUFs (SmolLM2 135M etc.) — cheap if nothing to delete.
+        MglaLocalModelsManager.purgeBannedModels(ApplicationLoader.applicationContext);
         SharedPreferences p = prefs();
         if (p.getInt("ai_local_defaults_ver", 0) >= DEFAULTS_VERSION) {
             return;
@@ -305,10 +307,15 @@ public final class MglaLocalChatRuntime {
         request.bindLocalHandle(h);
 
         // Trailing empty assistant stub (UI placeholder) must not enter the prompt.
+        // System seeds are never part of AI-chat turns — each thread is user/assistant only.
+        // Drop prior assistant loops/garbage so tiny models don't continue the salad.
         ArrayList<MglaAiChatStorage.Message> forPrompt = new ArrayList<>(messages.size());
         for (int i = 0; i < messages.size(); i++) {
             MglaAiChatStorage.Message m = messages.get(i);
-            if (m == null || TextUtils.isEmpty(m.text)) {
+            if (m == null || TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
+                continue;
+            }
+            if ("assistant".equals(m.role) && looksLikeLoopGarbage(m.text)) {
                 continue;
             }
             forPrompt.add(m);
@@ -318,6 +325,12 @@ public final class MglaLocalChatRuntime {
 
         float temp = Math.max(0f, Math.min(0.8f, temperature));
         int tokens = Math.max(64, Math.min(2048, maxTokens));
+        // Tiny instruct GGUFs collapse into loops/salad if allowed to run long.
+        String modelName = model.getName().toLowerCase(java.util.Locale.US);
+        if (modelName.contains("135m") || modelName.contains("360m")
+                || modelName.contains("0.5b") || modelName.contains("500m")) {
+            tokens = Math.min(tokens, 192);
+        }
         final AtomicBoolean gotToken = new AtomicBoolean(false);
 
         int generated = MglaLlamaNative.generate(h, prompt, tokens, temp, new MglaLlamaNative.TokenSink() {
@@ -382,6 +395,32 @@ public final class MglaLocalChatRuntime {
         }
     }
 
+    private static final String CHAT_SYSTEM =
+            "Ты полезный ассистент. Отвечай кратко на языке пользователя. "
+                    + "Не повторяй сообщение пользователя — дай свой ответ.";
+
+    /**
+     * SmolLM2 / Qwen / … ship as ChatML Instruct but GGUF {@code general.architecture}
+     * is often {@code llama}. Using Llama-3 headers then makes the model echo the user.
+     */
+    private static boolean prefersChatMl(File modelFile, String arch) {
+        String name = modelFile != null ? modelFile.getName().toLowerCase(java.util.Locale.US) : "";
+        if (name.contains("smol") || name.contains("qwen") || name.contains("chatml")
+                || name.contains("openchat") || name.contains("zephyr") || name.contains("tinyllama")
+                || name.contains("dolphin") || name.contains("hermes") || name.contains("openhermes")) {
+            return true;
+        }
+        String a = arch != null ? arch.toLowerCase(java.util.Locale.US) : "";
+        return a.contains("qwen");
+    }
+
+    private static boolean isValidChatMlPrompt(String prompt) {
+        return !TextUtils.isEmpty(prompt)
+                && prompt.contains("<|im_start|>")
+                && prompt.contains("<|im_start|>assistant")
+                && !prompt.contains("<|start_header_id|>");
+    }
+
     /**
      * Prefer the GGUF-embedded chat template (Gemma / Llama-3 / ChatML / Phi / Nemotron).
      * Fall back to an architecture-aware Java template if native apply fails.
@@ -392,10 +431,10 @@ public final class MglaLocalChatRuntime {
         ArrayList<String> texts = new ArrayList<>();
         for (int i = start; i < messages.size(); i++) {
             MglaAiChatStorage.Message m = messages.get(i);
-            if (m == null || TextUtils.isEmpty(m.text)) {
+            if (m == null || TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
                 continue;
             }
-            roles.add("assistant".equals(m.role) ? "assistant" : "user");
+            String role = "assistant".equals(m.role) ? "assistant" : "user";
             // Don't burn context on prior CoT — only the final answer matters for history.
             String turn = "assistant".equals(m.role)
                     ? MglaAiReasoning.stripForContext(m.text)
@@ -403,8 +442,12 @@ public final class MglaLocalChatRuntime {
             if (TextUtils.isEmpty(turn)) {
                 continue;
             }
+            roles.add(role);
             texts.add(turn);
         }
+        String arch = MglaLocalModelsManager.readGgufArchitecture(modelFile);
+        final boolean chatMl = prefersChatMl(modelFile, arch);
+
         if (!roles.isEmpty()) {
             String nativePrompt = MglaLlamaNative.applyChatTemplate(
                     handle,
@@ -413,25 +456,53 @@ public final class MglaLocalChatRuntime {
                     true
             );
             if (!TextUtils.isEmpty(nativePrompt)) {
-                return nativePrompt;
+                // SmolLM2 mis-tagged as llama: reject Llama-3 shaped native output.
+                if (chatMl && !isValidChatMlPrompt(nativePrompt)) {
+                    FileLog.d("MglaLocal: reject non-ChatML native template for " + modelFile.getName());
+                } else if (!chatMl || isValidChatMlPrompt(nativePrompt)) {
+                    return nativePrompt;
+                }
             }
         }
-        String arch = MglaLocalModelsManager.readGgufArchitecture(modelFile);
-        return buildPromptFallback(arch, messages, start);
+        return buildPromptFallback(arch, modelFile, messages, start);
+    }
+
+    private static String buildChatMlPrompt(ArrayList<MglaAiChatStorage.Message> messages, int start) {
+        StringBuilder p = new StringBuilder();
+        p.append("<|im_start|>system\n").append(CHAT_SYSTEM).append("<|im_end|>\n");
+        for (int i = start; i < messages.size(); i++) {
+            MglaAiChatStorage.Message m = messages.get(i);
+            if (m == null || TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
+                continue;
+            }
+            boolean assistant = "assistant".equals(m.role);
+            String turn = assistant ? MglaAiReasoning.stripForContext(m.text) : m.text.trim();
+            if (TextUtils.isEmpty(turn)) {
+                continue;
+            }
+            p.append("<|im_start|>").append(assistant ? "assistant" : "user").append('\n')
+                    .append(turn)
+                    .append("<|im_end|>\n");
+        }
+        p.append("<|im_start|>assistant\n");
+        return p.toString();
     }
 
     /** Manual templates when llama_chat_apply_template cannot detect the GGUF jinja. */
-    private static String buildPromptFallback(String arch, ArrayList<MglaAiChatStorage.Message> messages, int start) {
+    private static String buildPromptFallback(String arch, File modelFile, ArrayList<MglaAiChatStorage.Message> messages, int start) {
         String lower = arch != null ? arch.toLowerCase(java.util.Locale.US) : "";
-        final String system = "Ты полезный ассистент. Отвечай кратко на языке пользователя.";
-        StringBuilder p = new StringBuilder();
+
+        // Filename beats architecture — SmolLM2 is ChatML despite arch=llama.
+        if (prefersChatMl(modelFile, arch)) {
+            return buildChatMlPrompt(messages, start);
+        }
 
         if (lower.contains("gemma")) {
-            // Gemma / Gemma 2 / Gemma 3 Instruct
-            p.append("<start_of_turn>user\n").append(system).append("<end_of_turn>\n");
+            StringBuilder p = new StringBuilder();
+            p.append("<start_of_turn>user\n").append(CHAT_SYSTEM).append("<end_of_turn>\n");
             for (int i = start; i < messages.size(); i++) {
                 MglaAiChatStorage.Message m = messages.get(i);
-                if (m == null || TextUtils.isEmpty(m.text)) {
+                if (m == null || TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
                     continue;
                 }
                 boolean assistant = "assistant".equals(m.role);
@@ -447,12 +518,12 @@ public final class MglaLocalChatRuntime {
         }
 
         if (lower.contains("llama") || lower.contains("nemotron") || lower.contains("granite")) {
-            // Llama 3 / 3.1 / 3.2 / Nemotron Instruct
+            StringBuilder p = new StringBuilder();
             p.append("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n")
-                    .append(system).append("<|eot_id|>");
+                    .append(CHAT_SYSTEM).append("<|eot_id|>");
             for (int i = start; i < messages.size(); i++) {
                 MglaAiChatStorage.Message m = messages.get(i);
-                if (m == null || TextUtils.isEmpty(m.text)) {
+                if (m == null || TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
                     continue;
                 }
                 boolean assistant = "assistant".equals(m.role);
@@ -469,10 +540,11 @@ public final class MglaLocalChatRuntime {
         }
 
         if (lower.contains("phi")) {
-            p.append("<|system|>\n").append(system).append("<|end|>\n");
+            StringBuilder p = new StringBuilder();
+            p.append("<|system|>\n").append(CHAT_SYSTEM).append("<|end|>\n");
             for (int i = start; i < messages.size(); i++) {
                 MglaAiChatStorage.Message m = messages.get(i);
-                if (m == null || TextUtils.isEmpty(m.text)) {
+                if (m == null || TextUtils.isEmpty(m.text) || "system".equals(m.role)) {
                     continue;
                 }
                 boolean assistant = "assistant".equals(m.role);
@@ -487,27 +559,91 @@ public final class MglaLocalChatRuntime {
             return p.toString();
         }
 
-        // Default ChatML — Qwen2 / Qwen2.5 / Qwen3 / SmolLM2 / many OpenChat-style GGUFs.
-        p.append("<|im_start|>system\n").append(system).append("<|im_end|>\n");
-        for (int i = start; i < messages.size(); i++) {
-            MglaAiChatStorage.Message m = messages.get(i);
-            if (m == null || TextUtils.isEmpty(m.text)) {
-                continue;
-            }
-            boolean assistant = "assistant".equals(m.role);
-            String turn = assistant ? MglaAiReasoning.stripForContext(m.text) : m.text.trim();
-            if (TextUtils.isEmpty(turn)) {
-                continue;
-            }
-            p.append("<|im_start|>").append(assistant ? "assistant" : "user").append('\n')
-                    .append(turn)
-                    .append("<|im_end|>\n");
-        }
-        p.append("<|im_start|>assistant\n");
-        return p.toString();
+        return buildChatMlPrompt(messages, start);
     }
 
     private static SharedPreferences prefs() {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * Detect greedy-loop / UTF-8 salad so it is not fed back into the next prompt
+     * (SmolLM 135M otherwise keeps generating gibberish forever).
+     */
+    public static boolean looksLikeLoopGarbage(String s) {
+        if (TextUtils.isEmpty(s) || s.length() < 8) {
+            return false;
+        }
+        int replacement = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == '\uFFFD') {
+                replacement++;
+            }
+        }
+        if (replacement >= 3) {
+            return true;
+        }
+        return collapseRepeatedUnit(s) != null;
+    }
+
+    /**
+     * If {@code s} is the same short unit repeated (e.g. "Привет. Привет. Привет."),
+     * return one copy; otherwise null.
+     */
+    private static String collapseRepeatedUnit(String s) {
+        String t = s.trim();
+        if (t.length() < 6) {
+            return null;
+        }
+        for (int len = 3; len <= Math.min(64, t.length() / 2); len++) {
+            if (t.length() < len * 2) {
+                continue;
+            }
+            String unit = t.substring(0, len);
+            int count = 0;
+            int pos = 0;
+            while (pos + len <= t.length() && t.regionMatches(pos, unit, 0, len)) {
+                count++;
+                pos += len;
+            }
+            // Allow a short leftover (whitespace) after exact repeats.
+            if (count >= 2 && pos >= t.length() - 2) {
+                return unit.trim();
+            }
+            // Also match from the end (partial first chunk).
+            unit = t.substring(t.length() - len);
+            count = 0;
+            pos = t.length();
+            while (pos >= len && t.regionMatches(pos - len, unit, 0, len)) {
+                count++;
+                pos -= len;
+            }
+            if (count >= 2 && pos <= 2) {
+                return unit.trim();
+            }
+        }
+        return null;
+    }
+
+    /** Trim a looped assistant reply down to a single phrase. */
+    public static String sanitizeGeneratedText(String raw) {
+        if (TextUtils.isEmpty(raw)) {
+            return raw;
+        }
+        String collapsed = collapseRepeatedUnit(raw);
+        if (collapsed != null) {
+            return collapsed;
+        }
+        int replacement = 0;
+        for (int i = 0; i < raw.length(); i++) {
+            if (raw.charAt(i) == '\uFFFD') {
+                replacement++;
+            }
+        }
+        if (replacement >= 3) {
+            int cut = Math.min(160, raw.length());
+            return raw.substring(0, cut).trim() + "…";
+        }
+        return raw;
     }
 }

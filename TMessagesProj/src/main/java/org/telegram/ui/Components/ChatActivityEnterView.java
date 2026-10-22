@@ -2844,9 +2844,11 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
             }
         });
-        // Always BOTTOM — when the field grows with multiline text, chrome stays on the baseline
-        // (CENTER_VERTICAL would float emoji/editor up with the panel height).
-        messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(emojiSize, emojiSize, Gravity.BOTTOM | Gravity.LEFT, isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2, 0, 0, 0));
+        // BOTTOM so multiline growth doesn't float chrome up; +3dp inset centers 38dp in the 44dp row
+        // (same optical center as the send/mic disc).
+        final float telegramChromeBottom = useTelegramBottomPanelLayout()
+                ? (TELEGRAM_ROW_HEIGHT - DEFAULT_HEIGHT) / 2f : 0f;
+        messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(emojiSize, emojiSize, Gravity.BOTTOM | Gravity.LEFT, isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2, 0, 0, telegramChromeBottom));
         setEmojiButtonImage(false, false);
 
         // AI Editor robot button (to the right of emoji)
@@ -2908,10 +2910,10 @@ public class ChatActivityEnterView extends FrameLayout implements
                 });
                 parentFragment.showDialog(menu.create());
             });
-            // Same 38dp size as emoji; sit after emoji, pinned to the bottom of the growing row.
+            // Same 38dp size as emoji; bottom-pinned with the same 3dp inset into the 44dp strip.
             final int aiSize = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : rowH;
             final int aiLeft = (isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2) + emojiSize;
-            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(aiSize, aiSize, Gravity.BOTTOM | Gravity.LEFT, aiLeft, 0, 0, 0));
+            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(aiSize, aiSize, Gravity.BOTTOM | Gravity.LEFT, aiLeft, 0, 0, telegramChromeBottom));
         }
         deleteRichDraftButton = new ImageView(context);
         deleteRichDraftButton.setScaleType(ImageView.ScaleType.CENTER);

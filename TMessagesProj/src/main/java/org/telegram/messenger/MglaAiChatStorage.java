@@ -67,9 +67,15 @@ public final class MglaAiChatStorage {
                 JSONArray messages = source.optJSONArray("messages");
                 if (messages != null) for (int j = 0; j < messages.length(); j++) {
                     JSONObject m = messages.optJSONObject(j);
-                    if (m != null && !TextUtils.isEmpty(m.optString("text"))) {
-                        chat.messages.add(new Message(m.optString("role", "assistant"), m.optString("text"), m.optLong("date")));
+                    if (m == null || TextUtils.isEmpty(m.optString("text"))) {
+                        continue;
                     }
+                    String role = m.optString("role", "assistant");
+                    // AI chats are user/assistant only — never restore leaked system seeds.
+                    if ("system".equals(role)) {
+                        continue;
+                    }
+                    chat.messages.add(new Message(role, m.optString("text"), m.optLong("date")));
                 }
                 if (!TextUtils.isEmpty(chat.id)) result.add(chat);
             }
@@ -78,6 +84,80 @@ public final class MglaAiChatStorage {
         }
         Collections.sort(result, (a, b) -> Long.compare(b.updatedAt, a.updatedAt));
         return result;
+    }
+
+    /**
+     * One-shot cleanup: drop legacy {@code system} seeds (e.g. deleted «ask about chat»)
+     * from disk so they cannot leak into prompts / other threads.
+     */
+    public static synchronized void purgeLegacySystemSeeds(int account) {
+        SharedPreferences p = prefs();
+        final String flag = "ai_chats_purged_system_v2_" + account;
+        if (p.getBoolean(flag, false)) {
+            return;
+        }
+        boolean changed = false;
+        JSONArray out = new JSONArray();
+        try {
+            JSONArray chats = new JSONArray(p.getString(KEY_PREFIX + account, "[]"));
+            for (int i = 0; i < chats.length(); i++) {
+                JSONObject source = chats.optJSONObject(i);
+                if (source == null) {
+                    continue;
+                }
+                JSONArray messages = source.optJSONArray("messages");
+                JSONArray clean = new JSONArray();
+                boolean hadSystem = false;
+                if (messages != null) {
+                    for (int j = 0; j < messages.length(); j++) {
+                        JSONObject m = messages.optJSONObject(j);
+                        if (m == null || TextUtils.isEmpty(m.optString("text"))) {
+                            continue;
+                        }
+                        if ("system".equals(m.optString("role"))) {
+                            hadSystem = true;
+                            changed = true;
+                            continue;
+                        }
+                        clean.put(m);
+                    }
+                }
+                source.put("messages", clean);
+                // Seeded «Чат: …» threads with no real turns — drop entirely.
+                if (clean.length() == 0 && source.optBoolean("customTitle")
+                        && source.optString("title", "").startsWith("Чат:")) {
+                    changed = true;
+                    continue;
+                }
+                if (hadSystem && clean.length() == 0) {
+                    changed = true;
+                    continue;
+                }
+                out.put(source);
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+            p.edit().putBoolean(flag, true).apply();
+            return;
+        }
+        SharedPreferences.Editor ed = p.edit().putBoolean(flag, true);
+        if (changed) {
+            ed.putString(KEY_PREFIX + account, out.toString());
+        }
+        ed.apply();
+    }
+
+    /** Drop system messages from an in-memory chat (defense in depth). */
+    public static void stripSystemMessages(Chat chat) {
+        if (chat == null || chat.messages.isEmpty()) {
+            return;
+        }
+        for (int i = chat.messages.size() - 1; i >= 0; i--) {
+            Message m = chat.messages.get(i);
+            if (m != null && "system".equals(m.role)) {
+                chat.messages.remove(i);
+            }
+        }
     }
 
     public static synchronized Chat newChat(String provider, String model) {
@@ -92,6 +172,7 @@ public final class MglaAiChatStorage {
 
     public static synchronized void save(int account, Chat chat) {
         if (chat == null || TextUtils.isEmpty(chat.id)) return;
+        stripSystemMessages(chat);
         chat.updatedAt = System.currentTimeMillis();
         if (!chat.customTitle && !chat.messages.isEmpty()) {
             String first = null;

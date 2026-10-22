@@ -7,7 +7,6 @@ import org.telegram.utils.wsbypass.MglaWsConfig;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.cert.Certificate;
@@ -16,13 +15,14 @@ import java.util.Base64;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * HTTPS к ИИ-прокси на хосте текущего обхода:
+ * HTTPS к ИИ-прокси ({@code /mgla-ai/…}):
  * <ul>
- *   <li>обычный обход → {@code mglabot.mooo.com/mgla-ai/…}</li>
- *   <li>Ultra-обход → {@code fin.mgla.mooo.com/mgla-ai/…}</li>
- *   <li>обход выключен / на паузе (VPN) → не использовать; вызывающий бьёт в Gemini/OpenRouter напрямую</li>
+ *   <li>обычный обход → {@code mglabot} / Германия2 ({@code mglahub})</li>
+ *   <li>Ultra-обход → {@code fin.mgla.mooo.com}</li>
+ *   <li>обход выключен / VPN-пауза → напрямую {@code mglahub.mooo.com}
+ *       (каталог моделей и чат без ключа в APK; иначе список моделей не грузится)</li>
  * </ul>
- * Features/stats/updates при обходе — {@code /mgla-ai/v1/*} на том же хосте
+ * Features/stats/updates при обходе — тот же стек
  * (см. {@link MglaRemoteConfig#shouldFetchViaRelay()}).
  */
 public final class MglaHubHttp {
@@ -40,14 +40,16 @@ public final class MglaHubHttp {
     private MglaHubHttp() {
     }
 
-    /** В сборке есть хост/токен релея (не значит, что обход сейчас включён). */
+    /** Релей или хаб готовы принять /mgla-ai (обход не обязан быть включён). */
     public static boolean isConfigured() {
-        return MglaWsConfig.isRelayConfigured();
+        return MglaWsConfig.isRelayConfigured() || MglaWsConfig.isHubConfigured();
     }
 
     /**
-     * Gemini / OpenRouter через обход: обычный → выбранный DE-сервер, Ultra → Finland.
-     * {@code false} если обход выключен или на паузе из‑за VPN — тогда напрямую к API.
+     * Gemini / OpenRouter через активный обход: обычный → DE1/DE2, Ultra → Finland.
+     * {@code false} если обход выключен или на паузе из‑за VPN — тогда
+     * {@link #request} бьёт в mglahub напрямую (модели/чат), а при наличии
+     * {@code OPENROUTER_API_KEY} в сборке чат может идти в OpenRouter напрямую.
      */
     public static boolean shouldProxyAi() {
         try {
@@ -69,30 +71,58 @@ public final class MglaHubHttp {
     }
 
     private static Response request(String method, String path, byte[] jsonBody, int connectTimeoutMs, int readTimeoutMs) throws Exception {
-        // Ultra → Finland; normal → Germany1/2. Same /mgla-ai paths on all.
-        String host = MglaWsConfig.getRelayHost();
+        final boolean viaRelay = shouldProxyAi();
+        final String host;
+        final String token;
+        if (viaRelay) {
+            // Ultra → Finland; normal → Germany1/2.
+            host = MglaWsConfig.getRelayHost();
+            token = MglaWsConfig.getRelayToken();
+        } else {
+            if (!MglaWsConfig.isHubConfigured()) {
+                throw new Exception("хаб ИИ не настроен");
+            }
+            host = MglaWsConfig.getHubHost();
+            token = MglaWsConfig.getHubToken();
+        }
+        if (TextUtils.isEmpty(host) || TextUtils.isEmpty(token)) {
+            throw new Exception(viaRelay ? "релей ИИ не настроен" : "хаб ИИ не настроен");
+        }
         String normalized = path.startsWith("/") ? path : ("/" + path);
-        URL url = new URL("https://" + host + normalized);
-        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+        HttpsURLConnection conn = MglaDirectHttp.openHttps("https://" + host + normalized);
         try {
             conn.setConnectTimeout(connectTimeoutMs);
             conn.setReadTimeout(readTimeoutMs);
             conn.setRequestMethod(method);
-            conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
+            conn.setRequestProperty("X-Mgla-Token", token);
             conn.setRequestProperty("X-Mgla-Client", "mgla");
             boolean hasBody = jsonBody != null && jsonBody.length > 0 && !"GET".equals(method);
             if (hasBody) {
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             }
-            conn.connect();
-            String[] pins = MglaWsConfig.getRelaySpkiPins(host);
-            if (pins != null && pins.length > 0) {
-                verifySpkiPin(conn.getServerCertificates(), pins[0]);
-            }
+            // Handshake before pin check (getOutputStream / connect).
             if (hasBody) {
                 try (OutputStream os = conn.getOutputStream()) {
+                    if (viaRelay) {
+                        String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+                        if (pins != null && pins.length > 0) {
+                            verifySpkiPin(conn.getServerCertificates(), pins[0]);
+                        }
+                    } else if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
+                        verifySpkiPin(conn.getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
+                    }
                     os.write(jsonBody);
+                }
+            } else {
+                conn.connect();
+                if (viaRelay) {
+                    String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+                    if (pins != null && pins.length > 0) {
+                        verifySpkiPin(conn.getServerCertificates(), pins[0]);
+                    }
+                } else if (MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(host)) {
+                    verifySpkiPin(conn.getServerCertificates(), MglaWsConfig.HUB_SPKI_SHA256_BASE64);
                 }
             }
             int code = conn.getResponseCode();

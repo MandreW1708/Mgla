@@ -16,7 +16,6 @@ import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -27,7 +26,6 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.ColorUtils;
-import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
@@ -98,7 +96,6 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     private ActionBarMenuItem quotaMenuItem;
     private ActionBarMenuItem modelRamMenuItem;
     private boolean emptyStateVisible;
-    private ViewTreeObserver.OnGlobalLayoutListener keyboardLayoutListener;
     private int lastKeyboardHeight;
     private final ArrayList<String> attachedPhotos = new ArrayList<>();
     private MglaAiChatStorage.Chat chat;
@@ -290,19 +287,20 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
         createComposer(context);
         root.setDelegate((keyboardHeight, isWidthGreater) -> applyKeyboardInset(keyboardHeight));
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
-            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
-            applyKeyboardInset(Math.max(ime.bottom, root.measureKeyboardHeight()));
+            int ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            applyKeyboardInset(Math.max(ime, root.measureKeyboardHeight()));
             return insets;
         });
-        keyboardLayoutListener = () -> {
-            if (root == null) {
-                return;
-            }
-            applyKeyboardInset(root.measureKeyboardHeight());
-        };
-        root.getViewTreeObserver().addOnGlobalLayoutListener(keyboardLayoutListener);
 
+        MglaAiChatStorage.purgeLegacySystemSeeds(currentAccount);
         chat = restoreOrCreateChat();
+        MglaAiChatStorage.stripSystemMessages(chat);
+        // If the remembered thread was only a purged seed, start clean.
+        if (chat != null && chat.messages.isEmpty() && chat.customTitle
+                && chat.title != null && chat.title.startsWith("Чат:")) {
+            chat = MglaAiChatStorage.newChat(preferredProvider(), preferredModel());
+        }
+        rememberCurrentChat();
         renderChat(false);
         applySubscriptionEntitlements();
         updateSettingsMenuVisibility();
@@ -1172,6 +1170,9 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     }
 
     private void finishRequest() {
+        if (!TextUtils.isEmpty(streamedText) && !streamedText.startsWith("Ошибка:")) {
+            streamedText = MglaLocalChatRuntime.sanitizeGeneratedText(streamedText);
+        }
         if (!chat.messages.isEmpty()) {
             chat.messages.get(chat.messages.size() - 1).text = streamedText;
         }
@@ -1214,6 +1215,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     private void newChat() {
         stopRequest();
         if (chat != null && !chat.messages.isEmpty()) {
+            MglaAiChatStorage.stripSystemMessages(chat);
             MglaAiChatStorage.save(currentAccount, chat);
         }
         chat = MglaAiChatStorage.newChat(preferredProvider(), preferredModel());
@@ -1641,6 +1643,7 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
                         MglaAiChatStorage.save(currentAccount, chat);
                     }
                     chat = saved;
+                    MglaAiChatStorage.stripSystemMessages(chat);
                     rememberCurrentChat();
                     renderChat(true);
                     closeDrawer();
@@ -1910,10 +1913,6 @@ public class MglaAiChatActivity extends BaseFragment implements MainTabsActivity
     @Override
     public void onFragmentDestroy() {
         MglaGlobalMusicBar.removeGlobalVisibilityListener(musicBarVisibilityListener);
-        if (root != null && keyboardLayoutListener != null) {
-            root.getViewTreeObserver().removeOnGlobalLayoutListener(keyboardLayoutListener);
-            keyboardLayoutListener = null;
-        }
         closeDrawer();
         stopRequest();
         super.onFragmentDestroy();

@@ -336,8 +336,10 @@ async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
             with urllib.request.urlopen(req, timeout=6) as resp:
                 payload = json.loads(resp.read().decode("utf-8", errors="replace"))
         except Exception as e:
+            # Do NOT cache failures as "free" — hub rate-limits / brief 503s would
+            # lock Ultra clients out for the whole TTL.
             LOG.warning("entitlements fetch failed: %s", e)
-            return "free"
+            return None
         plan = "free"
         if isinstance(payload, dict):
             p = payload.get("plan")
@@ -365,6 +367,11 @@ async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
         return plan
 
     plan = await asyncio.to_thread(_sync_fetch)
+    if plan is None:
+        # Transient hub error: keep previous cache if any, else free for this call only.
+        if hit:
+            return hit[1]
+        return "free"
     _entitlements_cache[cache_key] = (now, plan)
     LOG.info("entitlements tg_ids=%s plan=%s s2s=%s", tg_ids, plan, int(has_s2s))
     return plan

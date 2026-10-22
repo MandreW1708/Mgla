@@ -55,12 +55,6 @@ public class MglaLocalModelsManager {
      */
     public static final ModelInfo[] CATALOG = {
         new ModelInfo(
-            "smollm2-135m",
-            "SmolLM2 135M Instruct",
-            "Крошечная модель, мгновенный инференс",
-            "https://huggingface.co/Felladrin/gguf-Q8_0-SmolLM2-135M-Instruct/resolve/main/smollm2-135m-instruct-q8_0.gguf",
-            150_000_000L),
-        new ModelInfo(
             "qwen25-0.5b",
             "Qwen2.5 0.5B Instruct",
             "Сильная малая модель, хорошее понимание русского",
@@ -237,6 +231,20 @@ public class MglaLocalModelsManager {
             "gemma3n", "gemma-3n",
             "deepseek-r1", "deepseek_r1",
             "llama-4", "llama4",
+            // Removed from catalog — tiny SmolLM2 only echoes / loops on-device.
+            "smollm2-135m", "smollm2_135m", "smollm-135m", "smolllm2-135m",
+            "135m-instruct", "smollm2-135m-instruct",
+    };
+
+    /** Ids / filename fragments that must be deleted if already on disk. */
+    private static final String[] BANNED_MODEL_MARKERS = {
+            "smollm2-135m",
+            "smollm2_135m",
+            "smollm-135m",
+            "smolllm2-135m",
+            "smollm2-135m-instruct",
+            "gguf-q8_0-smollm2-135m",
+            "q8_0-smollm2-135m",
     };
 
     /** Скачанная и выбранная модель (null — ничего не загружено). */
@@ -253,6 +261,7 @@ public class MglaLocalModelsManager {
      * Returns null if nothing selected or the file is incompatible.
      */
     public static File getRunnableModel(Context context) {
+        purgeBannedModels(context);
         File model = getLoadedModel(context);
         if (model == null) {
             return null;
@@ -334,9 +343,91 @@ public class MglaLocalModelsManager {
 
     /** Clear selection if the currently chosen file became incompatible. */
     public static void clearSelectionIfUnsupported(Context context) {
+        purgeBannedModels(context);
         File loaded = getLoadedModel(context);
         if (loaded != null && unsupportedReason(loaded) != null) {
             prefs().edit().putString(PREF_LOADED_MODEL, "").apply();
+        }
+    }
+
+    public static boolean isBannedModelId(String idOrName) {
+        if (TextUtils.isEmpty(idOrName)) {
+            return false;
+        }
+        String id = idOrName.toLowerCase(Locale.US);
+        for (String marker : BANNED_MODEL_MARKERS) {
+            if (id.contains(marker)) {
+                return true;
+            }
+        }
+        // Catch HF search hits like "Felladrin/...SmolLM2-135M..."
+        return id.contains("smollm2") && id.contains("135");
+    }
+
+    /**
+     * Remove banned GGUFs from disk (e.g. retired SmolLM2 135M), clear selection,
+     * and unload from RAM if that file was mapped.
+     */
+    public static synchronized void purgeBannedModels(Context context) {
+        if (context == null) {
+            context = ApplicationLoader.applicationContext;
+        }
+        if (context == null) {
+            return;
+        }
+        final Context app = context.getApplicationContext();
+        File dir = modelsDir(app);
+        File[] files = dir.listFiles();
+        String selected = getSelectedModelId();
+        boolean touchedSelection = isBannedModelId(selected);
+        String loadedPath = MglaLocalChatRuntime.loadedPath();
+        boolean unload = false;
+
+        if (files != null) {
+            for (File f : files) {
+                if (f == null || !f.isFile()) {
+                    continue;
+                }
+                String name = f.getName();
+                String lower = name.toLowerCase(Locale.US);
+                if (!lower.endsWith(".gguf") && !lower.endsWith(".gguf.part")) {
+                    continue;
+                }
+                if (!isBannedModelId(lower)) {
+                    continue;
+                }
+                String id = lower.endsWith(".gguf.part")
+                        ? name.substring(0, name.length() - ".gguf.part".length())
+                        : name.substring(0, name.length() - ".gguf".length());
+                if (loadedPath != null && f.getAbsolutePath().equals(loadedPath)) {
+                    unload = true;
+                }
+                if (selected != null && sanitizeId(selected).equalsIgnoreCase(id)) {
+                    touchedSelection = true;
+                }
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+                forgetCustomModel(id);
+                FileLog.d("MglaLocalModels: purged banned model " + name);
+            }
+        }
+
+        // Known catalog id even if renamed oddly.
+        File catalogBanned = modelFile(app, "smollm2-135m");
+        if (catalogBanned.exists()) {
+            if (loadedPath != null && catalogBanned.getAbsolutePath().equals(loadedPath)) {
+                unload = true;
+            }
+            touchedSelection = true;
+            //noinspection ResultOfMethodCallIgnored
+            catalogBanned.delete();
+        }
+
+        if (touchedSelection) {
+            prefs().edit().putString(PREF_LOADED_MODEL, "").apply();
+        }
+        if (unload && MglaLocalChatRuntime.isLoaded()) {
+            MglaLocalChatRuntime.unloadAsync(null);
         }
     }
 
@@ -423,6 +514,9 @@ public class MglaLocalModelsManager {
     public static String unsupportedReason(File modelFile) {
         if (modelFile == null || !modelFile.isFile()) {
             return "Файл модели не найден";
+        }
+        if (isBannedModelId(modelFile.getName())) {
+            return "Эта модель снята с поддержки (SmolLM2 135M). Удалите её и выберите другую из каталога.";
         }
         if (modelFile.length() < 1024) {
             return "Файл модели повреждён или пуст";
@@ -546,6 +640,12 @@ public class MglaLocalModelsManager {
 
     /** Запускает скачивание модели с HuggingFace. */
     public static void download(Context context, ModelInfo info, DownloadCallback callback) {
+        if (info != null && isBannedModelId(info.id)) {
+            if (callback != null) {
+                AndroidUtilities.runOnUIThread(() -> callback.onError("Эта модель снята с поддержки"));
+            }
+            return;
+        }
         if (isDownloading(info.id)) {
             return;
         }

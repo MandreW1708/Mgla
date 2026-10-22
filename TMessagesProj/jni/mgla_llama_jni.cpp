@@ -187,6 +187,133 @@ static bool emit_token(sink_bridge & s, const std::string & piece) {
     return keep == JNI_TRUE;
 }
 
+/** How many leading bytes form a complete UTF-8 prefix (0 if need more input). */
+static size_t utf8_complete_prefix_len(const std::string & s) {
+    size_t i = 0;
+    const size_t n = s.size();
+    while (i < n) {
+        unsigned char c = (unsigned char) s[i];
+        size_t need = 1;
+        if (c < 0x80) {
+            need = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            need = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            need = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            need = 4;
+        } else {
+            // Invalid lead — skip one byte so we don't stall forever.
+            i += 1;
+            continue;
+        }
+        if (i + need > n) {
+            break;
+        }
+        i += need;
+    }
+    return i;
+}
+
+/**
+ * Token pieces often split multi-byte UTF-8 (Cyrillic). Emitting incomplete sequences
+ * turns into U+FFFD (��) in Java — e.g. "привет" becomes "��ривет" in a loop.
+ */
+static bool emit_token_utf8_safe(sink_bridge & s, std::string & pending, const std::string & piece) {
+    pending += piece;
+    size_t complete = utf8_complete_prefix_len(pending);
+    if (complete == 0) {
+        return true;
+    }
+    std::string out = pending.substr(0, complete);
+    pending.erase(0, complete);
+    return emit_token(s, out);
+}
+
+static bool flush_utf8_pending(sink_bridge & s, std::string & pending) {
+    if (pending.empty()) {
+        return true;
+    }
+    std::string out = pending;
+    pending.clear();
+    return emit_token(s, out);
+}
+
+/** Tiny instruct models (SmolLM…) love greedy loops — stop when a short tail repeats. */
+static bool is_repeating_tail(const std::string & s) {
+    // "Привет. Привет." is already enough — don't wait for 4 copies.
+    if (s.size() < 8) {
+        return false;
+    }
+    for (int len = 3; len <= 48; len++) {
+        const int need = len <= 16 ? 2 : 3; // short phrases: stop on 2nd repeat
+        if ((int) s.size() < len * need) {
+            continue;
+        }
+        const std::string unit = s.substr(s.size() - (size_t) len);
+        bool meaningful = false;
+        bool sentence_like = false;
+        for (char c : unit) {
+            if (c == '.' || c == '!' || c == '?' || c == '\n') {
+                sentence_like = true;
+            }
+            if (c != ' ' && c != '\n' && c != '\t' && c != '.' && c != ',' && c != '!' && c != '?') {
+                meaningful = true;
+            }
+        }
+        if (!meaningful) {
+            continue;
+        }
+        const int threshold = sentence_like ? 2 : need;
+        int count = 0;
+        size_t pos = s.size();
+        while (pos >= (size_t) len && s.compare(pos - (size_t) len, (size_t) len, unit) == 0) {
+            count++;
+            pos -= (size_t) len;
+            if (count >= threshold) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/** Drop trailing repeated copies so UI keeps a single "Привет." not four. */
+static void trim_repeating_tail(std::string & s) {
+    if (s.size() < 8) {
+        return;
+    }
+    for (int len = 3; len <= 48; len++) {
+        if ((int) s.size() < len * 2) {
+            continue;
+        }
+        const std::string unit = s.substr(s.size() - (size_t) len);
+        bool meaningful = false;
+        for (char c : unit) {
+            if (c != ' ' && c != '\n' && c != '\t') {
+                meaningful = true;
+                break;
+            }
+        }
+        if (!meaningful) {
+            continue;
+        }
+        int count = 0;
+        size_t pos = s.size();
+        while (pos >= (size_t) len && s.compare(pos - (size_t) len, (size_t) len, unit) == 0) {
+            count++;
+            pos -= (size_t) len;
+        }
+        if (count >= 2) {
+            s.resize(pos + (size_t) len); // keep one copy
+            while (!s.empty() && (s.back() == ' ' || s.back() == '\n')) {
+                s.pop_back();
+            }
+            return;
+        }
+    }
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_telegram_messenger_MglaLlamaNative_nativeLastError(JNIEnv * env, jclass) {
     std::lock_guard<std::mutex> guard(g_err_lock);
@@ -345,21 +472,26 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
 
     float temp = std::max(0.0f, std::min(1.2f, (float) temperature));
     llama_sampler * sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    // Prefer greedy for tiny on-device instruct — less empty/garbage output.
+    // Greedy + repeat-penalty makes tiny models (SmolLM 135M) emit word salad.
+    // Stop loops via is_repeating_tail / same-token run instead.
     if (temp <= 0.05f) {
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     } else {
-        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(20));
-        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.85f, 1));
+        llama_sampler_chain_add(sampler, llama_sampler_init_penalties(/*last_n*/ 64, /*repeat*/ 1.12f, 0.0f, 0.0f));
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.9f, 1));
         llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp));
         llama_sampler_chain_add(sampler, llama_sampler_init_dist((uint32_t) llama_time_us()));
     }
 
     std::string output;
+    std::string utf8_pending;
     int n_past = (int) input.size();
     // Allow long CoT + answer (Qwen3 / reasoning GGUFs); still capped by n_ctx.
     int limit = std::max(8, std::min(2048, (int) max_tokens));
     int generated = 0;
+    llama_token last_token = -1;
+    int same_token_run = 0;
 
     for (int i = 0; i < limit && n_past < rt->n_ctx - 1; i++) {
         if (rt->abort.load()) {
@@ -371,6 +503,16 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
         if (llama_vocab_is_eog(vocab, token)) {
             LOGI("EOG at token %d after %d generated", token, generated);
             break;
+        }
+        if (token == last_token) {
+            same_token_run++;
+            if (same_token_run >= 24) {
+                LOGI("stop: same token x%d", same_token_run);
+                break;
+            }
+        } else {
+            last_token = token;
+            same_token_run = 1;
         }
 
         std::string piece = token_piece(vocab, token);
@@ -389,7 +531,15 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
         }
         output += piece;
         generated++;
-        if (!emit_token(bridge, piece)) {
+        if (is_repeating_tail(output)) {
+            // Keep a single copy in the streamed buffer — drop the duplicate tail
+            // that was about to be emitted (earlier pieces of the 2nd copy may
+            // already be on screen; Java sanitizeGeneratedText collapses them).
+            trim_repeating_tail(output);
+            LOGI("stop: repeating tail after %d tokens", generated);
+            break;
+        }
+        if (!emit_token_utf8_safe(bridge, utf8_pending, piece)) {
             rt->abort.store(true);
             set_last_error("генерация прервана");
             break;
@@ -406,6 +556,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
             break;
         }
     }
+    flush_utf8_pending(bridge, utf8_pending);
 
     llama_sampler_free(sampler);
     llama_batch_free(batch);
@@ -423,7 +574,11 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
             if (decode_tokens(rt, batch2, alt, 0)) {
                 llama_sampler * sampler2 = llama_sampler_chain_init(llama_sampler_chain_default_params());
                 llama_sampler_chain_add(sampler2, llama_sampler_init_greedy());
+                std::string utf8_pending2;
                 int n_past2 = (int) alt.size();
+                llama_token last2 = -1;
+                int same2 = 0;
+                std::string out2;
                 for (int i = 0; i < limit && n_past2 < rt->n_ctx - 1; i++) {
                     if (rt->abort.load()) {
                         break;
@@ -432,12 +587,24 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
                     if (llama_vocab_is_eog(vocab, token)) {
                         break;
                     }
+                    if (token == last2) {
+                        if (++same2 >= 24) {
+                            break;
+                        }
+                    } else {
+                        last2 = token;
+                        same2 = 1;
+                    }
                     std::string piece = token_piece(vocab, token);
                     if (piece.find("<|im_end|>") != std::string::npos) {
                         break;
                     }
+                    out2 += piece;
                     generated++;
-                    if (!emit_token(bridge, piece)) {
+                    if (is_repeating_tail(out2)) {
+                        break;
+                    }
+                    if (!emit_token_utf8_safe(bridge, utf8_pending2, piece)) {
                         break;
                     }
                     batch2.n_tokens = 1;
@@ -450,6 +617,7 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeGenerate(
                         break;
                     }
                 }
+                flush_utf8_pending(bridge, utf8_pending2);
                 llama_sampler_free(sampler2);
             }
             llama_batch_free(batch2);
@@ -577,7 +745,9 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeApplyChatTemplate(
 
     // Leading system message improves Instruct models across families.
     role_storage.emplace_back("system");
-    text_storage.emplace_back("Ты полезный ассистент. Отвечай кратко на языке пользователя.");
+    text_storage.emplace_back(
+            "Ты полезный ассистент. Отвечай кратко на языке пользователя. "
+            "Не повторяй сообщение пользователя — дай свой ответ.");
     msgs.push_back({role_storage.back().c_str(), text_storage.back().c_str()});
 
     for (jsize i = 0; i < n; i++) {
@@ -612,14 +782,15 @@ Java_org_telegram_messenger_MglaLlamaNative_nativeApplyChatTemplate(
     }
 
     const char * embedded = llama_model_chat_template(rt->model, nullptr);
-    // Prefer GGUF jinja (detected as ChatML / Gemma / Llama-3 / …), then short aliases.
+    // Prefer GGUF jinja; try ChatML before Llama-3 — many small Instruct GGUFs
+    // (SmolLM2) are ChatML but report architecture=llama.
     const char * try_tmpls[] = {
             embedded,
             "chatml",
+            "zephyr",
             "llama3",
             "gemma",
             "phi3",
-            "zephyr",
     };
 
     std::string formatted;
