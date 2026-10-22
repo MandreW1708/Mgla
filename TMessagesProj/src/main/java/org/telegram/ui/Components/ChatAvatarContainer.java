@@ -347,6 +347,13 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             communityItem.setScaleType(ImageView.ScaleType.CENTER);
             communityItem.setVisibility(GONE);
             communityItem.setImageDrawable(new CommunityArrowDrawable());
+            communityItem.setContentDescription(getString(R.string.Community));
+            communityItem.setOnClickListener(v -> {
+                // Telegram header: arrow opens the community sheet.
+                if (!onAvatarClick() && parentFragment != null) {
+                    openProfile(false);
+                }
+            });
             addView(communityItem);
 
             timeItem = new ImageView(context);
@@ -391,6 +398,10 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if (parentFragment != null && (parentFragment.getChatMode() == 0 || parentFragment.getChatMode() == ChatActivity.MODE_SUGGESTIONS || parentFragment.getChatMode() == ChatActivity.MODE_SAVED)) {
             if ((!parentFragment.isThreadChat() || parentFragment.isTopic || parentFragment.isComments) && !UserObject.isReplyUser(parentFragment.getCurrentUser()) && (parentFragment.getCurrentUser() == null || parentFragment.getCurrentUser().id != UserObject.VERIFY)) {
                 setOnClickListener(v -> {
+                    // Telegram header: tap on the nick pill opens the community sheet when linked.
+                    if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled() && onAvatarClick()) {
+                        return;
+                    }
                     openProfile(false);
                 });
             }
@@ -430,14 +441,16 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             AndroidUtilities.runOnUIThread(this.onLongClick, ViewConfiguration.getLongPressTimeout());
             return true;
         } else if (ev.getAction() == MotionEvent.ACTION_UP || ev.getAction() == MotionEvent.ACTION_CANCEL) {
-            if (pressed) {
-                bounce.setPressed(false);
-                pressed = false;
-                if (isClickable()) {
-                    openProfile(false);
+                if (pressed) {
+                    bounce.setPressed(false);
+                    pressed = false;
+                    if (isClickable()) {
+                        if (!(org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled() && onAvatarClick())) {
+                            openProfile(false);
+                        }
+                    }
+                    AndroidUtilities.cancelRunOnUIThread(this.onLongClick);
                 }
-                AndroidUtilities.cancelRunOnUIThread(this.onLongClick);
-            }
         }
         return super.onTouchEvent(ev);
     }
@@ -1211,7 +1224,10 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     public void setCommunityItemVisible(boolean visible) {
         if (communityItem != null) {
-            communityItem.setVisibility(visible && !avatarImageIsHidden ? VISIBLE : GONE);
+            // Standard / Clean: never show the community arrow.
+            // Telegram: show it next to the avatar so it can open CommunitySheet.
+            final boolean telegramHeader = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled();
+            communityItem.setVisibility(visible && telegramHeader && !avatarImageIsHidden ? VISIBLE : GONE);
         }
     }
 

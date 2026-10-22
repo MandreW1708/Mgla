@@ -40,7 +40,6 @@ import org.telegram.utils.dpi.MglaDpiConfig;
 import org.telegram.utils.dpi.MglaDpiStrategies;
 import org.telegram.utils.wsbypass.MglaWsBypass;
 import org.telegram.utils.wsbypass.MglaWsConfig;
-import org.telegram.utils.wsbypass.WsBypassCore;
 
 /**
  * Mgla -> Настройки Mgla -> Обход блокировок.
@@ -492,12 +491,9 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             } else if (ws.getRoute() == MglaWsBypass.Route.WEB) {
                 routeText = "WEB proxy (резерв)";
             } else if (MglaWsConfig.isUltraBypassEnabled()) {
-                routeText = "Ultra · " + MglaWsConfig.getRelayHost();
+                routeText = "Ultra · Финляндия";
             } else {
-                String region = MglaWsConfig.getBypassRegionLabel();
-                routeText = ws.isServerRunning() && ws.getPort() > 0
-                    ? "WS · " + region + " · " + WsBypassCore.LOCAL_PROXY_HOST + ":" + ws.getPort()
-                    : "WS · " + region;
+                routeText = "WS · " + MglaWsConfig.getBypassRegionLabel();
             }
             wsProxyCell.setValue(routeText, false);
         }
