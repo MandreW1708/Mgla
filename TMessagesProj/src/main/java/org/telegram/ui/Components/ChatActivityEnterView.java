@@ -3407,15 +3407,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                         }
                     }
 
-                    // Stock Telegram mic disc: 38dp in the (possibly 44dp) slot, vertically centered.
+                    // 38dp mic disc, vertically centered in the (44dp) slot.
                     final float r = dpf2(19);
                     paint.setColor(getThemedColor(Theme.key_chat_messagePanelSend));
                     final float margin = dpf2(3);
                     final float height = dpf2(38);
                     final float width = dpf2(38);
-                    final float top = getMeasuredHeight() >= height + margin * 2f
-                            ? (getMeasuredHeight() - height) / 2f
-                            : (getMeasuredHeight() - height - margin);
+                    final float top = (getMeasuredHeight() - height) / 2f;
                     backgroundRect.set(
                             getMeasuredWidth() - width - margin,
                             top,
@@ -6047,8 +6045,9 @@ public class ChatActivityEnterView extends FrameLayout implements
             msgLeftMargin += leftChrome + dp(12) + dp(1) - dp(3);
         }
         messageEditText.setMinimumHeight(getPanelRowHeight());
-        // Stock uses 1.5dp bottom inset under the field in the glass row.
-        final float textBottomMargin = 1.5f;
+        // Telegram 44dp row: no extra bottom margin — otherwise the pill is >44dp and
+        // bottom-pinned send/mic sit optically below the vertical center.
+        final float textBottomMargin = useTelegramBottomPanelLayout() ? 0f : 1.5f;
         messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, useStaticSendButton() ? INPUT_INNER_BUTTON_RIGHT_MARGIN : (isChat ? 50 : 2), textBottomMargin));
         if (aiEditorButton != null) {
             aiEditorButton.bringToFront();
@@ -15473,7 +15472,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 + (aiEditorButton != null ? dp(chrome) : 0);
             final int textRight = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(isChat ? 50 : 2);
             final int lineH = getPanelRowHeight();
-            final int bottomMargin = dp(1.5f);
+            final int bottomMargin = telegramPanel ? 0 : dp(1.5f);
             if (textLp.leftMargin != textLeft || textLp.rightMargin != textRight || textLp.height != LayoutHelper.WRAP_CONTENT || textLp.gravity != Gravity.BOTTOM || textLp.bottomMargin != bottomMargin) {
                 textLp.leftMargin = textLeft;
                 textLp.rightMargin = textRight;
@@ -16325,17 +16324,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                 return false;
             }
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                if (externalGlassBackground) {
-                    // Glass send sits centered in the view; the stock hit-test below
-                    // assumes bottom-right alignment and leaves a dead zone on the
-                    // top/left of the round button (taps "don't always register").
-                    checkBackgroundRect();
-                    final float pad = dp(2);
-                    if (event.getX() < backgroundRect.left - pad || event.getX() > backgroundRect.right + pad
-                            || event.getY() < backgroundRect.top - pad || event.getY() > backgroundRect.bottom + pad) {
-                        return false;
-                    }
-                } else if (event.getX() < getWidth() - width() || event.getY() < getHeight() - height()) {
+                // Disc is vertically centered in the slot; hit-test against backgroundRect
+                // (stock bottom-right math leaves a dead zone on the top of a 44dp row).
+                checkBackgroundRect();
+                final float pad = dp(2);
+                if (event.getX() < backgroundRect.left - pad || event.getX() > backgroundRect.right + pad
+                        || event.getY() < backgroundRect.top - pad || event.getY() > backgroundRect.bottom + pad) {
                     return false;
                 }
             }
@@ -16424,8 +16418,8 @@ public class ChatActivityEnterView extends FrameLayout implements
         private static final int RADIUS = 19;
 
         private void checkBackgroundRect() {
-            // Stock Telegram (DrKLO): 38dp disc. In the 44dp row it sits with equal 3dp inset.
-            // Mgla Standard external-glass: centered in the view.
+            // 38dp disc, vertically centered in the slot (44dp Telegram row → equal 3dp inset).
+            // Mgla Standard external-glass: also centered in the view.
             final float margin = dpf2(3);
             final float height = dpf2(38);
             final float width = lerp(
@@ -16438,21 +16432,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                         (getMeasuredWidth() + width) / 2f,
                         (getMeasuredHeight() + height) / 2f
                 );
-            } else if (getMeasuredHeight() >= height + margin * 2f) {
-                // Taller slot (44): vertically center the disc, keep right inset.
+            } else {
                 final float top = (getMeasuredHeight() - height) / 2f;
                 backgroundRect.set(
                         getMeasuredWidth() - width - margin,
                         top,
                         getMeasuredWidth() - margin,
                         top + height
-                );
-            } else {
-                backgroundRect.set(
-                        getMeasuredWidth() - width - margin,
-                        getMeasuredHeight() - height - margin,
-                        getMeasuredWidth() - margin,
-                        getMeasuredHeight() - margin
                 );
             }
         }
