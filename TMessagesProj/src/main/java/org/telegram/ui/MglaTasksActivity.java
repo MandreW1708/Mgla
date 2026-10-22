@@ -2,7 +2,10 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -19,6 +22,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.animation.ValueAnimator;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -27,6 +31,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.ColorUtils;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -35,8 +40,10 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MglaTask;
 import org.telegram.messenger.MglaTaskRepeat;
+import org.telegram.messenger.MglaTasksIO;
 import org.telegram.messenger.MglaTasksReminderScheduler;
 import org.telegram.messenger.MglaTasksStorage;
+import org.telegram.messenger.MglaTasksWidgetProvider;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -44,6 +51,7 @@ import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.MglaGlobalMusicBar;
 import org.telegram.ui.Components.MglaTaskCell;
@@ -70,6 +78,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
     private static final int MENU_GROUPS = 1;
     private static final int MENU_TOGGLE_DONE = 2;
+    private static final int MENU_CLEAR_DONE = 3;
+    private static final int MENU_EXPORT = 4;
+    private static final int MENU_IMPORT = 5;
+    private static final int MENU_SEARCH = 6;
 
     private static final int ROW_HEADER = 0;
     private static final int ROW_TASK = 1;
@@ -79,6 +91,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private boolean showDone = true;
     private long selectedGroupId = -1; // -1 = все, 0 = без группы, >0 = группа
     private int selectedTab; // 0 = list, 1 = calendar
+    private String searchQuery = "";
 
     private FrameLayout rootLayout;
 
@@ -126,6 +139,8 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private final Date dateInstance = new Date();
 
     private MglaTask pendingReminderTask;
+    private long openTaskId;
+    private static long pendingOpenTaskId;
 
     private static class Row {
         int type;
@@ -133,10 +148,15 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         MglaTask task;
     }
 
+    public static void requestOpenTask(long taskId) {
+        pendingOpenTaskId = taskId;
+    }
+
     public MglaTasksActivity(Bundle args) {
         super(args);
         if (args != null) {
             hasMainTabs = args.getBoolean("hasMainTabs", false);
+            openTaskId = args.getLong("openTaskId", 0);
         }
         iBlur3SourceColor = new BlurredBackgroundSourceColor();
         iBlur3SourceColor.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -215,16 +235,55 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                     listAdapter.notifyDataSetChanged();
                     updateEmptyState();
                     updateDayTasks();
+                } else if (id == MENU_CLEAR_DONE) {
+                    confirmClearDone();
+                } else if (id == MENU_EXPORT) {
+                    exportTasks();
+                } else if (id == MENU_IMPORT) {
+                    importTasks();
                 }
             }
         });
 
         showDone = getPreferences().getBoolean("tasks_show_done", true);
 
+        ActionBarMenuItem searchItem = actionBar.createMenu().addItem(MENU_SEARCH, R.drawable.outline_header_search);
+        searchItem.setIsSearchField(true);
+        searchItem.setSearchFieldHint("Поиск задач");
+        searchItem.setActionBarMenuItemSearchListener(new ActionBarMenuItem.ActionBarMenuItemSearchListener() {
+            @Override
+            public void onSearchExpand() {
+            }
+
+            @Override
+            public void onSearchCollapse() {
+                searchQuery = "";
+                applyGroupFilter();
+                rebuildRows();
+                listAdapter.notifyDataSetChanged();
+                updateEmptyState();
+                updateDayTasks();
+            }
+
+            @Override
+            public void onTextChanged(EditText editText) {
+                searchQuery = editText.getText() != null ? editText.getText().toString().trim() : "";
+                applyGroupFilter();
+                rebuildRows();
+                listAdapter.notifyDataSetChanged();
+                updateEmptyState();
+                calendarView.setTasks(filteredTasks);
+                updateDayTasks();
+            }
+        });
+
         ActionBarMenuItem menu = actionBar.createMenu().addItem(0, R.drawable.ic_ab_other);
         menu.addSubItem(MENU_GROUPS, "Группы");
         toggleDoneItem = menu.addSubItem(MENU_TOGGLE_DONE, "");
         updateToggleDoneItem();
+        menu.addSubItem(MENU_CLEAR_DONE, "Очистить выполненные");
+        menu.addSubItem(MENU_EXPORT, "Экспорт JSON");
+        menu.addSubItem(MENU_IMPORT, "Импорт из буфера");
 
         rootLayout = new FrameLayout(context) {
             @Override
@@ -315,6 +374,53 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             }
             return false;
         });
+        ItemTouchHelper touchHelper = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
+            @Override
+            public boolean onMove(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder, @NonNull RecyclerView.ViewHolder target) {
+                int from = viewHolder.getAdapterPosition();
+                int to = target.getAdapterPosition();
+                if (from < 0 || to < 0 || from >= rows.size() || to >= rows.size()) {
+                    return false;
+                }
+                Row fromRow = rows.get(from);
+                Row toRow = rows.get(to);
+                if (fromRow.type != ROW_TASK || toRow.type != ROW_TASK || fromRow.task == null || toRow.task == null) {
+                    return false;
+                }
+                Collections.swap(rows, from, to);
+                int tmp = fromRow.task.sortOrder;
+                fromRow.task.sortOrder = toRow.task.sortOrder;
+                toRow.task.sortOrder = tmp;
+                listAdapter.notifyItemMoved(from, to);
+                ArrayList<MglaTask> ordered = new ArrayList<>();
+                for (Row row : rows) {
+                    if (row.type == ROW_TASK && row.task != null && !row.task.done) {
+                        ordered.add(row.task);
+                    }
+                }
+                MglaTasksStorage.getInstance().updateTaskSortOrders(ordered);
+                return true;
+            }
+
+            @Override
+            public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int direction) {
+            }
+
+            @Override
+            public boolean isLongPressDragEnabled() {
+                return true;
+            }
+
+            @Override
+            public int getMovementFlags(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
+                int pos = viewHolder.getAdapterPosition();
+                if (pos < 0 || pos >= rows.size() || rows.get(pos).type != ROW_TASK) {
+                    return makeMovementFlags(0, 0);
+                }
+                return makeMovementFlags(ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0);
+            }
+        });
+        touchHelper.attachToRecyclerView(listView);
         listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
@@ -424,7 +530,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         rootLayout.addView(fab, fabParams);
 
         MglaTasksStorage.getInstance().addListener(this);
-        MglaTasksStorage.getInstance().ensureLoaded(this::reloadData);
+        MglaTasksStorage.getInstance().ensureLoaded(() -> {
+            reloadData();
+            openPendingTaskIfNeeded();
+        });
         MglaGlobalMusicBar.addGlobalVisibilityListener(musicBarVisibilityListener);
 
         // Capture lists for the bottom tabs/player liquid glass.
@@ -433,6 +542,27 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
         fragmentView = rootLayout;
         return fragmentView;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        openPendingTaskIfNeeded();
+    }
+
+    public void openPendingTaskIfNeeded() {
+        long id = openTaskId != 0 ? openTaskId : pendingOpenTaskId;
+        if (id == 0 || getContext() == null) {
+            return;
+        }
+        openTaskId = 0;
+        pendingOpenTaskId = 0;
+        MglaTasksStorage.getInstance().ensureLoaded(() -> {
+            MglaTask task = MglaTasksStorage.getInstance().getTask(id);
+            if (task != null) {
+                openTaskDetails(task);
+            }
+        });
     }
 
     private void blur3_InvalidateBlur() {
@@ -544,10 +674,19 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
 
     private void applyGroupFilter() {
         filteredTasks.clear();
+        String q = searchQuery != null ? searchQuery.toLowerCase(Locale.getDefault()) : "";
         for (MglaTask task : allTasks) {
-            if (selectedGroupId == -1 || task.groupId == selectedGroupId) {
-                filteredTasks.add(task);
+            if (selectedGroupId != -1 && task.groupId != selectedGroupId) {
+                continue;
             }
+            if (!TextUtils.isEmpty(q)) {
+                String title = task.title != null ? task.title.toLowerCase(Locale.getDefault()) : "";
+                String note = task.note != null ? task.note.toLowerCase(Locale.getDefault()) : "";
+                if (!title.contains(q) && !note.contains(q)) {
+                    continue;
+                }
+            }
+            filteredTasks.add(task);
         }
     }
 
@@ -668,17 +807,18 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         ArrayList<MglaTask> done = new ArrayList<>();
 
         for (MglaTask task : filteredTasks) {
+            long due = MglaTaskRepeat.effectiveDueAt(task);
             if (task.done) {
                 done.add(task);
-            } else if (task.dueAt <= 0) {
+            } else if (due <= 0) {
                 noDate.add(task);
-            } else if (task.dueAt < todayStart) {
+            } else if (due < todayStart) {
                 overdue.add(task);
-            } else if (task.dueAt < tomorrowStart) {
+            } else if (due < tomorrowStart) {
                 today.add(task);
-            } else if (task.dueAt < dayAfterTomorrowStart) {
+            } else if (due < dayAfterTomorrowStart) {
                 tomorrow.add(task);
-            } else if (task.dueAt < weekEnd) {
+            } else if (due < weekEnd) {
                 week.add(task);
             } else {
                 later.add(task);
@@ -712,10 +852,22 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             return;
         }
         Collections.sort(section, (a, b) -> {
-            long da = a.dueAt > 0 ? a.dueAt : Long.MAX_VALUE;
-            long db = b.dueAt > 0 ? b.dueAt : Long.MAX_VALUE;
+            if (a.priority != b.priority) {
+                return Integer.compare(b.priority, a.priority);
+            }
+            long da = MglaTaskRepeat.effectiveDueAt(a);
+            long db = MglaTaskRepeat.effectiveDueAt(b);
+            if (da <= 0) {
+                da = Long.MAX_VALUE;
+            }
+            if (db <= 0) {
+                db = Long.MAX_VALUE;
+            }
             if (da != db) {
                 return Long.compare(da, db);
+            }
+            if (a.sortOrder != b.sortOrder) {
+                return Integer.compare(a.sortOrder, b.sortOrder);
             }
             return Long.compare(b.createdAt, a.createdAt);
         });
@@ -734,7 +886,9 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private void updateEmptyState() {
         boolean empty = rows.isEmpty();
         String emptyText;
-        if (selectedGroupId > 0) {
+        if (!TextUtils.isEmpty(searchQuery)) {
+            emptyText = "Ничего не найдено";
+        } else if (selectedGroupId > 0) {
             emptyText = "В этой группе задач нет";
         } else if (selectedGroupId == 0) {
             emptyText = "Задач без группы нет";
@@ -744,6 +898,81 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         emptyTitle.setText(emptyText);
         emptyView.setVisibility(empty ? View.VISIBLE : View.GONE);
         listView.setVisibility(empty ? View.GONE : View.VISIBLE);
+    }
+
+    private void confirmClearDone() {
+        Context context = getContext();
+        if (context == null) {
+            return;
+        }
+        int count = 0;
+        for (MglaTask task : allTasks) {
+            if (task.done) {
+                count++;
+            }
+        }
+        if (count == 0) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Выполненных задач нет").show();
+            return;
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle("Очистить выполненные?");
+        builder.setMessage("Будет удалено задач: " + count);
+        builder.setPositiveButton("Удалить", (d, w) -> {
+            MglaTasksStorage.getInstance().deleteDoneTasks();
+            MglaTasksWidgetProvider.updateAll();
+        });
+        builder.setNegativeButton("Отмена", null);
+        showDialog(builder.create());
+    }
+
+    private void exportTasks() {
+        try {
+            String json = MglaTasksIO.exportJson();
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TEXT, json);
+            intent.putExtra(Intent.EXTRA_SUBJECT, "Mgla tasks");
+            startActivityForResult(Intent.createChooser(intent, "Экспорт задач"), 0);
+            ClipboardManager clipboard = (ClipboardManager) ApplicationLoader.applicationContext.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("mgla_tasks", json));
+            }
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "JSON скопирован и готов к отправке").show();
+        } catch (Exception e) {
+            BulletinFactory.of(this).createErrorBulletin("Не удалось экспортировать").show();
+        }
+    }
+
+    private void importTasks() {
+        Context context = getContext();
+        if (context == null) {
+            return;
+        }
+        ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+        CharSequence clip = null;
+        if (clipboard != null && clipboard.hasPrimaryClip() && clipboard.getPrimaryClip() != null && clipboard.getPrimaryClip().getItemCount() > 0) {
+            clip = clipboard.getPrimaryClip().getItemAt(0).coerceToText(context);
+        }
+        if (clip == null || TextUtils.isEmpty(clip)) {
+            BulletinFactory.of(this).createErrorBulletin("В буфере нет JSON").show();
+            return;
+        }
+        final String json = clip.toString();
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle("Импорт задач?");
+        builder.setMessage("Задачи из буфера обмена будут добавлены к текущим.");
+        builder.setPositiveButton("Импорт", (d, w) -> {
+            try {
+                int count = MglaTasksIO.importJson(json);
+                MglaTasksWidgetProvider.updateAll();
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Импортировано: " + count).show();
+            } catch (Exception e) {
+                BulletinFactory.of(this).createErrorBulletin("Некорректный JSON").show();
+            }
+        });
+        builder.setNegativeButton("Отмена", null);
+        showDialog(builder.create());
     }
 
     private void updateDayTasks() {
@@ -761,8 +990,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             if (a.done != b.done) {
                 return a.done ? 1 : -1;
             }
-            if (a.dueAt != b.dueAt) {
-                return Long.compare(a.dueAt, b.dueAt);
+            long da = MglaTaskRepeat.effectiveDueAt(a);
+            long db = MglaTaskRepeat.effectiveDueAt(b);
+            if (da != db) {
+                return Long.compare(da, db);
             }
             return Long.compare(b.createdAt, a.createdAt);
         });
@@ -777,6 +1008,21 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
             MglaTasksReminderScheduler.schedule(task);
         } else {
             MglaTasksReminderScheduler.cancel(task.id);
+        }
+    }
+
+    private void onTaskCheckClicked(MglaTask task) {
+        if (task == null) {
+            return;
+        }
+        if (task.done) {
+            MglaTasksStorage.getInstance().setTaskDone(task.id, false);
+            MglaTask updated = MglaTasksStorage.getInstance().getTask(task.id);
+            if (updated != null) {
+                applyReminder(updated);
+            }
+        } else {
+            MglaTasksReminderScheduler.completeTask(task.id);
         }
     }
 
@@ -872,16 +1118,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                         openLinkedMessage(task);
                     }
                 });
-                cell.setOnCheckClickListener(v -> {
-                    MglaTask task = cell.getTask();
-                    if (task != null) {
-                        boolean done = !task.done;
-                        MglaTasksStorage.getInstance().setTaskDone(task.id, done);
-                        if (done) {
-                            MglaTasksReminderScheduler.cancel(task.id);
-                        }
-                    }
-                });
+                cell.setOnCheckClickListener(v -> onTaskCheckClicked(cell.getTask()));
                 view = cell;
             } else if (viewType == ROW_DONE_HEADER) {
                 LinearLayout container = new LinearLayout(context);
@@ -941,16 +1178,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                     openLinkedMessage(task);
                 }
             });
-            cell.setOnCheckClickListener(v -> {
-                MglaTask task = cell.getTask();
-                if (task != null) {
-                    boolean done = !task.done;
-                    MglaTasksStorage.getInstance().setTaskDone(task.id, done);
-                    if (done) {
-                        MglaTasksReminderScheduler.cancel(task.id);
-                    }
-                }
-            });
+            cell.setOnCheckClickListener(v -> onTaskCheckClicked(cell.getTask()));
             return new Holder(cell);
         }
 

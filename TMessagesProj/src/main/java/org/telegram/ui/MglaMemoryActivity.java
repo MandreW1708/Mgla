@@ -28,6 +28,11 @@ import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaMemoryEngine;
 import org.telegram.messenger.MglaMemoryExtractor;
 import org.telegram.messenger.MglaMemoryStorage;
+import org.telegram.messenger.MglaSubscription;
+import org.telegram.messenger.MglaTask;
+import org.telegram.messenger.MglaTasksReminderScheduler;
+import org.telegram.messenger.MglaTasksStorage;
+import org.telegram.messenger.MglaTasksWidgetProvider;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.ConnectionsManager;
@@ -641,31 +646,89 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         card.addView(label(context, meta), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 14, 6, 14, 0));
 
         LinearLayout actions = new LinearLayout(context);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        addAction(actions, "К сообщению", () -> openFactSource(fact));
-        addAction(actions, "Почему", () -> showWhy(fact));
-        addAction(actions, "Править", () -> editFact(fact));
+        actions.setOrientation(LinearLayout.VERTICAL);
+        actions.setPadding(dp(10), dp(8), dp(10), dp(10));
+
+        LinearLayout primary = actionRow();
+        addActionChip(primary, "К сообщению", ActionTone.PRIMARY, () -> openFactSource(fact));
+        addActionChip(primary, "Почему", ActionTone.NORMAL, () -> showWhy(fact));
+        addActionChip(primary, "Править", ActionTone.NORMAL, () -> editFact(fact));
+        actions.addView(primary, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        LinearLayout secondary = actionRow();
+        if (MglaMemoryStorage.TYPE_PLAN.equals(fact.type) || MglaMemoryStorage.TYPE_PROMISE.equals(fact.type)) {
+            addActionChip(secondary, "В задачи", ActionTone.PRIMARY, () -> createTaskFromFact(fact));
+        }
         if (MglaMemoryStorage.STATUS_EXCLUDED.equals(fact.status)) {
-            addAction(actions, "Вернуть в ответы", () -> {
+            addActionChip(secondary, "Вернуть", ActionTone.NORMAL, () -> {
                 MglaMemoryEngine.setFactStatus(currentAccount, fact.id, MglaMemoryStorage.STATUS_OPEN);
                 reloadFacts();
                 reloadOverview();
             });
         } else {
-            addAction(actions, "Не использовать", () -> {
+            addActionChip(secondary, "Скрыть", ActionTone.MUTED, () -> {
                 MglaMemoryEngine.setFactStatus(currentAccount, fact.id, MglaMemoryStorage.STATUS_EXCLUDED);
                 reloadFacts();
                 reloadOverview();
             });
         }
-        addAction(actions, "Удалить", () -> {
+        addActionChip(secondary, "Удалить", ActionTone.DANGER, () -> {
             MglaMemoryEngine.deleteFact(currentAccount, fact.id);
             reloadFacts();
             reloadOverview();
             reloadGraph();
         });
-        card.addView(actions, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 4, 8, 8));
+        actions.addView(secondary, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 6, 0, 0));
+        card.addView(actions, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         return card;
+    }
+
+    private enum ActionTone {
+        PRIMARY, NORMAL, MUTED, DANGER
+    }
+
+    private LinearLayout actionRow() {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        return row;
+    }
+
+    private void addActionChip(LinearLayout row, String text, ActionTone tone, Runnable action) {
+        TextView button = new TextView(context);
+        button.setText(text);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        button.setTypeface(AndroidUtilities.bold());
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(12), dp(7), dp(12), dp(7));
+        button.setSingleLine(true);
+        button.setEllipsize(TextUtils.TruncateAt.END);
+        button.setOnClickListener(v -> action.run());
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        int textColor;
+        switch (tone) {
+            case PRIMARY:
+                bg.setColor(accentSoft(0x28));
+                textColor = accent();
+                break;
+            case DANGER:
+                bg.setColor(0x14E53935);
+                textColor = 0xFFE53935;
+                break;
+            case MUTED:
+                bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+                textColor = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
+                break;
+            default:
+                bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+                textColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+                break;
+        }
+        button.setBackground(bg);
+        button.setTextColor(textColor);
+        row.addView(button, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 6, 0));
     }
 
     private void showWhy(MglaMemoryStorage.MemoryFact fact) {
@@ -692,6 +755,37 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
                     reloadOverview();
                 }, 250);
             });
+    }
+
+    private void createTaskFromFact(MglaMemoryStorage.MemoryFact fact) {
+        if (fact == null || TextUtils.isEmpty(fact.text)) {
+            return;
+        }
+        if (!MglaSubscription.canUseTasks()) {
+            presentFragment(new MglaPremiumActivity());
+            return;
+        }
+        String title = fact.text.trim().replace('\n', ' ');
+        if (title.length() > 120) {
+            title = title.substring(0, 120);
+        }
+        MglaTask task = new MglaTask();
+        task.account = currentAccount;
+        task.title = title;
+        task.note = "Из живой памяти";
+        task.createdAt = System.currentTimeMillis();
+        task.dialogId = fact.uid;
+        task.messageId = firstMid(fact.sourceMids);
+        task.priority = MglaTask.PRIORITY_NORMAL;
+        MglaTasksStorage storage = MglaTasksStorage.getInstance();
+        storage.ensureLoaded(() -> {
+            storage.saveTask(task);
+            if (task.remindAt > 0) {
+                MglaTasksReminderScheduler.schedule(task);
+            }
+            MglaTasksWidgetProvider.updateAll();
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Добавлено в задачи").show();
+        });
     }
 
     private void openFactSource(MglaMemoryStorage.MemoryFact fact) {
@@ -1227,16 +1321,6 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         }
         chip.setBackground(bg);
         chip.setTextColor(selected ? accent() : Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-    }
-
-    private void addAction(LinearLayout row, String text, Runnable action) {
-        TextView button = new TextView(context);
-        button.setText(text);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        button.setTextColor(accent());
-        button.setPadding(dp(8), dp(8), dp(8), dp(8));
-        button.setOnClickListener(v -> action.run());
-        row.addView(button);
     }
 
     private static boolean isHot(String type) {

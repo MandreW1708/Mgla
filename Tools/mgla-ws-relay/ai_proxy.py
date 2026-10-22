@@ -8,6 +8,7 @@ Runs next to relay.py. Clients call:
   POST /mgla-ai/v1/features          ??? feature flags (proxies to mglahub)
   POST /mgla-ai/v1/update-check      ??? in-app update check (proxies to mglahub)
   GET  /mgla-ai/v1/update-apk        ??? APK download (proxies to mglahub)
+  GET  /mgla-ai/v1/fetch?url=…       — stream allowlisted HTTPS (HuggingFace models/API)
   GET  /mgla-ai/v1/models            — model list + crowd status (up/degraded/down, no probes)
   POST /mgla-ai/v1/models/report     — crowd success/failure (1→yellow, 2+→red)
   POST /mgla-ai/v1/stats-batch       ??? anonymous stats batch (proxies to mglahub)
@@ -49,9 +50,19 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit
 
 import mgla_token
+
+# Local GGUF / Whisper downloads & HF search via bypass.
+FETCH_HOST_SUFFIXES = (
+    "huggingface.co",
+    "hf.co",
+    "hf.space",
+)
+FETCH_MAX_REDIRECTS = 8
+# Larger chunks cut syscall/TLS overhead on multi‑hundred‑MB GGUF/Whisper downloads.
+FETCH_CHUNK = 256 * 1024
 
 HOST = os.environ.get("MGLA_AI_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MGLA_AI_PORT", "8768"))
@@ -826,17 +837,31 @@ _entitlements_cache: dict[str, tuple[float, str]] = {}
 _ENTITLEMENTS_TTL = 45.0
 
 
-def fetch_hub_plan(tg_ids: list[int]) -> str:
-    """Best paid plan among tg_ids according to mglahub subscriptions (cached)."""
+def fetch_hub_plan(tg_ids: list[int], client_token: str = "") -> str:
+    """Best paid plan among tg_ids according to mglahub subscriptions (cached).
+
+    Forwards the client JWT when the local node has no dedicated hub sync
+    secret (Ultra Finland). Hub then authorizes via JWT ownership filters.
+    """
+    import hashlib
     import mgla_entitlements
 
     ids = [int(x) for x in tg_ids if isinstance(x, int) and x > 0]
     if not ids:
         return PLAN_FREE
-    if not HUB_ENTITLEMENTS_URL or not HUB_ENTITLEMENTS_TOKEN:
+    client_token = (client_token or "").strip()
+    if not HUB_ENTITLEMENTS_URL:
+        log.warning("entitlements URL missing — treating as free")
+        return PLAN_FREE
+    if not HUB_ENTITLEMENTS_TOKEN and not client_token:
         log.warning("entitlements URL/token missing — treating as free")
         return PLAN_FREE
-    cache_key = ",".join(str(x) for x in sorted(ids))
+    tok_part = (
+        "s2s"
+        if (HUB_ENTITLEMENTS_TOKEN and HUB_ENTITLEMENTS_TOKEN != TOKEN and not client_token)
+        else hashlib.sha256((client_token or HUB_ENTITLEMENTS_TOKEN or "").encode()).hexdigest()[:16]
+    )
+    cache_key = tok_part + ":" + ",".join(str(x) for x in sorted(ids))
     now = time.time()
     hit = _entitlements_cache.get(cache_key)
     if hit and now - hit[0] < _ENTITLEMENTS_TTL:
@@ -845,9 +870,15 @@ def fetch_hub_plan(tg_ids: list[int]) -> str:
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "X-Mgla-Client": "mgla",
-        "X-Mgla-Sync-Token": HUB_ENTITLEMENTS_TOKEN,
-        "X-Mgla-Entitlements-Token": HUB_ENTITLEMENTS_TOKEN,
     }
+    if HUB_ENTITLEMENTS_TOKEN and HUB_ENTITLEMENTS_TOKEN != TOKEN:
+        headers["X-Mgla-Sync-Token"] = HUB_ENTITLEMENTS_TOKEN
+        headers["X-Mgla-Entitlements-Token"] = HUB_ENTITLEMENTS_TOKEN
+    elif HUB_ENTITLEMENTS_TOKEN and not client_token:
+        headers["X-Mgla-Sync-Token"] = HUB_ENTITLEMENTS_TOKEN
+        headers["X-Mgla-Entitlements-Token"] = HUB_ENTITLEMENTS_TOKEN
+    if client_token:
+        headers["X-Mgla-Token"] = client_token
     req = urllib.request.Request(
         HUB_ENTITLEMENTS_URL, data=body, method="POST", headers=headers
     )
@@ -964,6 +995,30 @@ def call_gemini_json(api_key: str, model: str, body: dict) -> str:
         raise RuntimeError(f"Gemini HTTP {e.code}: {err_body}") from e
 
 
+def fetch_host_allowed(host: str) -> bool:
+    h = (host or "").lower().strip().strip(".")
+    if not h or "/" in h:
+        return False
+    if ":" in h:
+        h = h.split(":", 1)[0]
+    for suffix in FETCH_HOST_SUFFIXES:
+        if h == suffix or h.endswith("." + suffix):
+            return True
+    return False
+
+
+def fetch_url_allowed(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return False
+    if parts.scheme.lower() != "https":
+        return False
+    if parts.username or parts.password:
+        return False
+    return fetch_host_allowed(parts.hostname or "")
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "mgla-ai-proxy"
     sys_version = ""
@@ -1046,8 +1101,102 @@ class Handler(BaseHTTPRequestHandler):
             self._get_models()
         elif path == "/mgla-ai/v1/update-apk":
             self._get_update_apk()
+        elif path == "/mgla-ai/v1/fetch":
+            self._get_fetch()
         else:
             self._reply(404)
+
+    def _get_fetch(self):
+        """Stream allowlisted HTTPS (HuggingFace) for local model downloads via bypass."""
+        if not self._check_token():
+            return
+        qs = parse_qs(urlsplit(self.path).query)
+        raw_url = (qs.get("url") or [""])[0]
+        target = unquote(raw_url).strip()
+        if not target or not fetch_url_allowed(target):
+            self._reply(400, b'{"error":"url not allowed"}')
+            return
+        headers = {
+            "User-Agent": self.headers.get("User-Agent") or "Mgla/1.0",
+            "Accept": self.headers.get("Accept") or "*/*",
+        }
+        range_h = self.headers.get("Range")
+        if range_h:
+            headers["Range"] = range_h[:200]
+        current = target
+        resp = None
+        headers_sent = False
+        try:
+            for _ in range(FETCH_MAX_REDIRECTS):
+                if not fetch_url_allowed(current):
+                    self._reply(400, b'{"error":"redirect not allowed"}')
+                    return
+                req = urllib.request.Request(current, method="GET", headers=headers)
+                try:
+                    # Connect/read timeout: long streams keep the socket alive per-read.
+                    resp = urllib.request.urlopen(req, timeout=180)
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code in (301, 302, 303, 307, 308):
+                        loc = e.headers.get("Location") or ""
+                        e.close()
+                        if not loc:
+                            self._reply(502, b'{"error":"bad redirect"}')
+                            return
+                        current = urljoin(current, loc)
+                        continue
+                    body = e.read(2048)
+                    self.send_response(int(e.code))
+                    self.send_header("Content-Type", e.headers.get("Content-Type") or "text/plain")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    headers_sent = True
+                    if body:
+                        self.wfile.write(body)
+                    return
+            else:
+                self._reply(502, b'{"error":"too many redirects"}')
+                return
+
+            self.send_response(int(resp.status))
+            self.send_header("Content-Type", resp.headers.get("Content-Type") or "application/octet-stream")
+            clen = resp.headers.get("Content-Length")
+            if clen:
+                self.send_header("Content-Length", clen)
+            crange = resp.headers.get("Content-Range")
+            if crange:
+                self.send_header("Content-Range", crange)
+            accept_ranges = resp.headers.get("Accept-Ranges")
+            if accept_ranges:
+                self.send_header("Accept-Ranges", accept_ranges)
+            # Advertise ranges so clients can resume after a dropped Ultra/WS link.
+            elif not crange:
+                self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            headers_sent = True
+            while True:
+                chunk = resp.read(FETCH_CHUNK)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                try:
+                    self.wfile.flush()
+                except Exception:
+                    pass
+        except (urllib.error.URLError, TimeoutError, OSError, BrokenPipeError) as e:
+            log.warning("fetch failed url=%s err=%s", target[:120], e)
+            if not headers_sent:
+                try:
+                    self._reply(502, b'{"error":"fetch failed"}')
+                except Exception:
+                    pass
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
     def _get_models(self):
         if not self._check_token():
@@ -1354,7 +1503,9 @@ class Handler(BaseHTTPRequestHandler):
         import mgla_entitlements
 
         tg_ids = mgla_entitlements.parse_tg_ids(raw.get("tg_id"), raw.get("tg_ids"))
-        hub_plan = fetch_hub_plan(tg_ids)
+        hub_plan = fetch_hub_plan(
+            tg_ids, client_token=self.headers.get("X-Mgla-Token", "") or ""
+        )
         if not isinstance(message, str) or not message.strip():
             self._reply(400, b'{"error":"message required"}')
             return

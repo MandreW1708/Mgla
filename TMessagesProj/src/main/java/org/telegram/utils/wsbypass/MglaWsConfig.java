@@ -211,6 +211,13 @@ public final class MglaWsConfig {
         if (!isUltraBypassEnabled() && REGION_HUB.equals(getBypassRegion())) {
             return getHubToken();
         }
+        return getBotRelayToken();
+    }
+
+    /**
+     * JWT / {@code MGLA_WS_RELAY_TOKEN} for mglabot / fin.mgla (never the hub WS token).
+     */
+    public static String getBotRelayToken() {
         try {
             String session = org.telegram.messenger.MglaAuth.getAccessToken();
             if (!TextUtils.isEmpty(session)) {

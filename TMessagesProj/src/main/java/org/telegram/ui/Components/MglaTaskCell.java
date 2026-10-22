@@ -37,6 +37,7 @@ public class MglaTaskCell extends FrameLayout {
     private final LinearLayout content;
     private final LinearLayout metaLayout;
     private final TextView dueView;
+    private final TextView priorityView;
     private final TextView repeatView;
     private final ImageView remindIcon;
     private final View groupDot;
@@ -87,6 +88,9 @@ public class MglaTaskCell extends FrameLayout {
 
         dueView = makeMetaText(context);
         metaLayout.addView(dueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 10, 0));
+
+        priorityView = makeMetaText(context);
+        metaLayout.addView(priorityView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 10, 0));
 
         remindIcon = makeMetaIcon(context, R.drawable.outline_message_time_24);
         metaLayout.addView(remindIcon, LayoutHelper.createLinear(14, 14, 0, 0, 10, 0));
@@ -173,20 +177,43 @@ public class MglaTaskCell extends FrameLayout {
             content.setLayoutParams(contentLp);
         }
 
-        titleView.setText(task.title);
+        titleView.setText(task.title != null ? task.title : "");
         titleView.getPaint().setStrikeThruText(done);
-        titleView.setTextColor(Theme.getColor(done ? Theme.key_windowBackgroundWhiteGrayText : Theme.key_windowBackgroundWhiteBlackText));
+        int titleColor;
+        if (done) {
+            titleColor = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
+        } else if (task.priority == MglaTask.PRIORITY_HIGH) {
+            titleColor = Theme.getColor(Theme.key_text_RedRegular);
+        } else {
+            titleColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+        }
+        titleView.setTextColor(titleColor);
 
         boolean hasMeta = false;
-        if (task.dueAt > 0) {
-            dateInstance.setTime(task.dueAt);
+        long displayDue = task.dueAt > 0 ? task.dueAt : task.remindAt;
+        if (displayDue > 0) {
+            dateInstance.setTime(displayDue);
             dueView.setText(dueFormat.format(dateInstance));
-            boolean overdue = task.dueAt < System.currentTimeMillis() && !done && !task.hasRepeat();
+            boolean overdue = displayDue < System.currentTimeMillis() && !done && !task.hasRepeat();
             dueView.setTextColor(Theme.getColor(overdue ? Theme.key_text_RedRegular : Theme.key_windowBackgroundWhiteGrayText));
             dueView.setVisibility(VISIBLE);
             hasMeta = true;
         } else {
             dueView.setVisibility(GONE);
+        }
+
+        if (!done && task.priority == MglaTask.PRIORITY_HIGH) {
+            priorityView.setText("Важно");
+            priorityView.setTextColor(Theme.getColor(Theme.key_text_RedRegular));
+            priorityView.setVisibility(VISIBLE);
+            hasMeta = true;
+        } else if (!done && task.priority == MglaTask.PRIORITY_LOW) {
+            priorityView.setText("Низкий");
+            priorityView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+            priorityView.setVisibility(VISIBLE);
+            hasMeta = true;
+        } else {
+            priorityView.setVisibility(GONE);
         }
 
         if (task.remindAt > 0) {

@@ -127,6 +127,8 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.MglaSideMenuConfig;
+import org.telegram.messenger.MglaSubscription;
+import org.telegram.messenger.MglaTasksReminderScheduler;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
@@ -1602,6 +1604,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         boolean showLocations = false;
         boolean showGroupVoip = false;
         boolean showCallLog = false;
+        long open_mgla_task_id = 0;
+        boolean open_mgla_tasks_tab = false;
         boolean audioCallUser = false;
         boolean videoCallUser = false;
         boolean needCallAlert = false;
@@ -2916,6 +2920,15 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 } else if (intent.getAction().equals("mgla_ghost_toggle")) {
                     boolean newVal = !MglaSpyConfig.isGhostModeEnabled();
                     MglaSpyConfig.setGhostModeEnabled(newVal);
+                } else if (MglaTasksReminderScheduler.ACTION_OPEN_TASK.equals(intent.getAction())) {
+                    open_mgla_task_id = intent.getLongExtra(MglaTasksReminderScheduler.EXTRA_TASK_ID, 0);
+                    open_mgla_tasks_tab = open_mgla_task_id == 0;
+                } else if (intent.getAction() != null && intent.getAction().startsWith("mgla_task://")) {
+                    try {
+                        open_mgla_task_id = Long.parseLong(intent.getAction().substring("mgla_task://".length()));
+                    } catch (Exception ignore) {
+                        open_mgla_task_id = 0;
+                    }
                 } else if (intent.getAction().startsWith("com.tmessages.openchat")) {
 //                    Integer chatIdInt = intent.getIntExtra("chatId", 0);
                     long chatId = intent.getLongExtra("chatId", 0);
@@ -3327,6 +3340,12 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     actionBarLayout.rebuildFragments(INavigationLayout.REBUILD_FLAG_REBUILD_LAST);
                     rightActionBarLayout.rebuildFragments(INavigationLayout.REBUILD_FLAG_REBUILD_LAST);
                 }
+                pushOpened = true;
+            } else if (open_mgla_task_id != 0) {
+                openMglaTaskFromNotification(open_mgla_task_id);
+                pushOpened = true;
+            } else if (open_mgla_tasks_tab) {
+                openMglaTasksTab();
                 pushOpened = true;
             } else if (openBot) {
                 processAttachedMenuBotFromShortcut(botId);
@@ -6164,6 +6183,32 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         handleIntent(intent, true, false, false, null, true, true);
+    }
+
+    private void openMglaTaskFromNotification(long taskId) {
+        if (taskId == 0) {
+            openMglaTasksTab();
+            return;
+        }
+        AndroidUtilities.runOnUIThread(() -> {
+            MainTabsActivity tabs = findFragment(MainTabsActivity.class);
+            if (tabs != null && MglaSubscription.canUseTasks() && tabs.openTask(taskId)) {
+                return;
+            }
+            Bundle args = new Bundle();
+            args.putLong("openTaskId", taskId);
+            presentFragment(new MglaTasksActivity(args));
+        }, 50);
+    }
+
+    private void openMglaTasksTab() {
+        AndroidUtilities.runOnUIThread(() -> {
+            MainTabsActivity tabs = findFragment(MainTabsActivity.class);
+            if (tabs != null && MglaSubscription.canUseTasks() && tabs.openTab(org.telegram.messenger.MglaMainTabsConfig.TabId.TASKS)) {
+                return;
+            }
+            presentFragment(new MglaTasksActivity(null));
+        }, 50);
     }
 
     public void onNewIntent(Intent intent, Browser.Progress progress) {

@@ -147,6 +147,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     private View fadeView;
     private MglaGlobalMusicBar globalMusicBar;
     private boolean pendingOpenSearch;
+    private long pendingOpenTaskId;
 
     public MainTabsActivity() {
         super();
@@ -911,6 +912,18 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                     dialogs.search("", true);
                 }
             }
+            final int tasksPos = positionOf(TabId.TASKS);
+            if (pendingOpenTaskId != 0 && tasksPos >= 0 && currentPosition == tasksPos) {
+                final long taskId = pendingOpenTaskId;
+                pendingOpenTaskId = 0;
+                final BaseFragment fragment = getCurrentVisibleFragment();
+                if (fragment instanceof MglaTasksActivity) {
+                    MglaTasksActivity.requestOpenTask(taskId);
+                    ((MglaTasksActivity) fragment).openPendingTaskIfNeeded();
+                } else {
+                    MglaTasksActivity.requestOpenTask(taskId);
+                }
+            }
         }
 
     }
@@ -1058,6 +1071,21 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
         selectTab(position, true);
         viewPager.scrollToPosition(position);
+        return true;
+    }
+
+    /** Open Tasks tab and show details for {@code taskId} once the page is ready. */
+    public boolean openTask(long taskId) {
+        if (taskId == 0 || !openTab(TabId.TASKS)) {
+            return false;
+        }
+        pendingOpenTaskId = taskId;
+        final BaseFragment fragment = getCurrentVisibleFragment();
+        if (fragment instanceof MglaTasksActivity && positionOf(TabId.TASKS) == (viewPager != null ? viewPager.getCurrentPosition() : -1)) {
+            pendingOpenTaskId = 0;
+            MglaTasksActivity.requestOpenTask(taskId);
+            ((MglaTasksActivity) fragment).openPendingTaskIfNeeded();
+        }
         return true;
     }
 

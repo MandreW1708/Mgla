@@ -23,6 +23,7 @@ public class MglaMessageMenuController {
         ChatActivity.OPTION_PIN,
         ChatActivity.OPTION_UNPIN,
         ChatActivity.OPTION_TRANSLATE,
+        ChatActivity.OPTION_REMIND,
         ChatActivity.OPTION_AI_SUMMARY,
         ChatActivity.OPTION_AI_REPLY_POLITE,
         ChatActivity.OPTION_AI_EXPLAIN_SIMPLE,
@@ -41,6 +42,7 @@ public class MglaMessageMenuController {
             case ChatActivity.OPTION_PIN: return "Закрепить";
             case ChatActivity.OPTION_UNPIN: return "Открепить";
             case ChatActivity.OPTION_TRANSLATE: return "Перевести";
+            case ChatActivity.OPTION_REMIND: return "Напомнить…";
             case ChatActivity.OPTION_AI_SUMMARY: return "Краткая Сводка";
             case ChatActivity.OPTION_AI_REPLY_POLITE: return "Ответить вежливо";
             case ChatActivity.OPTION_AI_EXPLAIN_SIMPLE: return "Объяснить проще";

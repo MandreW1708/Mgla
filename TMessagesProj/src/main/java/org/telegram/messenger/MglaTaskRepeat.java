@@ -8,9 +8,10 @@ public class MglaTaskRepeat {
     public static final int UNIT_DAY = 1;
     public static final int UNIT_WEEK = 2;
     public static final int UNIT_MONTH = 3;
+    public static final int UNIT_YEAR = 4;
 
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
-    private static final String[] WEEKDAYS_SHORT = { "вс", "пн", "вт", "ср", "чт", "пт", "сб" }; // Calendar.DAY_OF_WEEK order
+    private static final String[] WEEKDAYS_SHORT = { "вс", "пн", "вт", "ср", "чт", "пт", "сб" };
 
     public static String label(MglaTask task) {
         if (!task.hasRepeat()) {
@@ -36,6 +37,8 @@ public class MglaTaskRepeat {
                 return "Каждые " + n + " " + plural(n, "неделя", "недели", "недель");
             case UNIT_MONTH:
                 return n == 1 ? "Каждый месяц" : "Каждые " + n + " " + plural(n, "месяц", "месяца", "месяцев");
+            case UNIT_YEAR:
+                return n == 1 ? "Каждый год" : "Каждые " + n + " " + plural(n, "год", "года", "лет");
             default:
                 return null;
         }
@@ -63,37 +66,50 @@ public class MglaTaskRepeat {
         if (!task.hasRepeat()) {
             return 0;
         }
-        long occ = firstOccurrenceNotBefore(task, timeMs + 1);
-        return occ;
+        return firstOccurrenceNotBefore(task, timeMs + 1);
     }
 
-    /** Задача (с учётом повторов) попадает на день [dayStart, dayStart+1d). */
+    /** Effective due for list/calendar: dueAt, or remindAt if due was never set. */
+    public static long effectiveDueAt(MglaTask task) {
+        if (task == null) {
+            return 0;
+        }
+        if (task.dueAt > 0) {
+            return task.dueAt;
+        }
+        return task.remindAt > 0 ? task.remindAt : 0;
+    }
+
+    /** Задача (с учётом повторов) попадает на календарный день dayStart (локальная полуночь). */
     public static boolean occursOn(MglaTask task, long dayStart) {
-        if (task.dueAt <= 0) {
+        long due = effectiveDueAt(task);
+        if (due <= 0) {
             return false;
         }
-        if (task.dueAt >= dayStart && task.dueAt < dayStart + DAY_MS) {
+        // Compare by calendar day, not dayStart+DAY_MS — DST days are not 24h.
+        if (dayStartOf(due) == dayStart) {
             return true;
         }
-        if (!task.hasRepeat() || dayStart + DAY_MS <= task.dueAt) {
+        if (!task.hasRepeat() || dayStartOf(due) > dayStart) {
             return false;
         }
         long occ = firstOccurrenceNotBefore(task, dayStart);
-        return occ >= dayStart && occ < dayStart + DAY_MS;
+        return occ > 0 && dayStartOf(occ) == dayStart;
     }
 
     /** Добавляет в out начала дней всех повторений задачи в диапазоне [rangeStart, rangeEnd). */
     public static void addOccurrenceDays(MglaTask task, long rangeStart, long rangeEnd, HashSet<Long> out) {
-        if (task.dueAt <= 0) {
+        long due = effectiveDueAt(task);
+        if (due <= 0) {
             return;
         }
         if (!task.hasRepeat()) {
-            if (task.dueAt >= rangeStart && task.dueAt < rangeEnd) {
-                out.add(dayStartOf(task.dueAt));
+            if (due >= rangeStart && due < rangeEnd) {
+                out.add(dayStartOf(due));
             }
             return;
         }
-        long occ = task.dueAt < rangeStart ? firstOccurrenceNotBefore(task, rangeStart) : task.dueAt;
+        long occ = due < rangeStart ? firstOccurrenceNotBefore(task, rangeStart) : due;
         int guard = 0;
         while (occ > 0 && occ < rangeEnd && guard++ < 500) {
             out.add(dayStartOf(occ));
@@ -101,7 +117,6 @@ public class MglaTaskRepeat {
         }
     }
 
-    /** Первое повторение >= timeMs (включая сам dueAt). */
     private static long firstOccurrenceNotBefore(MglaTask task, long timeMs) {
         if (timeMs <= task.dueAt) {
             return task.dueAt;
@@ -114,17 +129,32 @@ public class MglaTaskRepeat {
                 return task.dueAt + k * intervalMs;
             }
             case UNIT_MONTH: {
-                Calendar occ = Calendar.getInstance();
                 Calendar target = Calendar.getInstance();
                 target.setTimeInMillis(timeMs);
+                Calendar occ = Calendar.getInstance();
                 occ.setTimeInMillis(task.dueAt);
                 int monthsDiff = (target.get(Calendar.YEAR) - occ.get(Calendar.YEAR)) * 12 + (target.get(Calendar.MONTH) - occ.get(Calendar.MONTH));
                 long k = Math.max(0, monthsDiff / task.repeatInterval - 1);
-                long result = monthOccurrence(task, k);
+                long result = calendarOccurrence(task, Calendar.MONTH, k);
                 int guard = 0;
                 while (result < timeMs && guard++ < 1000) {
                     k++;
-                    result = monthOccurrence(task, k);
+                    result = calendarOccurrence(task, Calendar.MONTH, k);
+                }
+                return result;
+            }
+            case UNIT_YEAR: {
+                Calendar target = Calendar.getInstance();
+                target.setTimeInMillis(timeMs);
+                Calendar occ = Calendar.getInstance();
+                occ.setTimeInMillis(task.dueAt);
+                int yearsDiff = target.get(Calendar.YEAR) - occ.get(Calendar.YEAR);
+                long k = Math.max(0, yearsDiff / task.repeatInterval - 1);
+                long result = calendarOccurrence(task, Calendar.YEAR, k);
+                int guard = 0;
+                while (result < timeMs && guard++ < 1000) {
+                    k++;
+                    result = calendarOccurrence(task, Calendar.YEAR, k);
                 }
                 return result;
             }
@@ -133,7 +163,6 @@ public class MglaTaskRepeat {
         }
     }
 
-    /** Повторение, следующее за fromOccurrence (которое само является повторением). */
     private static long occurrenceAfter(MglaTask task, long fromOccurrence) {
         switch (task.repeatUnit) {
             case UNIT_DAY:
@@ -147,18 +176,27 @@ public class MglaTaskRepeat {
                 occ.setTimeInMillis(fromOccurrence);
                 int monthsDiff = (occ.get(Calendar.YEAR) - base.get(Calendar.YEAR)) * 12 + (occ.get(Calendar.MONTH) - base.get(Calendar.MONTH));
                 long k = Math.max(1, monthsDiff / task.repeatInterval + 1);
-                return monthOccurrence(task, k);
+                return calendarOccurrence(task, Calendar.MONTH, k);
+            }
+            case UNIT_YEAR: {
+                Calendar occ = Calendar.getInstance();
+                Calendar base = Calendar.getInstance();
+                base.setTimeInMillis(task.dueAt);
+                occ.setTimeInMillis(fromOccurrence);
+                int yearsDiff = occ.get(Calendar.YEAR) - base.get(Calendar.YEAR);
+                long k = Math.max(1, yearsDiff / task.repeatInterval + 1);
+                return calendarOccurrence(task, Calendar.YEAR, k);
             }
             default:
                 return 0;
         }
     }
 
-    private static long monthOccurrence(MglaTask task, long k) {
+    private static long calendarOccurrence(MglaTask task, int field, long k) {
         Calendar calendar = Calendar.getInstance();
         calendar.setTimeInMillis(task.dueAt);
         int dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH);
-        calendar.add(Calendar.MONTH, (int) (k * task.repeatInterval));
+        calendar.add(field, (int) (k * task.repeatInterval));
         int maxDay = calendar.getActualMaximum(Calendar.DAY_OF_MONTH);
         if (dayOfMonth > maxDay) {
             calendar.set(Calendar.DAY_OF_MONTH, maxDay);

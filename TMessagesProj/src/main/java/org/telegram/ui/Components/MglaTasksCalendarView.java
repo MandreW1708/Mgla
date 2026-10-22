@@ -177,8 +177,10 @@ public class MglaTasksCalendarView extends LinearLayout {
         int offset = (firstDayOfWeek - Calendar.MONDAY + 7) % 7;
         calendar.add(Calendar.DAY_OF_MONTH, -offset);
 
-        long gridStart = calendar.getTimeInMillis();
-        long gridEnd = gridStart + GRID_CELLS * 24L * 60 * 60 * 1000;
+        long gridStart = dayStartOf(calendar.getTimeInMillis());
+        calendar.add(Calendar.DAY_OF_MONTH, GRID_CELLS);
+        long gridEnd = dayStartOf(calendar.getTimeInMillis());
+        calendar.setTimeInMillis(gridStart);
         daysWithTasks.clear();
         for (MglaTask task : tasks) {
             MglaTaskRepeat.addOccurrenceDays(task, gridStart, gridEnd, daysWithTasks);
@@ -186,7 +188,7 @@ public class MglaTasksCalendarView extends LinearLayout {
 
         for (int a = 0; a < GRID_CELLS; a++) {
             DayCell cell = cells[a];
-            cell.dayMillis = calendar.getTimeInMillis();
+            cell.dayMillis = dayStartOf(calendar.getTimeInMillis());
             cell.dayNumber = calendar.get(Calendar.DAY_OF_MONTH);
             cell.inMonth = calendar.get(Calendar.MONTH) == shownMonth;
             cell.hasTasks = daysWithTasks.contains(cell.dayMillis);

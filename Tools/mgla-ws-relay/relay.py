@@ -276,14 +276,31 @@ _entitlements_cache: Dict[str, Tuple[float, str]] = {}
 _ENTITLEMENTS_TTL = 45.0
 
 
-async def fetch_hub_plan(tg_ids: list) -> str:
-    """Best plan among tg_ids from mglahub. Fail-closed → free."""
+async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
+    """Best plan among tg_ids from mglahub. Fail-closed → free.
+
+    Auth to hub:
+      1) dedicated s2s token (MGLA_HUB_ENTITLEMENTS_TOKEN / SYNC), and/or
+      2) client's X-Mgla-Token (JWT) — required on Ultra-only nodes when the
+         local WS token is not the hub sync secret (typical for fin.mgla).
+    """
     if not tg_ids:
         return "free"
-    if not HUB_ENTITLEMENTS_URL or not HUB_ENTITLEMENTS_TOKEN:
+    client_token = (client_token or "").strip()
+    if not HUB_ENTITLEMENTS_URL:
+        LOG.warning("entitlements URL missing — treating as free")
+        return "free"
+    if not HUB_ENTITLEMENTS_TOKEN and not client_token:
         LOG.warning("entitlements not configured — treating as free")
         return "free"
-    cache_key = ",".join(str(x) for x in sorted(tg_ids))
+    # JWT path applies install ownership filters — cache per token, not only ids.
+    import hashlib
+    tok_part = (
+        "s2s"
+        if (HUB_ENTITLEMENTS_TOKEN and HUB_ENTITLEMENTS_TOKEN != AUTH_TOKEN and not client_token)
+        else hashlib.sha256((client_token or HUB_ENTITLEMENTS_TOKEN or "").encode()).hexdigest()[:16]
+    )
+    cache_key = tok_part + ":" + ",".join(str(x) for x in sorted(tg_ids))
     now = time.monotonic()
     hit = _entitlements_cache.get(cache_key)
     if hit and now - hit[0] < _ENTITLEMENTS_TTL:
@@ -291,20 +308,28 @@ async def fetch_hub_plan(tg_ids: list) -> str:
 
     def _sync_fetch() -> str:
         import json
-        import urllib.error
         import urllib.request
 
         body = json.dumps({"tg_ids": list(tg_ids)}).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "X-Mgla-Client": "mgla",
+        }
+        # Dedicated hub sync/entitlements secret (not the local WS echo).
+        if HUB_ENTITLEMENTS_TOKEN and HUB_ENTITLEMENTS_TOKEN != AUTH_TOKEN:
+            headers["X-Mgla-Sync-Token"] = HUB_ENTITLEMENTS_TOKEN
+            headers["X-Mgla-Entitlements-Token"] = HUB_ENTITLEMENTS_TOKEN
+        elif HUB_ENTITLEMENTS_TOKEN and not client_token:
+            # Last resort: local WS token might equal hub TOKEN on single-node.
+            headers["X-Mgla-Sync-Token"] = HUB_ENTITLEMENTS_TOKEN
+            headers["X-Mgla-Entitlements-Token"] = HUB_ENTITLEMENTS_TOKEN
+        if client_token:
+            headers["X-Mgla-Token"] = client_token
         req = urllib.request.Request(
             HUB_ENTITLEMENTS_URL,
             data=body,
             method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "X-Mgla-Client": "mgla",
-                "X-Mgla-Sync-Token": HUB_ENTITLEMENTS_TOKEN,
-                "X-Mgla-Entitlements-Token": HUB_ENTITLEMENTS_TOKEN,
-            },
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=6) as resp:
@@ -352,7 +377,8 @@ async def resolve_verified_plan(headers) -> tuple:
         if wants_ultra or claimed_plan != "free":
             LOG.info("paid claim without tg ids (claimed=%s)", claimed_plan)
         return "free", False
-    hub_plan = await fetch_hub_plan(tg_ids)
+    client_token = _header_get(headers, "X-Mgla-Token", "x-mgla-token")
+    hub_plan = await fetch_hub_plan(tg_ids, client_token=client_token)
     ultra = hub_plan == "premium_ultra"
     if wants_ultra and not ultra:
         LOG.info(

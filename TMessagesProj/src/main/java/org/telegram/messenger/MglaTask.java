@@ -4,6 +4,11 @@ import java.util.ArrayList;
 
 public class MglaTask {
 
+    public static final int PRIORITY_NONE = 0;
+    public static final int PRIORITY_LOW = 1;
+    public static final int PRIORITY_NORMAL = 2;
+    public static final int PRIORITY_HIGH = 3;
+
     public long id;
     public int account;
     public String title;
@@ -18,7 +23,8 @@ public class MglaTask {
     public long dialogId;
     public int messageId;
     public int repeatInterval; // 0 = нет повтора; иначе каждые N единиц
-    public int repeatUnit;     // MglaTaskRepeat.UNIT_DAY / UNIT_WEEK / UNIT_MONTH
+    public int repeatUnit;     // MglaTaskRepeat.UNIT_*
+    public int priority = PRIORITY_NONE;
     public ArrayList<SubItem> subItems = new ArrayList<>();
 
     public boolean hasReminder() {
@@ -26,11 +32,27 @@ public class MglaTask {
     }
 
     public boolean hasRepeat() {
-        return repeatInterval > 0 && repeatUnit >= MglaTaskRepeat.UNIT_DAY && repeatUnit <= MglaTaskRepeat.UNIT_MONTH && dueAt > 0;
+        return repeatInterval > 0
+                && repeatUnit >= MglaTaskRepeat.UNIT_DAY
+                && repeatUnit <= MglaTaskRepeat.UNIT_YEAR
+                && dueAt > 0;
     }
 
     public boolean isLinkedToMessage() {
         return dialogId != 0 && messageId != 0;
+    }
+
+    public static String priorityLabel(int priority) {
+        switch (priority) {
+            case PRIORITY_LOW:
+                return "Низкий";
+            case PRIORITY_NORMAL:
+                return "Обычный";
+            case PRIORITY_HIGH:
+                return "Высокий";
+            default:
+                return "Нет";
+        }
     }
 
     public static class Group {

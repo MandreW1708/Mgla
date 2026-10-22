@@ -796,6 +796,13 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <receiver android:name=".MglaTasksWidgetProvider" android:exported="false" android:label="Задачи">
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/mgla_tasks_widget_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
 
         <receiver android:name=".RefererReceiver" android:exported="true" android:permission="android.permission.INSTALL_PACKAGES">
             <intent-filter>

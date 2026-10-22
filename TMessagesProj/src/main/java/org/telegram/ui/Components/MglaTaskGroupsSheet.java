@@ -9,7 +9,6 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -157,17 +156,26 @@ public class MglaTaskGroupsSheet extends BottomSheet {
     private void showRenameDialog(MglaTask.Group group) {
         Context context = getContext();
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Переименовать группу");
+        builder.setTitle("Изменить группу");
 
-        FrameLayout container = new FrameLayout(context);
-        container.setPadding(dp(20), dp(8), dp(20), 0);
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(8), dp(20), 0);
+
         EditText editText = new EditText(context);
         editText.setSingleLine(true);
         editText.setText(group.name);
         editText.setSelection(editText.length());
         editText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        container.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        builder.setView(container);
+        content.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        int[] colors = new int[PALETTE_KEYS.length];
+        for (int a = 0; a < PALETTE_KEYS.length; a++) {
+            colors[a] = Theme.getColor(PALETTE_KEYS[a]);
+        }
+        final int[] selectedColor = new int[] { group.color != 0 ? group.color : colors[0] };
+        content.addView(MglaTaskEditSheet.makePalette(context, colors, selectedColor), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 12, 0, 0));
+        builder.setView(content);
 
         builder.setPositiveButton("Сохранить", (d, w) -> {
             String name = editText.getText().toString().trim();
@@ -175,6 +183,7 @@ public class MglaTaskGroupsSheet extends BottomSheet {
                 return;
             }
             group.name = name;
+            group.color = selectedColor[0];
             MglaTasksStorage.getInstance().saveGroup(group);
             if (onChanged != null) {
                 onChanged.run();
@@ -206,24 +215,7 @@ public class MglaTaskGroupsSheet extends BottomSheet {
             colors[a] = Theme.getColor(PALETTE_KEYS[a]);
         }
         final int[] selectedColor = new int[] { colors[0] };
-
-        LinearLayout palette = new LinearLayout(context);
-        palette.setOrientation(LinearLayout.HORIZONTAL);
-        ArrayList<View> dots = new ArrayList<>();
-        for (int a = 0; a < colors.length; a++) {
-            int color = colors[a];
-            View dot = new View(context);
-            dot.setBackground(makeColorDot(color, a == 0));
-            dot.setOnClickListener(v -> {
-                selectedColor[0] = color;
-                for (int b = 0; b < dots.size(); b++) {
-                    dots.get(b).setBackground(makeColorDot(colors[b], dots.get(b) == v));
-                }
-            });
-            dots.add(dot);
-            palette.addView(dot, LayoutHelper.createLinear(28, 28, 0, 0, 8, 8, 0));
-        }
-        content.addView(palette, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 12, 0, 0));
+        content.addView(MglaTaskEditSheet.makePalette(context, colors, selectedColor), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 12, 0, 0));
         builder.setView(content);
 
         builder.setPositiveButton("Создать", (d, w) -> {
@@ -244,16 +236,6 @@ public class MglaTaskGroupsSheet extends BottomSheet {
         });
         builder.setNegativeButton("Отмена", null);
         builder.show();
-    }
-
-    private GradientDrawable makeColorDot(int color, boolean selected) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setShape(GradientDrawable.OVAL);
-        drawable.setColor(color);
-        if (selected) {
-            drawable.setStroke(dp(2), Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        }
-        return drawable;
     }
 
     @Override

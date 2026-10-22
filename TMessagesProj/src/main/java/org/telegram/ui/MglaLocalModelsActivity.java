@@ -22,6 +22,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.MglaBypassHttp;
 import org.telegram.messenger.MglaLocalModelsManager;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -154,9 +155,9 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
             try {
                 String url = "https://huggingface.co/api/models?search=" + URLEncoder.encode(query, "UTF-8")
                     + "&filter=gguf&sort=downloads&limit=20";
-                conn = (HttpURLConnection) new URL(url).openConnection();
+                conn = MglaBypassHttp.open(url);
                 conn.setConnectTimeout(15000);
-                conn.setReadTimeout(15000);
+                conn.setReadTimeout(30000);
                 conn.setRequestProperty("User-Agent", "Mgla/1.0");
                 if (conn.getResponseCode() != 200) {
                     throw new Exception("HTTP " + conn.getResponseCode());
@@ -260,9 +261,9 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
             if (size == null) {
                 HttpURLConnection conn = null;
                 try {
-                    conn = (HttpURLConnection) new URL("https://huggingface.co/api/models/" + result.id + "?blobs=true").openConnection();
+                    conn = MglaBypassHttp.open("https://huggingface.co/api/models/" + result.id + "?blobs=true");
                     conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
+                    conn.setReadTimeout(30000);
                     conn.setRequestProperty("User-Agent", "Mgla/1.0");
                     if (conn.getResponseCode() != 200) {
                         throw new Exception("HTTP " + conn.getResponseCode());
@@ -931,9 +932,9 @@ public class MglaLocalModelsActivity extends MglaBaseSettingsActivity {
             HttpURLConnection conn = null;
             try {
                 if (blockReason == null) {
-                    conn = (HttpURLConnection) new URL("https://huggingface.co/api/models/" + displayTitle + "?blobs=true").openConnection();
+                    conn = MglaBypassHttp.open("https://huggingface.co/api/models/" + displayTitle + "?blobs=true");
                     conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
+                    conn.setReadTimeout(30000);
                     conn.setRequestProperty("User-Agent", "Mgla/1.0");
                     if (conn.getResponseCode() != 200) {
                         throw new Exception("HTTP " + conn.getResponseCode());

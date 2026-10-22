@@ -5,9 +5,6 @@ import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.HashMap;
 import java.util.Locale;
@@ -224,53 +221,12 @@ public final class MglaWhisperModelsManager {
         Thread thread = new Thread(() -> {
             File target = modelFile(appContext, info.id);
             File temp = new File(target.getAbsolutePath() + ".part");
-            HttpURLConnection conn = null;
             try {
-                URL url = new URL(info.url);
-                for (int i = 0; i < 5; i++) {
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestProperty("User-Agent", "Mgla/1.0");
-                    conn.setConnectTimeout(30000);
-                    conn.setReadTimeout(60000);
-                    conn.setInstanceFollowRedirects(false);
-                    int code = conn.getResponseCode();
-                    if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
-                        String location = conn.getHeaderField("Location");
-                        conn.disconnect();
-                        if (location == null || location.isEmpty()) {
-                            throw new Exception("HTTP " + code);
-                        }
-                        url = new URL(url, location);
-                        continue;
-                    }
-                    if (code != 200) {
-                        throw new Exception("HTTP " + code);
-                    }
-                    break;
-                }
-                long total = conn.getContentLengthLong();
-                if (total <= 0) {
-                    total = info.sizeBytes;
-                }
-                long downloaded = 0;
-                byte[] buffer = new byte[64 * 1024];
-                try (InputStream in = conn.getInputStream();
-                     FileOutputStream out = new FileOutputStream(temp)) {
-                    int read;
-                    long lastPublish = 0;
-                    while ((read = in.read(buffer)) > 0) {
-                        out.write(buffer, 0, read);
-                        downloaded += read;
-                        long now = System.currentTimeMillis();
-                        if (now - lastPublish > 300 && callback != null) {
-                            lastPublish = now;
-                            final long d = downloaded;
-                            final long t = total;
-                            AndroidUtilities.runOnUIThread(() -> callback.onProgress(d, t));
-                        }
-                    }
-                }
-                if (temp.exists() && temp.length() > 1024) {
+                long downloaded = MglaHttpFetch.downloadToPart(
+                        new URL(info.url),
+                        temp,
+                        callback == null ? null : callback::onProgress);
+                if (temp.exists() && temp.length() > 1024 && downloaded > 1024) {
                     if (target.exists() && !target.delete()) {
                         throw new Exception("Не удалось заменить файл модели");
                     }
@@ -286,7 +242,7 @@ public final class MglaWhisperModelsManager {
                 }
             } catch (Throwable e) {
                 FileLog.e(e);
-                if (temp.exists()) {
+                if (temp.exists() && temp.length() <= 1024) {
                     //noinspection ResultOfMethodCallIgnored
                     temp.delete();
                 }
@@ -295,9 +251,6 @@ public final class MglaWhisperModelsManager {
                     AndroidUtilities.runOnUIThread(() -> callback.onError(msg));
                 }
             } finally {
-                if (conn != null) {
-                    conn.disconnect();
-                }
                 activeDownloads.remove(info.id);
             }
         }, "MglaWhisperDownload");

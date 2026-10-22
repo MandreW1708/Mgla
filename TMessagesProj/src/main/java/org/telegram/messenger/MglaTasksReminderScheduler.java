@@ -21,8 +21,13 @@ import java.util.ArrayList;
 public class MglaTasksReminderScheduler {
 
     public static final String ACTION_REMINDER = "org.telegram.messenger.mgla.task.reminder";
+    public static final String ACTION_DONE = "org.telegram.messenger.mgla.task.done";
+    public static final String ACTION_SNOOZE = "org.telegram.messenger.mgla.task.snooze";
+    public static final String ACTION_OPEN_TASK = "org.telegram.messenger.OPEN_MGLA_TASK";
     public static final String EXTRA_TASK_ID = "task_id";
     public static final String CHANNEL_ID = "mgla_tasks_reminders";
+
+    public static final long SNOOZE_DELAY_MS = 60 * 60 * 1000L;
 
     private static final int NOTIFICATION_ID_BASE = 0x4D474C00;
 
@@ -38,7 +43,7 @@ public class MglaTasksReminderScheduler {
         }
         try {
             AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pendingIntent = buildPendingIntent(context, task.id);
+            PendingIntent pendingIntent = buildAlarmPendingIntent(context, task.id);
             if (Build.VERSION.SDK_INT < 31 || alarmManager.canScheduleExactAlarms()) {
                 alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, task.remindAt, pendingIntent);
             } else {
@@ -53,7 +58,18 @@ public class MglaTasksReminderScheduler {
         try {
             Context context = ApplicationLoader.applicationContext;
             AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            alarmManager.cancel(buildPendingIntent(context, taskId));
+            alarmManager.cancel(buildAlarmPendingIntent(context, taskId));
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
+    public static void cancelNotification(long taskId) {
+        try {
+            NotificationManager notificationManager = (NotificationManager) ApplicationLoader.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager != null) {
+                notificationManager.cancel(notificationId(taskId));
+            }
         } catch (Exception e) {
             FileLog.e(e);
         }
@@ -85,29 +101,96 @@ public class MglaTasksReminderScheduler {
                 return;
             }
             showNotification(task);
-            if (task.hasRepeat()) {
-                advanceToNextOccurrence(storage, task, System.currentTimeMillis());
-                schedule(task);
+            // Do not advance repeats here — wait until the user completes the occurrence.
+        });
+    }
+
+    /**
+     * Marks a task done, or advances a repeating task to the next occurrence.
+     */
+    public static void completeTask(long taskId) {
+        if (taskId == 0) {
+            return;
+        }
+        MglaTasksStorage storage = MglaTasksStorage.getInstance();
+        storage.ensureLoaded(() -> {
+            MglaTask task = storage.getTask(taskId);
+            if (task == null) {
+                return;
+            }
+            cancelNotification(taskId);
+            if (task.hasRepeat() && !task.done) {
+                // Advance from current due, so early completion still moves to the next occurrence.
+                advanceToNextOccurrence(storage, task, task.dueAt);
+                cancel(taskId);
+                if (task.remindAt > System.currentTimeMillis()) {
+                    schedule(task);
+                }
+            } else {
+                storage.setTaskDone(taskId, true);
+                cancel(taskId);
             }
         });
     }
 
-    private static void advanceToNextOccurrence(MglaTasksStorage storage, MglaTask task, long now) {
+    public static void snoozeTask(long taskId, long delayMs) {
+        if (taskId == 0) {
+            return;
+        }
+        if (delayMs <= 0) {
+            delayMs = SNOOZE_DELAY_MS;
+        }
+        MglaTasksStorage storage = MglaTasksStorage.getInstance();
+        final long delay = delayMs;
+        storage.ensureLoaded(() -> {
+            MglaTask task = storage.getTask(taskId);
+            if (task == null || task.done) {
+                return;
+            }
+            cancelNotification(taskId);
+            task.remindAt = System.currentTimeMillis() + delay;
+            storage.saveTask(task);
+            schedule(task);
+        });
+    }
+
+    public static void advanceToNextOccurrence(MglaTasksStorage storage, MglaTask task, long now) {
         long next = MglaTaskRepeat.nextOccurrenceAfter(task, now);
         if (next <= 0) {
             return;
         }
         long offset = task.remindAt > 0 ? task.dueAt - task.remindAt : 0;
+        if (offset < 0) {
+            offset = 0;
+        }
         task.dueAt = next;
-        task.remindAt = task.hasReminder() ? next - offset : 0;
+        task.remindAt = task.hasReminder() || offset > 0 ? next - offset : 0;
+        if (task.remindAt < 0) {
+            task.remindAt = 0;
+        }
         storage.saveTask(task);
     }
 
-    private static PendingIntent buildPendingIntent(Context context, long taskId) {
+    private static PendingIntent buildAlarmPendingIntent(Context context, long taskId) {
         Intent intent = new Intent(context, MglaTasksReminderReceiver.class)
                 .setAction(ACTION_REMINDER)
                 .putExtra(EXTRA_TASK_ID, taskId);
-        return PendingIntent.getBroadcast(context, (int) (taskId & 0x7fffffff), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getBroadcast(context, requestCode(taskId, 0), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static PendingIntent buildActionPendingIntent(Context context, String action, long taskId, int salt) {
+        Intent intent = new Intent(context, MglaTasksReminderReceiver.class)
+                .setAction(action)
+                .putExtra(EXTRA_TASK_ID, taskId);
+        return PendingIntent.getBroadcast(context, requestCode(taskId, salt), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static int requestCode(long taskId, int salt) {
+        return (int) (taskId & 0x0fffffff) ^ (salt << 28);
+    }
+
+    private static int notificationId(long taskId) {
+        return NOTIFICATION_ID_BASE + (int) (taskId % 10000);
     }
 
     private static void showNotification(MglaTask task) {
@@ -120,23 +203,24 @@ public class MglaTasksReminderScheduler {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 notificationManager.createNotificationChannel(new NotificationChannel(CHANNEL_ID, "Задачи и напоминания", NotificationManager.IMPORTANCE_HIGH));
             }
-            Intent intent;
-            if (task.dialogId != 0) {
-                intent = new Intent(context, LaunchActivity.class);
-                intent.setAction(Intent.ACTION_VIEW);
-                intent.setData(Uri.parse("tg://openmessage?" + (task.dialogId > 0 ? "user_id=" + task.dialogId : "chat_id=" + (-task.dialogId)) + "&message_id=" + task.messageId));
+            Intent contentIntentAction = new Intent(context, LaunchActivity.class);
+            if (task.dialogId != 0 && task.messageId != 0) {
+                contentIntentAction.setAction(Intent.ACTION_VIEW);
+                contentIntentAction.setData(Uri.parse("tg://openmessage?" + (task.dialogId > 0 ? "user_id=" + task.dialogId : "chat_id=" + (-task.dialogId)) + "&message_id=" + task.messageId));
             } else {
-                intent = new Intent(context, LaunchActivity.class);
-                intent.setAction("mgla_task://" + task.id);
+                contentIntentAction.setAction(ACTION_OPEN_TASK);
+                contentIntentAction.putExtra(EXTRA_TASK_ID, task.id);
             }
-            PendingIntent contentIntent = PendingIntent.getActivity(context, (int) (task.id & 0x7fffffff), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            contentIntentAction.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent contentIntent = PendingIntent.getActivity(context, requestCode(task.id, 1), contentIntentAction, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
             String text;
             if (!android.text.TextUtils.isEmpty(task.note)) {
                 text = task.note;
             } else if (task.isLinkedToMessage()) {
                 text = "Нажмите, чтобы открыть сообщение";
             } else {
-                text = "";
+                text = "Нажмите, чтобы открыть задачу";
             }
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.notification)
@@ -145,10 +229,12 @@ public class MglaTasksReminderScheduler {
                     .setContentText(text)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
                     .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                    .setWhen(task.remindAt)
+                    .setWhen(task.remindAt > 0 ? task.remindAt : System.currentTimeMillis())
                     .setAutoCancel(true)
-                    .setContentIntent(contentIntent);
-            notificationManager.notify(NOTIFICATION_ID_BASE + (int) (task.id % 10000), builder.build());
+                    .setContentIntent(contentIntent)
+                    .addAction(0, "Готово", buildActionPendingIntent(context, ACTION_DONE, task.id, 2))
+                    .addAction(0, "Отложить на 1 час", buildActionPendingIntent(context, ACTION_SNOOZE, task.id, 3));
+            notificationManager.notify(notificationId(task.id), builder.build());
         } catch (Exception e) {
             FileLog.e(e);
         }

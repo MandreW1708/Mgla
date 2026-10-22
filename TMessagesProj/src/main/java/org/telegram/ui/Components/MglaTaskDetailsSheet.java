@@ -89,6 +89,10 @@ public class MglaTaskDetailsSheet extends BottomSheet {
             root.addView(makeMetaRow(context, "Повтор", repeatLabel));
             hasMeta = true;
         }
+        if (task.priority > MglaTask.PRIORITY_NONE) {
+            root.addView(makeMetaRow(context, "Приоритет", MglaTask.priorityLabel(task.priority)));
+            hasMeta = true;
+        }
         MglaTask.Group group = null;
         if (task.groupId != 0) {
             for (MglaTask.Group g : MglaTasksStorage.getInstance().getGroups()) {

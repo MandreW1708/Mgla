@@ -14,6 +14,7 @@ public class MglaTasksBootReceiver extends BroadcastReceiver {
         PendingResult pendingResult = goAsync();
         MglaTasksStorage.getInstance().ensureLoaded(() -> {
             MglaTasksReminderScheduler.rescheduleAll();
+            MglaTasksWidgetProvider.updateAll();
             pendingResult.finish();
         });
     }

@@ -151,6 +151,10 @@ public class MglaTasksStorage {
         if (task.createdAt == 0) {
             task.createdAt = System.currentTimeMillis();
         }
+        // Reminder time alone is not enough for list/calendar — promote to due.
+        if (task.dueAt <= 0 && task.remindAt > 0) {
+            task.dueAt = task.remindAt;
+        }
         if (task.id == 0) {
             synchronized (tasks) {
                 long maxId = 0;
@@ -177,6 +181,7 @@ public class MglaTasksStorage {
                 existing.messageId = task.messageId;
                 existing.repeatInterval = task.repeatInterval;
                 existing.repeatUnit = task.repeatUnit;
+                existing.priority = task.priority;
                 existing.subItems = task.subItems;
             } else {
                 synchronized (tasks) {
@@ -199,13 +204,38 @@ public class MglaTasksStorage {
             }
         }
         notifyChanged();
+        final long dueAtSnap = task.dueAt;
+        final int prioritySnap = task.priority;
+        final long taskIdSnap = task.id;
         storageQueue.postRunnable(() -> {
             try {
                 ensureOpen();
-                SQLitePreparedStatement state = database.executeFast("INSERT OR REPLACE INTO tasks(account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, repeat_interval, repeat_unit, id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                state.requery();
-                bindTask(state, task, true);
-                state.stepThis().dispose();
+                // Prefer UPDATE so a partial bind cannot wipe due_at via REPLACE semantics.
+                SQLiteCursor exists = database.queryFinalized("SELECT id FROM tasks WHERE id = " + taskIdSnap);
+                boolean rowExists = exists.next();
+                exists.dispose();
+                if (rowExists) {
+                    SQLitePreparedStatement state = database.executeFast(
+                            "UPDATE tasks SET account = ?, title = ?, note = ?, group_id = ?, due_at = ?, remind_at = ?, "
+                                    + "done = ?, done_at = ?, created_at = ?, sort_order = ?, dialog_id = ?, message_id = ?, "
+                                    + "repeat_interval = ?, repeat_unit = ?, priority = ? WHERE id = ?");
+                    state.requery();
+                    bindTask(state, task, true);
+                    state.stepThis().dispose();
+                } else {
+                    SQLitePreparedStatement state = database.executeFast(
+                            "INSERT INTO tasks(account, title, note, group_id, due_at, remind_at, done, done_at, created_at, "
+                                    + "sort_order, dialog_id, message_id, repeat_interval, repeat_unit, priority, id) "
+                                    + "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    state.requery();
+                    bindTask(state, task, true);
+                    state.stepThis().dispose();
+                }
+                // Sanity: never let priority save leave due_at as 0 if we still have a due.
+                if (dueAtSnap > 0) {
+                    database.executeFast("UPDATE tasks SET due_at = " + dueAtSnap + ", priority = " + prioritySnap
+                            + " WHERE id = " + taskIdSnap).stepThis().dispose();
+                }
                 database.executeFast("DELETE FROM task_items WHERE task_id = " + task.id).stepThis().dispose();
                 if (!task.subItems.isEmpty()) {
                     SQLitePreparedStatement itemState = database.executeFast("INSERT OR REPLACE INTO task_items(task_id, title, done, sort_order, id) VALUES(?, ?, ?, ?, ?)");
@@ -453,6 +483,7 @@ public class MglaTasksStorage {
         for (Listener listener : copy) {
             AndroidUtilities.runOnUIThread(listener::onTasksChanged);
         }
+        AndroidUtilities.runOnUIThread(MglaTasksWidgetProvider::updateAll);
     }
 
     private void ensureOpen() throws Exception {
@@ -484,6 +515,85 @@ public class MglaTasksStorage {
             database.executeFast("ALTER TABLE tasks ADD COLUMN repeat_unit INTEGER DEFAULT 0").stepThis().dispose();
         } catch (Exception ignore) {
         }
+        try {
+            database.executeFast("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0").stepThis().dispose();
+        } catch (Exception ignore) {
+        }
+        // One-shot heal: rows that only have remind_at (clock in UI, missing from calendar).
+        try {
+            database.executeFast(
+                    "UPDATE tasks SET due_at = remind_at WHERE (due_at IS NULL OR due_at <= 0) AND remind_at > 0"
+            ).stepThis().dispose();
+        } catch (Exception ignore) {
+        }
+    }
+
+    public void deleteDoneTasks() {
+        if (!loaded) {
+            ensureLoaded(this::deleteDoneTasks);
+            return;
+        }
+        ArrayList<Long> ids = new ArrayList<>();
+        int account = UserConfig.selectedAccount;
+        synchronized (tasks) {
+            for (int a = tasks.size() - 1; a >= 0; a--) {
+                MglaTask task = tasks.get(a);
+                if (task.account == account && task.done) {
+                    ids.add(task.id);
+                    tasks.remove(a);
+                }
+            }
+        }
+        for (long id : ids) {
+            MglaTasksReminderScheduler.cancel(id);
+        }
+        notifyChanged();
+        storageQueue.postRunnable(() -> {
+            try {
+                ensureOpen();
+                for (long id : ids) {
+                    database.executeFast("DELETE FROM task_items WHERE task_id = " + id).stepThis().dispose();
+                    database.executeFast("DELETE FROM tasks WHERE id = " + id).stepThis().dispose();
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
+    public void updateTaskSortOrders(ArrayList<MglaTask> ordered) {
+        if (ordered == null || ordered.isEmpty()) {
+            return;
+        }
+        if (!loaded) {
+            ensureLoaded(() -> updateTaskSortOrders(ordered));
+            return;
+        }
+        for (int a = 0; a < ordered.size(); a++) {
+            MglaTask task = ordered.get(a);
+            if (task != null) {
+                task.sortOrder = a;
+                MglaTask existing = getTask(task.id);
+                if (existing != null) {
+                    existing.sortOrder = a;
+                }
+            }
+        }
+        notifyChanged();
+        storageQueue.postRunnable(() -> {
+            try {
+                ensureOpen();
+                for (int a = 0; a < ordered.size(); a++) {
+                    MglaTask task = ordered.get(a);
+                    if (task == null || task.id == 0) {
+                        continue;
+                    }
+                    database.executeFast("UPDATE tasks SET sort_order = " + a + " WHERE id = " + task.id).stepThis().dispose();
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
     }
 
     private void loadInternal() throws Exception {
@@ -503,7 +613,7 @@ public class MglaTasksStorage {
         } finally {
             cursor.dispose();
         }
-        cursor = database.queryFinalized("SELECT id, account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, repeat_interval, repeat_unit FROM tasks ORDER BY sort_order, id");
+        cursor = database.queryFinalized("SELECT id, account, title, note, group_id, due_at, remind_at, done, done_at, created_at, sort_order, dialog_id, message_id, repeat_interval, repeat_unit, priority FROM tasks ORDER BY sort_order, id");
         try {
             while (cursor.next()) {
                 MglaTask task = new MglaTask();
@@ -522,6 +632,11 @@ public class MglaTasksStorage {
                 task.messageId = cursor.intValue(12);
                 task.repeatInterval = cursor.intValue(13);
                 task.repeatUnit = cursor.intValue(14);
+                task.priority = cursor.intValue(15);
+                // Heal: reminder-without-due left clock icon but no list/calendar date.
+                if (task.dueAt <= 0 && task.remindAt > 0) {
+                    task.dueAt = task.remindAt;
+                }
                 newTasks.add(task);
             }
         } finally {
@@ -566,8 +681,9 @@ public class MglaTasksStorage {
         state.bindInteger(12, task.messageId);
         state.bindInteger(13, task.repeatInterval);
         state.bindInteger(14, task.repeatUnit);
+        state.bindInteger(15, task.priority);
         if (withId) {
-            state.bindLong(15, task.id);
+            state.bindLong(16, task.id);
         }
     }
 }

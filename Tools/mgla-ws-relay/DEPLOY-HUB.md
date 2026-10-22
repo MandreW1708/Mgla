@@ -100,13 +100,33 @@ sudo cp /opt/mgla-ws-relay/nginx-mglahub.conf /etc/nginx/sites-available/mglahub
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## Ultra-обход: ИИ напрямую на хабе
+## Ultra-обход: Финляндия (`fin.mgla.mooo.com`) + хаб
 
-Клиент с включённым Ultra ходит на `mglahub` не только за `/apiws`, но и за
-`/mgla-ai/*` (модели, OpenRouter, Gemini), а features/stats/updates/auth —
-нативными путями хаба (`/mgla-config`, `/mgla-stats`, …).
+Клиент с Ultra ходит на **`fin.mgla.mooo.com`** (`MGLA_WS_ULTRA_ONLY=1`): `/apiws` и
+`/mgla-ai/*`. Features/stats/updates/auth — нативно на `mglahub`.
 
-На хабе должен работать тот же `ai_proxy.py`, что на боте:
+На **fin.mgla** в `/opt/mgla-ws-relay/env` обязательно одно из:
+
+```bash
+# предпочтительно — тот же sync, что на mglahub:
+MGLA_HUB_SYNC_TOKEN=...          # или MGLA_HUB_ENTITLEMENTS_TOKEN=...
+MGLA_HUB_ENTITLEMENTS_URL=https://mglahub.mooo.com/mgla-config/v1/entitlements
+MGLA_WS_ULTRA_ONLY=1
+```
+
+Без sync-токена релей пробрасывает клиентский JWT в `/entitlements` (нужен
+актуальный `relay.py`). Иначе fail-closed → `free` → close `ultra only`.
+
+Nginx `/apiws` должен проксировать `X-Mgla-Tg-Id` / `X-Mgla-Tg-Ids` (см.
+`nginx-apiws.conf`). После правки:
+
+```bash
+# на fin.mgla
+sudo systemctl restart mgla-ws-relay
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Опционально тот же `ai_proxy.py` на **mglahub** (legacy):
 
 ```bash
 # ключи Plus/Ultra + entitlements localhost
