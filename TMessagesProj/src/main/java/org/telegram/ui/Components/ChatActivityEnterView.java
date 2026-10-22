@@ -2844,10 +2844,9 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
             }
         });
-        final int emojiGravity = useTelegramBottomPanelLayout()
-                ? (Gravity.CENTER_VERTICAL | Gravity.LEFT)
-                : (Gravity.BOTTOM | Gravity.LEFT);
-        messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(emojiSize, emojiSize, emojiGravity, isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2, 0, 0, 0));
+        // Always BOTTOM — when the field grows with multiline text, chrome stays on the baseline
+        // (CENTER_VERTICAL would float emoji/editor up with the panel height).
+        messageEditTextContainer.addView(emojiButton, LayoutHelper.createFrame(emojiSize, emojiSize, Gravity.BOTTOM | Gravity.LEFT, isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2, 0, 0, 0));
         setEmojiButtonImage(false, false);
 
         // AI Editor robot button (to the right of emoji)
@@ -2909,13 +2908,10 @@ public class ChatActivityEnterView extends FrameLayout implements
                 });
                 parentFragment.showDialog(menu.create());
             });
-            // Same 38dp size as emoji; sit after emoji in the 44dp Telegram row.
+            // Same 38dp size as emoji; sit after emoji, pinned to the bottom of the growing row.
             final int aiSize = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : rowH;
             final int aiLeft = (isChat ? (useTelegramBottomPanelLayout() ? 3 : INPUT_INNER_BUTTON_LEFT_MARGIN) : 2) + emojiSize;
-            final int aiGravity = useTelegramBottomPanelLayout()
-                    ? (Gravity.CENTER_VERTICAL | Gravity.LEFT)
-                    : (Gravity.BOTTOM | Gravity.LEFT);
-            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(aiSize, aiSize, aiGravity, aiLeft, 0, 0, 0));
+            messageEditTextContainer.addView(aiEditorButton, LayoutHelper.createFrame(aiSize, aiSize, Gravity.BOTTOM | Gravity.LEFT, aiLeft, 0, 0, 0));
         }
         deleteRichDraftButton = new ImageView(context);
         deleteRichDraftButton.setScaleType(ImageView.ScaleType.CENTER);
@@ -6025,12 +6021,14 @@ public class ChatActivityEnterView extends FrameLayout implements
         updateFieldHint(false);
         messageEditText.setSingleLine(false);
         messageEditText.setMaxLines(6);
-        messageEditText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, INPUT_TEXT_SIZE_DP);
-        messageEditText.setGravity(Gravity.CENTER_VERTICAL);
-        // Telegram 44dp row: no vertical padding — CENTER_VERTICAL centers hint/text in the slot.
+        // Stock Telegram: 18sp + 9/10 padding so each new line grows ~lineHeight (not swallowed by minHeight).
         if (useTelegramBottomPanelLayout()) {
-            messageEditText.setPadding(0, 0, 0, 0);
+            messageEditText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, TELEGRAM_INPUT_TEXT_SIZE_DP);
+            messageEditText.setGravity(Gravity.BOTTOM);
+            messageEditText.setPadding(0, dp(TELEGRAM_INPUT_PADDING_TOP), 0, dp(TELEGRAM_INPUT_PADDING_BOTTOM));
         } else {
+            messageEditText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, INPUT_TEXT_SIZE_DP);
+            messageEditText.setGravity(Gravity.CENTER_VERTICAL);
             messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), 0, dp(INPUT_TEXT_PADDING_BOTTOM));
         }
         messageEditText.setBackgroundDrawable(null);
@@ -6047,7 +6045,8 @@ public class ChatActivityEnterView extends FrameLayout implements
             msgLeftMargin += leftChrome + dp(12) + dp(1) - dp(3);
         }
         messageEditText.setMinimumHeight(getPanelRowHeight());
-        final float textBottomMargin = useTelegramBottomPanelLayout() ? 0 : 1.5f;
+        // Stock uses 1.5dp bottom inset under the field in the glass row.
+        final float textBottomMargin = 1.5f;
         messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, msgLeftMargin, 0, useStaticSendButton() ? INPUT_INNER_BUTTON_RIGHT_MARGIN : (isChat ? 50 : 2), textBottomMargin));
         if (aiEditorButton != null) {
             aiEditorButton.bringToFront();
@@ -6708,6 +6707,10 @@ public class ChatActivityEnterView extends FrameLayout implements
     private static final int INPUT_TEXT_SIZE_DP = 16;
     private static final int INPUT_TEXT_PADDING_TOP = 7;
     private static final int INPUT_TEXT_PADDING_BOTTOM = 8;
+    /** Match DrKLO ChatActivityEnterView multiline growth (18sp + 9/10 padding). */
+    private static final int TELEGRAM_INPUT_TEXT_SIZE_DP = 18;
+    private static final int TELEGRAM_INPUT_PADDING_TOP = 9;
+    private static final int TELEGRAM_INPUT_PADDING_BOTTOM = 10;
     private static final int INPUT_INNER_SEND_RESERVED = DEFAULT_HEIGHT + 6;
     private static final int STATIC_ATTACH_GAP = 0;
 
@@ -9045,7 +9048,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             if (isStories) {
                 messageEditText.setPadding(0, 0, padding, 0);
             } else if (useTelegramBottomPanelLayout()) {
-                messageEditText.setPadding(0, 0, padding, 0);
+                messageEditText.setPadding(0, dp(TELEGRAM_INPUT_PADDING_TOP), padding, dp(TELEGRAM_INPUT_PADDING_BOTTOM));
             } else {
                 messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), padding, dp(INPUT_TEXT_PADDING_BOTTOM));
             }
@@ -15461,17 +15464,19 @@ public class ChatActivityEnterView extends FrameLayout implements
 
         if (messageEditText != null && !collapsed) {
             FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) messageEditText.getLayoutParams();
-            final int emojiLeft = useTelegramBottomPanelLayout() ? dp(3) : getInputInnerButtonLeftMargin();
-            final int chrome = useTelegramBottomPanelLayout() ? DEFAULT_HEIGHT : getPanelRowHeightDp();
+            final boolean telegramPanel = useTelegramBottomPanelLayout();
+            final int emojiLeft = telegramPanel ? dp(3) : getInputInnerButtonLeftMargin();
+            final int chrome = telegramPanel ? DEFAULT_HEIGHT : getPanelRowHeightDp();
             final int textLeft = emojiLeft + dp(2) + dp(chrome)
                 + (aiEditorButton != null ? dp(chrome) : 0);
             final int textRight = useStaticSendButton() ? dp(INPUT_INNER_BUTTON_RIGHT_MARGIN) : dp(isChat ? 50 : 2);
             final int lineH = getPanelRowHeight();
-            if (textLp.leftMargin != textLeft || textLp.rightMargin != textRight || textLp.height != LayoutHelper.WRAP_CONTENT || textLp.gravity != Gravity.BOTTOM || textLp.bottomMargin != 0) {
+            final int bottomMargin = dp(1.5f);
+            if (textLp.leftMargin != textLeft || textLp.rightMargin != textRight || textLp.height != LayoutHelper.WRAP_CONTENT || textLp.gravity != Gravity.BOTTOM || textLp.bottomMargin != bottomMargin) {
                 textLp.leftMargin = textLeft;
                 textLp.rightMargin = textRight;
                 textLp.height = LayoutHelper.WRAP_CONTENT;
-                textLp.bottomMargin = 0;
+                textLp.bottomMargin = bottomMargin;
                 textLp.gravity = Gravity.BOTTOM;
                 messageEditText.setLayoutParams(textLp);
             }
@@ -15479,9 +15484,16 @@ public class ChatActivityEnterView extends FrameLayout implements
                 messageEditText.setMinimumHeight(lineH);
             }
             messageEditText.setIncludeFontPadding(false);
-            messageEditText.setGravity(Gravity.CENTER_VERTICAL);
-            messageEditText.setPadding(0, 0, 0, 0);
-            messageEditText.setHintDrawableGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            final int padRight = messageEditText.getPaddingRight();
+            if (telegramPanel) {
+                messageEditText.setGravity(Gravity.BOTTOM);
+                messageEditText.setPadding(0, dp(TELEGRAM_INPUT_PADDING_TOP), padRight, dp(TELEGRAM_INPUT_PADDING_BOTTOM));
+                messageEditText.setHintDrawableGravity(Gravity.LEFT | Gravity.BOTTOM);
+            } else {
+                messageEditText.setGravity(Gravity.CENTER_VERTICAL);
+                messageEditText.setPadding(0, dp(INPUT_TEXT_PADDING_TOP), padRight, dp(INPUT_TEXT_PADDING_BOTTOM));
+                messageEditText.setHintDrawableGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            }
         }
 
         // Reclaim left/right button slots while collapsed so the hint fills the pill.

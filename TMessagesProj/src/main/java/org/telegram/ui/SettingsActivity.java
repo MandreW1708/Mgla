@@ -676,7 +676,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(UItem.asCustomShadow(topView, 200 - 12));
 
         items.add(SettingCell.Factory.of(100, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, "Настройки Mgla"));
-        items.add(SettingCell.Factory.of(101, 0xFFEFA612, 0xFFE77512, R.drawable.settings_mgla_premium, "Mgla Premium"));
+        items.add(SettingCell.Factory.of(101, 0xFF111111, 0xFF000000, R.drawable.settings_mgla_premium, "Mgla Premium"));
         items.add(UItem.asShadow(null));
 
         accountNumbers.clear();
@@ -1284,6 +1284,11 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
 
             iconBackground.setColor(iconColorTop, iconColorBottom);
             iconView.setImageResource(icon);
+            if (icon == R.drawable.settings_mgla_premium) {
+                iconView.setColorFilter(new PorterDuffColorFilter(0xFFE8B84A, PorterDuff.Mode.SRC_IN));
+            } else {
+                iconView.clearColorFilter();
+            }
             titleView.setText(title);
             subtitleView.setVisibility((twoLines = !TextUtils.isEmpty(subtitle)) ? View.VISIBLE : View.GONE);
             subtitleView.setText(subtitle);

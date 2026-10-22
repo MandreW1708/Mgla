@@ -8,6 +8,7 @@ import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.os.Bundle;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -35,12 +36,18 @@ import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.browser.Browser;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MglaMainTabsConfig;
 import org.telegram.messenger.MglaPremiumController;
 import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.R;
+import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.tgnet.TLObject;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.BulletinFactory;
@@ -746,15 +753,78 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             return;
         }
 
-        // Platega moderation path: tariff + concrete price + clickable pay → stub (no live checkout yet).
         String text = "Оплатить · " + plan.priceRub + " ₽/мес";
-        premiumButtonView.setButton(text, v -> {
-            BulletinFactory.of(this)
-                    .createSimpleBulletin(
-                            R.raw.error,
-                            "Оплата пока недоступна. Подключение платёжной системы ещё не завершено.")
-                    .show();
-        }, animated);
+        premiumButtonView.setButton(text, v -> openAdminChatForPlan(plan), animated);
+    }
+
+    private static final String ADMIN_USERNAME = "mgla_admin";
+
+    /** Opens chat with @mgla_admin and pre-fills the purchase request for the selected plan tab. */
+    private void openAdminChatForPlan(PlanData plan) {
+        if (getParentActivity() == null || plan == null) {
+            return;
+        }
+        final String draft = "Привет! Хочу купить подписку тарифа " + plan.tabTitle;
+        final String username = ADMIN_USERNAME;
+        try {
+            TLRPC.User cached = null;
+            TLObject obj = getMessagesController().getUserOrChat(username);
+            if (obj instanceof TLRPC.User && !((TLRPC.User) obj).min) {
+                cached = (TLRPC.User) obj;
+            }
+            if (cached != null) {
+                presentAdminChat(cached, draft);
+                return;
+            }
+            AlertDialog[] progressDialog = new AlertDialog[]{
+                    new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER)
+            };
+            boolean[] canceled = new boolean[]{false};
+            getMessagesController().getUserNameResolver().resolve(username, peerId -> {
+                try {
+                    if (progressDialog[0] != null) {
+                        progressDialog[0].dismiss();
+                    }
+                } catch (Exception ignored) {
+                }
+                progressDialog[0] = null;
+                setVisibleDialog(null);
+                if (canceled[0]) {
+                    return;
+                }
+                if (peerId != null && peerId > 0) {
+                    TLRPC.User user = getMessagesController().getUser(peerId);
+                    if (user != null) {
+                        presentAdminChat(user, draft);
+                        return;
+                    }
+                }
+                Browser.openUrl(getParentActivity(), "https://t.me/" + username);
+            });
+            AndroidUtilities.runOnUIThread(() -> {
+                if (progressDialog[0] == null || getParentActivity() == null) {
+                    return;
+                }
+                progressDialog[0].setOnCancelListener(d -> canceled[0] = true);
+                showDialog(progressDialog[0]);
+            }, 400);
+        } catch (Throwable e) {
+            FileLog.e(e);
+            Browser.openUrl(getParentActivity(), "https://t.me/" + username);
+        }
+    }
+
+    private void presentAdminChat(TLRPC.User user, String draft) {
+        if (user == null || UserObject.isDeleted(user)) {
+            Browser.openUrl(getParentActivity(), "https://t.me/" + ADMIN_USERNAME);
+            return;
+        }
+        Bundle args = new Bundle();
+        args.putLong("user_id", user.id);
+        if (!TextUtils.isEmpty(draft)) {
+            args.putString("start_text", draft);
+        }
+        presentFragment(new ChatActivity(args));
     }
 
     private void updateColors() {

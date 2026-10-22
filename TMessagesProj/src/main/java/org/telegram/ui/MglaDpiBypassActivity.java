@@ -457,7 +457,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         int size = dp(16);
         star.setBounds(0, 0, size, size);
         star.setColorFilter(new PorterDuffColorFilter(
-            Theme.getColor(Theme.key_premiumGradient1), PorterDuff.Mode.SRC_IN));
+            Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
         sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return sb;
     }

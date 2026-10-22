@@ -279,10 +279,11 @@ _ENTITLEMENTS_TTL = 45.0
 async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
     """Best plan among tg_ids from mglahub. Fail-closed → free.
 
-    Auth to hub:
-      1) dedicated s2s token (MGLA_HUB_ENTITLEMENTS_TOKEN / SYNC), and/or
-      2) client's X-Mgla-Token (JWT) — required on Ultra-only nodes when the
-         local WS token is not the hub sync secret (typical for fin.mgla).
+    Install-wide Ultra: hub returns the best plan across *all* claimed tg_ids.
+    Prefer dedicated s2s entitlements/sync token. Do **not** attach the client's
+    X-Mgla-Token when s2s is available — JWT ownership filters can strip the
+    Ultra account and collapse the plan to free even when another account on
+    the same install is Ultra.
     """
     if not tg_ids:
         return "free"
@@ -290,17 +291,21 @@ async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
     if not HUB_ENTITLEMENTS_URL:
         LOG.warning("entitlements URL missing — treating as free")
         return "free"
-    if not HUB_ENTITLEMENTS_TOKEN and not client_token:
+    has_s2s = bool(HUB_ENTITLEMENTS_TOKEN)
+    if not has_s2s and not client_token:
         LOG.warning("entitlements not configured — treating as free")
         return "free"
-    # JWT path applies install ownership filters — cache per token, not only ids.
     import hashlib
-    tok_part = (
-        "s2s"
-        if (HUB_ENTITLEMENTS_TOKEN and HUB_ENTITLEMENTS_TOKEN != AUTH_TOKEN and not client_token)
-        else hashlib.sha256((client_token or HUB_ENTITLEMENTS_TOKEN or "").encode()).hexdigest()[:16]
-    )
-    cache_key = tok_part + ":" + ",".join(str(x) for x in sorted(tg_ids))
+
+    # Cache by tg_ids only when using s2s (install-wide plan).
+    if has_s2s:
+        cache_key = "s2s:" + ",".join(str(x) for x in sorted(tg_ids))
+    else:
+        cache_key = (
+            hashlib.sha256(client_token.encode()).hexdigest()[:16]
+            + ":"
+            + ",".join(str(x) for x in sorted(tg_ids))
+        )
     now = time.monotonic()
     hit = _entitlements_cache.get(cache_key)
     if hit and now - hit[0] < _ENTITLEMENTS_TTL:
@@ -315,15 +320,11 @@ async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
             "Content-Type": "application/json",
             "X-Mgla-Client": "mgla",
         }
-        # Dedicated hub sync/entitlements secret (not the local WS echo).
-        if HUB_ENTITLEMENTS_TOKEN and HUB_ENTITLEMENTS_TOKEN != AUTH_TOKEN:
+        if has_s2s:
             headers["X-Mgla-Sync-Token"] = HUB_ENTITLEMENTS_TOKEN
             headers["X-Mgla-Entitlements-Token"] = HUB_ENTITLEMENTS_TOKEN
-        elif HUB_ENTITLEMENTS_TOKEN and not client_token:
-            # Last resort: local WS token might equal hub TOKEN on single-node.
-            headers["X-Mgla-Sync-Token"] = HUB_ENTITLEMENTS_TOKEN
-            headers["X-Mgla-Entitlements-Token"] = HUB_ENTITLEMENTS_TOKEN
-        if client_token:
+        elif client_token:
+            # Fallback only when no s2s secret is configured on this node.
             headers["X-Mgla-Token"] = client_token
         req = urllib.request.Request(
             HUB_ENTITLEMENTS_URL,
@@ -365,11 +366,12 @@ async def fetch_hub_plan(tg_ids: list, client_token: str = "") -> str:
 
     plan = await asyncio.to_thread(_sync_fetch)
     _entitlements_cache[cache_key] = (now, plan)
+    LOG.info("entitlements tg_ids=%s plan=%s s2s=%s", tg_ids, plan, int(has_s2s))
     return plan
 
 
 async def resolve_verified_plan(headers) -> tuple:
-    """Return (plan, ultra) from hub only. Client X-Mgla-Plan is advisory/logging."""
+    """Return (plan, ultra) from hub — best plan across all client tg_ids."""
     claimed_plan, wants_ultra = parse_priority(headers)
     tg_ids = parse_tg_ids_from_headers(headers)
     if not tg_ids:
