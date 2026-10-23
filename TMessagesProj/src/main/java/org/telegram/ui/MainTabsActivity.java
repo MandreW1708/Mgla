@@ -148,6 +148,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     private LinearLayout tabsBottomRow;
     private MainTabsLayout tabsView;
     private BlurredBackgroundDrawable tabsViewBackground;
+    private BlurredBackgroundDrawableViewFactory liquidGlassFactory;
     private FrameLayout searchButton;
     private ImageView searchButtonIcon;
     private BlurredBackgroundDrawable searchButtonBackground;
@@ -345,6 +346,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         iBlur3FactoryGlass.setSourceRootView(viewPositionWatcher, contentView);
         iBlur3FactoryGlass.setGlassEngine(glassEngine);
         iBlur3FactoryGlass.setLiquidGlassEffectAllowed(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS));
+        liquidGlassFactory = iBlur3FactoryGlass;
 
         tabsViewBackground = iBlur3FactoryGlass.create(tabsView, BlurredBackgroundProviderImpl.mainTabs(resourceProvider));
         tabsViewBackground.setRadius(dp(DialogsActivity.MAIN_TABS_HEIGHT / 2f));
@@ -1163,6 +1165,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     public DialogsActivity getDialogsActivity() {
         return dialogsActivity;
+    }
+
+    public BlurredBackgroundDrawableViewFactory getLiquidGlassFactory() {
+        return liquidGlassFactory;
     }
 
     /* */

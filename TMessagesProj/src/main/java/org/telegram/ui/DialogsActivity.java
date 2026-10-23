@@ -14663,6 +14663,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private final @NonNull BlurredBackgroundDrawableViewFactory iBlur3FactoryLiquidGlass;
     private final @NonNull BlurredBackgroundDrawableViewFactory iBlur3FactoryFade;
 
+    public BlurredBackgroundDrawableViewFactory getLiquidGlassFactory() {
+        return iBlur3FactoryLiquidGlass;
+    }
+
 
     private IBlur3Capture iBlur3Capture;
 

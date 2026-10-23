@@ -60,7 +60,7 @@ public class MglaNotificationsSettingsActivity extends MglaBaseSettingsActivity 
         popupCell.setBackground(null);
         boolean popupOn = MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")
             && prefs.getBoolean("mgla_popup_notifications_enabled", false);
-        popupCell.setTextAndCheck("Всплывающие уведомления", popupOn, false);
+        popupCell.setTextAndCheck("Всплывающие уведомления", popupOn, true);
         popupCell.setOnClickListener(v -> {
             boolean newVal = !prefs.getBoolean("mgla_popup_notifications_enabled", false);
             if (newVal && !MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")) {
@@ -72,6 +72,17 @@ public class MglaNotificationsSettingsActivity extends MglaBaseSettingsActivity 
             popupCell.setChecked(newVal && MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled"));
         });
         block.addView(popupCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextCheckCell pulseCell = new TextCheckCell(context);
+        pulseCell.setBackground(null);
+        boolean pulseOn = prefs.getBoolean("mgla_popup_pulse_enabled", true);
+        pulseCell.setTextAndCheck("Пульсация рамки", pulseOn, false);
+        pulseCell.setOnClickListener(v -> {
+            boolean newVal = !prefs.getBoolean("mgla_popup_pulse_enabled", true);
+            prefs.edit().putBoolean("mgla_popup_pulse_enabled", newVal).apply();
+            pulseCell.setChecked(newVal);
+        });
+        block.addView(pulseCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         block.addView(MglaUi.createDivider(context));
 

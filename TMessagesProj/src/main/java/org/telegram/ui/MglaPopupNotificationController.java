@@ -5,9 +5,9 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
-
-import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -15,15 +15,15 @@ import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.MglaHiddenChats;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
-import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
-import org.telegram.ui.Components.BackupImageView;
-import org.telegram.ui.Components.Bulletin;
-import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MglaPopupNotificationView;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 
 import java.util.ArrayList;
 
@@ -32,8 +32,10 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 public class MglaPopupNotificationController {
 
     private final LaunchActivity activity;
-    private Bulletin currentBulletin;
+    private MglaPopupNotificationView currentPopup;
     private MessageObject currentMessage;
+    private Runnable hideRunnable;
+    private boolean hiding;
 
     public MglaPopupNotificationController(LaunchActivity activity) {
         this.activity = activity;
@@ -45,7 +47,7 @@ public class MglaPopupNotificationController {
             return;
         }
         SharedPreferences prefs = ApplicationLoader.applicationContext.getSharedPreferences("mgla_config", Context.MODE_PRIVATE);
-        if (!org.telegram.messenger.MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")
+        if (!MglaFeatureFlags.isAllowed("mgla_popup_notifications_enabled")
                 || !prefs.getBoolean("mgla_popup_notifications_enabled", false)) {
             return;
         }
@@ -68,8 +70,6 @@ public class MglaPopupNotificationController {
         MessagesController messagesController = MessagesController.getInstance(account);
         long dialogId = message.getDialogId();
         long topicId = message.getTopicId();
-        // Same membership guard as NotificationsController: no in-app popups for chats the
-        // user left / was kicked from / never joined (system tray already skips these).
         if (DialogObject.isChatDialog(dialogId)) {
             TLRPC.Chat chat = messagesController.getChat(-dialogId);
             if (chat == null || chat.min || ChatObject.isNotInChat(chat) || ChatObject.isCommunity(chat)) {
@@ -87,52 +87,103 @@ public class MglaPopupNotificationController {
             return;
         }
         currentMessage = message;
-        showPopup(message, prefs, lastFragment);
+        showPopup(message, prefs);
     }
 
     public void destroy() {
-        hidePopup(false);
+        cancelHide();
+        removePopupImmediate();
     }
 
-    private void showPopup(MessageObject message, SharedPreferences prefs, BaseFragment fragment) {
-        hidePopup(false);
-
-        BulletinFactory factory = fragment != null
-            ? BulletinFactory.of(fragment)
-            : BulletinFactory.of(activity.drawerLayoutContainer, null);
-
-        Bulletin.TwoLineLayout layout = new Bulletin.TwoLineLayout(activity, null);
-
-        int alpha = Math.max(60, Math.min(100, prefs.getInt("mgla_popup_alpha", 90)));
-        layout.setBackground(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_undo_background), 255 * alpha / 100), 16);
-
-        AvatarDrawable avatarDrawable = new AvatarDrawable();
-        setupAvatar(layout.imageView, avatarDrawable, message);
-        layout.imageView.setRoundRadius(dp(15));
-
-        layout.titleTextView.setText(getTitle(message));
-        layout.subtitleTextView.setText(getMessagePreview(message));
-        layout.subtitleTextView.setMaxLines(2);
-
-        int duration = Math.max(1500, prefs.getInt("mgla_popup_duration_ms", 4000));
-        layout.setButton(new Bulletin.UndoButton(activity, true, null)
-            .setText("Открыть")
-            .setUndoAction(this::openCurrentMessage));
-
-        currentBulletin = factory.create(layout, duration)
-            .setOnClickListener(v -> openCurrentMessage())
-            .show(true);
-
-        Bulletin.Layout bulletinLayout = currentBulletin.getLayout();
-        if (bulletinLayout.getLayoutParams() instanceof FrameLayout.LayoutParams) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) bulletinLayout.getLayoutParams();
-            lp.width = AndroidUtilities.displaySize.x - dp(24);
-            lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-            bulletinLayout.setLayoutParams(lp);
+    private void showPopup(MessageObject message, SharedPreferences prefs) {
+        if (activity.drawerLayoutContainer == null) {
+            return;
         }
+        hidePopup(false);
+
+        final int alpha = Math.max(60, Math.min(100, prefs.getInt("mgla_popup_alpha", 90)));
+        final int duration = Math.max(1500, prefs.getInt("mgla_popup_duration_ms", 4000));
+
+        MglaPopupNotificationView popup = new MglaPopupNotificationView(activity);
+        AvatarDrawable avatarDrawable = new AvatarDrawable();
+        setupAvatar(popup.getAvatarView(), avatarDrawable, message);
+        final boolean pulseEnabled = prefs.getBoolean("mgla_popup_pulse_enabled", true);
+        BaseFragment glassFragment = LaunchActivity.getLastFragment();
+        BlurredBackgroundDrawableViewFactory glassFactory = resolveGlassFactory(glassFragment);
+        if (glassFactory != null) {
+            View sourceRoot = glassFragment != null ? glassFragment.getFragmentView() : null;
+            if (sourceRoot == null && glassFragment instanceof MainTabsActivity) {
+                DialogsActivity dialogs = ((MainTabsActivity) glassFragment).getDialogsActivity();
+                if (dialogs != null) {
+                    sourceRoot = dialogs.getFragmentView();
+                }
+            }
+            popup.attachGlass(glassFactory, sourceRoot);
+        }
+        popup.bind(
+                getTitle(message),
+                getMessagePreview(message),
+                alpha,
+                pulseEnabled,
+                avatarDrawable.getColor(),
+                avatarDrawable.getColor2(),
+                this::openCurrentMessage
+        );
+
+        FrameLayout.LayoutParams lp = LayoutHelper.createFrameMarginPx(
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL,
+                dp(12), AndroidUtilities.statusBarHeight + dp(8), dp(12), 0
+        );
+        activity.drawerLayoutContainer.addView(popup, lp);
+        currentPopup = popup;
+        hiding = false;
+        popup.showAnimated();
+
+        cancelHide();
+        hideRunnable = () -> hidePopup(true);
+        AndroidUtilities.runOnUIThread(hideRunnable, duration);
     }
 
-    private void setupAvatar(BackupImageView avatarView, AvatarDrawable avatarDrawable, MessageObject message) {
+    private BlurredBackgroundDrawableViewFactory resolveGlassFactory(BaseFragment last) {
+        // Prefer the visible fragment's glass source (chat wallpaper / dialogs list).
+        // MainTabs factory alone samples tab content and looks flat over ChatActivity.
+        BlurredBackgroundDrawableViewFactory fromLast = liquidGlassFromFragment(last);
+        if (fromLast != null) {
+            return fromLast;
+        }
+        if (last instanceof MainTabsActivity) {
+            fromLast = liquidGlassFromFragment(((MainTabsActivity) last).getDialogsActivity());
+            if (fromLast != null) {
+                return fromLast;
+            }
+            fromLast = ((MainTabsActivity) last).getLiquidGlassFactory();
+            if (fromLast != null) {
+                return fromLast;
+            }
+        }
+        MainTabsActivity tabs = LaunchActivity.findFragment(MainTabsActivity.class);
+        if (tabs != null) {
+            BlurredBackgroundDrawableViewFactory factory = liquidGlassFromFragment(tabs.getDialogsActivity());
+            if (factory != null) {
+                return factory;
+            }
+            return tabs.getLiquidGlassFactory();
+        }
+        return null;
+    }
+
+    private static BlurredBackgroundDrawableViewFactory liquidGlassFromFragment(BaseFragment fragment) {
+        if (fragment instanceof ChatActivity) {
+            return ((ChatActivity) fragment).getLiquidGlassFactory();
+        }
+        if (fragment instanceof DialogsActivity) {
+            return ((DialogsActivity) fragment).getLiquidGlassFactory();
+        }
+        return null;
+    }
+
+    private void setupAvatar(org.telegram.ui.Components.BackupImageView avatarView, AvatarDrawable avatarDrawable, MessageObject message) {
         MessagesController messagesController = MessagesController.getInstance(message.currentAccount);
         TLRPC.Peer fromId = message.messageOwner != null ? message.messageOwner.from_id : null;
         if (fromId != null && fromId.user_id != 0) {
@@ -213,9 +264,36 @@ public class MglaPopupNotificationController {
     }
 
     private void hidePopup(boolean animated) {
-        if (currentBulletin != null) {
-            currentBulletin.hide(animated, 0);
-            currentBulletin = null;
+        cancelHide();
+        final MglaPopupNotificationView popup = currentPopup;
+        if (popup == null) {
+            return;
+        }
+        if (!animated || hiding) {
+            removePopupImmediate();
+            return;
+        }
+        hiding = true;
+        popup.hideAnimated(this::removePopupImmediate);
+    }
+
+    private void removePopupImmediate() {
+        hiding = false;
+        final MglaPopupNotificationView popup = currentPopup;
+        currentPopup = null;
+        if (popup == null) {
+            return;
+        }
+        ViewGroup parent = (ViewGroup) popup.getParent();
+        if (parent != null) {
+            parent.removeView(popup);
+        }
+    }
+
+    private void cancelHide() {
+        if (hideRunnable != null) {
+            AndroidUtilities.cancelRunOnUIThread(hideRunnable);
+            hideRunnable = null;
         }
     }
 }
