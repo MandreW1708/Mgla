@@ -11,6 +11,8 @@ public class MglaTask {
 
     public long id;
     public int account;
+    /** Stable id for cloud sync across devices (UUID string). */
+    public String uuid;
     public String title;
     public String note;
     public long groupId;
@@ -19,6 +21,8 @@ public class MglaTask {
     public boolean done;
     public long doneAt;
     public long createdAt;
+    /** Last local/cloud mutation time (ms) — LWW sync. */
+    public long updatedAt;
     public int sortOrder;
     public long dialogId;
     public int messageId;
@@ -58,14 +62,17 @@ public class MglaTask {
     public static class Group {
         public long id;
         public int account;
+        public String uuid;
         public String name;
         public int color;
         public int sortOrder;
+        public long updatedAt;
     }
 
     public static class SubItem {
         public long id;
         public long taskId;
+        public String uuid;
         public String title;
         public boolean done;
         public int sortOrder;

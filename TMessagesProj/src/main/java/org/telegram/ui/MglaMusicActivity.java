@@ -3,6 +3,7 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.annotation.SuppressLint;
+import android.app.Dialog;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -123,7 +124,7 @@ public class MglaMusicActivity extends BaseFragment implements
     private LinearLayout musicRootColumn;
     private ScrollView homeScrollView;
     private ScrollView collectionScrollView;
-    private LinearLayout fullFavoritesView;
+    private FrameLayout fullFavoritesView;
     private LinearLayout searchView;
     private View authPromoView;
 
@@ -169,6 +170,13 @@ public class MglaMusicActivity extends BaseFragment implements
     private TextView offlineSectionTitle;
     private TextView offlineSectionCount;
     private TextView detailDownloadAllBtn;
+    private TextView detailSelectBtn;
+    private LinearLayout detailSelectionBar;
+    private TextView detailSelectionCount;
+    private TextView detailSelectionAllBtn;
+    private TextView detailSelectionDeleteBtn;
+    private boolean offlineSelectMode;
+    private final java.util.HashSet<String> selectedOfflineIds = new java.util.HashSet<>();
 
     // Playlists Section
     private View playlistsHeaderRow;
@@ -281,6 +289,7 @@ public class MglaMusicActivity extends BaseFragment implements
         MglaYandexMusicPlayer.getInstance().addListener(this);
         MglaYandexMusicStore.getInstance().addAuthListener(this);
         MglaYandexMusicOffline.getInstance().addListener(this);
+        MglaGlobalMusicBar.addGlobalVisibilityListener(musicBarVisibilityListener);
         return super.onFragmentCreate();
     }
 
@@ -289,6 +298,7 @@ public class MglaMusicActivity extends BaseFragment implements
         MglaYandexMusicPlayer.getInstance().removeListener(this);
         MglaYandexMusicStore.getInstance().removeAuthListener(this);
         MglaYandexMusicOffline.getInstance().removeListener(this);
+        MglaGlobalMusicBar.removeGlobalVisibilityListener(musicBarVisibilityListener);
         if (offlineUiRefreshRunnable != null) {
             AndroidUtilities.cancelRunOnUIThread(offlineUiRefreshRunnable);
         }
@@ -301,6 +311,7 @@ public class MglaMusicActivity extends BaseFragment implements
         updateHomeWaveSubtitle();
         updateCollectionWaveSubtitle();
         updateWaveButtons();
+        updateMusicBottomInsets();
     }
 
     private void updateHomeWaveSubtitle() {
@@ -592,10 +603,55 @@ public class MglaMusicActivity extends BaseFragment implements
     // ==========================================
 
     private int islandBottomInset() {
-        return AndroidUtilities.navigationBarHeight
-                + (hasMainTabs
-                ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + MglaGlobalMusicBar.BAR_HEIGHT + 12)
-                : dp(16));
+        int inset = AndroidUtilities.navigationBarHeight;
+        if (hasMainTabs) {
+            inset += dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS + 12);
+        } else {
+            inset += dp(16);
+        }
+        // Mini-player island sits above the tab island when visible.
+        if (MglaGlobalMusicBar.isGloballyVisible()) {
+            inset += dp(MglaGlobalMusicBar.BAR_HEIGHT + 8);
+        }
+        return inset;
+    }
+
+    private final MglaGlobalMusicBar.VisibilityListener musicBarVisibilityListener =
+            visible -> updateMusicBottomInsets();
+
+    /** Re-apply list / selection-bar insets when tabs or mini-player visibility changes. */
+    private void updateMusicBottomInsets() {
+        int inset = islandBottomInset();
+        int selectExtra = (offlineSelectMode && detailSelectionBar != null
+                && detailSelectionBar.getVisibility() == View.VISIBLE) ? dp(64) : 0;
+        if (fullFavoritesListView != null) {
+            fullFavoritesListView.setPadding(0, 0, 0, inset + selectExtra);
+        }
+        if (detailSelectionBar != null) {
+            ViewGroup.LayoutParams raw = detailSelectionBar.getLayoutParams();
+            if (raw instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                if (lp.bottomMargin != inset) {
+                    lp.bottomMargin = inset;
+                    detailSelectionBar.setLayoutParams(lp);
+                }
+            }
+        }
+        if (homeScrollView != null) {
+            homeScrollView.setPadding(0, 0, 0, inset);
+        }
+        if (collectionScrollView != null) {
+            collectionScrollView.setPadding(0, 0, 0, inset);
+        }
+        if (fullPlaylistsListView != null) {
+            fullPlaylistsListView.setPadding(0, 0, 0, inset);
+        }
+        if (fullArtistsListView != null) {
+            fullArtistsListView.setPadding(0, 0, 0, inset);
+        }
+        if (searchListView != null) {
+            searchListView.setPadding(0, 0, 0, inset);
+        }
     }
 
     private LinearLayout createMusicTabsHeader(Context context) {
@@ -1399,6 +1455,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void openPlaylist(MglaYandexMusicModel.Playlist playlist) {
         if (playlist == null) return;
+        exitOfflineSelectMode();
         openedPlaylistFromFullList = fullPlaylistsView != null && fullPlaylistsView.getVisibility() == View.VISIBLE;
         openedDetailFromArtist = false;
         detailSourceTitle = playlist.title;
@@ -1568,7 +1625,9 @@ public class MglaMusicActivity extends BaseFragment implements
     // FULL FAVORITES PAGE
     // ==========================================
 
-    private LinearLayout createFullFavoritesPage(Context context) {
+    private FrameLayout createFullFavoritesPage(Context context) {
+        FrameLayout root = new FrameLayout(context);
+
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(dp(16), dp(10), dp(16), 0);
@@ -1600,9 +1659,13 @@ public class MglaMusicActivity extends BaseFragment implements
         header.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
         layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
 
-        // Action buttons: "Слушать всё" and "Перемешать"
+        // Action buttons scroll when «Очистить» + «Выбрать» appear on small screens
+        HorizontalScrollView actionScroll = new HorizontalScrollView(context);
+        actionScroll.setHorizontalScrollBarEnabled(false);
+        actionScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         LinearLayout actionRow = new LinearLayout(context);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView playAllBtn = new TextView(context);
         playAllBtn.setText("▶  Слушать всё");
@@ -1649,10 +1712,32 @@ public class MglaMusicActivity extends BaseFragment implements
         dlBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
         detailDownloadAllBtn.setBackground(dlBg);
         detailDownloadAllBtn.setPadding(dp(16), dp(12), dp(16), dp(12));
-        detailDownloadAllBtn.setOnClickListener(v -> downloadDetailTracks());
-        actionRow.addView(detailDownloadAllBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        detailDownloadAllBtn.setOnClickListener(v -> onDetailDownloadOrClearClicked());
+        actionRow.addView(detailDownloadAllBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 10, 0));
 
-        layout.addView(actionRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
+        detailSelectBtn = new TextView(context);
+        detailSelectBtn.setText("Выбрать");
+        detailSelectBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        detailSelectBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        detailSelectBtn.setTextColor(MD3_ON_SURFACE);
+        GradientDrawable selBg = new GradientDrawable();
+        selBg.setCornerRadius(dp(20));
+        selBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        detailSelectBtn.setBackground(selBg);
+        detailSelectBtn.setPadding(dp(16), dp(12), dp(16), dp(12));
+        detailSelectBtn.setVisibility(View.GONE);
+        detailSelectBtn.setOnClickListener(v -> {
+            if (offlineSelectMode) {
+                exitOfflineSelectMode();
+            } else {
+                enterOfflineSelectMode();
+            }
+        });
+        actionRow.addView(detailSelectBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        actionScroll.addView(actionRow, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        layout.addView(actionScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
         fullFavoritesLoading = new ProgressBar(context);
         fullFavoritesLoading.setVisibility(View.GONE);
@@ -1665,13 +1750,64 @@ public class MglaMusicActivity extends BaseFragment implements
         fullFavoritesAdapter = new FullTrackAdapter(detailTracks, (track, position) ->
                 MglaYandexMusicPlayer.getInstance().playTrack(track, new ArrayList<>(detailTracks), detailSourceTitle));
         fullFavoritesListView.setAdapter(fullFavoritesAdapter);
+        // Instant click: don't wait for pressed-state delay (selection feels laggy otherwise).
+        fullFavoritesListView.setInstantClick(true);
         attachBlurScrollListener(fullFavoritesListView);
         layout.addView(fullFavoritesListView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
 
-        return layout;
+        root.addView(layout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // Floating selection bar — sits above tab / mini-player islands via bottomMargin.
+        detailSelectionBar = new LinearLayout(context);
+        detailSelectionBar.setOrientation(LinearLayout.HORIZONTAL);
+        detailSelectionBar.setGravity(Gravity.CENTER_VERTICAL);
+        detailSelectionBar.setPadding(dp(14), dp(12), dp(14), dp(12));
+        detailSelectionBar.setElevation(dp(8));
+        GradientDrawable selBarBg = new GradientDrawable();
+        selBarBg.setCornerRadius(dp(20));
+        selBarBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        detailSelectionBar.setBackground(selBarBg);
+        detailSelectionBar.setVisibility(View.GONE);
+        detailSelectionBar.setClickable(true);
+
+        detailSelectionCount = new TextView(context);
+        detailSelectionCount.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        detailSelectionCount.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        detailSelectionCount.setTextColor(MD3_ON_SURFACE);
+        detailSelectionBar.addView(detailSelectionCount, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        detailSelectionAllBtn = new TextView(context);
+        detailSelectionAllBtn.setText("Все");
+        detailSelectionAllBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        detailSelectionAllBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        detailSelectionAllBtn.setTextColor(MD3_PRIMARY);
+        detailSelectionAllBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
+        detailSelectionAllBtn.setOnClickListener(v -> selectAllOfflineTracks());
+        detailSelectionBar.addView(detailSelectionAllBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 6, 0));
+
+        detailSelectionDeleteBtn = new TextView(context);
+        detailSelectionDeleteBtn.setText("Удалить");
+        detailSelectionDeleteBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        detailSelectionDeleteBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        detailSelectionDeleteBtn.setTextColor(0xFFFFFFFF);
+        GradientDrawable delBg = new GradientDrawable();
+        delBg.setCornerRadius(dp(16));
+        delBg.setColor(0xFFE53935);
+        detailSelectionDeleteBtn.setBackground(delBg);
+        detailSelectionDeleteBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
+        detailSelectionDeleteBtn.setOnClickListener(v -> confirmDeleteSelectedOffline());
+        detailSelectionBar.addView(detailSelectionDeleteBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+        root.addView(detailSelectionBar, LayoutHelper.createFrame(
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.LEFT | Gravity.BOTTOM, 16, 0, 16, 0));
+        updateMusicBottomInsets();
+
+        return root;
     }
 
     private void showFullFavorites() {
+        exitOfflineSelectMode();
         openedPlaylistFromFullList = false;
         openedDetailFromArtist = false;
         detailSourceTitle = "Мне нравится";
@@ -1704,6 +1840,10 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private void closeFullFavorites() {
+        if (offlineSelectMode) {
+            exitOfflineSelectMode();
+            return;
+        }
         if (fullFavoritesView != null) fullFavoritesView.setVisibility(View.GONE);
         if (openedDetailFromArtist) {
             openedDetailFromArtist = false;
@@ -3039,12 +3179,8 @@ public class MglaMusicActivity extends BaseFragment implements
             } else if (which == 1) {
                 if (downloading) {
                     Toast.makeText(getContext(), "Уже скачивается", Toast.LENGTH_SHORT).show();
-                } else                 if (downloaded) {
-                    MglaYandexMusicOffline.getInstance().remove(track.id);
-                    Toast.makeText(getContext(), "Удалено с устройства", Toast.LENGTH_SHORT).show();
-                    notifyTrackDownloadRow(track.id);
-                    updateOfflineSection();
-                    updateFavoritesPreview();
+                } else if (downloaded) {
+                    confirmRemoveOfflineTrack(track);
                 } else {
                     Toast.makeText(getContext(), "Скачивание…", Toast.LENGTH_SHORT).show();
                     notifyTrackDownloadRow(track.id);
@@ -3094,37 +3230,103 @@ public class MglaMusicActivity extends BaseFragment implements
             return;
         }
         int count = MglaYandexMusicOffline.getInstance().getDownloadedCount();
-        offlineSectionCount.setText(count == 0
-                ? "Треки для прослушивания без интернета"
-                : formatTrackCount(count) + " · без интернета");
+        long bytes = MglaYandexMusicOffline.getInstance().getDownloadedBytes();
+        if (count == 0) {
+            offlineSectionCount.setText("Треки для прослушивания без интернета");
+        } else {
+            offlineSectionCount.setText(formatTrackCount(count) + " · " + AndroidUtilities.formatFileSize(bytes));
+        }
+
+        boolean downloadedPage = isDownloadedDetailPage();
+        if (detailSelectBtn != null) {
+            detailSelectBtn.setVisibility(downloadedPage && !detailTracks.isEmpty() ? View.VISIBLE : View.GONE);
+            if (!downloadedPage && offlineSelectMode) {
+                exitOfflineSelectMode();
+            } else if (downloadedPage) {
+                detailSelectBtn.setText(offlineSelectMode ? "Готово" : "Выбрать");
+            }
+        }
         if (detailDownloadAllBtn != null) {
-            int missing = 0;
-            for (MglaYandexMusicModel.Track t : detailTracks) {
-                if (t != null && !MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
-                    missing++;
+            if (downloadedPage) {
+                styleDetailDestructiveButton(detailDownloadAllBtn, !detailTracks.isEmpty() && !offlineSelectMode);
+                detailDownloadAllBtn.setText(detailTracks.isEmpty() ? "Очистить" : "Очистить всё");
+                detailDownloadAllBtn.setVisibility(offlineSelectMode ? View.GONE : View.VISIBLE);
+            } else {
+                styleDetailNeutralButton(detailDownloadAllBtn);
+                detailDownloadAllBtn.setVisibility(View.VISIBLE);
+                int missing = 0;
+                for (MglaYandexMusicModel.Track t : detailTracks) {
+                    if (t != null && !MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
+                        missing++;
+                    }
+                }
+                if (detailTracks.isEmpty()) {
+                    detailDownloadAllBtn.setText("Скачать");
+                    detailDownloadAllBtn.setEnabled(false);
+                    detailDownloadAllBtn.setAlpha(0.5f);
+                } else if (missing == 0) {
+                    detailDownloadAllBtn.setText("Скачано");
+                    detailDownloadAllBtn.setEnabled(false);
+                    detailDownloadAllBtn.setAlpha(0.55f);
+                } else if (MglaYandexMusicOffline.getInstance().isBatchRunning()) {
+                    detailDownloadAllBtn.setText("Скачивание…");
+                    detailDownloadAllBtn.setEnabled(false);
+                    detailDownloadAllBtn.setAlpha(0.55f);
+                } else {
+                    detailDownloadAllBtn.setText("Скачать (" + missing + ")");
+                    detailDownloadAllBtn.setEnabled(true);
+                    detailDownloadAllBtn.setAlpha(1f);
                 }
             }
-            if (detailTracks.isEmpty()) {
-                detailDownloadAllBtn.setText("Скачать");
-                detailDownloadAllBtn.setEnabled(false);
-                detailDownloadAllBtn.setAlpha(0.5f);
-            } else if (missing == 0) {
-                detailDownloadAllBtn.setText("Скачано");
-                detailDownloadAllBtn.setEnabled(false);
-                detailDownloadAllBtn.setAlpha(0.55f);
-            } else if (MglaYandexMusicOffline.getInstance().isBatchRunning()) {
-                detailDownloadAllBtn.setText("Скачивание…");
-                detailDownloadAllBtn.setEnabled(false);
-                detailDownloadAllBtn.setAlpha(0.55f);
-            } else {
-                detailDownloadAllBtn.setText("Скачать (" + missing + ")");
-                detailDownloadAllBtn.setEnabled(true);
-                detailDownloadAllBtn.setAlpha(1f);
+        }
+        if (downloadedPage) {
+            refreshDownloadedDetailSubtitle();
+        }
+        updateOfflineSelectionBar();
+    }
+
+    private void styleDetailNeutralButton(TextView btn) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(20));
+        bg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        btn.setBackground(bg);
+        btn.setTextColor(MD3_ON_SURFACE);
+    }
+
+    private void styleDetailDestructiveButton(TextView btn, boolean enabled) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(20));
+        bg.setColor(0x33E53935);
+        btn.setBackground(bg);
+        btn.setTextColor(0xFFE53935);
+        btn.setEnabled(enabled);
+        btn.setAlpha(enabled ? 1f : 0.45f);
+    }
+
+    private void refreshDownloadedDetailSubtitle() {
+        if (fullFavoritesCountText == null || !isDownloadedDetailPage()) {
+            return;
+        }
+        int count = detailTracks.size();
+        long bytes = 0;
+        for (MglaYandexMusicModel.Track t : detailTracks) {
+            if (t != null) {
+                bytes += MglaYandexMusicOffline.getInstance().getDownloadedBytes(t.id);
             }
+        }
+        if (count == 0) {
+            fullFavoritesCountText.setText("Нет скачанных треков");
+        } else {
+            fullFavoritesCountText.setText(formatTrackCount(count) + " · " + AndroidUtilities.formatFileSize(bytes));
         }
     }
 
+    private boolean isDownloadedDetailPage() {
+        return "Скачанное".equals(detailSourceTitle);
+    }
+
     private void showDownloadedTracks() {
+        exitOfflineSelectMode();
         List<MglaYandexMusicModel.Track> offline = MglaYandexMusicOffline.getInstance().getDownloadedTracks();
         openedPlaylistFromFullList = false;
         openedDetailFromArtist = false;
@@ -3134,14 +3336,195 @@ public class MglaMusicActivity extends BaseFragment implements
         if (fullFavoritesTitleText != null) {
             fullFavoritesTitleText.setText("Скачанное");
         }
-        if (fullFavoritesCountText != null) {
-            fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
-        }
         if (fullFavoritesAdapter != null) {
             fullFavoritesAdapter.notifyDataSetChanged();
         }
         updateOfflineSection();
         showTrackDetailPage();
+    }
+
+    private void onDetailDownloadOrClearClicked() {
+        if (isDownloadedDetailPage()) {
+            confirmClearAllOffline();
+        } else {
+            downloadDetailTracks();
+        }
+    }
+
+    private void enterOfflineSelectMode() {
+        if (!isDownloadedDetailPage() || detailTracks.isEmpty()) {
+            return;
+        }
+        offlineSelectMode = true;
+        selectedOfflineIds.clear();
+        if (detailSelectBtn != null) {
+            detailSelectBtn.setText("Готово");
+        }
+        if (detailDownloadAllBtn != null) {
+            detailDownloadAllBtn.setVisibility(View.GONE);
+        }
+        updateOfflineSelectionBar();
+        if (fullFavoritesAdapter != null) {
+            fullFavoritesAdapter.notifyDataSetChanged();
+        }
+        updateMusicBottomInsets();
+    }
+
+    private void exitOfflineSelectMode() {
+        if (!offlineSelectMode && selectedOfflineIds.isEmpty()
+                && (detailSelectionBar == null || detailSelectionBar.getVisibility() != View.VISIBLE)) {
+            return;
+        }
+        offlineSelectMode = false;
+        selectedOfflineIds.clear();
+        if (detailSelectBtn != null && isDownloadedDetailPage()) {
+            detailSelectBtn.setText("Выбрать");
+        }
+        if (detailDownloadAllBtn != null && isDownloadedDetailPage()) {
+            detailDownloadAllBtn.setVisibility(View.VISIBLE);
+        }
+        updateOfflineSelectionBar();
+        if (fullFavoritesAdapter != null) {
+            fullFavoritesAdapter.notifyDataSetChanged();
+        }
+        updateMusicBottomInsets();
+    }
+
+    private void updateOfflineSelectionBar() {
+        if (detailSelectionBar == null) {
+            return;
+        }
+        boolean show = offlineSelectMode && isDownloadedDetailPage();
+        detailSelectionBar.setVisibility(show ? View.VISIBLE : View.GONE);
+        updateMusicBottomInsets();
+        if (!show) {
+            return;
+        }
+        int n = selectedOfflineIds.size();
+        if (detailSelectionCount != null) {
+            detailSelectionCount.setText(n == 0 ? "Выберите треки" : ("Выбрано: " + n));
+        }
+        if (detailSelectionAllBtn != null) {
+            boolean all = !detailTracks.isEmpty() && n == detailTracks.size();
+            detailSelectionAllBtn.setText(all ? "Снять" : "Все");
+        }
+        if (detailSelectionDeleteBtn != null) {
+            detailSelectionDeleteBtn.setEnabled(n > 0);
+            detailSelectionDeleteBtn.setAlpha(n > 0 ? 1f : 0.4f);
+            detailSelectionDeleteBtn.setText(n > 0 ? ("Удалить · " + n) : "Удалить");
+        }
+    }
+
+    private void toggleOfflineSelection(MglaYandexMusicModel.Track track) {
+        if (track == null || TextUtils.isEmpty(track.id) || !offlineSelectMode) {
+            return;
+        }
+        if (selectedOfflineIds.contains(track.id)) {
+            selectedOfflineIds.remove(track.id);
+        } else {
+            selectedOfflineIds.add(track.id);
+        }
+        updateOfflineSelectionBar();
+        if (fullFavoritesAdapter != null) {
+            for (int i = 0; i < detailTracks.size(); i++) {
+                MglaYandexMusicModel.Track t = detailTracks.get(i);
+                if (t != null && track.id.equals(t.id)) {
+                    fullFavoritesAdapter.notifyItemChanged(i, "select");
+                    return;
+                }
+            }
+        }
+    }
+
+    private void selectAllOfflineTracks() {
+        if (!offlineSelectMode) {
+            return;
+        }
+        boolean allSelected = selectedOfflineIds.size() == detailTracks.size() && !detailTracks.isEmpty();
+        selectedOfflineIds.clear();
+        if (!allSelected) {
+            for (MglaYandexMusicModel.Track t : detailTracks) {
+                if (t != null && !TextUtils.isEmpty(t.id)) {
+                    selectedOfflineIds.add(t.id);
+                }
+            }
+        }
+        updateOfflineSelectionBar();
+        if (fullFavoritesAdapter != null) {
+            fullFavoritesAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private void confirmDeleteSelectedOffline() {
+        if (selectedOfflineIds.isEmpty() || getParentActivity() == null) {
+            return;
+        }
+        int n = selectedOfflineIds.size();
+        long bytes = MglaYandexMusicOffline.getInstance().getDownloadedBytes(selectedOfflineIds);
+        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
+        b.setTitle(n == 1 ? "Удалить трек?" : "Удалить треки?");
+        b.setMessage("С устройства будет удалено " + formatTrackCount(n)
+                + " (" + AndroidUtilities.formatFileSize(bytes) + ").\n"
+                + "В Яндекс Музыке они останутся.");
+        b.setNegativeButton("Отмена", null);
+        b.setPositiveButton("Удалить", (d, w) -> {
+            ArrayList<String> ids = new ArrayList<>(selectedOfflineIds);
+            MglaYandexMusicOffline.getInstance().removeMany(ids);
+            exitOfflineSelectMode();
+            Toast.makeText(getContext(), "Удалено с устройства", Toast.LENGTH_SHORT).show();
+        });
+        showDestructiveDialog(b.create());
+    }
+
+    private void confirmClearAllOffline() {
+        if (detailTracks.isEmpty() || getParentActivity() == null) {
+            return;
+        }
+        int n = detailTracks.size();
+        long bytes = MglaYandexMusicOffline.getInstance().getDownloadedBytes();
+        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
+        b.setTitle("Очистить скачанное?");
+        b.setMessage("Удалить все офлайн-треки с устройства?\n"
+                + formatTrackCount(n) + " · " + AndroidUtilities.formatFileSize(bytes) + "\n\n"
+                + "В библиотеке Яндекс Музыки они останутся.");
+        b.setNegativeButton("Отмена", null);
+        b.setPositiveButton("Очистить", (d, w) -> {
+            MglaYandexMusicOffline.getInstance().removeAll();
+            exitOfflineSelectMode();
+            Toast.makeText(getContext(), "Скачанное очищено", Toast.LENGTH_SHORT).show();
+        });
+        showDestructiveDialog(b.create());
+    }
+
+    private void confirmRemoveOfflineTrack(MglaYandexMusicModel.Track track) {
+        if (track == null || getParentActivity() == null) {
+            return;
+        }
+        long bytes = MglaYandexMusicOffline.getInstance().getDownloadedBytes(track.id);
+        String size = bytes > 0 ? " (" + AndroidUtilities.formatFileSize(bytes) + ")" : "";
+        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
+        b.setTitle("Удалить загрузку?");
+        b.setMessage("«" + track.title + "»" + size + " будет удалён с устройства.\n"
+                + "В Яндекс Музыке трек останется.");
+        b.setNegativeButton("Отмена", null);
+        b.setPositiveButton("Удалить", (d, w) -> {
+            MglaYandexMusicOffline.getInstance().remove(track.id);
+            Toast.makeText(getContext(), "Удалено с устройства", Toast.LENGTH_SHORT).show();
+            notifyTrackDownloadRow(track.id);
+            updateOfflineSection();
+            updateFavoritesPreview();
+        });
+        showDestructiveDialog(b.create());
+    }
+
+    private void showDestructiveDialog(AlertDialog dialog) {
+        dialog.setOnShowListener(d -> {
+            View btn = dialog.getButton(Dialog.BUTTON_POSITIVE);
+            if (btn instanceof TextView) {
+                ((TextView) btn).setTextColor(0xFFE53935);
+            }
+        });
+        showDialog(dialog);
     }
 
     private void downloadDetailTracks() {
@@ -3217,9 +3600,28 @@ public class MglaMusicActivity extends BaseFragment implements
                 if ("Скачанное".equals(detailSourceTitle)) {
                     detailTracks.clear();
                     detailTracks.addAll(MglaYandexMusicOffline.getInstance().getDownloadedTracks());
-                    if (fullFavoritesCountText != null) {
-                        fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
+                    if (offlineSelectMode) {
+                        ArrayList<String> stale = new ArrayList<>();
+                        for (String id : selectedOfflineIds) {
+                            boolean stillThere = false;
+                            for (MglaYandexMusicModel.Track t : detailTracks) {
+                                if (t != null && id.equals(t.id)) {
+                                    stillThere = true;
+                                    break;
+                                }
+                            }
+                            if (!stillThere) {
+                                stale.add(id);
+                            }
+                        }
+                        selectedOfflineIds.removeAll(stale);
+                        if (detailTracks.isEmpty()) {
+                            exitOfflineSelectMode();
+                        } else {
+                            updateOfflineSelectionBar();
+                        }
                     }
+                    refreshDownloadedDetailSubtitle();
                     if (fullFavoritesAdapter != null) {
                         fullFavoritesAdapter.notifyDataSetChanged();
                     }
@@ -3253,6 +3655,10 @@ public class MglaMusicActivity extends BaseFragment implements
 
     @Override
     public boolean onBackPressed(boolean invoked) {
+        if (offlineSelectMode && fullFavoritesView != null && fullFavoritesView.getVisibility() == View.VISIBLE) {
+            exitOfflineSelectMode();
+            return false;
+        }
         if (searchView != null && searchView.getVisibility() == View.VISIBLE) {
             closeSearch();
             return false;
@@ -3666,11 +4072,18 @@ public class MglaMusicActivity extends BaseFragment implements
             row.setLayoutParams(lp);
 
             // Click target is a direct child — RecyclerListView forwards taps to clickable children.
+            // In select mode playArea becomes non-clickable so OnItemClickListener receives the tap.
             LinearLayout playArea = new LinearLayout(ctx);
             playArea.setOrientation(LinearLayout.HORIZONTAL);
             playArea.setGravity(Gravity.CENTER_VERTICAL);
             playArea.setClickable(true);
             playArea.setFocusable(true);
+
+            ImageView check = new ImageView(ctx);
+            check.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            check.setVisibility(View.GONE);
+            check.setClickable(false);
+            playArea.addView(check, LayoutHelper.createLinear(28, 28, 0, 0, 10, 0));
 
             ImageView cover = new ImageView(ctx);
             cover.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -3736,24 +4149,78 @@ public class MglaMusicActivity extends BaseFragment implements
             like.setPadding(dp(6), dp(6), dp(6), dp(6));
             row.addView(like, LayoutHelper.createLinear(36, 36));
 
-            return new Holder(row, playArea, cover, title, explicitTag, subtitle, duration, download, like);
+            return new Holder(row, check, playArea, cover, title, explicitTag, subtitle, duration, download, like);
         }
 
         @Override
         public void onBindViewHolder(@NonNull Holder holder, int position, @NonNull List<Object> payloads) {
-            if (!payloads.isEmpty() && "download".equals(payloads.get(0))) {
+            if (!payloads.isEmpty()) {
+                Object p = payloads.get(0);
                 MglaYandexMusicModel.Track t = items.get(position);
-                bindDownloadIcon(holder.download, t.id);
-                return;
+                if ("download".equals(p)) {
+                    bindDownloadIcon(holder.download, t.id);
+                    return;
+                }
+                if ("select".equals(p)) {
+                    bindSelectState(holder, t);
+                    return;
+                }
             }
             onBindViewHolder(holder, position);
+        }
+
+        private void bindSelectState(Holder holder, MglaYandexMusicModel.Track t) {
+            boolean selectMode = offlineSelectMode && isDownloadedDetailPage();
+            boolean selected = selectMode && t != null && selectedOfflineIds.contains(t.id);
+            if (selectMode) {
+                holder.check.setVisibility(View.VISIBLE);
+                GradientDrawable ring = new GradientDrawable();
+                ring.setShape(GradientDrawable.OVAL);
+                if (selected) {
+                    ring.setColor(MD3_PRIMARY);
+                    holder.check.setImageResource(R.drawable.msg_check_s);
+                    holder.check.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN));
+                } else {
+                    ring.setColor(0x00000000);
+                    ring.setStroke(dp(2), MD3_ON_SURFACE_VARIANT);
+                    holder.check.setImageDrawable(null);
+                    holder.check.setColorFilter(null);
+                }
+                holder.check.setBackground(ring);
+                holder.download.setVisibility(View.GONE);
+                holder.download.setClickable(false);
+                holder.download.setOnClickListener(null);
+                holder.like.setVisibility(View.GONE);
+                holder.like.setClickable(false);
+                holder.like.setOnClickListener(null);
+                GradientDrawable rowBg = new GradientDrawable();
+                rowBg.setCornerRadius(dp(12));
+                rowBg.setColor(selected ? ColorUtils.setAlphaComponent(MD3_PRIMARY, 0x28) : MD3_ROW_SCRIM);
+                holder.itemView.setBackground(rowBg);
+            } else {
+                holder.check.setVisibility(View.GONE);
+                holder.check.setBackground(null);
+                holder.download.setVisibility(View.VISIBLE);
+                holder.like.setVisibility(View.VISIBLE);
+                GradientDrawable rowBg = new GradientDrawable();
+                rowBg.setCornerRadius(dp(12));
+                rowBg.setColor(MD3_ROW_SCRIM);
+                holder.itemView.setBackground(rowBg);
+            }
         }
 
         @Override
         public void onBindViewHolder(@NonNull Holder holder, int position) {
             MglaYandexMusicModel.Track t = items.get(position);
             holder.title.setText(t.title);
-            holder.subtitle.setText(t.artist);
+            if (isDownloadedDetailPage()) {
+                long bytes = MglaYandexMusicOffline.getInstance().getDownloadedBytes(t.id);
+                holder.subtitle.setText(bytes > 0
+                        ? (t.artist + " · " + AndroidUtilities.formatFileSize(bytes))
+                        : t.artist);
+            } else {
+                holder.subtitle.setText(t.artist);
+            }
             holder.duration.setText(t.getFormattedDuration());
             holder.explicitTag.setVisibility(t.isExplicit ? View.VISIBLE : View.GONE);
 
@@ -3769,6 +4236,7 @@ public class MglaMusicActivity extends BaseFragment implements
             }
 
             bindDownloadIcon(holder.download, t.id);
+            bindSelectState(holder, t);
 
             if (t.isLiked) {
                 holder.like.setImageResource(R.drawable.media_like_active);
@@ -3778,45 +4246,64 @@ public class MglaMusicActivity extends BaseFragment implements
                 holder.like.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
             }
 
+            // Single click path for both play and select — RecyclerListView only forwards
+            // taps reliably to clickable children (not via OnItemClickListener alone).
+            holder.playArea.setClickable(true);
+            holder.playArea.setFocusable(true);
             holder.playArea.setOnClickListener(v -> {
+                if (offlineSelectMode && isDownloadedDetailPage()) {
+                    toggleOfflineSelection(t);
+                    return;
+                }
+                int pos = holder.getAdapterPosition();
+                if (pos == RecyclerView.NO_POSITION) {
+                    pos = position;
+                }
                 if (listener != null) {
-                    listener.onTrackClick(t, position);
+                    listener.onTrackClick(t, pos);
                 }
             });
             holder.playArea.setOnLongClickListener(v -> {
+                if (isDownloadedDetailPage()) {
+                    if (!offlineSelectMode) {
+                        enterOfflineSelectMode();
+                    }
+                    toggleOfflineSelection(t);
+                    return true;
+                }
                 showTrackOptionsMenu(t);
                 return true;
             });
 
-            holder.download.setOnClickListener(v -> {
-                if (MglaYandexMusicOffline.getInstance().isDownloading(t.id)) {
-                    Toast.makeText(getContext(), "Уже скачивается", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
-                    MglaYandexMusicOffline.getInstance().remove(t.id);
-                    Toast.makeText(getContext(), "Удалено с устройства", Toast.LENGTH_SHORT).show();
+            if (!(offlineSelectMode && isDownloadedDetailPage())) {
+                holder.download.setClickable(true);
+                holder.download.setOnClickListener(v -> {
+                    if (MglaYandexMusicOffline.getInstance().isDownloading(t.id)) {
+                        Toast.makeText(getContext(), "Уже скачивается", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
+                        confirmRemoveOfflineTrack(t);
+                        return;
+                    }
+                    Toast.makeText(getContext(), "Скачивание…", Toast.LENGTH_SHORT).show();
                     notifyItemChanged(position, "download");
-                    updateOfflineSection();
-                    updateFavoritesPreview();
-                    return;
-                }
-                Toast.makeText(getContext(), "Скачивание…", Toast.LENGTH_SHORT).show();
-                notifyItemChanged(position, "download");
-                MglaYandexMusicOffline.getInstance().download(t, () -> {
-                    notifyItemChanged(position, "download");
-                    updateOfflineSection();
-                    updateFavoritesPreview();
+                    MglaYandexMusicOffline.getInstance().download(t, () -> {
+                        notifyItemChanged(position, "download");
+                        updateOfflineSection();
+                        updateFavoritesPreview();
+                    });
                 });
-            });
 
-            holder.like.setOnClickListener(v -> {
-                boolean nextLiked = !t.isLiked;
-                t.isLiked = nextLiked;
-                MglaYandexMusicStore.getInstance().setLiked(t.id, nextLiked);
-                notifyItemChanged(position);
-                MglaYandexMusicApi.toggleLike(t.id, nextLiked, null);
-            });
+                holder.like.setClickable(true);
+                holder.like.setOnClickListener(v -> {
+                    boolean nextLiked = !t.isLiked;
+                    t.isLiked = nextLiked;
+                    MglaYandexMusicStore.getInstance().setLiked(t.id, nextLiked);
+                    notifyItemChanged(position);
+                    MglaYandexMusicApi.toggleLike(t.id, nextLiked, null);
+                });
+            }
         }
 
         @Override
@@ -3825,6 +4312,7 @@ public class MglaMusicActivity extends BaseFragment implements
         }
 
         class Holder extends RecyclerView.ViewHolder {
+            final ImageView check;
             final View playArea;
             final ImageView cover;
             final TextView title;
@@ -3834,8 +4322,9 @@ public class MglaMusicActivity extends BaseFragment implements
             final ImageView download;
             final ImageView like;
 
-            Holder(View itemView, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView download, ImageView like) {
+            Holder(View itemView, ImageView check, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView download, ImageView like) {
                 super(itemView);
+                this.check = check;
                 this.playArea = playArea;
                 this.cover = cover;
                 this.title = title;

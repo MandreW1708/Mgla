@@ -461,6 +461,14 @@ public final class MglaSubscription {
         return PLAN_PREMIUM_PLUS.equals(plan) || PLAN_PREMIUM_ULTRA.equals(plan);
     }
 
+    /**
+     * Cloud sync of Задачи across devices — <b>currently selected</b> account with any
+     * paid plan (Premium / Premium+ / Ultra). Free never syncs and must not see sync UI.
+     */
+    public static boolean canSyncTasks() {
+        return !PLAN_FREE.equals(getPlanId());
+    }
+
     /** Media attachments in AI chat are disabled for all plans. */
     public static boolean canAttachMedia() {
         return false;

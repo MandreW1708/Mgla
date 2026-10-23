@@ -6394,33 +6394,24 @@ public class Theme {
         currentColors.put(key_switchTrackChecked, uiAccent);
         currentColors.put(key_checkbox, uiAccent);
         currentColors.put(key_checkboxCheck, 0xFFFFFFFF);
-        // Firm amoled/dark keep accent loaders/links; icon themes need contrast on colored bubbles.
-        final boolean firmTheme = MGLA_THEME_AMOLED.equals(themeInfo.name)
-                || MGLA_THEME_DARK.equals(themeInfo.name);
-        if (firmTheme) {
-            currentColors.put(key_chat_messageLinkIn, palette.accent);
-            currentColors.put(key_chat_messageLinkOut, palette.accent);
-            currentColors.put(key_chat_inLoader, palette.accent);
-            currentColors.put(key_chat_outLoader, palette.accent);
-        } else {
-            // Outgoing: white on dark bubble (links, loader ring); dark glyph on white file circle.
-            // Incoming: lifted accent for links on dark in-bubble; dark loader + white glyph.
-            currentColors.put(key_chat_messageLinkOut, 0xFFFFFFFF);
-            currentColors.put(key_chat_messageLinkIn, uiAccent);
-            currentColors.put(key_chat_outLoader, 0xFFFFFFFF);
-            currentColors.put(key_chat_outLoaderSelected, 0xFFFFFFFF);
-            currentColors.put(key_chat_outFileProgress, palette.bubble);
-            currentColors.put(key_chat_outFileProgressSelected, palette.bubble);
-            currentColors.put(key_chat_outMediaIcon, palette.accent);
-            currentColors.put(key_chat_outMediaIconSelected, palette.accent);
-            currentColors.put(key_chat_inLoader, palette.accent);
-            currentColors.put(key_chat_inLoaderSelected, palette.accent);
-            currentColors.put(key_chat_inFileProgress, uiAccent);
-            currentColors.put(key_chat_inFileProgressSelected, uiAccent);
-            currentColors.put(key_chat_inMediaIcon, 0xFFFFFFFF);
-            currentColors.put(key_chat_inMediaIconSelected, 0xFFFFFFFF);
-            currentColors.put(key_chat_linkSelectBackground, Theme.multAlpha(uiAccent, 0.28f));
-        }
+        // Firm amoled/dark and icon themes share the same out-bubble accent — accent-colored
+        // links/loaders disappear on those bubbles. Same contrast map for all Mgla themes:
+        // white on out bubble; lifted accent on dark in bubble; dark glyph on white file disc.
+        currentColors.put(key_chat_messageLinkOut, 0xFFFFFFFF);
+        currentColors.put(key_chat_messageLinkIn, uiAccent);
+        currentColors.put(key_chat_outLoader, 0xFFFFFFFF);
+        currentColors.put(key_chat_outLoaderSelected, 0xFFFFFFFF);
+        currentColors.put(key_chat_outFileProgress, palette.bubble);
+        currentColors.put(key_chat_outFileProgressSelected, palette.bubble);
+        currentColors.put(key_chat_outMediaIcon, palette.accent);
+        currentColors.put(key_chat_outMediaIconSelected, palette.accent);
+        currentColors.put(key_chat_inLoader, palette.accent);
+        currentColors.put(key_chat_inLoaderSelected, palette.accent);
+        currentColors.put(key_chat_inFileProgress, uiAccent);
+        currentColors.put(key_chat_inFileProgressSelected, uiAccent);
+        currentColors.put(key_chat_inMediaIcon, 0xFFFFFFFF);
+        currentColors.put(key_chat_inMediaIconSelected, 0xFFFFFFFF);
+        currentColors.put(key_chat_linkSelectBackground, Theme.multAlpha(uiAccent, 0.28f));
     }
 
     /** Lift near-black accents so links/controls stay readable on dark surfaces. */

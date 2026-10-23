@@ -14,6 +14,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,6 +161,39 @@ public final class MglaYandexMusicOffline {
         }
     }
 
+    /** Total bytes of offline audio files currently on disk. */
+    public long getDownloadedBytes() {
+        long total = 0;
+        synchronized (tracks) {
+            for (String id : tracks.keySet()) {
+                File f = fileForTrack(id);
+                if (f.exists()) {
+                    total += f.length();
+                }
+            }
+        }
+        return total;
+    }
+
+    public long getDownloadedBytes(String trackId) {
+        if (TextUtils.isEmpty(trackId)) {
+            return 0;
+        }
+        File f = fileForTrack(trackId);
+        return f.exists() ? f.length() : 0;
+    }
+
+    public long getDownloadedBytes(Collection<String> trackIds) {
+        if (trackIds == null || trackIds.isEmpty()) {
+            return 0;
+        }
+        long total = 0;
+        for (String id : trackIds) {
+            total += getDownloadedBytes(id);
+        }
+        return total;
+    }
+
     public List<MglaYandexMusicModel.Track> getDownloadedTracks() {
         synchronized (tracks) {
             ArrayList<MglaYandexMusicModel.Track> list = new ArrayList<>(tracks.values());
@@ -258,6 +292,10 @@ public final class MglaYandexMusicOffline {
     }
 
     public void remove(String trackId) {
+        remove(trackId, true);
+    }
+
+    public void remove(String trackId, boolean notify) {
         if (TextUtils.isEmpty(trackId)) {
             return;
         }
@@ -274,6 +312,19 @@ public final class MglaYandexMusicOffline {
             tracks.remove(trackId);
         }
         saveIndex();
+        if (notify) {
+            notifyChanged();
+        }
+    }
+
+    /** Remove several offline tracks and fire a single change notification. */
+    public void removeMany(Collection<String> trackIds) {
+        if (trackIds == null || trackIds.isEmpty()) {
+            return;
+        }
+        for (String id : trackIds) {
+            remove(id, false);
+        }
         notifyChanged();
     }
 

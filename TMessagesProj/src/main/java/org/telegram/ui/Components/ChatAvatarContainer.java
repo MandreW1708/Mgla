@@ -1154,11 +1154,33 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         final boolean glassTitleCentered = glassMode && !hasVisibleAvatar();
         SimpleTextView titleTextLargerCopyView = this.titleTextLargerCopyView.get();
         // Non-glass (Topics etc.): raise title to the back-button row.
-        // Glass chat header keeps the two-line offsets.
+        // Glass + no subtitle (Saved Messages / Replies / …): true vertical center in the nick pill —
+        // fixed titleY=10 sits too high because titleTextView has asymmetric padding (6/12).
+        final boolean subtitleGone = getSubtitleTextView() == null || getSubtitleTextView().getVisibility() == GONE;
         final boolean raiseTitle = !glassMode;
-        final float titleY = raiseTitle ? -2f : (getSubtitleTextView().getVisibility() == GONE ? 10f : 1.66f);
-        final int titleTop = viewTop + dp(titleY) - titleTextView.getPaddingTop();
-        final int titleBottom = viewTop + titleTextView.getTextHeight() + dp(titleY) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom();
+        final int titleTop;
+        final int titleBottom;
+        final int titleCopyTop;
+        if (raiseTitle) {
+            final float titleY = -2f;
+            titleTop = viewTop + dp(titleY) - titleTextView.getPaddingTop();
+            titleBottom = viewTop + titleTextView.getTextHeight() + dp(titleY) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom();
+            titleCopyTop = viewTop + dp(titleY);
+        } else if (subtitleGone) {
+            final int contentTop = occupyStatusBar && getMeasuredHeight() > ActionBar.getCurrentActionBarHeight() + dp(8)
+                    ? AndroidUtilities.statusBarHeight : 0;
+            final int contentH = ActionBar.getCurrentActionBarHeight();
+            final int textH = titleTextView.getTextHeight();
+            // Glyphs start at titleTop + paddingTop; put their optical center on the bar mid-line.
+            titleTop = contentTop + (contentH - textH) / 2 - titleTextView.getPaddingTop();
+            titleBottom = titleTop + textH + titleTextView.getPaddingBottom();
+            titleCopyTop = contentTop + (contentH - (titleTextLargerCopyView != null ? titleTextLargerCopyView.getTextHeight() : textH)) / 2;
+        } else {
+            final float titleY = 1.66f;
+            titleTop = viewTop + dp(titleY) - titleTextView.getPaddingTop();
+            titleBottom = viewTop + titleTextView.getTextHeight() + dp(titleY) - titleTextView.getPaddingTop() + titleTextView.getPaddingBottom();
+            titleCopyTop = viewTop + dp(titleY);
+        }
         int titleLeft = glassTitleCentered
                 ? getGlassTitleLeft()
                 : (glassMode ? getCenteredTextLeft(l, titleTextView.getMeasuredWidth()) : l);
@@ -1167,7 +1189,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             int copyLeft = glassTitleCentered
                     ? getGlassTitleLeft()
                     : (glassMode ? getCenteredTextLeft(l, titleTextLargerCopyView.getMeasuredWidth()) : l);
-            titleTextLargerCopyView.layout(copyLeft, viewTop + dp(titleY), copyLeft + titleTextLargerCopyView.getMeasuredWidth(), viewTop + titleTextLargerCopyView.getTextHeight() + dp(titleY));
+            titleTextLargerCopyView.layout(copyLeft, titleCopyTop, copyLeft + titleTextLargerCopyView.getMeasuredWidth(), titleCopyTop + titleTextLargerCopyView.getTextHeight());
         }
         if (communityItem != null) {
             communityItem.layout(
@@ -1500,6 +1522,12 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         if ((UserObject.isUserSelf(user) && !showSavedMessagesHint || UserObject.isReplyUser(user) || user != null && user.id == UserObject.VERIFY || parentFragment.getChatMode() != 0 && parentFragment.getChatMode() != ChatActivity.MODE_SUGGESTIONS) && parentFragment.getChatMode() != ChatActivity.MODE_SAVED) {
             if (getSubtitleTextView().getVisibility() != GONE) {
                 getSubtitleTextView().setVisibility(GONE);
+                // Saved Messages / Replies: single-line title needs a fresh glass measure + vertical center.
+                if (glassMode) {
+                    updateGlassLayout();
+                } else {
+                    requestLayout();
+                }
             }
             return;
         } else if (showSavedMessagesHint) {

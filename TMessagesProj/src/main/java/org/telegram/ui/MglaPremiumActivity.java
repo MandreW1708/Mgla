@@ -84,6 +84,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     public static final int FEATURE_CLOUD_AI = 6;
     public static final int FEATURE_ULTRA_AI = 7;
     public static final int FEATURE_PRIORITY_BYPASS = 8;
+    public static final int FEATURE_TASKS_SYNC = 9;
 
     private static final int COLOR_BG = 0xFF000000;
     private static final int COLOR_CARD = 0xFF121212;
@@ -494,6 +495,9 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             case FEATURE_ULTRA_AI:
                 openMainTab(MglaMainTabsConfig.TabId.AI);
                 break;
+            case FEATURE_TASKS_SYNC:
+                openMainTab(MglaMainTabsConfig.TabId.TASKS);
+                break;
             case FEATURE_PRIORITY_BYPASS:
                 presentFragment(new MglaDpiBypassActivity());
                 break;
@@ -523,6 +527,11 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 FEATURE_TASKS, R.drawable.msg_premium_liststar,
                 "Планировщик задач",
                 "Удобный список задач прямо в приложении"
+        ));
+        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
+                FEATURE_TASKS_SYNC, R.drawable.msg_retry,
+                "Синхронизация задач на разных устройствах",
+                "Задачи этого аккаунта синхронизируются через сервер между устройствами"
         ));
         premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
                 FEATURE_LOCAL_MODELS, R.drawable.premium_ai_editor,
@@ -962,7 +971,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                             : "На этом аккаунте активен " + plan.title + " " + until
                                     + ". На других аккаунтах подписка не действует.";
                 } else if (plan.id == PLAN_PREMIUM) {
-                    hint = "Premium: анимации, задачи, локальные модели, живая память, темы иконок и автоперевод.";
+                    hint = "Premium: анимации, задачи с синхронизацией между устройствами, локальные модели, живая память, темы иконок и автоперевод.";
                 } else if (plan.id == PLAN_PLUS) {
                     hint = "Premium+ включает всё из Premium и добавляет умные облачные ИИ-модели.";
                 } else {

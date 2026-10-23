@@ -38,11 +38,13 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.LiteMode;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.MglaTask;
 import org.telegram.messenger.MglaTaskRepeat;
 import org.telegram.messenger.MglaTasksIO;
 import org.telegram.messenger.MglaTasksReminderScheduler;
 import org.telegram.messenger.MglaTasksStorage;
+import org.telegram.messenger.MglaTasksSync;
 import org.telegram.messenger.MglaTasksWidgetProvider;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
@@ -82,6 +84,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private static final int MENU_EXPORT = 4;
     private static final int MENU_IMPORT = 5;
     private static final int MENU_SEARCH = 6;
+    private static final int MENU_SYNC = 7;
 
     private static final int ROW_HEADER = 0;
     private static final int ROW_TASK = 1;
@@ -126,6 +129,8 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     private TextView dayEmptyView;
 
     private TextView toggleDoneItem;
+    private ActionBarMenuItem syncItem;
+    private View syncSubItem;
 
     private final ArrayList<Row> rows = new ArrayList<>();
     private final ArrayList<MglaTask> allTasks = new ArrayList<>();
@@ -241,11 +246,22 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                     exportTasks();
                 } else if (id == MENU_IMPORT) {
                     importTasks();
+                } else if (id == MENU_SYNC) {
+                    if (!MglaSubscription.canSyncTasks()) {
+                        BulletinFactory.of(MglaTasksActivity.this)
+                                .createErrorBulletin("Синхронизация доступна с Premium, Premium+ и Ultra")
+                                .show();
+                        return;
+                    }
+                    syncTasksNow();
                 }
             }
         });
 
         showDone = getPreferences().getBoolean("tasks_show_done", true);
+
+        // Always create; visibility follows selected-account plan (Plus/Ultra only).
+        syncItem = actionBar.createMenu().addItem(MENU_SYNC, R.drawable.msg_retry);
 
         ActionBarMenuItem searchItem = actionBar.createMenu().addItem(MENU_SEARCH, R.drawable.outline_header_search);
         searchItem.setIsSearchField(true);
@@ -282,8 +298,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         toggleDoneItem = menu.addSubItem(MENU_TOGGLE_DONE, "");
         updateToggleDoneItem();
         menu.addSubItem(MENU_CLEAR_DONE, "Очистить выполненные");
+        syncSubItem = menu.addSubItem(MENU_SYNC, R.drawable.msg_retry, "Синхронизировать");
         menu.addSubItem(MENU_EXPORT, "Экспорт JSON");
         menu.addSubItem(MENU_IMPORT, "Импорт из буфера");
+        updateSyncUi();
 
         rootLayout = new FrameLayout(context) {
             @Override
@@ -548,6 +566,45 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
     public void onResume() {
         super.onResume();
         openPendingTaskIfNeeded();
+        updateSyncUi();
+        if (MglaSubscription.canSyncTasks()) {
+            MglaTasksSync.maybeAutoSync(false);
+        }
+    }
+
+    /** Show sync controls only for the selected account on Premium+ / Ultra. */
+    private void updateSyncUi() {
+        boolean allowed = MglaSubscription.canSyncTasks();
+        if (syncItem != null) {
+            syncItem.setVisibility(allowed ? View.VISIBLE : View.GONE);
+        }
+        if (syncSubItem != null) {
+            syncSubItem.setVisibility(allowed ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void syncTasksNow() {
+        if (!MglaSubscription.canSyncTasks()) {
+            BulletinFactory.of(this).createErrorBulletin("Синхронизация доступна с Premium, Premium+ и Ultra").show();
+            return;
+        }
+        BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Синхронизация…").show();
+        MglaTasksSync.syncNow(true, new MglaTasksSync.Callback() {
+            @Override
+            public void onSuccess(String message) {
+                reloadData();
+                BulletinFactory.of(MglaTasksActivity.this)
+                        .createSimpleBulletin(R.raw.chats_infotip, message != null ? message : "Готово")
+                        .show();
+            }
+
+            @Override
+            public void onError(String message) {
+                BulletinFactory.of(MglaTasksActivity.this)
+                        .createErrorBulletin(message != null ? message : "Ошибка синхронизации")
+                        .show();
+            }
+        });
     }
 
     public void openPendingTaskIfNeeded() {

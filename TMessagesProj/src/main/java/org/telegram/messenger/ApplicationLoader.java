@@ -301,6 +301,11 @@ public class ApplicationLoader extends Application {
         } catch (Throwable e) {
             FileLog.e(e);
         }
+        try {
+            MglaTasksSync.init();
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
 
         ApplicationLoader app = (ApplicationLoader) ApplicationLoader.applicationContext;
         app.initPushServices();
