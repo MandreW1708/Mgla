@@ -45,6 +45,7 @@ import org.telegram.messenger.MglaYandexMusicPlayback;
 import org.telegram.messenger.MglaYandexMusicPlayer;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -237,26 +238,49 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     private boolean observersRegistered;
     private VisibilityListener visibilityListener;
 
+    /** LOW devices only: progress UI at ~4 Hz instead of every display frame. */
+    private static final long LOW_PROGRESS_TICK_MS = 250L;
+
     private final Choreographer.FrameCallback progressFrameCallback = new Choreographer.FrameCallback() {
         @Override
         public void doFrame(long frameTimeNanos) {
             if (!progressTicking) {
                 return;
             }
-            if (updateDisplayProgress()) {
-                progressView.invalidate();
-                // Underglow only needs coarse progress — avoid dual invalidates every frame.
-                int bucket = (int) (displayProgress * 40f);
-                if (bucket != underglowProgressBucket) {
-                    underglowProgressBucket = bucket;
-                    underglowView.invalidate();
-                }
-            }
+            invalidateProgressVisuals();
             if (progressTicking) {
                 Choreographer.getInstance().postFrameCallback(this);
             }
         }
     };
+
+    private final Runnable lowProgressTickRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!progressTicking || !SharedConfig.deviceIsLow()) {
+                return;
+            }
+            invalidateProgressVisuals();
+            if (progressTicking) {
+                AndroidUtilities.runOnUIThread(this, LOW_PROGRESS_TICK_MS);
+            }
+        }
+    };
+
+    private void invalidateProgressVisuals() {
+        if (!updateDisplayProgress()) {
+            return;
+        }
+        progressView.invalidate();
+        // Underglow only needs coarse progress — avoid dual invalidates every frame.
+        // LOW: fewer buckets (matches slower tick).
+        float buckets = SharedConfig.deviceIsLow() ? 16f : 40f;
+        int bucket = (int) (displayProgress * buckets);
+        if (bucket != underglowProgressBucket) {
+            underglowProgressBucket = bucket;
+            underglowView.invalidate();
+        }
+    }
 
     public interface VisibilityListener {
         void onMusicBarVisibilityChanged(boolean visible);
@@ -792,7 +816,11 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             return;
         }
         progressTicking = true;
-        Choreographer.getInstance().postFrameCallback(progressFrameCallback);
+        if (SharedConfig.deviceIsLow()) {
+            AndroidUtilities.runOnUIThread(lowProgressTickRunnable, LOW_PROGRESS_TICK_MS);
+        } else {
+            Choreographer.getInstance().postFrameCallback(progressFrameCallback);
+        }
     }
 
     private void stopProgressTicker() {
@@ -801,9 +829,15 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         }
         progressTicking = false;
         Choreographer.getInstance().removeFrameCallback(progressFrameCallback);
+        AndroidUtilities.cancelRunOnUIThread(lowProgressTickRunnable);
     }
 
     private void startPulse() {
+        // Soft glow pulse is decorative — skip continuous invalidates on weak GPUs.
+        if (SharedConfig.deviceIsLow()) {
+            glowPulse = 1f;
+            return;
+        }
         if (pulseAnimator != null && pulseAnimator.isRunning()) {
             return;
         }
@@ -899,6 +933,25 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         glassClipPath.addRoundRect(glassRect, r, r, Path.Direction.CW);
         if (Build.VERSION.SDK_INT >= 26) {
             canvas.clipOutPath(glassClipPath);
+        }
+
+        if (SharedConfig.deviceIsLow()) {
+            // 2 layers instead of 12 — same accent glow, far cheaper on weak GPUs.
+            for (int i = 2; i >= 1; i--) {
+                float t = i / 2f;
+                float spread = dp(14) * t;
+                float alpha = (0.16f * (1f - t * 0.45f))
+                        * (0.55f + 0.45f * Math.min(1f, displayProgress + 0.35f));
+                underglowPaint.setColor(Color.argb(
+                        Math.max(0, Math.min(255, (int) (alpha * 255))),
+                        ar, ag, ab
+                ));
+                glowRect.set(glassRect);
+                glowRect.inset(-spread, -spread);
+                canvas.drawRoundRect(glowRect, r + spread, r + spread, underglowPaint);
+            }
+            canvas.restore();
+            return;
         }
 
         final int layers = 8;

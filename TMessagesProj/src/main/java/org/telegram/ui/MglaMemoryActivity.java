@@ -120,11 +120,14 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
         actionBar.setTitle("Живая память");
+        actionBar.createMenu().addItem(1, R.drawable.msg_settings).setContentDescription("Настройки");
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
                 if (id == -1) {
                     finishFragment();
+                } else if (id == 1) {
+                    openMemorySettings();
                 }
             }
         });
@@ -149,6 +152,13 @@ public class MglaMemoryActivity extends MglaBaseSettingsActivity {
         super.onResume();
         // Сначала отдаём кадр интерфейса, тяжёлую подгрузку — следом.
         AndroidUtilities.runOnUIThread(this::reloadVisible, 16);
+    }
+
+    /** Открывает «Искусственный интеллект» и подсвечивает блок Живой памяти. */
+    private void openMemorySettings() {
+        MglaAiSettingsActivity ai = new MglaAiSettingsActivity();
+        presentFragment(ai);
+        ai.highlightMemoryToggle();
     }
 
     private View wrapScroll(View child) {

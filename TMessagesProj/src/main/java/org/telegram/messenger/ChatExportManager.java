@@ -3,11 +3,13 @@ package org.telegram.messenger;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.provider.DocumentsContract;
 import android.text.TextUtils;
 import android.webkit.MimeTypeMap;
 
@@ -19,13 +21,16 @@ import org.telegram.SQLite.SQLiteCursor;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLRPC;
+
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
@@ -41,7 +46,6 @@ public class ChatExportManager {
         void onError(String error);
     }
 
-    // Export state accessible from UI
     public static class ExportState {
         public volatile boolean running = false;
         public volatile boolean canceled = false;
@@ -55,6 +59,7 @@ public class ChatExportManager {
         public volatile String outputFilePath = "";
         public volatile String error = null;
         public volatile boolean completed = false;
+        public volatile File exportDir = null;
     }
 
     private static volatile ExportState currentState = null;
@@ -72,9 +77,9 @@ public class ChatExportManager {
         ExportState s = currentState;
         if (s != null && s.running && !s.canceled && !s.completed) {
             s.canceled = true;
+            // Service is stopped by the export thread after cleanup
             AndroidUtilities.runOnUIThread(() -> {
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaExportCanceled);
-                cancelExportNotification();
             });
         }
     }
@@ -95,12 +100,13 @@ public class ChatExportManager {
         });
     }
 
-    private static final int EXPORT_NOTIFICATION_ID = 77777;
-    private static final String EXPORT_CHANNEL_ID = "chat_export_channel";
+    public static final int EXPORT_NOTIFICATION_ID = 77777;
+    public static final String EXPORT_CHANNEL_ID = "chat_export_channel";
     private static final String EXPORT_CHANNEL_NAME = "Экспорт чата";
     private static final int HISTORY_BATCH_SIZE = 100;
     private static final int DB_EXPORT_BATCH_SIZE = 1000;
     private static final long MEDIA_DOWNLOAD_RETRY_DELAY_MS = 5000L;
+    private static final int MEDIA_DOWNLOAD_MAX_RETRIES = 3;
     private static volatile long lastProgressUpdate = 0;
 
     private static void ensureExportChannel() {
@@ -112,10 +118,10 @@ public class ChatExportManager {
             if (nm == null) return;
             NotificationChannel channel = nm.getNotificationChannel(EXPORT_CHANNEL_ID);
             if (channel == null) {
-                channel = new NotificationChannel(EXPORT_CHANNEL_ID, EXPORT_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT);
-                channel.enableLights(true);
-                channel.enableVibration(true);
-                channel.setShowBadge(true);
+                channel = new NotificationChannel(EXPORT_CHANNEL_ID, EXPORT_CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
+                channel.enableLights(false);
+                channel.enableVibration(false);
+                channel.setShowBadge(false);
                 nm.createNotificationChannel(channel);
             }
         } catch (Throwable e) {
@@ -148,7 +154,7 @@ public class ChatExportManager {
                         .setContentText(text)
                         .setOngoing(true)
                         .setOnlyAlertOnce(true)
-                        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                        .setPriority(NotificationCompat.PRIORITY_LOW)
                         .setColor(0xff11acfa)
                         .setProgress(100, percent, false)
                         .setContentIntent(pendingIntent);
@@ -180,7 +186,7 @@ public class ChatExportManager {
                         .setContentText(text)
                         .setOngoing(true)
                         .setOnlyAlertOnce(true)
-                        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                        .setPriority(NotificationCompat.PRIORITY_LOW)
                         .setColor(0xff11acfa)
                         .setProgress(0, 0, true)
                         .setContentIntent(pendingIntent);
@@ -197,7 +203,7 @@ public class ChatExportManager {
             try {
                 ensureExportChannel();
                 File file = new File(filePath);
-                PendingIntent openPendingIntent = buildOpenFileIntent(file);
+                PendingIntent openPendingIntent = file.exists() ? buildOpenFileIntent(file) : null;
 
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(ApplicationLoader.applicationContext, EXPORT_CHANNEL_ID)
                         .setSmallIcon(org.telegram.ui.MglaGlassConfig.getNotificationSmallIconRes())
@@ -285,11 +291,196 @@ public class ChatExportManager {
         }
     }
 
-    private static ArrayList<TLRPC.Message> fetchFullHistoryFromServer(int account, long dialogId, ExportState state) throws InterruptedException {
-        ArrayList<TLRPC.Message> allMessages = new ArrayList<>();
+    private static void deleteRecursive(File file) {
+        if (file == null || !file.exists()) {
+            return;
+        }
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        //noinspection ResultOfMethodCallIgnored
+        file.delete();
+    }
+
+    private static boolean isContentUri(String location) {
+        return location != null && location.startsWith("content:");
+    }
+
+    private static File resolveWritableBaseDir(String saveLocation) {
+        if (saveLocation != null && saveLocation.startsWith("/")) {
+            File dir = new File(saveLocation);
+            if (dir.exists() || dir.mkdirs()) {
+                File probe = new File(dir, ".export_write_probe");
+                try {
+                    if (probe.createNewFile() || probe.exists()) {
+                        //noinspection ResultOfMethodCallIgnored
+                        probe.delete();
+                        return dir;
+                    }
+                } catch (Exception ignore) {
+                }
+            }
+        } else if (saveLocation != null && saveLocation.equals("Telegram")) {
+            File dir = new File(Environment.getExternalStorageDirectory(), "Telegram");
+            if (dir.exists() || dir.mkdirs()) {
+                return dir;
+            }
+        } else if (saveLocation != null && !saveLocation.equals(Environment.DIRECTORY_DOWNLOADS) && !isContentUri(saveLocation)) {
+            File dir = Environment.getExternalStoragePublicDirectory(saveLocation);
+            if (dir.exists() || dir.mkdirs()) {
+                return dir;
+            }
+        }
+        File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (!downloads.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            downloads.mkdirs();
+        }
+        return downloads;
+    }
+
+    private static File createExportWorkingDir(String saveLocation, String folderName, boolean[] usedSafTemp) {
+        usedSafTemp[0] = false;
+        if (isContentUri(saveLocation)) {
+            File cacheRoot = ApplicationLoader.applicationContext.getExternalFilesDir(null);
+            if (cacheRoot == null) {
+                cacheRoot = ApplicationLoader.applicationContext.getFilesDir();
+            }
+            File tempRoot = new File(cacheRoot, "ChatExportTemp");
+            if (!tempRoot.exists() && !tempRoot.mkdirs()) {
+                return null;
+            }
+            File exportDir = new File(tempRoot, folderName);
+            deleteRecursive(exportDir);
+            if (!exportDir.mkdirs()) {
+                return null;
+            }
+            usedSafTemp[0] = true;
+            return exportDir;
+        }
+
+        File baseDir = resolveWritableBaseDir(saveLocation);
+        File exportDir = new File(baseDir, folderName);
+        if (!exportDir.exists() && !exportDir.mkdirs()) {
+            baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            exportDir = new File(baseDir, folderName);
+            if (!exportDir.exists() && !exportDir.mkdirs()) {
+                return null;
+            }
+        }
+        return exportDir;
+    }
+
+    private static String guessMimeType(String fileName) {
+        String ext = "";
+        int dot = fileName.lastIndexOf('.');
+        if (dot >= 0 && dot < fileName.length() - 1) {
+            ext = fileName.substring(dot + 1).toLowerCase(Locale.US);
+        }
+        String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+        if (mime == null) {
+            if ("html".equals(ext) || "htm".equals(ext)) return "text/html";
+            if ("json".equals(ext)) return "application/json";
+            return "application/octet-stream";
+        }
+        return mime;
+    }
+
+    private static Uri findChildDocument(ContentResolver resolver, Uri treeUri, Uri parentDocUri, String displayName) {
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, DocumentsContract.getDocumentId(parentDocUri));
+        try (android.database.Cursor cursor = resolver.query(children,
+                new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME},
+                null, null, null)) {
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    String name = cursor.getString(1);
+                    if (displayName.equals(name)) {
+                        return DocumentsContract.buildDocumentUriUsingTree(treeUri, cursor.getString(0));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        return null;
+    }
+
+    private static Uri ensureSafDirectory(ContentResolver resolver, Uri treeUri, Uri parentDocUri, String name) throws Exception {
+        Uri existing = findChildDocument(resolver, treeUri, parentDocUri, name);
+        if (existing != null) {
+            return existing;
+        }
+        Uri created = DocumentsContract.createDocument(resolver, parentDocUri, DocumentsContract.Document.MIME_TYPE_DIR, name);
+        if (created == null) {
+            throw new Exception("Failed to create SAF directory: " + name);
+        }
+        return created;
+    }
+
+    private static void copyFileToSaf(ContentResolver resolver, Uri treeUri, File file, Uri parentDocUri) throws Exception {
+        String name = file.getName();
+        Uri existing = findChildDocument(resolver, treeUri, parentDocUri, name);
+        if (existing != null) {
+            try {
+                DocumentsContract.deleteDocument(resolver, existing);
+            } catch (Exception ignore) {
+            }
+        }
+        Uri dest = DocumentsContract.createDocument(resolver, parentDocUri, guessMimeType(name), name);
+        if (dest == null) {
+            throw new Exception("Failed to create SAF file: " + name);
+        }
+        try (InputStream in = new FileInputStream(file); OutputStream out = resolver.openOutputStream(dest)) {
+            if (out == null) {
+                throw new Exception("Cannot open SAF output stream: " + name);
+            }
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                checkCanceled();
+                out.write(buf, 0, n);
+            }
+            out.flush();
+        }
+    }
+
+    private static void copyDirectoryToSaf(ContentResolver resolver, Uri treeUri, File dir, Uri parentDocUri) throws Exception {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            checkCanceled();
+            if (child.isDirectory()) {
+                Uri childDir = ensureSafDirectory(resolver, treeUri, parentDocUri, child.getName());
+                copyDirectoryToSaf(resolver, treeUri, child, childDir);
+            } else {
+                copyFileToSaf(resolver, treeUri, child, parentDocUri);
+            }
+        }
+    }
+
+    private static String publishExportToSaf(File exportDir, String treeUriString) throws Exception {
+        Uri treeUri = Uri.parse(treeUriString);
+        ContentResolver resolver = ApplicationLoader.applicationContext.getContentResolver();
+        Uri treeDoc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri));
+        Uri destDir = ensureSafDirectory(resolver, treeUri, treeDoc, exportDir.getName());
+        copyDirectoryToSaf(resolver, treeUri, exportDir, destDir);
+        return destDir.toString();
+    }
+
+    /**
+     * Syncs full history into local DB without keeping all messages in RAM.
+     */
+    private static int syncFullHistoryFromServer(int account, long dialogId) throws InterruptedException {
         TLRPC.InputPeer inputPeer = MessagesController.getInstance(account).getInputPeer(dialogId);
         if (inputPeer == null) {
-            return allMessages;
+            return 0;
         }
 
         int offsetId = 0;
@@ -309,6 +500,7 @@ public class ChatExportManager {
             final boolean[] finished = new boolean[1];
             final int[] retryDelay = new int[1];
             final int[] lastMsgId = new int[1];
+            final int[] batchCount = new int[1];
 
             ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
                 if (error != null) {
@@ -330,15 +522,12 @@ public class ChatExportManager {
                         int minId = Integer.MAX_VALUE;
                         for (int i = 0; i < res.messages.size(); i++) {
                             TLRPC.Message msg = res.messages.get(i);
-                            if (msg != null) {
-                                msg.dialog_id = dialogId;
-                                allMessages.add(msg);
-                                if (msg.id < minId) {
-                                    minId = msg.id;
-                                }
+                            if (msg != null && msg.id < minId) {
+                                minId = msg.id;
                             }
                         }
                         lastMsgId[0] = minId;
+                        batchCount[0] = res.messages.size();
                         if (res.messages.size() < HISTORY_BATCH_SIZE) {
                             finished[0] = true;
                         }
@@ -356,13 +545,18 @@ public class ChatExportManager {
                 continue;
             }
 
+            if (finished[0] && batchCount[0] == 0) {
+                break;
+            }
+
+            downloadedCount += batchCount[0];
+            showIndeterminateNotification("Синхронизация истории... (" + downloadedCount + " сообщений)");
+
             if (finished[0]) {
                 break;
             }
 
             if (lastMsgId[0] > 0 && lastMsgId[0] != offsetId) {
-                downloadedCount += HISTORY_BATCH_SIZE;
-                showIndeterminateNotification("Синхронизация истории... (" + downloadedCount + " сообщений)");
                 offsetId = lastMsgId[0];
             } else {
                 break;
@@ -370,13 +564,7 @@ public class ChatExportManager {
 
             Thread.sleep(100);
         }
-        Collections.sort(allMessages, (a, b) -> {
-            if (a.date != b.date) {
-                return Integer.compare(a.date, b.date);
-            }
-            return Integer.compare(a.id, b.id);
-        });
-        return allMessages;
+        return downloadedCount;
     }
 
     public static void startExport(int account, long dialogId, boolean photos, boolean videos, boolean voice, boolean stickers, boolean files, boolean htmlFormat, String folderName, String saveLocation, long maxFileSize, ExportCallback callback) {
@@ -390,46 +578,42 @@ public class ChatExportManager {
         currentState = state;
         lastProgressUpdate = 0;
         showIndeterminateNotification("Подготовка...");
+        ChatExportService.start();
 
         AndroidUtilities.runOnUIThread(() -> {
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaExportStarted, state);
         });
 
+        final String safTreeUri = isContentUri(saveLocation) ? saveLocation : null;
+
         new Thread(() -> {
             Thread.currentThread().setPriority(Thread.MIN_PRIORITY);
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+            BufferedWriter writer = null;
             FileOutputStream fos = null;
             File exportDir = null;
+            boolean usedSafTemp = false;
             try {
                 checkCanceled();
-                File baseDir;
-                if (saveLocation != null && saveLocation.startsWith("/")) {
-                    // Full path from folder picker
-                    baseDir = new File(saveLocation);
-                } else if (saveLocation != null && saveLocation.equals("Telegram")) {
-                    baseDir = new File(Environment.getExternalStorageDirectory(), "Telegram");
-                } else if (saveLocation != null && !saveLocation.equals(Environment.DIRECTORY_DOWNLOADS)) {
-                    baseDir = Environment.getExternalStoragePublicDirectory(saveLocation);
-                } else {
-                    baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                }
-                if (!baseDir.exists() && !baseDir.mkdirs()) {
-                    baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                }
-                exportDir = new File(baseDir, folderName);
-                if (!exportDir.exists() && !exportDir.mkdirs()) {
+                boolean[] safFlag = new boolean[1];
+                exportDir = createExportWorkingDir(saveLocation, folderName, safFlag);
+                usedSafTemp = safFlag[0];
+                if (exportDir == null) {
                     state.running = false;
                     state.error = "Не удалось создать папку экспорта";
                     showErrorNotification(state.error);
+                    ChatExportService.stop();
                     AndroidUtilities.runOnUIThread(() -> {
                         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaExportFailed, state);
                         callback.onError("Failed to create export directory");
                     });
                     return;
                 }
+                state.exportDir = exportDir;
 
                 File mediaDir = new File(exportDir, "media");
                 if ((photos || videos || voice || stickers || files) && !mediaDir.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
                     mediaDir.mkdirs();
                 }
                 File photosDir = new File(mediaDir, "photos");
@@ -445,35 +629,14 @@ public class ChatExportManager {
 
                 File outputFile = new File(exportDir, htmlFormat ? "export_1.html" : "export.json");
                 fos = new FileOutputStream(outputFile);
-                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fos, "UTF-8"), 8192);
+                writer = new BufferedWriter(new OutputStreamWriter(fos, "UTF-8"), 8192);
 
                 final int MESSAGES_PER_FILE = 10000;
                 int fileIndex = 1;
                 int messagesInCurrentFile = 0;
 
                 if (htmlFormat) {
-                    writer.write("<!DOCTYPE html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Chat Export — Часть 1</title>\n");
-                    writer.write("<style>\n");
-                    writer.write("*{box-sizing:border-box; margin:0; padding:0;}\n");
-                    writer.write("body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#e7ebf0; color:#000; padding:16px;}\n");
-                    writer.write(".header{background:#3390ec; color:#fff; padding:20px; border-radius:16px; margin-bottom:16px; text-align:center;}\n");
-                    writer.write(".header h1{font-size:20px; font-weight:600;}\n");
-                    writer.write(".header .info{font-size:13px; opacity:0.85; margin-top:4px;}\n");
-                    writer.write(".nav{text-align:center; margin:12px 0; padding:8px;}\n");
-                    writer.write(".nav a{display:inline-block; background:#3390ec; color:#fff; padding:8px 16px; border-radius:8px; text-decoration:none; margin:0 4px; font-size:14px;}\n");
-                    writer.write(".msg{background:#fff; padding:12px 16px; margin:4px 0; border-radius:14px; max-width:85%; word-wrap:break-word; box-shadow:0 1px 2px rgba(0,0,0,0.08);}\n");
-                    writer.write(".msg.out{background:#efffde; margin-left:auto; border-bottom-right-radius:4px;}\n");
-                    writer.write(".msg.in{margin-right:auto; border-bottom-left-radius:4px;}\n");
-                    writer.write(".msg .sender{font-weight:600; font-size:14px; color:#3390ec; margin-bottom:2px;}\n");
-                    writer.write(".msg.out .sender{color:#4caf50;}\n");
-                    writer.write(".msg .text{font-size:15px; line-height:1.4;}\n");
-                    writer.write(".msg .date{font-size:11px; color:#999; margin-top:4px; text-align:right;}\n");
-                    writer.write(".msg a{color:#3390ec; text-decoration:none;}\n");
-                    writer.write(".msg a:hover{text-decoration:underline;}\n");
-                    writer.write(".media-badge{display:inline-block; background:#3390ec1a; color:#3390ec; padding:4px 10px; border-radius:8px; font-size:13px; margin-top:4px;}\n");
-                    writer.write("</style>\n");
-                    writer.write("</head>\n<body>\n");
-                    writer.write("<div class=\"header\"><h1>Экспорт чата — Часть 1</h1><div class=\"info\">" + dateFormat.format(new Date()) + "</div></div>\n");
+                    writeHtmlHeader(writer, dateFormat, 1);
                 } else {
                     writer.write("{\n\"messages\": [\n");
                 }
@@ -482,78 +645,67 @@ public class ChatExportManager {
                 int count = 0;
                 int mediaProcessed = 0;
                 int totalMessages = 0;
-                ArrayList<TLRPC.Message> serverMessages = null;
-                
-                // Synchronize full chat history from Telegram servers first
+
+                // Sync history into DB without holding all messages in memory
                 try {
-                    serverMessages = fetchFullHistoryFromServer(account, dialogId, state);
+                    syncFullHistoryFromServer(account, dialogId);
+                } catch (InterruptedException e) {
+                    throw e;
                 } catch (Exception e) {
                     FileLog.e(e);
                 }
 
-                // Get total messages for progress
-                if (serverMessages != null && !serverMessages.isEmpty()) {
-                    totalMessages = serverMessages.size();
-                } else {
-                    CountDownLatch countLatch = new CountDownLatch(1);
-                    final int[] total = {0};
+                checkCanceled();
+
+                CountDownLatch countLatch = new CountDownLatch(1);
+                final int[] total = {0};
+                storage.getStorageQueue().postRunnable(() -> {
+                    try {
+                        SQLiteCursor cursor = storage.getDatabase().queryFinalized("SELECT COUNT(*) FROM messages_v2 WHERE uid = " + dialogId);
+                        if (cursor.next()) {
+                            total[0] = cursor.intValue(0);
+                        }
+                        cursor.dispose();
+                    } catch (Exception e) {
+                        FileLog.e(e);
+                    }
+                    countLatch.countDown();
+                });
+                awaitLatchWithoutTimeout(countLatch);
+                totalMessages = total[0];
+                state.total = totalMessages;
+
+                checkCanceled();
+
+                int totalMedia = 0;
+                if (photos || videos || voice || stickers || files) {
+                    CountDownLatch mediaCountLatch = new CountDownLatch(1);
+                    final int[] mediaTotal = {0};
                     storage.getStorageQueue().postRunnable(() -> {
                         try {
-                            SQLiteCursor cursor = storage.getDatabase().queryFinalized("SELECT COUNT(*) FROM messages_v2 WHERE uid = " + dialogId);
-                            if (cursor.next()) {
-                                total[0] = cursor.intValue(0);
+                            SQLiteCursor cursor = storage.getDatabase().queryFinalized("SELECT data FROM messages_v2 WHERE uid = " + dialogId);
+                            while (cursor.next()) {
+                                NativeByteBuffer data = cursor.byteBufferValue(0);
+                                if (data != null) {
+                                    try {
+                                        TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                                        if (hasSelectedMedia(message, photos, videos, voice, stickers, files)) {
+                                            mediaTotal[0]++;
+                                        }
+                                    } catch (Exception e) {
+                                        FileLog.e(e);
+                                    }
+                                    data.reuse();
+                                }
                             }
                             cursor.dispose();
                         } catch (Exception e) {
                             FileLog.e(e);
                         }
-                        countLatch.countDown();
+                        mediaCountLatch.countDown();
                     });
-                    awaitLatchWithoutTimeout(countLatch);
-                    totalMessages = total[0];
-                }
-                state.total = totalMessages;
-
-                checkCanceled();
-
-                // Count total media items
-                int totalMedia = 0;
-                if (photos || videos || voice || stickers || files) {
-                    if (serverMessages != null && !serverMessages.isEmpty()) {
-                        for (int i = 0; i < serverMessages.size(); i++) {
-                            if (hasSelectedMedia(serverMessages.get(i), photos, videos, voice, stickers, files)) {
-                                totalMedia++;
-                            }
-                        }
-                    } else {
-                        CountDownLatch mediaCountLatch = new CountDownLatch(1);
-                        final int[] mediaTotal = {0};
-                        storage.getStorageQueue().postRunnable(() -> {
-                            try {
-                                SQLiteCursor cursor = storage.getDatabase().queryFinalized("SELECT data FROM messages_v2 WHERE uid = " + dialogId);
-                                while (cursor.next()) {
-                                    NativeByteBuffer data = cursor.byteBufferValue(0);
-                                    if (data != null) {
-                                        try {
-                                            TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
-                                            if (hasSelectedMedia(message, photos, videos, voice, stickers, files)) {
-                                                mediaTotal[0]++;
-                                            }
-                                        } catch (Exception e) {
-                                            FileLog.e(e);
-                                        }
-                                        data.reuse();
-                                    }
-                                }
-                                cursor.dispose();
-                            } catch (Exception e) {
-                                FileLog.e(e);
-                            }
-                            mediaCountLatch.countDown();
-                        });
-                        awaitLatchWithoutTimeout(mediaCountLatch);
-                        totalMedia = mediaTotal[0];
-                    }
+                    awaitLatchWithoutTimeout(mediaCountLatch);
+                    totalMedia = mediaTotal[0];
                 }
                 state.mediaTotal = totalMedia;
 
@@ -562,116 +714,81 @@ public class ChatExportManager {
                 boolean isFirstJson = true;
                 final int batchSize = DB_EXPORT_BATCH_SIZE;
                 long lastMid = Long.MIN_VALUE;
-                int serverMessageIndex = 0;
 
                 while (true) {
                     final ArrayList<TLRPC.Message> messages = new ArrayList<>();
                     final ArrayList<Long> messageMids = new ArrayList<>();
-                    if (serverMessages != null && !serverMessages.isEmpty()) {
-                        int endIndex = Math.min(serverMessageIndex + batchSize, serverMessages.size());
-                        for (int i = serverMessageIndex; i < endIndex; i++) {
-                            messages.add(serverMessages.get(i));
-                        }
-                        serverMessageIndex = endIndex;
-                    } else {
-                        CountDownLatch latch = new CountDownLatch(1);
-                        final long currentLastMid = lastMid;
+                    CountDownLatch latch = new CountDownLatch(1);
+                    final long currentLastMid = lastMid;
 
-                        storage.getStorageQueue().postRunnable(() -> {
-                            try {
-                                // Load all messages in batches using mid-based cursor
-                                // mid can be negative (channels) so we use > comparison
-                                String query;
-                                if (currentLastMid == Long.MIN_VALUE) {
-                                    query = "SELECT data, mid FROM messages_v2 WHERE uid = " + dialogId + " ORDER BY mid ASC LIMIT " + batchSize;
-                                } else {
-                                    query = "SELECT data, mid FROM messages_v2 WHERE uid = " + dialogId + " AND mid > " + currentLastMid + " ORDER BY mid ASC LIMIT " + batchSize;
-                                }
-                                SQLiteCursor cursor = storage.getDatabase().queryFinalized(query);
-                                while (cursor.next()) {
-                                    NativeByteBuffer data = cursor.byteBufferValue(0);
-                                    if (data != null) {
-                                        try {
-                                            TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
-                                            if (message != null) {
-                                                message.readAttachPath(data, UserConfig.getInstance(account).clientUserId);
-                                                messages.add(message);
-                                                messageMids.add(cursor.longValue(1));
-                                            }
-                                        } catch (Exception e) {
-                                            FileLog.e(e);
-                                        }
-                                        data.reuse();
-                                    }
-                                }
-                                cursor.dispose();
-                            } catch (Exception e) {
-                                FileLog.e(e);
+                    storage.getStorageQueue().postRunnable(() -> {
+                        try {
+                            String query;
+                            if (currentLastMid == Long.MIN_VALUE) {
+                                query = "SELECT data, mid FROM messages_v2 WHERE uid = " + dialogId + " ORDER BY mid ASC LIMIT " + batchSize;
+                            } else {
+                                query = "SELECT data, mid FROM messages_v2 WHERE uid = " + dialogId + " AND mid > " + currentLastMid + " ORDER BY mid ASC LIMIT " + batchSize;
                             }
-                            latch.countDown();
-                        });
+                            SQLiteCursor cursor = storage.getDatabase().queryFinalized(query);
+                            while (cursor.next()) {
+                                NativeByteBuffer data = cursor.byteBufferValue(0);
+                                if (data != null) {
+                                    try {
+                                        TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                                        if (message != null) {
+                                            message.readAttachPath(data, UserConfig.getInstance(account).clientUserId);
+                                            message.dialog_id = dialogId;
+                                            messages.add(message);
+                                            messageMids.add(cursor.longValue(1));
+                                        }
+                                    } catch (Exception e) {
+                                        FileLog.e(e);
+                                    }
+                                    data.reuse();
+                                }
+                            }
+                            cursor.dispose();
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
+                        latch.countDown();
+                    });
 
-                        awaitLatchWithoutTimeout(latch);
-                    }
-                    
+                    awaitLatchWithoutTimeout(latch);
+
                     if (messages.isEmpty()) {
                         break;
                     }
 
-                    // Update lastMid to the last message's mid for next batch
-                    if (serverMessages == null || serverMessages.isEmpty()) {
-                        lastMid = messageMids.get(messageMids.size() - 1);
-                    }
+                    lastMid = messageMids.get(messageMids.size() - 1);
 
                     for (TLRPC.Message msg : messages) {
                         checkCanceled();
                         count++;
                         messagesInCurrentFile++;
 
-                        // Split HTML files every MESSAGES_PER_FILE messages
                         if (htmlFormat && messagesInCurrentFile >= MESSAGES_PER_FILE) {
                             writer.write("<div class=\"nav\"><a href=\"export_" + (fileIndex + 1) + ".html\">Вперёд →</a></div>\n");
                             writer.write("</body>\n</html>");
                             writer.flush();
                             writer.close();
+                            writer = null;
+                            fos = null;
 
                             fileIndex++;
                             messagesInCurrentFile = 0;
                             File nextFile = new File(exportDir, "export_" + fileIndex + ".html");
                             fos = new FileOutputStream(nextFile);
                             writer = new BufferedWriter(new OutputStreamWriter(fos, "UTF-8"), 8192);
-                            writer.write("<!DOCTYPE html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Chat Export — Часть " + fileIndex + "</title>\n");
-                            writer.write("<style>\n");
-                            writer.write("*{box-sizing:border-box; margin:0; padding:0;}\n");
-                            writer.write("body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#e7ebf0; color:#000; padding:16px;}\n");
-                            writer.write(".header{background:#3390ec; color:#fff; padding:20px; border-radius:16px; margin-bottom:16px; text-align:center;}\n");
-                            writer.write(".header h1{font-size:20px; font-weight:600;}\n");
-                            writer.write(".header .info{font-size:13px; opacity:0.85; margin-top:4px;}\n");
-                            writer.write(".nav{text-align:center; margin:12px 0; padding:8px;}\n");
-                            writer.write(".nav a{display:inline-block; background:#3390ec; color:#fff; padding:8px 16px; border-radius:8px; text-decoration:none; margin:0 4px; font-size:14px;}\n");
-                            writer.write(".msg{background:#fff; padding:12px 16px; margin:4px 0; border-radius:14px; max-width:85%; word-wrap:break-word; box-shadow:0 1px 2px rgba(0,0,0,0.08);}\n");
-                            writer.write(".msg.out{background:#efffde; margin-left:auto; border-bottom-right-radius:4px;}\n");
-                            writer.write(".msg.in{margin-right:auto; border-bottom-left-radius:4px;}\n");
-                            writer.write(".msg .sender{font-weight:600; font-size:14px; color:#3390ec; margin-bottom:2px;}\n");
-                            writer.write(".msg.out .sender{color:#4caf50;}\n");
-                            writer.write(".msg .text{font-size:15px; line-height:1.4;}\n");
-                            writer.write(".msg .date{font-size:11px; color:#999; margin-top:4px; text-align:right;}\n");
-                            writer.write(".msg a{color:#3390ec; text-decoration:none;}\n");
-                            writer.write(".msg a:hover{text-decoration:underline;}\n");
-                            writer.write(".media-badge{display:inline-block; background:#3390ec1a; color:#3390ec; padding:4px 10px; border-radius:8px; font-size:13px; margin-top:4px;}\n");
-                            writer.write("</style>\n");
-                            writer.write("</head>\n<body>\n");
-                            writer.write("<div class=\"header\"><h1>Экспорт чата — Часть " + fileIndex + "</h1><div class=\"info\">" + dateFormat.format(new Date()) + "</div></div>\n");
+                            writeHtmlHeader(writer, dateFormat, fileIndex);
                             writer.write("<div class=\"nav\"><a href=\"export_" + (fileIndex - 1) + ".html\">← Назад</a></div>\n");
                         }
-                        
-                        // Process message text
+
                         String text = msg.message != null ? msg.message : "";
                         String date = dateFormat.format(new Date(msg.date * 1000L));
                         String sender = getSenderName(account, msg);
                         String safeSender = TextUtils.htmlEncode(sender);
-                        
-                        // Handle Media
+
                         String mediaPath = "";
                         boolean hasMediaToDownload = false;
                         String mediaTypeLabel = "";
@@ -724,7 +841,6 @@ public class ChatExportManager {
                                 mediaSubfolder = "stickers";
                                 mediaPath = checkAndCopyMedia(account, doc, stickersDir, maxFileSize);
                             } else if (files && doc != null && !MessageObject.isStickerMessage(msg) && !MessageObject.isVoiceMessage(msg) && !MessageObject.isVideoMessage(msg) && !MessageObject.isRoundVideoMessage(msg) && !MessageObject.isAnimatedStickerMessage(msg) && !MessageObject.isMusicMessage(msg) && !MessageObject.isGifMessage(msg)) {
-                                // Regular files/documents
                                 hasMediaToDownload = true;
                                 mediaTypeLabel = "файл";
                                 mediaSubfolder = "files";
@@ -746,6 +862,8 @@ public class ChatExportManager {
                             }
                             if (!TextUtils.isEmpty(mediaPath)) {
                                 writer.write("<a class=\"media-badge\" href=\"media/" + mediaSubfolder + "/" + new File(mediaPath).getName() + "\">📎 " + mediaTypeLabel + "</a>");
+                            } else if (hasMediaToDownload) {
+                                writer.write("<span class=\"media-badge\">⚠ " + mediaTypeLabel + " (пропущено)</span>");
                             }
                             writer.write("<div class=\"date\">" + date + "</div>");
                             writer.write("</div>\n");
@@ -757,10 +875,12 @@ public class ChatExportManager {
                             writer.write("{\"id\": " + msg.id + ", \"date\": \"" + date + "\", \"sender\": \"" + jsonSender + "\", \"text\": \"" + jsonText + "\"");
                             if (!TextUtils.isEmpty(mediaPath)) {
                                 writer.write(", \"media\": \"media/" + mediaSubfolder + "/" + new File(mediaPath).getName() + "\", \"media_type\": \"" + mediaTypeLabel + "\"");
+                            } else if (hasMediaToDownload) {
+                                writer.write(", \"media_skipped\": true, \"media_type\": \"" + mediaTypeLabel + "\"");
                             }
                             writer.write("}");
                         }
-                        
+
                         final int currentCount = count;
                         final int cTotal = totalMessages;
                         final int cMediaProcessed = mediaProcessed;
@@ -769,7 +889,6 @@ public class ChatExportManager {
                             long now = System.currentTimeMillis();
                             if (currentCount == cTotal || now - lastProgressUpdate > 500) {
                                 lastProgressUpdate = now;
-                                // Weight: messages + media (media counts as extra work)
                                 int totalUnits = cTotal + cMediaTotal;
                                 int doneUnits = currentCount + cMediaProcessed;
                                 int percent = totalUnits > 0 ? (int) ((doneUnits / (float) totalUnits) * 100) : 0;
@@ -798,43 +917,97 @@ public class ChatExportManager {
 
                 writer.flush();
                 writer.close();
+                writer = null;
+                fos = null;
 
+                String resultPath = exportDir.getAbsolutePath();
                 File finalOutputFile = htmlFormat ? new File(exportDir, "export_" + fileIndex + ".html") : new File(exportDir, "export.json");
+
+                if (safTreeUri != null) {
+                    showIndeterminateNotification("Копирование в выбранную папку...");
+                    resultPath = publishExportToSaf(exportDir, safTreeUri);
+                    deleteRecursive(exportDir);
+                    exportDir = null;
+                    state.exportDir = null;
+                    state.outputFilePath = resultPath;
+                } else {
+                    state.outputFilePath = finalOutputFile.getAbsolutePath();
+                    resultPath = exportDir.getAbsolutePath();
+                }
+
                 state.completed = true;
                 state.running = false;
-                state.outputFilePath = finalOutputFile.getAbsolutePath();
-                showCompletionNotification(finalOutputFile.getAbsolutePath());
-                
-                final File finalExportDir = exportDir;
+                showCompletionNotification(state.outputFilePath);
+                ChatExportService.stop();
+
+                final String callbackPath = resultPath;
                 AndroidUtilities.runOnUIThread(() -> {
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaExportCompleted, state);
-                    callback.onComplete(finalExportDir.getAbsolutePath());
+                    callback.onComplete(callbackPath);
                 });
 
             } catch (InterruptedException e) {
-                // Export was canceled
                 state.running = false;
-                cancelExportNotification();
-                try { if (fos != null) fos.close(); } catch (Exception ignored) {}
-                // Delete partial file
+                state.canceled = true;
                 try {
-                    if (exportDir != null) {
-                        File partialFile = new File(exportDir, htmlFormat ? "export.html" : "export.json");
-                        if (partialFile.exists()) partialFile.delete();
-                    }
+                    if (writer != null) writer.close();
+                    else if (fos != null) fos.close();
                 } catch (Exception ignored) {}
-                AndroidUtilities.runOnUIThread(() -> callback.onError("Экспорт отменён"));
+                if (exportDir != null) {
+                    deleteRecursive(exportDir);
+                } else if (state.exportDir != null) {
+                    deleteRecursive(state.exportDir);
+                }
+                cancelExportNotification();
+                ChatExportService.stop();
+                AndroidUtilities.runOnUIThread(() -> {
+                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaExportCanceled);
+                    callback.onError("Экспорт отменён");
+                });
             } catch (Exception e) {
                 FileLog.e(e);
                 state.running = false;
                 state.error = e.getMessage();
+                try {
+                    if (writer != null) writer.close();
+                    else if (fos != null) fos.close();
+                } catch (Exception ignored) {}
+                if (usedSafTemp && exportDir != null) {
+                    deleteRecursive(exportDir);
+                }
                 showErrorNotification(e.getMessage());
+                ChatExportService.stop();
                 AndroidUtilities.runOnUIThread(() -> {
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaExportFailed, state);
                     callback.onError(e.getMessage());
                 });
             }
-        }).start();
+        }, "ChatExport").start();
+    }
+
+    private static void writeHtmlHeader(BufferedWriter writer, SimpleDateFormat dateFormat, int part) throws Exception {
+        writer.write("<!DOCTYPE html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Chat Export — Часть " + part + "</title>\n");
+        writer.write("<style>\n");
+        writer.write("*{box-sizing:border-box; margin:0; padding:0;}\n");
+        writer.write("body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#e7ebf0; color:#000; padding:16px;}\n");
+        writer.write(".header{background:#3390ec; color:#fff; padding:20px; border-radius:16px; margin-bottom:16px; text-align:center;}\n");
+        writer.write(".header h1{font-size:20px; font-weight:600;}\n");
+        writer.write(".header .info{font-size:13px; opacity:0.85; margin-top:4px;}\n");
+        writer.write(".nav{text-align:center; margin:12px 0; padding:8px;}\n");
+        writer.write(".nav a{display:inline-block; background:#3390ec; color:#fff; padding:8px 16px; border-radius:8px; text-decoration:none; margin:0 4px; font-size:14px;}\n");
+        writer.write(".msg{background:#fff; padding:12px 16px; margin:4px 0; border-radius:14px; max-width:85%; word-wrap:break-word; box-shadow:0 1px 2px rgba(0,0,0,0.08);}\n");
+        writer.write(".msg.out{background:#efffde; margin-left:auto; border-bottom-right-radius:4px;}\n");
+        writer.write(".msg.in{margin-right:auto; border-bottom-left-radius:4px;}\n");
+        writer.write(".msg .sender{font-weight:600; font-size:14px; color:#3390ec; margin-bottom:2px;}\n");
+        writer.write(".msg.out .sender{color:#4caf50;}\n");
+        writer.write(".msg .text{font-size:15px; line-height:1.4;}\n");
+        writer.write(".msg .date{font-size:11px; color:#999; margin-top:4px; text-align:right;}\n");
+        writer.write(".msg a{color:#3390ec; text-decoration:none;}\n");
+        writer.write(".msg a:hover{text-decoration:underline;}\n");
+        writer.write(".media-badge{display:inline-block; background:#3390ec1a; color:#3390ec; padding:4px 10px; border-radius:8px; font-size:13px; margin-top:4px;}\n");
+        writer.write("</style>\n");
+        writer.write("</head>\n<body>\n");
+        writer.write("<div class=\"header\"><h1>Экспорт чата — Часть " + part + "</h1><div class=\"info\">" + dateFormat.format(new Date()) + "</div></div>\n");
     }
 
     private static String getSenderName(int account, TLRPC.Message msg) {
@@ -869,7 +1042,6 @@ public class ChatExportManager {
                     }
                 }
             }
-            // Fallback: try dialog peer
             if (msg.dialog_id > 0) {
                 TLRPC.User user = mc.getUser(msg.dialog_id);
                 if (user != null) {
@@ -932,7 +1104,7 @@ public class ChatExportManager {
         return files && doc != null && !MessageObject.isStickerMessage(message) && !MessageObject.isVoiceMessage(message) && !MessageObject.isVideoMessage(message) && !MessageObject.isRoundVideoMessage(message) && !MessageObject.isAnimatedStickerMessage(message) && !MessageObject.isMusicMessage(message) && !MessageObject.isGifMessage(message);
     }
 
-    private static String checkAndCopyMedia(int account, Object mediaObject, File mediaDir, long maxFileSize) {
+    private static String checkAndCopyMedia(int account, Object mediaObject, File mediaDir, long maxFileSize) throws InterruptedException {
         try {
             File localPath = null;
             long mediaSize = 0;
@@ -964,20 +1136,18 @@ public class ChatExportManager {
                 }
             }
 
-            // Check file size limit
             if (maxFileSize > 0) {
                 long actualSize = mediaSize;
                 if (actualSize <= 0 && localPath != null && localPath.exists()) {
                     actualSize = localPath.length();
                 }
                 if (actualSize > maxFileSize) {
-                    return ""; // Skip this file — too large
+                    return "";
                 }
             }
 
             if (localPath != null && localPath.exists()) {
                 File destFile = new File(mediaDir, localPath.getName());
-                // Handle name collision — append number if file already exists with different content
                 if (destFile.exists() && destFile.length() != localPath.length()) {
                     String baseName = localPath.getName();
                     int dotIdx = baseName.lastIndexOf('.');
@@ -992,76 +1162,76 @@ public class ChatExportManager {
                 AndroidUtilities.copyFile(localPath, destFile);
                 return destFile.getAbsolutePath();
             }
+        } catch (InterruptedException e) {
+            throw e;
         } catch (Exception e) {
             FileLog.e(e);
         }
         return "";
     }
 
-    private static File downloadMediaSync(final int account, final TLRPC.PhotoSize photoSize, final TLRPC.Document document, final TLRPC.Photo photo) {
-        try {
-            while (true) {
-                checkCanceled();
-                final CountDownLatch latch = new CountDownLatch(1);
-                final File[] result = new File[1];
+    private static File downloadMediaSync(final int account, final TLRPC.PhotoSize photoSize, final TLRPC.Document document, final TLRPC.Photo photo) throws InterruptedException {
+        for (int attempt = 0; attempt < MEDIA_DOWNLOAD_MAX_RETRIES; attempt++) {
+            checkCanceled();
+            final CountDownLatch latch = new CountDownLatch(1);
+            final File[] result = new File[1];
 
-                final NotificationCenter.NotificationCenterDelegate delegate = new NotificationCenter.NotificationCenterDelegate() {
-                    @Override
-                    public void didReceivedNotification(int id, int accountId, Object... args) {
-                        if (id == NotificationCenter.fileLoaded) {
-                            String fileName = (String) args[0];
-                            String expectedName = "";
-                            if (photoSize != null) expectedName = FileLoader.getAttachFileName(photoSize);
-                            else if (document != null) expectedName = FileLoader.getAttachFileName(document);
+            final NotificationCenter.NotificationCenterDelegate delegate = new NotificationCenter.NotificationCenterDelegate() {
+                @Override
+                public void didReceivedNotification(int id, int accountId, Object... args) {
+                    if (id == NotificationCenter.fileLoaded) {
+                        String fileName = (String) args[0];
+                        String expectedName = "";
+                        if (photoSize != null) expectedName = FileLoader.getAttachFileName(photoSize);
+                        else if (document != null) expectedName = FileLoader.getAttachFileName(document);
 
-                            if (expectedName.equals(fileName)) {
-                                if (args[1] instanceof File) {
-                                    result[0] = (File) args[1];
-                                } else if (args[1] instanceof String) {
-                                    result[0] = new File((String) args[1]);
-                                }
-                                latch.countDown();
+                        if (expectedName.equals(fileName)) {
+                            if (args[1] instanceof File) {
+                                result[0] = (File) args[1];
+                            } else if (args[1] instanceof String) {
+                                result[0] = new File((String) args[1]);
                             }
-                        } else if (id == NotificationCenter.fileLoadFailed) {
-                            String fileName = (String) args[0];
-                            String expectedName = "";
-                            if (photoSize != null) expectedName = FileLoader.getAttachFileName(photoSize);
-                            else if (document != null) expectedName = FileLoader.getAttachFileName(document);
+                            latch.countDown();
+                        }
+                    } else if (id == NotificationCenter.fileLoadFailed) {
+                        String fileName = (String) args[0];
+                        String expectedName = "";
+                        if (photoSize != null) expectedName = FileLoader.getAttachFileName(photoSize);
+                        else if (document != null) expectedName = FileLoader.getAttachFileName(document);
 
-                            if (expectedName.equals(fileName)) {
-                                latch.countDown();
-                            }
+                        if (expectedName.equals(fileName)) {
+                            latch.countDown();
                         }
                     }
-                };
+                }
+            };
 
+            AndroidUtilities.runOnUIThread(() -> {
+                NotificationCenter.getInstance(account).addObserver(delegate, NotificationCenter.fileLoaded);
+                NotificationCenter.getInstance(account).addObserver(delegate, NotificationCenter.fileLoadFailed);
+
+                if (photoSize != null) {
+                    FileLoader.getInstance(account).loadFile(ImageLocation.getForPhoto(photoSize, photo), photo != null ? photo : photoSize, null, FileLoader.PRIORITY_HIGH, 1);
+                } else if (document != null) {
+                    FileLoader.getInstance(account).loadFile(document, document, FileLoader.PRIORITY_HIGH, 1);
+                }
+            });
+
+            try {
+                awaitLatchWithoutTimeout(latch);
+            } finally {
                 AndroidUtilities.runOnUIThread(() -> {
-                    NotificationCenter.getInstance(account).addObserver(delegate, NotificationCenter.fileLoaded);
-                    NotificationCenter.getInstance(account).addObserver(delegate, NotificationCenter.fileLoadFailed);
-
-                    if (photoSize != null) {
-                        FileLoader.getInstance(account).loadFile(ImageLocation.getForPhoto(photoSize, photo), photo != null ? photo : photoSize, null, FileLoader.PRIORITY_HIGH, 1);
-                    } else if (document != null) {
-                        FileLoader.getInstance(account).loadFile(document, document, FileLoader.PRIORITY_HIGH, 1);
-                    }
+                    NotificationCenter.getInstance(account).removeObserver(delegate, NotificationCenter.fileLoaded);
+                    NotificationCenter.getInstance(account).removeObserver(delegate, NotificationCenter.fileLoadFailed);
                 });
+            }
 
-                try {
-                    awaitLatchWithoutTimeout(latch);
-                } finally {
-                    AndroidUtilities.runOnUIThread(() -> {
-                        NotificationCenter.getInstance(account).removeObserver(delegate, NotificationCenter.fileLoaded);
-                        NotificationCenter.getInstance(account).removeObserver(delegate, NotificationCenter.fileLoadFailed);
-                    });
-                }
-
-                if (result[0] != null && result[0].exists()) {
-                    return result[0];
-                }
+            if (result[0] != null && result[0].exists()) {
+                return result[0];
+            }
+            if (attempt < MEDIA_DOWNLOAD_MAX_RETRIES - 1) {
                 Thread.sleep(MEDIA_DOWNLOAD_RETRY_DELAY_MS);
             }
-        } catch (InterruptedException e) {
-            FileLog.e(e);
         }
 
         return null;

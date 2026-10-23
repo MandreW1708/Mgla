@@ -9,9 +9,12 @@ import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLRPC;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -114,6 +117,7 @@ public class MglaMemoryExtractor {
     /** Коробки для передачи результата чтения БД обратно в поток тикера. */
     private static class ReadResult {
         ArrayList<BatchMessage> batch = new ArrayList<>();
+        ArrayList<String> knownTopics = new ArrayList<>();
         long maxMid;
         boolean dbReady;
     }
@@ -142,6 +146,7 @@ public class MglaMemoryExtractor {
                     lastMid = startMid;
                 }
                 read.maxMid = readBatch(db, uid, lastMid, MglaMemoryConfig.getBatchSize(), read.batch);
+                read.knownTopics = MglaMemoryStorage.openTopicTitles(db, uid, 8);
                 read.dbReady = true;
             } catch (Throwable e) {
                 FileLog.e(e);
@@ -160,7 +165,7 @@ public class MglaMemoryExtractor {
             return;
         }
 
-        String batchText = buildBatchText(account, uid, read.batch);
+        String batchText = buildBatchText(account, read.batch, read.knownTopics);
         if (TextUtils.isEmpty(batchText)) {
             writeCursor(storage, uid, read.maxMid);
             return;
@@ -183,6 +188,7 @@ public class MglaMemoryExtractor {
             facts = extractHeuristic(account, uid, read.batch);
             provider = "local";
         }
+        facts = refineFacts(facts, read.batch, read.knownTopics);
         final ArrayList<MglaMemoryStorage.MemoryFact> toSave = facts;
         final long now = ConnectionsManager.getInstance(account).getCurrentTime();
         storage.getStorageQueue().postRunnable(() -> {
@@ -301,9 +307,17 @@ public class MglaMemoryExtractor {
         return maxMid;
     }
 
-    private static String buildBatchText(int account, long uid, ArrayList<BatchMessage> batch) {
+    private static String buildBatchText(int account, ArrayList<BatchMessage> batch,
+                                         ArrayList<String> knownTopics) {
         SimpleDateFormat fmt = new SimpleDateFormat("dd.MM HH:mm", Locale.getDefault());
         StringBuilder sb = new StringBuilder();
+        if (knownTopics != null && !knownTopics.isEmpty()) {
+            sb.append("Уже известные темы этого чата (используй те же названия при продолжении):\n");
+            for (int i = 0; i < knownTopics.size(); i++) {
+                sb.append("- ").append(knownTopics.get(i)).append('\n');
+            }
+            sb.append('\n');
+        }
         int maxChars = MglaMemoryConfig.getMaxChars();
         HashMap<Long, String> nameCache = new HashMap<>();
         for (BatchMessage m : batch) {
@@ -477,7 +491,7 @@ public class MglaMemoryExtractor {
             if (type == null) continue;
             MglaMemoryStorage.MemoryFact fact = new MglaMemoryStorage.MemoryFact();
             fact.type = type;
-            fact.text = shorten(m.text.trim(), 240);
+            fact.text = cleanActionText(m.text.trim(), 80);
             fact.status = MglaMemoryStorage.STATUS_OPEN;
             fact.fromSelf = m.fromSelf;
             fact.peerId = m.fromSelf ? 0 : m.peerId;
@@ -492,7 +506,203 @@ public class MglaMemoryExtractor {
             result.add(fact);
             if (result.size() >= 10) break;
         }
+        // Локальная тема из пересечения keywords батча (без LLM).
+        MglaMemoryStorage.MemoryFact topic = synthesizeTopicFromBatch(batch, result, null);
+        if (topic != null) {
+            result.add(0, topic);
+        }
         return result;
+    }
+
+    /**
+     * Нормализация после AI/эвристик: отбраковка плохих topic, сжатие цитат,
+     * синтез одной темы если модель/эвристика её не дали.
+     */
+    private static ArrayList<MglaMemoryStorage.MemoryFact> refineFacts(
+            ArrayList<MglaMemoryStorage.MemoryFact> facts,
+            ArrayList<BatchMessage> batch,
+            ArrayList<String> knownTopics) {
+        if (facts == null) {
+            facts = new ArrayList<>();
+        }
+        ArrayList<MglaMemoryStorage.MemoryFact> out = new ArrayList<>();
+        int topicCount = 0;
+        for (MglaMemoryStorage.MemoryFact fact : facts) {
+            if (fact == null || TextUtils.isEmpty(fact.text)) {
+                continue;
+            }
+            if (MglaMemoryStorage.TYPE_TOPIC.equals(fact.type)) {
+                String cleaned = MglaMemoryStorage.capitalizePhrase(
+                    MglaMemoryStorage.cleanTopicPhrase(fact.text));
+                if (!isGoodTopicTitle(cleaned)) {
+                    continue;
+                }
+                // Предпочитаем уже известное название при сильном пересечении слов.
+                String matched = matchKnownTopic(cleaned, knownTopics);
+                fact.text = matched != null ? matched : cleaned;
+                fact.keywords = MglaMemoryStorage.keywordsOf(fact.text);
+                topicCount++;
+                if (topicCount > 3) {
+                    continue;
+                }
+            } else if (MglaMemoryStorage.TYPE_DECISION.equals(fact.type)
+                || MglaMemoryStorage.TYPE_PROMISE.equals(fact.type)
+                || MglaMemoryStorage.TYPE_PLAN.equals(fact.type)) {
+                fact.text = cleanActionText(fact.text, 80);
+            }
+            if (TextUtils.isEmpty(fact.text) || fact.text.length() < 3) {
+                continue;
+            }
+            out.add(fact);
+        }
+        if (topicCount == 0 && out.size() >= 2) {
+            MglaMemoryStorage.MemoryFact topic = synthesizeTopicFromBatch(batch, out, knownTopics);
+            if (topic != null) {
+                out.add(0, topic);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isGoodTopicTitle(String title) {
+        if (TextUtils.isEmpty(title)) {
+            return false;
+        }
+        if (title.length() < 4 || title.length() > 40) {
+            return false;
+        }
+        if (MglaMemoryStorage.looksLikeRawMessage(title)) {
+            return false;
+        }
+        String[] words = title.trim().split("\\s+");
+        return words.length >= 2 && words.length <= 7;
+    }
+
+    private static String matchKnownTopic(String candidate, ArrayList<String> knownTopics) {
+        if (knownTopics == null || knownTopics.isEmpty() || TextUtils.isEmpty(candidate)) {
+            return null;
+        }
+        String[] candTokens = MglaMemoryStorage.keywordsOf(candidate).split(" ");
+        if (candTokens.length == 0 || (candTokens.length == 1 && candTokens[0].isEmpty())) {
+            return null;
+        }
+        String best = null;
+        int bestHits = 0;
+        for (String known : knownTopics) {
+            String[] knownTokens = MglaMemoryStorage.keywordsOf(known).split(" ");
+            int hits = 0;
+            for (String c : candTokens) {
+                if (c.length() < 4) continue;
+                for (String k : knownTokens) {
+                    if (c.equals(k)) {
+                        hits++;
+                        break;
+                    }
+                }
+            }
+            if (hits >= 2 && hits > bestHits) {
+                bestHits = hits;
+                best = known;
+            }
+        }
+        return best;
+    }
+
+    /** Синтез одной темы из частотных токенов батча/фактов. */
+    private static MglaMemoryStorage.MemoryFact synthesizeTopicFromBatch(
+            ArrayList<BatchMessage> batch,
+            ArrayList<MglaMemoryStorage.MemoryFact> facts,
+            ArrayList<String> knownTopics) {
+        HashMap<String, Integer> freq = new HashMap<>();
+        HashMap<String, Integer> msgHits = new HashMap<>();
+        if (batch != null) {
+            for (BatchMessage m : batch) {
+                if (m.text == null) continue;
+                String[] tokens = MglaMemoryStorage.keywordsOf(m.text).split(" ");
+                HashMap<String, Boolean> seen = new HashMap<>();
+                for (String t : tokens) {
+                    if (t.length() < 5 || isStopTopicToken(t)) continue;
+                    freq.put(t, (freq.containsKey(t) ? freq.get(t) : 0) + 1);
+                    if (!seen.containsKey(t)) {
+                        seen.put(t, Boolean.TRUE);
+                        msgHits.put(t, (msgHits.containsKey(t) ? msgHits.get(t) : 0) + 1);
+                    }
+                }
+            }
+        }
+        if (facts != null) {
+            for (MglaMemoryStorage.MemoryFact f : facts) {
+                if (f == null || TextUtils.isEmpty(f.text)) continue;
+                for (String t : MglaMemoryStorage.keywordsOf(f.text).split(" ")) {
+                    if (t.length() < 5 || isStopTopicToken(t)) continue;
+                    freq.put(t, (freq.containsKey(t) ? freq.get(t) : 0) + 2);
+                }
+            }
+        }
+        // Нужно пересечение ≥2 сообщений по ≥2 токенам, иначе шум.
+        int sharedStrong = 0;
+        for (Map.Entry<String, Integer> e : msgHits.entrySet()) {
+            if (e.getValue() >= 2) {
+                sharedStrong++;
+            }
+        }
+        if (sharedStrong < 2 && (facts == null || facts.size() < 2)) {
+            return null;
+        }
+        ArrayList<Map.Entry<String, Integer>> ranked = new ArrayList<>(freq.entrySet());
+        Collections.sort(ranked, new Comparator<Map.Entry<String, Integer>>() {
+            @Override
+            public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
+                int c = Integer.compare(b.getValue(), a.getValue());
+                return c != 0 ? c : a.getKey().compareTo(b.getKey());
+            }
+        });
+        ArrayList<String> parts = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : ranked) {
+            if (e.getValue() < 2 && parts.isEmpty()) {
+                continue;
+            }
+            parts.add(e.getKey());
+            if (parts.size() >= 3) {
+                break;
+            }
+        }
+        if (parts.size() < 2) {
+            return null;
+        }
+        String title = MglaMemoryStorage.titleFromKeywords(TextUtils.join(" ", parts));
+        if (!isGoodTopicTitle(title)) {
+            return null;
+        }
+        String matched = matchKnownTopic(title, knownTopics);
+        if (matched != null) {
+            title = matched;
+        }
+        MglaMemoryStorage.MemoryFact topic = new MglaMemoryStorage.MemoryFact();
+        topic.type = MglaMemoryStorage.TYPE_TOPIC;
+        topic.text = title;
+        topic.status = MglaMemoryStorage.STATUS_OPEN;
+        topic.confidence = 55;
+        topic.keywords = MglaMemoryStorage.keywordsOf(title);
+        topic.fromSelf = false;
+        if (batch != null && !batch.isEmpty()) {
+            BatchMessage last = batch.get(batch.size() - 1);
+            topic.lastSeenAt = last.date;
+            topic.createdAt = last.date;
+            ArrayList<String> mids = new ArrayList<>();
+            for (int i = Math.max(0, batch.size() - 3); i < batch.size(); i++) {
+                mids.add(String.valueOf(batch.get(i).mid));
+            }
+            topic.sourceMids = TextUtils.join(",", mids);
+        }
+        return topic;
+    }
+
+    private static boolean isStopTopicToken(String t) {
+        return "этот".equals(t) || "это".equals(t) || "того".equals(t) || "меня".equals(t)
+            || "тебя".equals(t) || "него".equals(t) || "себя".equals(t) || "будет".equals(t)
+            || "можно".equals(t) || "нужно".equals(t) || "просто".equals(t) || "сейчас".equals(t)
+            || "сегодня".equals(t) || "завтра".equals(t) || "вчера".equals(t);
     }
 
     private static void softenAssumption(MglaMemoryStorage.MemoryFact fact) {
@@ -506,6 +716,15 @@ public class MglaMemoryExtractor {
             fact.type = MglaMemoryStorage.TYPE_IDEA;
         }
         fact.confidence = Math.min(fact.confidence <= 0 ? 40 : fact.confidence, 40);
+    }
+
+    private static String cleanActionText(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        String t = s.replace('\n', ' ').replaceAll("\\s+", " ").trim();
+        t = t.replaceAll("(?i)^(а|ну|ой|эм+|ээ+|хм+)[,\\s]+", "").trim();
+        return shorten(t, max);
     }
 
     private static String shorten(String s, int max) {

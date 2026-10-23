@@ -10,6 +10,7 @@ import org.telegram.tgnet.ConnectionsManager;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -807,8 +808,14 @@ public class MglaMemoryStorage {
         if (fact == null) {
             return "";
         }
-        if ((TYPE_TOPIC.equals(fact.type) || TYPE_EVENT.equals(fact.type) || TYPE_IDEA.equals(fact.type))
-            && !TextUtils.isEmpty(fact.text)) {
+        // Приоритет: уже сохранённый чистый topic.
+        if (TYPE_TOPIC.equals(fact.type) && !TextUtils.isEmpty(fact.text)) {
+            String cleaned = cleanTopicPhrase(fact.text);
+            if (cleaned.length() >= 4 && cleaned.length() <= 40 && !looksLikeRawMessage(cleaned)) {
+                return capitalizePhrase(cleaned);
+            }
+        }
+        if ((TYPE_EVENT.equals(fact.type) || TYPE_IDEA.equals(fact.type)) && !TextUtils.isEmpty(fact.text)) {
             String cleaned = cleanTopicPhrase(fact.text);
             if (cleaned.length() >= 4 && cleaned.length() <= 36 && !looksLikeRawMessage(cleaned)) {
                 return capitalizePhrase(cleaned);
@@ -832,16 +839,31 @@ public class MglaMemoryStorage {
         return t;
     }
 
-    private static boolean looksLikeRawMessage(String text) {
+    /** Цитата/шум вместо названия темы. */
+    public static boolean looksLikeRawMessage(String text) {
         if (text == null) {
             return true;
         }
-        String s = text.toLowerCase(Locale.ROOT);
-        return s.contains("http") || s.contains("www.") || s.endsWith("...")
-            || s.contains(" лол") || s.contains(" хах") || s.split(" ").length >= 8;
+        String s = text.toLowerCase(Locale.ROOT).trim();
+        if (s.contains("http") || s.contains("www.") || s.endsWith("...")
+            || s.contains(" лол") || s.contains(" хах")) {
+            return true;
+        }
+        String[] words = s.split("\\s+");
+        if (words.length >= 8) {
+            return true;
+        }
+        // Длинные глагольные обещания — не title темы.
+        if (words.length >= 4 && (s.contains("сделаю") || s.contains("пришлю") || s.contains("скину")
+            || s.contains("отправлю") || s.contains("давай ") || s.contains("могу ")
+            || s.startsWith("я ") || s.startsWith("а ") || s.startsWith("ну "))) {
+            return true;
+        }
+        return false;
     }
 
-    private static String titleFromKeywords(String keywords) {
+    /** 2–3 значимых слова пробелом — фраза, не «каша» через ·. */
+    public static String titleFromKeywords(String keywords) {
         if (TextUtils.isEmpty(keywords)) {
             return "";
         }
@@ -858,14 +880,14 @@ public class MglaMemoryStorage {
         if (parts.isEmpty()) {
             return "";
         }
-        String joined = TextUtils.join(" · ", parts);
+        String joined = TextUtils.join(" ", parts);
         if (joined.length() > 34) {
             joined = joined.substring(0, 33).trim() + "…";
         }
         return joined;
     }
 
-    private static String cleanTopicPhrase(String text) {
+    public static String cleanTopicPhrase(String text) {
         if (text == null) {
             return "";
         }
@@ -891,7 +913,7 @@ public class MglaMemoryStorage {
         return t;
     }
 
-    private static String capitalizePhrase(String text) {
+    public static String capitalizePhrase(String text) {
         if (TextUtils.isEmpty(text)) {
             return "";
         }
@@ -899,6 +921,31 @@ public class MglaMemoryStorage {
             return text.toUpperCase(Locale.ROOT);
         }
         return Character.toUpperCase(text.charAt(0)) + text.substring(1);
+    }
+
+    /** Открытые темы чата (для контекста LLM и merge). */
+    public static ArrayList<String> openTopicTitles(SQLiteDatabase database, long uid, int limit) {
+        ArrayList<String> out = new ArrayList<>();
+        if (database == null || uid == 0) {
+            return out;
+        }
+        MemoryQuery query = new MemoryQuery();
+        query.uid = uid;
+        query.types = new HashSet<>(Collections.singleton(TYPE_TOPIC));
+        query.status = STATUS_OPEN;
+        query.usableOnly = true;
+        query.limit = Math.max(1, limit);
+        for (MemoryFact fact : searchFacts(database, query)) {
+            String title = topicTitleFrom(fact);
+            if (TextUtils.isEmpty(title) || out.contains(title)) {
+                continue;
+            }
+            out.add(title);
+            if (out.size() >= limit) {
+                break;
+            }
+        }
+        return out;
     }
 
     private static String capitalizeWord(String w) {

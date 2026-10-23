@@ -483,13 +483,18 @@ public final class MglaStats {
             if (c == null) {
                 continue;
             }
-            Map<String, Integer> map = new HashMap<>();
+            Map<String, Integer> existing = store.get(day);
+            if (existing == null) {
+                existing = new HashMap<>();
+                store.put(day, existing);
+            }
             Iterator<String> names = c.keys();
             while (names.hasNext()) {
                 String name = names.next();
-                map.put(name, c.optInt(name, 0));
+                int loaded = c.optInt(name, 0);
+                Integer old = existing.get(name);
+                existing.put(name, (old == null ? 0 : old) + loaded);
             }
-            store.put(day, map);
         }
         trimDays(store);
     }

@@ -712,6 +712,12 @@
             android:exported="true"
             android:foregroundServiceType="dataSync"
         />
+        <service
+            android:name=".ChatExportService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+        />
 
         <service
             android:name=".LocationSharingService"

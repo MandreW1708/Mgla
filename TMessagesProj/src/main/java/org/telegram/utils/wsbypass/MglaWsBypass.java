@@ -1,12 +1,14 @@
 package org.telegram.utils.wsbypass;
 
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.SystemClock;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.DispatchQueue;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.NotificationCenter;
@@ -31,7 +33,15 @@ public final class MglaWsBypass {
 
     public enum Route { WS, WEB }
 
+    /** Cadence while connecting / recovering — must stay tight (stall confirm is tick-based). */
     private static final long MONITOR_INTERVAL_MS = 5_000L;
+    /**
+     * When already Connected and the UI is in background: stretch empty monitor wakes
+     * so MIUI/Realme kill the process less often. Failover path keeps {@link #MONITOR_INTERVAL_MS}.
+     */
+    private static final long MONITOR_INTERVAL_BACKGROUND_MS = 20_000L;
+    /** Same as background, but slower under Telegram power-saver battery threshold. */
+    private static final long MONITOR_INTERVAL_POWER_SAVE_MS = 45_000L;
     /** Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB. */
     private static final long WS_STALL_MS = 90_000L;
     /** Ultra (любой аккаунт): дольше держимся за WS — приоритетный маршрут. */
@@ -86,9 +96,12 @@ public final class MglaWsBypass {
         MglaWsBypass inst = getInstance();
         inst.startOnAppLaunch();
         inst.registerAccountObserver();
+        inst.registerConnectionObserver();
     }
 
     private boolean accountObserverRegistered;
+    private boolean connectionObserverRegistered;
+    private NotificationCenter.NotificationCenterDelegate connectionStateObserver;
 
     private void registerAccountObserver() {
         if (accountObserverRegistered) {
@@ -109,6 +122,44 @@ public final class MglaWsBypass {
         } catch (Throwable e) {
             FileLog.e(e);
             accountObserverRegistered = false;
+        }
+    }
+
+    private void registerConnectionObserver() {
+        if (connectionObserverRegistered) {
+            return;
+        }
+        connectionObserverRegistered = true;
+        if (connectionStateObserver == null) {
+            connectionStateObserver = (id, account, args) -> {
+                if (id != NotificationCenter.didUpdateConnectionState) {
+                    return;
+                }
+                if (!MglaWsConfig.isEnabled() || !proxyApplied) {
+                    return;
+                }
+                if (account != UserConfig.selectedAccount) {
+                    return;
+                }
+                try {
+                    int state = ConnectionsManager.getInstance(account).getConnectionState();
+                    // Left the healthy path — do not sit out a stretched background delay.
+                    if (state != ConnectionsManager.ConnectionStateConnected
+                            && state != ConnectionsManager.ConnectionStateUpdating) {
+                        requestMonitorSoon();
+                    }
+                } catch (Throwable ignored) {
+                }
+            };
+        }
+        try {
+            for (int i = 0; i < UserConfig.MAX_ACCOUNT_COUNT; i++) {
+                NotificationCenter.getInstance(i).addObserver(
+                        connectionStateObserver, NotificationCenter.didUpdateConnectionState);
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+            connectionObserverRegistered = false;
         }
     }
 
@@ -442,7 +493,48 @@ public final class MglaWsBypass {
             monitorQueue = new DispatchQueue("mglaAutoBypass");
         }
         monitorScheduled = true;
-        monitorQueue.postRunnable(monitorRunnable, MONITOR_INTERVAL_MS);
+        monitorQueue.postRunnable(monitorRunnable, nextMonitorDelayMs());
+    }
+
+    /**
+     * Only stretches the idle loop when Telegram is already Connected/Updating.
+     * Connecting / stalled / offline always keep the original 5s cadence so
+     * route failover and nudges behave as before.
+     */
+    private long nextMonitorDelayMs() {
+        int state = bestConnectionState();
+        if (state != ConnectionsManager.ConnectionStateConnected
+                && state != ConnectionsManager.ConnectionStateUpdating) {
+            return MONITOR_INTERVAL_MS;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                    && LiteMode.getPowerSaverLevel() > 0
+                    && LiteMode.getBatteryLevel() <= LiteMode.getPowerSaverLevel()) {
+                return MONITOR_INTERVAL_POWER_SAVE_MS;
+            }
+        } catch (Throwable ignored) {
+        }
+        if (ApplicationLoader.mainInterfacePaused) {
+            return MONITOR_INTERVAL_BACKGROUND_MS;
+        }
+        return MONITOR_INTERVAL_MS;
+    }
+
+    /** Cancel a stretched delay and run the next tick ASAP (connection dropped). */
+    private synchronized void requestMonitorSoon() {
+        if (!proxyApplied || !MglaWsConfig.isEnabled()) {
+            return;
+        }
+        if (monitorQueue == null) {
+            monitorQueue = new DispatchQueue("mglaAutoBypass");
+        }
+        if (monitorScheduled) {
+            monitorQueue.cancelRunnable(monitorRunnable);
+            monitorScheduled = false;
+        }
+        monitorScheduled = true;
+        monitorQueue.postRunnable(monitorRunnable, 0);
     }
 
     private void monitorTick() {

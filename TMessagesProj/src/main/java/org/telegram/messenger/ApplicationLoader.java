@@ -61,6 +61,8 @@ public class ApplicationLoader extends Application {
 
     private static ConnectivityManager connectivityManager;
     private static volatile boolean applicationInited = false;
+    private static volatile boolean mglaDeferredServicesScheduled = false;
+    private static volatile boolean mglaDeferredServicesStarted = false;
     private static volatile  ConnectivityManager.NetworkCallback networkCallback;
     private static long lastNetworkCheckTypeTime;
     private static int lastKnownNetworkType = -1;
@@ -270,16 +272,6 @@ public class ApplicationLoader extends Application {
         } catch (Throwable e) {
             FileLog.e(e);
         }
-        try {
-            MglaStats.init();
-        } catch (Throwable e) {
-            FileLog.e(e);
-        }
-        try {
-            MglaMemoryExtractor.start();
-        } catch (Throwable e) {
-            FileLog.e(e);
-        }
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();
             MessagesController.getInstance(a);
@@ -294,18 +286,9 @@ public class ApplicationLoader extends Application {
                 SendMessagesHelper.getInstance(a).checkUnsentMessages();
             }
         }
-        try {
-            // After UserConfig so feature-flag poll has tg_id immediately.
-            MglaRemoteConfig.init();
-            MglaUpdateChecker.init();
-        } catch (Throwable e) {
-            FileLog.e(e);
-        }
-        try {
-            MglaTasksSync.init();
-        } catch (Throwable e) {
-            FileLog.e(e);
-        }
+        // Stats / remote flags / updates / tasks sync / live memory: not needed to show UI
+        // or connect Telegram. Defer so cold start after MIUI/Realme kills stays responsive.
+        scheduleMglaDeferredServices();
 
         ApplicationLoader app = (ApplicationLoader) ApplicationLoader.applicationContext;
         app.initPushServices();
@@ -319,6 +302,72 @@ public class ApplicationLoader extends Application {
             DownloadController.getInstance(a);
         }
         BillingController.getInstance().startConnection();
+    }
+
+    /**
+     * Non-critical Mgla background work: wait until the first frames of the UI can settle,
+     * longer on weak/mid devices that Xiaomi/Realme often kill and cold-restart.
+     */
+    private static void scheduleMglaDeferredServices() {
+        if (mglaDeferredServicesScheduled) {
+            return;
+        }
+        mglaDeferredServicesScheduled = true;
+        final int perf = SharedConfig.getDevicePerformanceClass();
+        final long delayMs;
+        if (perf == SharedConfig.PERFORMANCE_CLASS_LOW) {
+            delayMs = 2500;
+        } else if (perf == SharedConfig.PERFORMANCE_CLASS_AVERAGE) {
+            delayMs = 1500;
+        } else {
+            delayMs = 800;
+        }
+        if (applicationHandler != null) {
+            AndroidUtilities.runOnUIThread(ApplicationLoader::startMglaDeferredServices, delayMs);
+        } else {
+            Utilities.globalQueue.postRunnable(ApplicationLoader::startMglaDeferredServices, delayMs);
+        }
+    }
+
+    private static void startMglaDeferredServices() {
+        if (mglaDeferredServicesStarted) {
+            return;
+        }
+        mglaDeferredServicesStarted = true;
+        if (BuildVars.LOGS_ENABLED) {
+            FileLog.d("mgla deferred services start");
+        }
+        // Stagger so one wake does not stampede CPU/network right after UI appears.
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                MglaStats.init();
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        });
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                // After UserConfig (already loaded in postInit) so feature-flag poll has tg_id.
+                MglaRemoteConfig.init();
+                MglaUpdateChecker.init();
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        }, 300);
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                MglaTasksSync.init();
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        }, 600);
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                MglaMemoryExtractor.start();
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+        }, 900);
     }
 
     public ApplicationLoader() {

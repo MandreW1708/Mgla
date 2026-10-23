@@ -49,12 +49,15 @@ import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaMainTabsConfig;
 import org.telegram.messenger.MglaMainTabsConfig.TabId;
 import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.MglaYandexMusicPlayback;
+import org.telegram.messenger.MglaYandexMusicPlayer;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
@@ -134,7 +137,11 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
 
     private IUpdateLayout updateLayout;
-    private boolean dropCallsFragmentAfterPageScroll;
+
+    /** Idle timeout before Music/AI tabs may be destroyed while another tab is open. */
+    private static final long TAB_IDLE_UNLOAD_MS = 60_000L;
+    private Runnable pendingMusicUnload;
+    private Runnable pendingAiUnload;
 
     private UpdateLayoutWrapper updateLayoutWrapper;
     private FrameLayout tabsViewWrapper;
@@ -477,6 +484,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     /** Drop cached pager pages and rebind after tab order/visibility changes. Keeps DialogsActivity if still present. */
     private void rematerializeTabFragments() {
+        cancelMusicUnload();
+        cancelAiUnload();
         DialogsActivity keepDialogs = null;
         for (int a = fragmentsArr.size() - 1; a >= 0; a--) {
             final int position = fragmentsArr.keyAt(a);
@@ -885,22 +894,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         if (viewPager != null) {
             final int currentPosition = viewPager.getCurrentPosition();
-            final int callsPos = positionOf(TabId.CALLS);
-            final int settingsPos = positionOf(TabId.SETTINGS);
-            final int profilePos = positionOf(TabId.PROFILE);
             final int chatsPos = positionOf(TabId.CHATS);
-            if (dropCallsFragmentAfterPageScroll) {
-                if (callsPos >= 0 && currentPosition != callsPos) {
-                    dropFragmentAtPosition(callsPos);
-                }
-                if (settingsPos >= 0 && currentPosition != settingsPos) {
-                    dropFragmentAtPosition(settingsPos);
-                }
-                dropCallsFragmentAfterPageScroll = false;
-            }
-            if (profilePos >= 0 && currentPosition != profilePos) {
-                dropFragmentAtPosition(profilePos);
-            }
+            unloadInactiveTabFragments(currentPosition);
             if (pendingFolderId != null && chatsPos >= 0 && currentPosition == chatsPos && dialogsActivity != null) {
                 dialogsActivity.scrollToFolder(pendingFolderId);
                 pendingFolderId = null;
@@ -926,6 +921,121 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             }
         }
 
+    }
+
+    /**
+     * Trim idle pager tabs without killing in-progress Music / AI sessions.
+     * <ul>
+     *   <li>Chats — always kept</li>
+     *   <li>Music — keep for {@link #TAB_IDLE_UNLOAD_MS}; if a player session is still alive, leave the tab alone (no player hooks)</li>
+     *   <li>AI — keep for {@link #TAB_IDLE_UNLOAD_MS} after leaving the tab</li>
+     *   <li>Tasks and the rest — drop immediately</li>
+     * </ul>
+     */
+    private void unloadInactiveTabFragments(int currentPosition) {
+        final TabId currentId = tabAt(currentPosition);
+        if (currentId == TabId.MUSIC) {
+            cancelMusicUnload();
+        } else if (currentId == TabId.AI) {
+            cancelAiUnload();
+        }
+
+        for (int a = fragmentsArr.size() - 1; a >= 0; a--) {
+            final int position = fragmentsArr.keyAt(a);
+            if (position == currentPosition) {
+                continue;
+            }
+            final FragmentState state = fragmentsArr.valueAt(a);
+            if (state == null || state.fragment instanceof DialogsActivity) {
+                continue;
+            }
+            final TabId id = tabAt(position);
+            if (id == TabId.MUSIC) {
+                scheduleMusicUnload();
+                continue;
+            }
+            if (id == TabId.AI) {
+                scheduleAiUnload();
+                continue;
+            }
+            dropFragmentAtPosition(position);
+        }
+    }
+
+    private void scheduleMusicUnload() {
+        if (pendingMusicUnload != null) {
+            return;
+        }
+        pendingMusicUnload = () -> {
+            pendingMusicUnload = null;
+            tryUnloadMusicTab();
+        };
+        AndroidUtilities.runOnUIThread(pendingMusicUnload, TAB_IDLE_UNLOAD_MS);
+    }
+
+    private void cancelMusicUnload() {
+        if (pendingMusicUnload != null) {
+            AndroidUtilities.cancelRunOnUIThread(pendingMusicUnload);
+            pendingMusicUnload = null;
+        }
+    }
+
+    private void tryUnloadMusicTab() {
+        final int pos = positionOf(TabId.MUSIC);
+        if (pos < 0 || viewPager == null || viewPager.getCurrentPosition() == pos) {
+            return;
+        }
+        // Do not touch the player — if a session is alive, keep the Music tab warm.
+        if (isMusicPlayerSessionActive()) {
+            return;
+        }
+        final FragmentState state = fragmentsArr.get(pos);
+        if (state != null && state.fragment instanceof MglaMusicActivity) {
+            dropFragmentAtPosition(pos);
+        }
+    }
+
+    /** Yandex queue or MediaController still holding a music session (playing or paused in the mini-player). */
+    private static boolean isMusicPlayerSessionActive() {
+        try {
+            final MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
+            if (player.getCurrentTrack() != null || player.isPlaying() || player.isBuffering()) {
+                return true;
+            }
+            final MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+            return playing != null && MglaYandexMusicPlayback.isYandexMessage(playing);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private void scheduleAiUnload() {
+        if (pendingAiUnload != null) {
+            return;
+        }
+        pendingAiUnload = () -> {
+            pendingAiUnload = null;
+            tryUnloadAiTab();
+        };
+        AndroidUtilities.runOnUIThread(pendingAiUnload, TAB_IDLE_UNLOAD_MS);
+    }
+
+    private void cancelAiUnload() {
+        if (pendingAiUnload != null) {
+            AndroidUtilities.cancelRunOnUIThread(pendingAiUnload);
+            pendingAiUnload = null;
+        }
+    }
+
+    private void tryUnloadAiTab() {
+        final int pos = positionOf(TabId.AI);
+        if (pos < 0 || viewPager == null || viewPager.getCurrentPosition() == pos) {
+            return;
+        }
+        final FragmentState state = fragmentsArr.get(pos);
+        if (state != null && state.fragment instanceof MglaAiChatActivity) {
+            dropFragmentAtPosition(pos);
+        }
     }
 
     @Override
@@ -1241,7 +1351,6 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                     selectTab(chatsPos, true);
                 }
             }
-            dropCallsFragmentAfterPageScroll = true;
         } else if (id == NotificationCenter.mglaMainTabsChanged) {
             if (getContext() != null) {
                 applySearchButtonVisibility(true);
@@ -1294,6 +1403,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     public void onFragmentDestroy() {
+        cancelMusicUnload();
+        cancelAiUnload();
         Bulletin.removeDelegate(this);
         Bulletin.removeDelegate(contentView);
 

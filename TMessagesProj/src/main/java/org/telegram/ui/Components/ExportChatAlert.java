@@ -27,8 +27,6 @@ import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.ChatActivity;
 
-import java.io.File;
-
 public class ExportChatAlert extends AlertDialog.Builder {
 
     public static final int REQUEST_CODE_FOLDER_PICK = 99001;
@@ -83,12 +81,18 @@ public class ExportChatAlert extends AlertDialog.Builder {
         TextCheckCell cbStickers = createCheckCellWithIcon(context, "Стикеры", 0xff5fbf6f, R.drawable.msg_sticker);
         cbStickers.setOnClickListener(v -> cbStickers.setChecked(!cbStickers.isChecked()));
         mediaContainer.addView(cbStickers);
+        TextCheckCell cbFiles = createCheckCellWithIcon(context, "Файлы", 0xff9a8cff, R.drawable.msg_filehq);
+        cbFiles.setOnClickListener(v -> cbFiles.setChecked(!cbFiles.isChecked()));
+        mediaContainer.addView(cbFiles);
+        container.addView(mediaContainer);
 
-        // File size limit inside Media section
-        TextCheckCell cbLimitSize = createCheckCellWithIcon(context, "Файлы", 0xff9a8cff, R.drawable.msg_filehq);
+        // === Section: Size limit (applies to all selected media) ===
+        container.addView(createSectionHeader(context, "Ограничение размера"));
+
+        LinearLayout sizeContainer = createRoundedSection(context);
+        TextCheckCell cbLimitSize = createCheckCell(context, "Ограничить размер файла");
         cbLimitSize.setChecked(false);
 
-        // Slider row
         LinearLayout sliderRow = new LinearLayout(context);
         sliderRow.setOrientation(LinearLayout.HORIZONTAL);
         sliderRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -125,7 +129,6 @@ public class ExportChatAlert extends AlertDialog.Builder {
             public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        // Set initial value
         maxFileSize = 100L * 1024 * 1024;
 
         sliderRow.addView(sizeSeekBar);
@@ -136,9 +139,9 @@ public class ExportChatAlert extends AlertDialog.Builder {
             sliderRow.setVisibility(cbLimitSize.isChecked() ? View.VISIBLE : View.GONE);
         });
 
-        mediaContainer.addView(cbLimitSize);
-        mediaContainer.addView(sliderRow);
-        container.addView(mediaContainer);
+        sizeContainer.addView(cbLimitSize);
+        sizeContainer.addView(sliderRow);
+        container.addView(sizeContainer);
 
         // === Section: Save location ===
         container.addView(createSectionHeader(context, "Место сохранения"));
@@ -149,7 +152,10 @@ public class ExportChatAlert extends AlertDialog.Builder {
         locationCell.setOnClickListener(v -> {
             try {
                 Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                        | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
                 if (chatActivity != null) {
                     chatActivity.startActivityForResult(intent, REQUEST_CODE_FOLDER_PICK);
                 }
@@ -204,7 +210,7 @@ public class ExportChatAlert extends AlertDialog.Builder {
             boolean videos = cbVideos.isChecked();
             boolean voice = cbVoice.isChecked();
             boolean stickers = cbStickers.isChecked();
-            boolean files = cbLimitSize.isChecked();
+            boolean files = cbFiles.isChecked();
             String folderName = folderInput.getText().toString().trim();
             if (folderName.isEmpty()) {
                 folderName = "ChatExport_" + dialogId;
@@ -219,13 +225,24 @@ public class ExportChatAlert extends AlertDialog.Builder {
 
     public static void onFolderPicked(Uri treeUri) {
         if (currentInstance == null || treeUri == null) return;
+        try {
+            Activity activity = currentInstance.chatActivity != null ? currentInstance.chatActivity.getParentActivity() : null;
+            if (activity != null) {
+                final int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+                activity.getContentResolver().takePersistableUriPermission(treeUri, flags);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+
+        // Prefer content:// URI for reliable SAF writes on Android 10+
+        currentInstance.saveLocation = treeUri.toString();
         String path = treeUriToPath(treeUri);
-        if (path != null) {
-            currentInstance.saveLocation = path;
+        if (path != null && !path.isEmpty()) {
             currentInstance.saveLocationDisplay = path;
         } else {
-            currentInstance.saveLocation = treeUri.toString();
-            currentInstance.saveLocationDisplay = treeUri.getLastPathSegment();
+            String segment = treeUri.getLastPathSegment();
+            currentInstance.saveLocationDisplay = segment != null ? segment : treeUri.toString();
         }
         if (currentInstance.locationCell != null) {
             currentInstance.locationCell.setTextAndValue("Сохранить в", currentInstance.saveLocationDisplay, false);
