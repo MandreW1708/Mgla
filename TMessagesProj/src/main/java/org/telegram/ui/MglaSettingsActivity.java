@@ -309,12 +309,31 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         titleView.setGravity(Gravity.CENTER);
         header.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 4));
 
+        LinearLayout versionRow = new LinearLayout(context);
+        versionRow.setOrientation(LinearLayout.HORIZONTAL);
+        versionRow.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView versionView = new TextView(context);
         versionView.setText(BuildVars.MGLA_VERSION_STRING);
         versionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         versionView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         versionView.setGravity(Gravity.CENTER);
-        header.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+        versionRow.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        TextView betaBadge = new TextView(context);
+        betaBadge.setText("beta");
+        betaBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+        betaBadge.setTypeface(AndroidUtilities.bold());
+        betaBadge.setTextColor(0xFFFFFFFF);
+        betaBadge.setGravity(Gravity.CENTER);
+        betaBadge.setPadding(dp(5), dp(1), dp(5), dp(2));
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setCornerRadius(dp(4));
+        badgeBg.setColor(Theme.getColor(Theme.key_chat_messagePanelSend));
+        betaBadge.setBackground(badgeBg);
+        versionRow.addView(betaBadge, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
+
+        header.addView(versionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
         return header;
     }
