@@ -51,6 +51,7 @@ import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.MglaMusicImageHelper;
 import org.telegram.messenger.MglaYandexMusicApi;
 import org.telegram.messenger.MglaYandexMusicModel;
+import org.telegram.messenger.MglaYandexMusicOffline;
 import org.telegram.messenger.MglaYandexMusicPlayer;
 import org.telegram.messenger.MglaYandexMusicStore;
 import org.telegram.messenger.R;
@@ -77,7 +78,8 @@ import java.util.List;
 public class MglaMusicActivity extends BaseFragment implements
         MainTabsActivity.TabFragmentDelegate,
         MglaYandexMusicPlayer.PlayerListener,
-        MglaYandexMusicStore.AuthListener {
+        MglaYandexMusicStore.AuthListener,
+        MglaYandexMusicOffline.Listener {
 
     private static final int MAIN_TAB_HOME = 0;
     private static final int MAIN_TAB_COLLECTION = 1;
@@ -96,6 +98,9 @@ public class MglaMusicActivity extends BaseFragment implements
     private int MD3_SECONDARY_CONTAINER;
     private int MD3_OUTLINE_VARIANT;
     private int MD3_ROW_SCRIM;
+    /** Downloaded-track badge (Material green). */
+    private static final int DOWNLOAD_DONE_GREEN = 0xFF2EBD59;
+    private Runnable offlineUiRefreshRunnable;
 
     private boolean hasMainTabs;
 
@@ -158,6 +163,12 @@ public class MglaMusicActivity extends BaseFragment implements
     private TextView favoritesSectionCount;
     private LinearLayout favoritesPreviewContainer;
     private ProgressBar favoritesPreviewLoading;
+
+    // Offline downloads (Telegram storage path)
+    private LinearLayout offlineCard;
+    private TextView offlineSectionTitle;
+    private TextView offlineSectionCount;
+    private TextView detailDownloadAllBtn;
 
     // Playlists Section
     private View playlistsHeaderRow;
@@ -269,6 +280,7 @@ public class MglaMusicActivity extends BaseFragment implements
     public boolean onFragmentCreate() {
         MglaYandexMusicPlayer.getInstance().addListener(this);
         MglaYandexMusicStore.getInstance().addAuthListener(this);
+        MglaYandexMusicOffline.getInstance().addListener(this);
         return super.onFragmentCreate();
     }
 
@@ -276,6 +288,10 @@ public class MglaMusicActivity extends BaseFragment implements
     public void onFragmentDestroy() {
         MglaYandexMusicPlayer.getInstance().removeListener(this);
         MglaYandexMusicStore.getInstance().removeAuthListener(this);
+        MglaYandexMusicOffline.getInstance().removeListener(this);
+        if (offlineUiRefreshRunnable != null) {
+            AndroidUtilities.cancelRunOnUIThread(offlineUiRefreshRunnable);
+        }
         super.onFragmentDestroy();
     }
 
@@ -1097,6 +1113,45 @@ public class MglaMusicActivity extends BaseFragment implements
 
         content.addView(favoritesCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
+        // Offline downloads — Telegram storage (internal / SD from Data & Storage)
+        offlineCard = new LinearLayout(context);
+        offlineCard.setOrientation(LinearLayout.VERTICAL);
+        offlineCard.setBackground(md3SurfaceDrawable(MD3_SURFACE_CONTAINER, 28));
+        offlineCard.setPadding(dp(16), dp(16), dp(16), dp(16));
+        offlineCard.setOnClickListener(v -> showDownloadedTracks());
+
+        LinearLayout offlineHeader = new LinearLayout(context);
+        offlineHeader.setOrientation(LinearLayout.HORIZONTAL);
+        offlineHeader.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView offlineIcon = new ImageView(context);
+        offlineIcon.setImageResource(R.drawable.msg_download);
+        offlineIcon.setColorFilter(new PorterDuffColorFilter(MD3_PRIMARY, PorterDuff.Mode.SRC_IN));
+        offlineHeader.addView(offlineIcon, LayoutHelper.createLinear(24, 24, 0, 0, 12, 0));
+
+        LinearLayout offlineTextCol = new LinearLayout(context);
+        offlineTextCol.setOrientation(LinearLayout.VERTICAL);
+        offlineSectionTitle = new TextView(context);
+        offlineSectionTitle.setText("Скачанное");
+        offlineSectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        offlineSectionTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        offlineSectionTitle.setTextColor(MD3_ON_SURFACE);
+        offlineTextCol.addView(offlineSectionTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        offlineSectionCount = new TextView(context);
+        offlineSectionCount.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        offlineSectionCount.setTextColor(MD3_ON_SURFACE_VARIANT);
+        offlineTextCol.addView(offlineSectionCount, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        offlineHeader.addView(offlineTextCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        ImageView offlineChevron = new ImageView(context);
+        offlineChevron.setImageResource(R.drawable.msg_arrowright);
+        offlineChevron.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+        offlineHeader.addView(offlineChevron, LayoutHelper.createLinear(20, 20));
+
+        offlineCard.addView(offlineHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        content.addView(offlineCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 12, 16, 0));
+        updateOfflineSection();
+
         // Playlists
         playlistsHeaderRow = createPlaylistsHeader(context);
         content.addView(playlistsHeaderRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 28, 16, 12));
@@ -1357,6 +1412,7 @@ public class MglaMusicActivity extends BaseFragment implements
         if (fullFavoritesAdapter != null) {
             fullFavoritesAdapter.notifyDataSetChanged();
         }
+        updateOfflineSection();
         showTrackDetailPage();
         if (fullFavoritesLoading != null) {
             fullFavoritesLoading.setVisibility(View.VISIBLE);
@@ -1376,6 +1432,7 @@ public class MglaMusicActivity extends BaseFragment implements
                 if (fullFavoritesAdapter != null) {
                     fullFavoritesAdapter.notifyDataSetChanged();
                 }
+                updateOfflineSection();
             }
 
             @Override
@@ -1395,7 +1452,7 @@ public class MglaMusicActivity extends BaseFragment implements
 
         ImageView cover = new ImageView(context);
         cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        MglaMusicImageHelper.bindCover(cover, track.getCoverUrl(100), 12, R.drawable.bot_music);
+        MglaMusicImageHelper.bindCover(cover, track.getCoverUrl(300), 12, R.drawable.bot_music);
         row.addView(cover, LayoutHelper.createLinear(48, 48, 0, 0, 12, 0));
 
         LinearLayout textCol = new LinearLayout(context);
@@ -1439,6 +1496,14 @@ public class MglaMusicActivity extends BaseFragment implements
         textCol.addView(artist, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 3, 0, 0));
 
         row.addView(textCol, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 6, 0));
+
+        if (MglaYandexMusicOffline.getInstance().isDownloaded(track.id)) {
+            ImageView dlBadge = new ImageView(context);
+            dlBadge.setImageResource(R.drawable.msg_download);
+            dlBadge.setColorFilter(new PorterDuffColorFilter(DOWNLOAD_DONE_GREEN, PorterDuff.Mode.SRC_IN));
+            dlBadge.setPadding(dp(6), dp(6), dp(6), dp(6));
+            row.addView(dlBadge, LayoutHelper.createLinear(32, 32, 0, 0, 2, 0));
+        }
 
         ImageView moreBtn = new ImageView(context);
         moreBtn.setImageResource(R.drawable.ic_ab_other);
@@ -1572,7 +1637,20 @@ public class MglaMusicActivity extends BaseFragment implements
                 MglaYandexMusicPlayer.getInstance().playTrack(detailTracks.get(0), new ArrayList<>(detailTracks), detailSourceTitle);
             }
         });
-        actionRow.addView(shuffleBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        actionRow.addView(shuffleBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 10, 0));
+
+        detailDownloadAllBtn = new TextView(context);
+        detailDownloadAllBtn.setText("Скачать");
+        detailDownloadAllBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        detailDownloadAllBtn.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"), Typeface.BOLD);
+        detailDownloadAllBtn.setTextColor(MD3_ON_SURFACE);
+        GradientDrawable dlBg = new GradientDrawable();
+        dlBg.setCornerRadius(dp(20));
+        dlBg.setColor(MD3_SURFACE_CONTAINER_HIGH);
+        detailDownloadAllBtn.setBackground(dlBg);
+        detailDownloadAllBtn.setPadding(dp(16), dp(12), dp(16), dp(12));
+        detailDownloadAllBtn.setOnClickListener(v -> downloadDetailTracks());
+        actionRow.addView(detailDownloadAllBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
         layout.addView(actionRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
@@ -1608,6 +1686,7 @@ public class MglaMusicActivity extends BaseFragment implements
         if (fullFavoritesAdapter != null) {
             fullFavoritesAdapter.notifyDataSetChanged();
         }
+        updateOfflineSection();
         showTrackDetailPage();
     }
 
@@ -2945,27 +3024,211 @@ public class MglaMusicActivity extends BaseFragment implements
 
     private void showTrackOptionsMenu(MglaYandexMusicModel.Track track) {
         if (track == null) return;
+        final boolean downloaded = MglaYandexMusicOffline.getInstance().isDownloaded(track.id);
+        final boolean downloading = MglaYandexMusicOffline.getInstance().isDownloading(track.id);
         AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
         b.setTitle(track.title);
         b.setItems(new CharSequence[]{
                 "Слушать следующим",
+                downloading ? "Скачивание…" : (downloaded ? "Удалить загрузку" : "Скачать для офлайн"),
                 "Удалить из Мне нравится",
                 "Поделиться названием"
         }, (dialog, which) -> {
             if (which == 0) {
                 Toast.makeText(getContext(), "Добавлено в очередь", Toast.LENGTH_SHORT).show();
             } else if (which == 1) {
+                if (downloading) {
+                    Toast.makeText(getContext(), "Уже скачивается", Toast.LENGTH_SHORT).show();
+                } else                 if (downloaded) {
+                    MglaYandexMusicOffline.getInstance().remove(track.id);
+                    Toast.makeText(getContext(), "Удалено с устройства", Toast.LENGTH_SHORT).show();
+                    notifyTrackDownloadRow(track.id);
+                    updateOfflineSection();
+                    updateFavoritesPreview();
+                } else {
+                    Toast.makeText(getContext(), "Скачивание…", Toast.LENGTH_SHORT).show();
+                    notifyTrackDownloadRow(track.id);
+                    MglaYandexMusicOffline.getInstance().download(track, () -> {
+                        boolean ok = MglaYandexMusicOffline.getInstance().isDownloaded(track.id);
+                        Toast.makeText(getContext(), ok ? "Скачано" : "Не удалось скачать", Toast.LENGTH_SHORT).show();
+                        notifyTrackDownloadRow(track.id);
+                        updateOfflineSection();
+                        updateFavoritesPreview();
+                    });
+                }
+            } else if (which == 2) {
                 MglaYandexMusicStore.getInstance().setLiked(track.id, false);
                 favoritesList.remove(track);
                 updateFavoritesPreview();
                 if (fullFavoritesAdapter != null) fullFavoritesAdapter.notifyDataSetChanged();
                 MglaYandexMusicApi.toggleLike(track.id, false, null);
-            } else if (which == 2) {
-                AndroidUtilities.addToClipboard(track.artist + " вЂ” " + track.title);
+            } else if (which == 3) {
+                AndroidUtilities.addToClipboard(track.artist + " — " + track.title);
                 Toast.makeText(getContext(), "Скопировано", Toast.LENGTH_SHORT).show();
             }
         });
         showDialog(b.create());
+    }
+
+    private void bindDownloadIcon(ImageView icon, String trackId) {
+        if (icon == null) {
+            return;
+        }
+        icon.setImageResource(R.drawable.msg_download);
+        boolean downloaded = MglaYandexMusicOffline.getInstance().isDownloaded(trackId);
+        boolean downloading = MglaYandexMusicOffline.getInstance().isDownloading(trackId);
+        if (downloaded) {
+            icon.setColorFilter(new PorterDuffColorFilter(DOWNLOAD_DONE_GREEN, PorterDuff.Mode.SRC_IN));
+            icon.setAlpha(1f);
+        } else if (downloading) {
+            icon.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+            icon.setAlpha(0.45f);
+        } else {
+            icon.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+            icon.setAlpha(0.7f);
+        }
+    }
+
+    private void updateOfflineSection() {
+        if (offlineSectionCount == null) {
+            return;
+        }
+        int count = MglaYandexMusicOffline.getInstance().getDownloadedCount();
+        offlineSectionCount.setText(count == 0
+                ? "Треки для прослушивания без интернета"
+                : formatTrackCount(count) + " · без интернета");
+        if (detailDownloadAllBtn != null) {
+            int missing = 0;
+            for (MglaYandexMusicModel.Track t : detailTracks) {
+                if (t != null && !MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
+                    missing++;
+                }
+            }
+            if (detailTracks.isEmpty()) {
+                detailDownloadAllBtn.setText("Скачать");
+                detailDownloadAllBtn.setEnabled(false);
+                detailDownloadAllBtn.setAlpha(0.5f);
+            } else if (missing == 0) {
+                detailDownloadAllBtn.setText("Скачано");
+                detailDownloadAllBtn.setEnabled(false);
+                detailDownloadAllBtn.setAlpha(0.55f);
+            } else if (MglaYandexMusicOffline.getInstance().isBatchRunning()) {
+                detailDownloadAllBtn.setText("Скачивание…");
+                detailDownloadAllBtn.setEnabled(false);
+                detailDownloadAllBtn.setAlpha(0.55f);
+            } else {
+                detailDownloadAllBtn.setText("Скачать (" + missing + ")");
+                detailDownloadAllBtn.setEnabled(true);
+                detailDownloadAllBtn.setAlpha(1f);
+            }
+        }
+    }
+
+    private void showDownloadedTracks() {
+        List<MglaYandexMusicModel.Track> offline = MglaYandexMusicOffline.getInstance().getDownloadedTracks();
+        openedPlaylistFromFullList = false;
+        openedDetailFromArtist = false;
+        detailSourceTitle = "Скачанное";
+        detailTracks.clear();
+        detailTracks.addAll(offline);
+        if (fullFavoritesTitleText != null) {
+            fullFavoritesTitleText.setText("Скачанное");
+        }
+        if (fullFavoritesCountText != null) {
+            fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
+        }
+        if (fullFavoritesAdapter != null) {
+            fullFavoritesAdapter.notifyDataSetChanged();
+        }
+        updateOfflineSection();
+        showTrackDetailPage();
+    }
+
+    private void downloadDetailTracks() {
+        if (detailTracks.isEmpty()) {
+            return;
+        }
+        if (MglaYandexMusicOffline.getInstance().isBatchRunning()) {
+            Toast.makeText(getContext(), "Уже идёт скачивание", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ArrayList<MglaYandexMusicModel.Track> missing = new ArrayList<>();
+        for (MglaYandexMusicModel.Track t : detailTracks) {
+            if (t != null && !TextUtils.isEmpty(t.id)
+                    && !MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
+                missing.add(t);
+            }
+        }
+        if (missing.isEmpty()) {
+            Toast.makeText(getContext(), "Все треки уже скачаны", Toast.LENGTH_SHORT).show();
+            updateOfflineSection();
+            return;
+        }
+        Toast.makeText(getContext(), "Скачивание " + missing.size() + " треков…", Toast.LENGTH_SHORT).show();
+        updateOfflineSection();
+        MglaYandexMusicOffline.getInstance().downloadAll(missing, new MglaYandexMusicOffline.ProgressCallback() {
+            @Override
+            public void onProgress(String trackId, int done, int total) {
+                if (detailDownloadAllBtn != null) {
+                    detailDownloadAllBtn.setText(done + "/" + total);
+                }
+            }
+
+            @Override
+            public void onTrackDone(String trackId, boolean ok) {
+                // Update only the finished row — full notifyDataSetChanged jerks the list while scrolling.
+                notifyTrackDownloadRow(trackId);
+            }
+
+            @Override
+            public void onFinished(int okCount, int failCount) {
+                updateOfflineSection();
+                updateFavoritesPreview();
+                if (fullFavoritesAdapter != null) {
+                    fullFavoritesAdapter.notifyDataSetChanged();
+                }
+                String msg = failCount == 0
+                        ? ("Скачано: " + okCount)
+                        : ("Скачано: " + okCount + ", ошибок: " + failCount);
+                Toast.makeText(getContext(), msg, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void notifyTrackDownloadRow(String trackId) {
+        if (TextUtils.isEmpty(trackId) || fullFavoritesAdapter == null || fullFavoritesListView == null) {
+            return;
+        }
+        for (int i = 0; i < detailTracks.size(); i++) {
+            MglaYandexMusicModel.Track t = detailTracks.get(i);
+            if (t != null && trackId.equals(t.id)) {
+                fullFavoritesAdapter.notifyItemChanged(i, "download");
+                return;
+            }
+        }
+    }
+
+    @Override
+    public void onOfflineChanged() {
+        if (offlineUiRefreshRunnable == null) {
+            offlineUiRefreshRunnable = () -> {
+                updateOfflineSection();
+                updateFavoritesPreview();
+                if ("Скачанное".equals(detailSourceTitle)) {
+                    detailTracks.clear();
+                    detailTracks.addAll(MglaYandexMusicOffline.getInstance().getDownloadedTracks());
+                    if (fullFavoritesCountText != null) {
+                        fullFavoritesCountText.setText(formatTrackCount(detailTracks.size()));
+                    }
+                    if (fullFavoritesAdapter != null) {
+                        fullFavoritesAdapter.notifyDataSetChanged();
+                    }
+                }
+            };
+        }
+        // Debounce: batch downloads fire many index writes — avoid list thrash while scrolling.
+        AndroidUtilities.cancelRunOnUIThread(offlineUiRefreshRunnable);
+        AndroidUtilities.runOnUIThread(offlineUiRefreshRunnable, 250);
     }
 
     private void openAuthSheet(boolean initialManual) {
@@ -3465,11 +3728,25 @@ public class MglaMusicActivity extends BaseFragment implements
 
             row.addView(playArea, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
+            ImageView download = new ImageView(ctx);
+            download.setPadding(dp(6), dp(6), dp(6), dp(6));
+            row.addView(download, LayoutHelper.createLinear(36, 36));
+
             ImageView like = new ImageView(ctx);
             like.setPadding(dp(6), dp(6), dp(6), dp(6));
             row.addView(like, LayoutHelper.createLinear(36, 36));
 
-            return new Holder(row, playArea, cover, title, explicitTag, subtitle, duration, like);
+            return new Holder(row, playArea, cover, title, explicitTag, subtitle, duration, download, like);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull Holder holder, int position, @NonNull List<Object> payloads) {
+            if (!payloads.isEmpty() && "download".equals(payloads.get(0))) {
+                MglaYandexMusicModel.Track t = items.get(position);
+                bindDownloadIcon(holder.download, t.id);
+                return;
+            }
+            onBindViewHolder(holder, position);
         }
 
         @Override
@@ -3480,7 +3757,7 @@ public class MglaMusicActivity extends BaseFragment implements
             holder.duration.setText(t.getFormattedDuration());
             holder.explicitTag.setVisibility(t.isExplicit ? View.VISIBLE : View.GONE);
 
-            MglaMusicImageHelper.bindCover(holder.cover, t.getCoverUrl(100), 8, R.drawable.bot_music);
+            MglaMusicImageHelper.bindCover(holder.cover, t.getCoverUrl(300), 8, R.drawable.bot_music);
 
             MglaYandexMusicModel.Track current = MglaYandexMusicPlayer.getInstance().getCurrentTrack();
             boolean isThisPlaying = (current != null && current.id != null && current.id.equals(t.id));
@@ -3490,6 +3767,8 @@ public class MglaMusicActivity extends BaseFragment implements
             } else {
                 holder.title.setTextColor(MD3_ON_SURFACE);
             }
+
+            bindDownloadIcon(holder.download, t.id);
 
             if (t.isLiked) {
                 holder.like.setImageResource(R.drawable.media_like_active);
@@ -3503,6 +3782,32 @@ public class MglaMusicActivity extends BaseFragment implements
                 if (listener != null) {
                     listener.onTrackClick(t, position);
                 }
+            });
+            holder.playArea.setOnLongClickListener(v -> {
+                showTrackOptionsMenu(t);
+                return true;
+            });
+
+            holder.download.setOnClickListener(v -> {
+                if (MglaYandexMusicOffline.getInstance().isDownloading(t.id)) {
+                    Toast.makeText(getContext(), "Уже скачивается", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (MglaYandexMusicOffline.getInstance().isDownloaded(t.id)) {
+                    MglaYandexMusicOffline.getInstance().remove(t.id);
+                    Toast.makeText(getContext(), "Удалено с устройства", Toast.LENGTH_SHORT).show();
+                    notifyItemChanged(position, "download");
+                    updateOfflineSection();
+                    updateFavoritesPreview();
+                    return;
+                }
+                Toast.makeText(getContext(), "Скачивание…", Toast.LENGTH_SHORT).show();
+                notifyItemChanged(position, "download");
+                MglaYandexMusicOffline.getInstance().download(t, () -> {
+                    notifyItemChanged(position, "download");
+                    updateOfflineSection();
+                    updateFavoritesPreview();
+                });
             });
 
             holder.like.setOnClickListener(v -> {
@@ -3526,9 +3831,10 @@ public class MglaMusicActivity extends BaseFragment implements
             final TextView explicitTag;
             final TextView subtitle;
             final TextView duration;
+            final ImageView download;
             final ImageView like;
 
-            Holder(View itemView, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView like) {
+            Holder(View itemView, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView download, ImageView like) {
                 super(itemView);
                 this.playArea = playArea;
                 this.cover = cover;
@@ -3536,6 +3842,7 @@ public class MglaMusicActivity extends BaseFragment implements
                 this.explicitTag = explicitTag;
                 this.subtitle = subtitle;
                 this.duration = duration;
+                this.download = download;
                 this.like = like;
             }
         }

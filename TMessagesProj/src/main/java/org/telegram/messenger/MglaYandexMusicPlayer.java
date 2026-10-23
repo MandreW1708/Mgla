@@ -478,7 +478,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         }
 
         int account = UserConfig.selectedAccount;
-        File file = MglaYandexMusicPlayback.cacheFileForTrack(track.id);
+        File file = MglaYandexMusicPlayback.fileForPlayback(track.id);
         MessageObject current = MglaYandexMusicPlayback.createMessageObject(track, file, account);
         if (current == null) {
             return;

@@ -46,7 +46,8 @@ public final class MglaYandexMusicPlayback {
         return trackIdByMsgId.get(messageObject.getId());
     }
 
-    public static File cacheFileForTrack(String trackId) {
+    /** Short-lived streaming cache (app cacheDir). Prefer {@link #fileForPlayback(String)}. */
+    public static File streamingCacheFileForTrack(String trackId) {
         File dir = new File(ApplicationLoader.applicationContext.getCacheDir(), "mgla_ym");
         if (!dir.exists()) {
             //noinspection ResultOfMethodCallIgnored
@@ -56,8 +57,27 @@ public final class MglaYandexMusicPlayback {
         return new File(dir, safeId + ".mp3");
     }
 
+    /**
+     * File used for playback: offline download (Telegram storage path) first,
+     * otherwise streaming cache.
+     */
+    public static File fileForPlayback(String trackId) {
+        if (!TextUtils.isEmpty(trackId)) {
+            File offline = MglaYandexMusicOffline.getInstance().fileForTrack(trackId);
+            if (offline.exists() && offline.length() > 1024) {
+                return offline;
+            }
+        }
+        return streamingCacheFileForTrack(trackId);
+    }
+
+    /** @deprecated use {@link #fileForPlayback(String)} */
+    public static File cacheFileForTrack(String trackId) {
+        return fileForPlayback(trackId);
+    }
+
     public static boolean isCached(String trackId) {
-        File f = cacheFileForTrack(trackId);
+        File f = fileForPlayback(trackId);
         return f.exists() && f.length() > 1024;
     }
 
@@ -127,7 +147,7 @@ public final class MglaYandexMusicPlayback {
             if (track == null || TextUtils.isEmpty(track.id)) {
                 continue;
             }
-            File file = cacheFileForTrack(track.id);
+            File file = fileForPlayback(track.id);
             MessageObject obj = createMessageObject(track, file, account);
             if (obj != null) {
                 list.add(obj);
@@ -148,7 +168,7 @@ public final class MglaYandexMusicPlayback {
         if (track == null) {
             return false;
         }
-        File file = cacheFileForTrack(track.id);
+        File file = fileForPlayback(track.id);
         if (file.exists() && file.length() > 1024) {
             messageObject.messageOwner.attachPath = file.getAbsolutePath();
             messageObject.attachPathExists = true;
@@ -162,6 +182,12 @@ public final class MglaYandexMusicPlayback {
         final String trackId = track.id;
         Utilities.globalQueue.postRunnable(() -> {
             try {
+                // Prefer offline store path if a download finished while we were waiting.
+                File offline = MglaYandexMusicOffline.getInstance().fileForTrack(trackId);
+                if (offline.exists() && offline.length() > 1024) {
+                    finishPlay(messageObject, track, offline);
+                    return;
+                }
                 MglaYandexMusicApi.AudioStream stream = MglaYandexMusicApi.resolveAudioStreamSync(trackId);
                 if (stream == null || TextUtils.isEmpty(stream.url)) {
                     throw new Exception("No stream");

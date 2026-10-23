@@ -1361,6 +1361,11 @@ public final class MglaYandexMusicApi {
         if (TextUtils.isEmpty(remoteUrl)) {
             throw new Exception("Empty remote url");
         }
+        // Prefer persistent offline download (Telegram storage path).
+        File offline = MglaYandexMusicOffline.getInstance().fileForTrack(trackId);
+        if (offline.exists() && offline.length() > 1024) {
+            return new AudioStream(Uri.fromFile(offline).toString(), "other");
+        }
         File dir = new File(ApplicationLoader.applicationContext.getCacheDir(), "mgla_ym");
         if (!dir.exists() && !dir.mkdirs()) {
             throw new Exception("Cannot create cache dir");
