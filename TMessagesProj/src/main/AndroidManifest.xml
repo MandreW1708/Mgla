@@ -757,7 +757,8 @@
             </intent-filter>
         </service>
 
-		<receiver android:name=".MusicPlayerReceiver" android:exported="false">
+		<!-- exported=true required so system / BT AVRCP can deliver MEDIA_BUTTON on Android 12+ -->
+		<receiver android:name=".MusicPlayerReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="org.telegram.android.musicplayer.close" />
                 <action android:name="org.telegram.android.musicplayer.pause" />
@@ -768,13 +769,16 @@
                 <action android:name="android.media.AUDIO_BECOMING_NOISY" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".MglaYandexMusicReceiver" android:exported="false">
+        <!-- exported=true so BT / wired headset MEDIA_BUTTON reaches Yandex Music controls -->
+        <receiver android:name=".MglaYandexMusicReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="org.telegram.messenger.mgla.ym.close" />
                 <action android:name="org.telegram.messenger.mgla.ym.pause" />
                 <action android:name="org.telegram.messenger.mgla.ym.next" />
                 <action android:name="org.telegram.messenger.mgla.ym.play" />
                 <action android:name="org.telegram.messenger.mgla.ym.previous" />
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+                <action android:name="android.media.AUDIO_BECOMING_NOISY" />
             </intent-filter>
         </receiver>
         <receiver android:name=".voip.VoIPMediaButtonReceiver" android:exported="false">

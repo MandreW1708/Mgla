@@ -185,6 +185,7 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1166, "Анимация кнопок", hub, player, playerIcon, playerScreen, "Анимация кнопок", "player/anim/buttons"));
         l.add(new Entry(1167, "Движение фона", hub, player, playerIcon, playerScreen, "Движение фона", "player/anim/ambient"));
         l.add(new Entry(1168, "Анимированный таймлайн", hub, player, playerIcon, playerScreen, "Анимированный таймлайн", "player/anim/seekbar"));
+        l.add(new Entry(1170, "Волна таймлайна", hub, player, playerIcon, playerScreen, "Волна таймлайна", "player/anim/seekbar-wave"));
         l.add(new Entry(1169, "Скорость анимаций", hub, player, playerIcon, playerScreen, "Скорость анимаций", "player/anim/speed"));
         l.add(new Entry(1006, connection, hub, null, connectionIcon, connectionScreen, null, "connection"));
         l.add(new Entry(1007, ai, hub, null, aiIcon, aiScreen, null, "ai"));

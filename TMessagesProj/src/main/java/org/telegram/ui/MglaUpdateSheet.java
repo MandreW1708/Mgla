@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
-import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -15,7 +14,9 @@ import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -75,21 +76,16 @@ public final class MglaUpdateSheet {
         handle.setBackground(handleBg);
         column.addView(handle, LayoutHelper.createLinear(36, 4, Gravity.CENTER_HORIZONTAL, 0, 4, 0, 14));
 
-        // Brand badge
-        FrameLayout badge = new FrameLayout(context);
-        GradientDrawable badgeBg = new GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            new int[]{0xFFF0B45A, 0xFFC47A22}
-        );
-        badgeBg.setCornerRadius(AndroidUtilities.dp(18));
-        badge.setBackground(badgeBg);
-        TextView badgeLetter = new TextView(context);
-        badgeLetter.setText("M");
-        badgeLetter.setTextColor(0xFF1A1208);
-        badgeLetter.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 26);
-        badgeLetter.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        badgeLetter.setGravity(Gravity.CENTER);
-        badge.addView(badgeLetter, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // App icon (same asset as launcher / notifications — not the yellow "M" placeholder)
+        ImageView badge = new ImageView(context);
+        badge.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        badge.setImageResource(R.drawable.ic_launcher_dr);
+        badge.setClipToOutline(true);
+        badge.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+        GradientDrawable badgeClip = new GradientDrawable();
+        badgeClip.setCornerRadius(AndroidUtilities.dp(14));
+        badgeClip.setColor(0x00000000);
+        badge.setBackground(badgeClip);
         column.addView(badge, LayoutHelper.createLinear(56, 56, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
 
         TextView title = new TextView(context);

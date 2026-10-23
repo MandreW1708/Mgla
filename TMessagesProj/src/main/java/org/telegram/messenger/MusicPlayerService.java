@@ -112,7 +112,18 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
         });
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mediaSession = new MediaSessionCompat(this, "telegramAudioPlayer");
+            ComponentName mediaButtonReceiver = new ComponentName(getApplicationContext(), MusicPlayerReceiver.class);
+            Intent mediaButtonIntent = new Intent(Intent.ACTION_MEDIA_BUTTON);
+            mediaButtonIntent.setComponent(mediaButtonReceiver);
+            PendingIntent mediaButtonPendingIntent = PendingIntent.getBroadcast(
+                    this, 0, mediaButtonIntent, fixIntentFlags(PendingIntent.FLAG_MUTABLE));
+            mediaSession = new MediaSessionCompat(this, "telegramAudioPlayer", mediaButtonReceiver, mediaButtonPendingIntent);
+            mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+            mediaSession.setMediaButtonReceiver(mediaButtonPendingIntent);
+            try {
+                mediaSession.setPlaybackToLocal(AudioManager.STREAM_MUSIC);
+            } catch (Throwable ignored) {
+            }
             playbackState = new PlaybackStateCompat.Builder();
             albumArtPlaceholder = Bitmap.createBitmap(AndroidUtilities.dp(102), AndroidUtilities.dp(102), Bitmap.Config.ARGB_8888);
             Drawable placeholder = getResources().getDrawable(R.drawable.nocover_big);
@@ -121,17 +132,31 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
             mediaSession.setCallback(new MediaSessionCompat.Callback() {
                 @Override
                 public void onPlay() {
-                    MediaController.getInstance().playMessage(MediaController.getInstance().getPlayingMessageObject());
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().play();
+                        return;
+                    }
+                    MediaController.getInstance().playMessage(playing);
                 }
 
                 @Override
                 public void onPause() {
-                    MediaController.getInstance().pauseMessage(MediaController.getInstance().getPlayingMessageObject());
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().pause();
+                        return;
+                    }
+                    MediaController.getInstance().pauseMessage(playing);
                 }
 
                 @Override
                 public void onSkipToNext() {
                     MessageObject playingMessageObject = MediaController.getInstance().getPlayingMessageObject();
+                    if (playingMessageObject != null && MglaYandexMusicPlayback.isYandexMessage(playingMessageObject)) {
+                        MglaYandexMusicPlayer.getInstance().next();
+                        return;
+                    }
                     if (playingMessageObject != null && playingMessageObject.isMusic()) {
                         MediaController.getInstance().playNextMessage();
                     }
@@ -140,9 +165,23 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 @Override
                 public void onSkipToPrevious() {
                     MessageObject playingMessageObject = MediaController.getInstance().getPlayingMessageObject();
+                    if (playingMessageObject != null && MglaYandexMusicPlayback.isYandexMessage(playingMessageObject)) {
+                        MglaYandexMusicPlayer.getInstance().prev();
+                        return;
+                    }
                     if (playingMessageObject != null && playingMessageObject.isMusic()) {
                         MediaController.getInstance().playPreviousMessage();
                     }
+                }
+
+                @Override
+                public void onStop() {
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().stop();
+                        return;
+                    }
+                    MediaController.getInstance().cleanupPlayer(true, true);
                 }
 
                 @Override
@@ -219,11 +258,6 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                         createNotification(messageObject, false);
                     }
                 }
-
-                @Override
-                public void onStop() {
-                    //stopSelf();
-                }
             });
             mediaSession.setActive(true);
             updateRepeatMode();
@@ -248,11 +282,16 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 AndroidUtilities.runOnUIThread(this::stopSelf);
                 return START_STICKY;
             }
+            // Always claim headset / BT media buttons — needed for Yandex Music and modern OEMs.
+            ComponentName remoteComponentName = new ComponentName(getApplicationContext(), MusicPlayerReceiver.class.getName());
+            try {
+                audioManager.registerMediaButtonEventReceiver(remoteComponentName);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
             if (supportLockScreenControls) {
-                ComponentName remoteComponentName = new ComponentName(getApplicationContext(), MusicPlayerReceiver.class.getName());
                 try {
                     if (remoteControlClient == null) {
-                        audioManager.registerMediaButtonEventReceiver(remoteComponentName);
                         Intent mediaButtonIntent = new Intent(Intent.ACTION_MEDIA_BUTTON);
                         mediaButtonIntent.setComponent(remoteComponentName);
                         PendingIntent mediaPendingIntent = PendingIntent.getBroadcast(this, 0, mediaButtonIntent, fixIntentFlags(PendingIntent.FLAG_MUTABLE));
@@ -264,6 +303,9 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 } catch (Exception e) {
                     FileLog.e(e);
                 }
+            }
+            if (mediaSession != null) {
+                mediaSession.setActive(true);
             }
             createNotification(messageObject, false);
         } catch (Exception e) {
@@ -442,8 +484,9 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
             PendingIntent pendingRepeat = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_REPEAT).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
             PendingIntent pendingShuffle = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_SHUFFLE).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
 
+            final boolean treatAsMusic = messageObject.isMusic() || MglaYandexMusicPlayback.isYandexMessage(messageObject);
             Notification.MediaStyle mediaStyle = new Notification.MediaStyle().setMediaSession((android.media.session.MediaSession.Token) mediaSession.getSessionToken().getToken());
-            if (messageObject.isMusic()) {
+            if (treatAsMusic) {
                 mediaStyle.setShowActionsInCompactView(0, 1, 2, 3, 4);
             } else if (messageObject.isVoice() || messageObject.isRoundVideo()) {
                 mediaStyle.setShowActionsInCompactView(0);
@@ -475,20 +518,28 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
 
             playbackState = new PlaybackStateCompat.Builder();
             if (MediaController.getInstance().isDownloadingCurrentMessage()) {
-                playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(0);
-                if (messageObject.isMusic()) {
+                // Keep transport actions while buffering so BT/headset buttons still work.
+                long bufferingActions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY
+                        | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_STOP;
+                if (treatAsMusic) {
+                    bufferingActions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
+                }
+                playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(bufferingActions);
+                if (treatAsMusic) {
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_previous, previousDescription, pendingPrev).build());
                 }
                 bldr.addAction(new Notification.Action.Builder(R.drawable.loading_animation2, LocaleController.getString(R.string.Loading), null).build());
-                if (messageObject.isMusic()) {
+                if (treatAsMusic) {
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_next, nextDescription, pendingNext).build());
                 }
             } else {
-                long actions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_SET_REPEAT_MODE | PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE;
-                if (messageObject.isMusic()) {
+                long actions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE
+                        | PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_STOP
+                        | PlaybackStateCompat.ACTION_SET_REPEAT_MODE | PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE;
+                if (treatAsMusic) {
                     actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
                 }
-                if (messageObject.isMusic()) {
+                if (treatAsMusic) {
                     int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
                     playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                             NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
@@ -497,7 +548,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                                 MediaController.getInstance().getPlayingMessageObject().audioProgressSec * 1000L,
                                 getPlaybackSpeed(isPlaying, messageObject))
                         .setActions(actions);
-                if (messageObject.isMusic()) {
+                if (treatAsMusic) {
                     int repeatIcon;
                     switch (SharedConfig.repeatMode) {
                         case 1: repeatIcon = R.drawable.player_new_repeatall; break;
@@ -508,13 +559,13 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                             NOTIFY_REPEAT, LocaleController.getString(R.string.RepeatSong), repeatIcon).build());
                 }
                 final String playPauseTitle = isPlaying ? LocaleController.getString(R.string.AccActionPause) : LocaleController.getString(R.string.AccActionPlay);
-                if (messageObject.isMusic()) {
+                if (treatAsMusic) {
                     int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
                     bldr.addAction(new Notification.Action.Builder(shuffleIcon, LocaleController.getString(R.string.ShuffleList), pendingShuffle).build());
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_previous, previousDescription, pendingPrev).build());
                 }
                 bldr.addAction(new Notification.Action.Builder(isPlaying ? R.drawable.ic_action_pause : R.drawable.ic_action_play, playPauseTitle, pendingPlaypause).build());
-                if (messageObject.isMusic()) {
+                if (treatAsMusic) {
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_next, nextDescription, pendingNext).build());
                     int repeatIcon;
                     switch (SharedConfig.repeatMode) {
@@ -723,13 +774,18 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
         }
         playbackState = new PlaybackStateCompat.Builder();
         boolean isPlaying = !MediaController.getInstance().isMessagePaused();
+        MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
+        boolean treatAsMusic = messageObject != null && (messageObject.isMusic() || MglaYandexMusicPlayback.isYandexMessage(messageObject));
+        long actions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE
+                | PlaybackStateCompat.ACTION_STOP;
+        if (treatAsMusic) {
+            actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
+        }
         if (MediaController.getInstance().isDownloadingCurrentMessage()) {
-            playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(0);
+            playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(actions);
         } else {
-            long actions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_SET_REPEAT_MODE | PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE;
-            MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
-            if (messageObject != null && messageObject.isMusic()) {
-                actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
+            actions |= PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_SET_REPEAT_MODE | PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE;
+            if (treatAsMusic) {
                 int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
                 playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                         NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
@@ -738,7 +794,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                             seekTo,
                             getPlaybackSpeed(isPlaying, messageObject))
                     .setActions(actions);
-            if (messageObject != null && messageObject.isMusic()) {
+            if (treatAsMusic) {
                 int repeatIcon;
                 switch (SharedConfig.repeatMode) {
                     case 1: repeatIcon = R.drawable.player_new_repeatall; break;

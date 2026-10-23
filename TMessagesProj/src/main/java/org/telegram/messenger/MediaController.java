@@ -3794,13 +3794,16 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             lastProgress = 0;
             audioInfo = null;
             playingMessageObject = messageObject;
-            if (canStartMusicPlayerService()) {
-                Intent yandexIntent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
-                try {
-                    ApplicationLoader.applicationContext.startService(yandexIntent);
-                } catch (Throwable e) {
-                    FileLog.e(e);
-                }
+            try {
+                ApplicationLoader.applicationContext.stopService(
+                        new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class));
+            } catch (Throwable e) {
+                FileLog.e(e);
+            }
+            try {
+                MglaYandexMusicService.startOrUpdate(ApplicationLoader.applicationContext);
+            } catch (Throwable e) {
+                FileLog.e(e);
             }
             NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
             MglaYandexMusicPlayback.ensureDownloadedThenPlay(messageObject);
@@ -4419,6 +4422,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
 
     private boolean canStartMusicPlayerService() {
         if (playingMessageObject == null || playingMessageObject.isVoiceOnce() || playingMessageObject.isRoundOnce()) {
+            return false;
+        }
+        // Yandex Music owns headset buttons via MglaYandexMusicService MediaSession.
+        if (MglaYandexMusicPlayback.isYandexMessage(playingMessageObject)) {
             return false;
         }
         // HyperOS/MIUI: MediaSession + RemoteControlClient at voice start races AudioTrack

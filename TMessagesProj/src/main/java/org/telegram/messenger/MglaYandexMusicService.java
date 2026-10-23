@@ -20,6 +20,7 @@ import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.text.TextUtils;
+import android.view.KeyEvent;
 
 import org.telegram.ui.LaunchActivity;
 
@@ -104,9 +105,20 @@ public class MglaYandexMusicService extends Service {
         } catch (Throwable ignored) {
         }
 
-        mediaSession = new MediaSessionCompat(this, "mglaYandexMusic");
+        ComponentName mediaButtonReceiver = new ComponentName(getApplicationContext(), MglaYandexMusicReceiver.class);
+        Intent mediaButtonIntent = new Intent(Intent.ACTION_MEDIA_BUTTON);
+        mediaButtonIntent.setComponent(mediaButtonReceiver);
+        PendingIntent mediaButtonPendingIntent = PendingIntent.getBroadcast(
+                this, 0, mediaButtonIntent, fixFlags(PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE));
+
+        mediaSession = new MediaSessionCompat(this, "mglaYandexMusic", mediaButtonReceiver, mediaButtonPendingIntent);
         playbackState = new PlaybackStateCompat.Builder();
         mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mediaSession.setMediaButtonReceiver(mediaButtonPendingIntent);
+        try {
+            mediaSession.setPlaybackToLocal(AudioManager.STREAM_MUSIC);
+        } catch (Throwable ignored) {
+        }
         Intent sessionIntent = new Intent(this, LaunchActivity.class);
         sessionIntent.setAction("com.tmessages.openplayer");
         sessionIntent.addCategory(Intent.CATEGORY_LAUNCHER);
@@ -145,6 +157,38 @@ public class MglaYandexMusicService extends Service {
             public void onStop() {
                 MglaYandexMusicPlayer.getInstance().stop();
             }
+
+            @Override
+            public boolean onMediaButtonEvent(Intent mediaButtonEvent) {
+                if (mediaButtonEvent != null && Intent.ACTION_MEDIA_BUTTON.equals(mediaButtonEvent.getAction())) {
+                    KeyEvent keyEvent = mediaButtonEvent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                    if (keyEvent != null && keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
+                        MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
+                        switch (keyEvent.getKeyCode()) {
+                            case KeyEvent.KEYCODE_HEADSETHOOK:
+                            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                                player.togglePlayPause();
+                                return true;
+                            case KeyEvent.KEYCODE_MEDIA_PLAY:
+                                player.play();
+                                return true;
+                            case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                                player.pause();
+                                return true;
+                            case KeyEvent.KEYCODE_MEDIA_STOP:
+                                player.stop();
+                                return true;
+                            case KeyEvent.KEYCODE_MEDIA_NEXT:
+                                player.next();
+                                return true;
+                            case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                                player.prev();
+                                return true;
+                        }
+                    }
+                }
+                return super.onMediaButtonEvent(mediaButtonEvent);
+            }
         });
         mediaSession.setActive(true);
 
@@ -175,15 +219,52 @@ public class MglaYandexMusicService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             MglaYandexMusicPlayer.getInstance().stop();
-            stopSelf();
+            promoteEmptyForegroundThenStop();
             return START_NOT_STICKY;
         }
         if (MglaYandexMusicPlayer.getInstance().getCurrentTrack() == null) {
-            stopSelf();
+            promoteEmptyForegroundThenStop();
             return START_NOT_STICKY;
+        }
+        try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                am.registerMediaButtonEventReceiver(
+                        new ComponentName(getApplicationContext(), MglaYandexMusicReceiver.class.getName()));
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        if (mediaSession != null) {
+            mediaSession.setActive(true);
         }
         createNotification(true);
         return START_STICKY;
+    }
+
+    /** Avoid Android O+ crash when startForegroundService is followed by stop without startForeground. */
+    private void promoteEmptyForegroundThenStop() {
+        try {
+            Notification.Builder bldr = new Notification.Builder(this);
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationsController.checkOtherNotificationsChannel();
+                bldr.setChannelId(NotificationsController.OTHER_NOTIFICATIONS_CHANNEL);
+            }
+            bldr.setSmallIcon(R.drawable.player)
+                    .setContentTitle("Яндекс Музыка")
+                    .setContentText("")
+                    .setPriority(Notification.PRIORITY_MIN);
+            Notification n = bldr.build();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(ID_NOTIFICATION, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(ID_NOTIFICATION, n);
+            }
+            foregroundStarted = true;
+        } catch (Throwable ignored) {
+        }
+        stopForegroundSafe(true);
+        stopSelf();
     }
 
     @SuppressLint("NewApi")

@@ -28,20 +28,26 @@ public class MusicPlayerReceiver extends BroadcastReceiver {
             if (keyEvent.getAction() != KeyEvent.ACTION_DOWN)
                 return;
 
+            MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+            // Yandex owns media buttons via MglaYandexMusicService / MglaYandexMusicReceiver.
+            if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                return;
+            }
+
             switch (keyEvent.getKeyCode()) {
                 case KeyEvent.KEYCODE_HEADSETHOOK:
                 case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
                     if (MediaController.getInstance().isMessagePaused()) {
-                        MediaController.getInstance().playMessage(MediaController.getInstance().getPlayingMessageObject());
+                        MediaController.getInstance().playMessage(playing);
                     } else {
-                        MediaController.getInstance().pauseMessage(MediaController.getInstance().getPlayingMessageObject());
+                        MediaController.getInstance().pauseMessage(playing);
                     }
                     break;
                 case KeyEvent.KEYCODE_MEDIA_PLAY:
-                    MediaController.getInstance().playMessage(MediaController.getInstance().getPlayingMessageObject());
+                    MediaController.getInstance().playMessage(playing);
                     break;
                 case KeyEvent.KEYCODE_MEDIA_PAUSE:
-                    MediaController.getInstance().pauseMessage(MediaController.getInstance().getPlayingMessageObject());
+                    MediaController.getInstance().pauseMessage(playing);
                     break;
                 case KeyEvent.KEYCODE_MEDIA_STOP:
                     break;
@@ -54,22 +60,46 @@ public class MusicPlayerReceiver extends BroadcastReceiver {
             }
         } else {
             switch (intent.getAction()) {
-                case MusicPlayerService.NOTIFY_PLAY:
-                    MediaController.getInstance().playMessage(MediaController.getInstance().getPlayingMessageObject());
+                case MusicPlayerService.NOTIFY_PLAY: {
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().play();
+                    } else {
+                        MediaController.getInstance().playMessage(playing);
+                    }
                     break;
+                }
                 case MusicPlayerService.NOTIFY_PAUSE:
-                case android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY:
-                    MediaController.getInstance().pauseMessage(MediaController.getInstance().getPlayingMessageObject());
+                case android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY: {
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().pause();
+                    } else {
+                        MediaController.getInstance().pauseMessage(playing);
+                    }
                     break;
-                case MusicPlayerService.NOTIFY_NEXT:
-                    MediaController.getInstance().playNextMessage();
+                }
+                case MusicPlayerService.NOTIFY_NEXT: {
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().next();
+                    } else {
+                        MediaController.getInstance().playNextMessage();
+                    }
                     break;
+                }
                 case MusicPlayerService.NOTIFY_CLOSE:
                     MediaController.getInstance().cleanupPlayer(true, true);
                     break;
-                case MusicPlayerService.NOTIFY_PREVIOUS:
-                    MediaController.getInstance().playPreviousMessage();
+                case MusicPlayerService.NOTIFY_PREVIOUS: {
+                    MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                    if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                        MglaYandexMusicPlayer.getInstance().prev();
+                    } else {
+                        MediaController.getInstance().playPreviousMessage();
+                    }
                     break;
+                }
                 case MusicPlayerService.NOTIFY_REPEAT:
                     SharedConfig.setRepeatMode((SharedConfig.repeatMode + 1) % 3);
                     break;

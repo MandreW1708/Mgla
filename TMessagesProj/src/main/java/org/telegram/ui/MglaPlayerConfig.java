@@ -20,6 +20,7 @@ public final class MglaPlayerConfig {
     public static final String PREF_ANIM_BUTTONS = "player_anim_buttons";
     public static final String PREF_ANIM_AMBIENT = "player_anim_ambient";
     public static final String PREF_ANIM_SEEKBAR = "player_anim_seekbar";
+    public static final String PREF_ANIM_SEEKBAR_WAVE = "player_anim_seekbar_wave";
     public static final String PREF_ANIM_SPEED = "player_anim_speed";
 
     public static final int SPEED_SLOW = 0;
@@ -95,6 +96,15 @@ public final class MglaPlayerConfig {
 
     public static void setSeekbarAnimationsEnabled(boolean enabled) {
         getPrefs().edit().putBoolean(PREF_ANIM_SEEKBAR, enabled).apply();
+    }
+
+    /** MD3 wavy played segment on the player timeline. */
+    public static boolean isSeekbarWaveEnabled() {
+        return getPrefs().getBoolean(PREF_ANIM_SEEKBAR_WAVE, true);
+    }
+
+    public static void setSeekbarWaveEnabled(boolean enabled) {
+        getPrefs().edit().putBoolean(PREF_ANIM_SEEKBAR_WAVE, enabled).apply();
     }
 
     public static int getAnimationSpeed() {

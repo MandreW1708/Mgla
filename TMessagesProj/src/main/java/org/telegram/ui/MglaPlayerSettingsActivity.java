@@ -101,6 +101,13 @@ public class MglaPlayerSettingsActivity extends MglaBaseSettingsActivity {
                     MglaPlayerConfig.setSeekbarAnimationsEnabled(on);
                     ((TextCheckCell) v).setChecked(on);
                 }), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        animBlock.addView(MglaUi.createDivider(context));
+        animBlock.addView(checkCell(context, "Волна таймлайна", MglaPlayerConfig.isSeekbarWaveEnabled(),
+                v -> {
+                    boolean on = !MglaPlayerConfig.isSeekbarWaveEnabled();
+                    MglaPlayerConfig.setSeekbarWaveEnabled(on);
+                    ((TextCheckCell) v).setChecked(on);
+                }), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         rootLayout.addView(animBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 10, 16, 6));
 
         LinearLayout speedBlock = MglaUi.createBlock(context, "Скорость анимаций");

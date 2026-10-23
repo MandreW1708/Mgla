@@ -484,15 +484,35 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             return;
         }
 
-        // Stop custom Yandex notification service — Telegram MusicPlayerService takes over
+        // Own MediaSession for headset / BT AVRCP — stop Telegram MusicPlayerService so sessions don't fight.
         try {
-            MglaYandexMusicService.stop(ApplicationLoader.applicationContext);
+            ApplicationLoader.applicationContext.stopService(
+                    new android.content.Intent(ApplicationLoader.applicationContext, MusicPlayerService.class));
+        } catch (Throwable ignored) {
+        }
+        try {
+            MglaYandexMusicService.startOrUpdate(ApplicationLoader.applicationContext);
         } catch (Throwable ignored) {
         }
 
-        ArrayList<MessageObject> playlist = new ArrayList<>();
-        playlist.add(current);
-        MediaController.getInstance().setPlaylist(playlist, current, 0, false, null);
+        // Pass the full Yandex queue so playlist next-prev stay in sync.
+        ArrayList<MessageObject> playlist;
+        synchronized (queue) {
+            playlist = MglaYandexMusicPlayback.buildPlaylist(queue, account);
+        }
+        if (playlist.isEmpty()) {
+            playlist = new ArrayList<>();
+            playlist.add(current);
+        }
+        MessageObject playObject = current;
+        for (int i = 0; i < playlist.size(); i++) {
+            MessageObject candidate = playlist.get(i);
+            if (candidate != null && candidate.getId() == current.getId()) {
+                playObject = candidate;
+                break;
+            }
+        }
+        MediaController.getInstance().setPlaylist(playlist, playObject, 0, false, null);
     }
 
     public void togglePlayPause() {
@@ -548,6 +568,10 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         currentTrack = null;
         notifyPlaybackState(false, false);
         notifyTrackChanged(null);
+        try {
+            MglaYandexMusicService.stop(ApplicationLoader.applicationContext);
+        } catch (Throwable ignored) {
+        }
     }
 
     public void next() {
@@ -693,6 +717,10 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     /** Drop Yandex session state without touching MediaController (Telegram media took over). */
     public void clearSessionWithoutStoppingPlayer() {
         if (currentTrack == null && !isPlaying && !isBuffering) {
+            try {
+                MglaYandexMusicService.stop(ApplicationLoader.applicationContext);
+            } catch (Throwable ignored) {
+            }
             return;
         }
         isPlaying = false;
@@ -700,6 +728,10 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         currentTrack = null;
         notifyPlaybackState(false, false);
         notifyTrackChanged(null);
+        try {
+            MglaYandexMusicService.stop(ApplicationLoader.applicationContext);
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -721,6 +753,10 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
                 isBuffering = MediaController.getInstance().isDownloadingCurrentMessage();
                 isPlaying = !MediaController.getInstance().isMessagePaused() && !isBuffering;
                 notifyPlaybackState(isPlaying, isBuffering);
+                try {
+                    MglaYandexMusicService.startOrUpdate(ApplicationLoader.applicationContext);
+                } catch (Throwable ignored) {
+                }
             } else if (playing != null) {
                 // Telegram voice / round / music replaced Yandex — release session state only.
                 clearSessionWithoutStoppingPlayer();

@@ -125,9 +125,11 @@ public class MglaMusicActivity extends BaseFragment implements
     // Shared header / tabs
     private TextView mainTabHome;
     private TextView mainTabCollection;
+    private ImageView refreshActionBtn;
     private ImageView profileActionBtn;
     private ImageView equalizerActionBtn;
     private ImageView searchActionBtn;
+    private boolean musicRefreshInFlight;
     private int mainTab = MAIN_TAB_HOME;
 
     // Home — Моя волна
@@ -600,6 +602,9 @@ public class MglaMusicActivity extends BaseFragment implements
         tabs.addView(mainTabHome, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
         tabs.addView(mainTabCollection, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
         topBar.addView(tabs, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+        refreshActionBtn = createMd3IconButton(context, R.drawable.msg_retry, v -> refreshMusicData());
+        topBar.addView(refreshActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 4, 0));
 
         profileActionBtn = createMd3IconButton(context, R.drawable.settings_account, v -> onProfileClicked());
         topBar.addView(profileActionBtn, LayoutHelper.createLinear(40, 40, 0, 0, 4, 0));
@@ -2773,6 +2778,46 @@ public class MglaMusicActivity extends BaseFragment implements
                 if (fullArtistsLoading != null) fullArtistsLoading.setVisibility(View.GONE);
             }
         });
+    }
+
+    private void refreshMusicData() {
+        if (!MglaYandexMusicStore.getInstance().isAuthorized()) {
+            Toast.makeText(getContext(), "Сначала войдите в Яндекс Музыку", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (musicRefreshInFlight) {
+            return;
+        }
+        musicRefreshInFlight = true;
+        if (refreshActionBtn != null) {
+            refreshActionBtn.animate().cancel();
+            refreshActionBtn.animate()
+                    .rotationBy(360f)
+                    .setDuration(600)
+                    .setInterpolator(new android.view.animation.LinearInterpolator())
+                    .withEndAction(() -> {
+                        if (refreshActionBtn != null) {
+                            refreshActionBtn.setRotation(0f);
+                        }
+                    })
+                    .start();
+            refreshActionBtn.setEnabled(false);
+            refreshActionBtn.setAlpha(0.55f);
+        }
+        loadFavorites();
+        loadPlaylists();
+        loadArtists();
+        loadWaveSettings();
+        AndroidUtilities.runOnUIThread(() -> {
+            musicRefreshInFlight = false;
+            if (refreshActionBtn != null) {
+                refreshActionBtn.setEnabled(true);
+                refreshActionBtn.setAlpha(1f);
+            }
+            if (getContext() != null) {
+                Toast.makeText(getContext(), "Данные музыки обновлены", Toast.LENGTH_SHORT).show();
+            }
+        }, 900);
     }
 
     private void updateAuthState() {
