@@ -755,11 +755,14 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     }
                 }
             } else if (position == notificationsServiceRow) {
+                // User toggle is independent of save-deleted. Save-deleted forces keep-alive on;
+                // when save-deleted is off, this switch controls the FGS (stock Telegram behavior).
                 SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
                 enabled = preferences.getBoolean("pushService", getMessagesController().keepAliveService);
-                SharedPreferences.Editor editor = preferences.edit();
-                editor.putBoolean("pushService", !enabled);
-                editor.commit();
+                final boolean newVal = !enabled;
+                preferences.edit().putBoolean("pushService", newVal).commit();
+                // startPushService reads global (account 0) prefs — keep them in sync.
+                MessagesController.getGlobalNotificationsSettings().edit().putBoolean("pushService", newVal).commit();
                 ApplicationLoader.startPushService();
             } else if (position == callsVibrateRow) {
                 if (getParentActivity() == null) {
@@ -1018,7 +1021,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     } else if (position == androidAutoAlertRow) {
                         checkCell.setTextAndCheck("Android Auto", preferences.getBoolean("EnableAutoNotifications", false), true);
                     } else if (position == notificationsServiceRow) {
-                        checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), preferences.getBoolean("pushService", getMessagesController().keepAliveService), true, true);
+                        checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), ApplicationLoader.isNotificationsKeepAliveWanted(), true, true);
                     } else if (position == notificationsServiceConnectionRow) {
                         checkCell.setTextAndValueAndCheck(getString("NotificationsServiceConnection", R.string.NotificationsServiceConnection), getString("NotificationsServiceConnectionInfo", R.string.NotificationsServiceConnectionInfo), preferences.getBoolean("pushConnection", getMessagesController().backgroundConnection), true, true);
                     } else if (position == badgeNumberShowRow) {

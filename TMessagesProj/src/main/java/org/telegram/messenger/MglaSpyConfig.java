@@ -107,6 +107,7 @@ public class MglaSpyConfig {
         if (!value) {
             MglaDeletedStorage.clearAllAccounts();
             clearDeletedNotifyWatermarks();
+            // Do not clear user "Keep-Alive Service" / pushService — that toggle stays independent.
         }
         updatePushBackgroundSettings();
     }
@@ -239,13 +240,29 @@ public class MglaSpyConfig {
         prefs.edit().putBoolean(key, enabled).apply();
     }
 
+    /**
+     * Save-deleted ON → keep-alive + persistent MTProto push (current spy mode).
+     * Save-deleted OFF → stock Google Play path: no forced foreground service, push
+     * connection follows user prefs (default off), FCM token re-registered so Telegram
+     * can deliver via the Firebase credentials on my.telegram.org.
+     */
     public static void updatePushBackgroundSettings() {
         AndroidUtilities.runOnUIThread(() -> {
+            final boolean keepAliveForDeleted = isSaveDeletedMessagesEnabled();
             ApplicationLoader.startPushService();
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-                if (UserConfig.getInstance(a).isClientActivated()) {
-                    ConnectionsManager cm = ConnectionsManager.getInstance(a);
-                    cm.setPushConnectionEnabled(cm.isPushConnectionEnabled());
+                if (!UserConfig.getInstance(a).isClientActivated()) {
+                    continue;
+                }
+                ConnectionsManager cm = ConnectionsManager.getInstance(a);
+                cm.setPushConnectionEnabled(cm.isPushConnectionEnabled());
+            }
+            if (!keepAliveForDeleted) {
+                // Leaving spy keep-alive: refresh FCM so the server switches back to Firebase.
+                try {
+                    ApplicationLoader.getPushProvider().onRequestPushToken();
+                } catch (Throwable e) {
+                    FileLog.e(e);
                 }
             }
         });

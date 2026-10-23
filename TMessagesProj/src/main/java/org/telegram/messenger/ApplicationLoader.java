@@ -445,10 +445,8 @@ public class ApplicationLoader extends Application {
 
         applicationHandler = new Handler(applicationContext.getMainLooper());
 
-        AndroidUtilities.runOnUIThread(ApplicationLoader::startPushService);
-        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
-            MglaSpyConfig.updatePushBackgroundSettings();
-        }
+        // Always sync push mode: save-deleted → keep-alive; otherwise stock FCM.
+        AndroidUtilities.runOnUIThread(MglaSpyConfig::updatePushBackgroundSettings);
 
         LauncherIconController.tryFixLauncherIconIfNeeded();
         ProxyRotationController.init();
@@ -462,29 +460,53 @@ public class ApplicationLoader extends Application {
         NotificationCenter.sanitize();
     });
 
-    public static void startPushService() {
-        SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
-        boolean enabled;
+    /**
+     * Whether NotificationsService should be running.
+     * Save-deleted → always. Otherwise → user "Keep-Alive Service" / server keepAliveService
+     * (stock Telegram), which does NOT use a sticky FGS notification.
+     */
+    public static boolean isNotificationsKeepAliveWanted() {
         if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
-            enabled = true;
-        } else if (preferences.contains("pushService")) {
-            enabled = preferences.getBoolean("pushService", true);
-        } else {
-            enabled = MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("keepAliveService", false);
+            return true;
         }
-        if (enabled) {
+        try {
+            SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
+            if (preferences.contains("pushService")) {
+                return preferences.getBoolean("pushService", false);
+            }
+            return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("keepAliveService", false);
+        } catch (Throwable ignore) {
+            return false;
+        }
+    }
+
+    public static void startPushService() {
+        if (!isNotificationsKeepAliveWanted()) {
             try {
-                Intent intent = new Intent(applicationContext, NotificationsService.class);
+                applicationContext.stopService(new Intent(applicationContext, NotificationsService.class));
+            } catch (Throwable ignore) {
+            }
+            try {
+                NotificationsController.checkMglaBackgroundChannel();
+                androidx.core.app.NotificationManagerCompat.from(applicationContext).cancel(1);
+            } catch (Throwable ignore) {
+            }
+            return;
+        }
+        try {
+            Intent intent = new Intent(applicationContext, NotificationsService.class);
+            if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+                // Spy mode needs a real FGS (sticky "Фоновая работа").
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     applicationContext.startForegroundService(intent);
                 } else {
                     applicationContext.startService(intent);
                 }
-            } catch (Throwable ignore) {
-
+            } else {
+                // Stock: plain startService — no ongoing notification, FCM delivers pushes.
+                applicationContext.startService(intent);
             }
-        } else {
-            applicationContext.stopService(new Intent(applicationContext, NotificationsService.class));
+        } catch (Throwable ignore) {
         }
     }
 

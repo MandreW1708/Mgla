@@ -11,15 +11,21 @@ package org.telegram.messenger;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 import org.telegram.ui.LaunchActivity;
 
+/**
+ * Stock Telegram: plain sticky Service, no ongoing notification — FCM delivers pushes;
+ * the process may stay warm so opening from a notification is fast.
+ * <p>
+ * Mgla save-deleted mode: promote to a real FGS with "Фоновая работа" so OEMs do not
+ * kill the process while we need a live connection to catch deletes.
+ */
 public class NotificationsService extends Service {
 
     private static final int NOTIFICATION_ID = 1;
@@ -27,36 +33,34 @@ public class NotificationsService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        ApplicationLoader.postInitApplication();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        try {
-            if (shouldKeepRunning()) {
-                startForegroundNotification();
-                ApplicationLoader.postInitApplication();
-            } else {
-                stopSelf();
-            }
-        } catch (Throwable e) {
-            FileLog.e(e);
-            try {
-                stopSelf();
-            } catch (Throwable ignore) {
-            }
+        if (!ApplicationLoader.isNotificationsKeepAliveWanted()) {
+            tearDownForeground();
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            startForegroundNotification();
+        } else {
+            // Stock path: never show the sticky keep-alive notification.
+            tearDownForeground();
         }
         return START_STICKY;
     }
 
-    private boolean shouldKeepRunning() {
-        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
-            return true;
+    private void tearDownForeground() {
+        try {
+            stopForeground(true);
+        } catch (Throwable ignore) {
         }
-        SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
-        if (preferences.contains("pushService")) {
-            return preferences.getBoolean("pushService", true);
+        try {
+            NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
+        } catch (Throwable ignore) {
         }
-        return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("keepAliveService", false);
     }
 
     private void startForegroundNotification() {
@@ -107,6 +111,7 @@ public class NotificationsService extends Service {
     @Override
     public void onTimeout(int startId, int fgsType) {
         super.onTimeout(startId, fgsType);
+        // FGS timeout only applies in save-deleted mode.
         try {
             stopForeground(true);
             stopSelfResult(startId);
@@ -118,25 +123,36 @@ public class NotificationsService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (!shouldKeepRunning()) {
+        if (!ApplicationLoader.isNotificationsKeepAliveWanted()) {
+            tearDownForeground();
             return;
         }
-        try {
-            Intent intent = new Intent(this, NotificationsService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent);
-            } else {
-                startService(intent);
+        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+            // Spy FGS: restart as foreground service.
+            try {
+                Intent intent = new Intent(this, NotificationsService.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent);
+                } else {
+                    startService(intent);
+                }
+            } catch (Throwable e) {
+                FileLog.e(e);
+                sendStockRestartBroadcast();
             }
+            return;
+        }
+        // Stock: broadcast restart (same as upstream NotificationsService).
+        sendStockRestartBroadcast();
+    }
+
+    private void sendStockRestartBroadcast() {
+        try {
+            Intent intent = new Intent("org.telegram.start");
+            intent.setPackage(getPackageName());
+            sendBroadcast(intent);
         } catch (Throwable e) {
             FileLog.e(e);
-            try {
-                Intent intent = new Intent("org.telegram.start");
-                intent.setPackage(getPackageName());
-                sendBroadcast(intent);
-            } catch (Throwable ex) {
-                FileLog.e(ex);
-            }
         }
     }
 }

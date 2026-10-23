@@ -44,7 +44,7 @@ public class PushListenerController {
     public @interface PushType {}
 
     public static final int NOTIFICATION_ID = 1;
-    private static CountDownLatch countDownLatch = new CountDownLatch(1);
+    private static volatile CountDownLatch countDownLatch = new CountDownLatch(1);
 
     public static void sendRegistrationToServer(@PushType int pushType, String token) {
         Utilities.stageQueue.postRunnable(() -> {
@@ -99,6 +99,9 @@ public class PushListenerController {
             FileLog.d(tag + " PRE START PROCESSING");
         }
         long receiveTime = SystemClock.elapsedRealtime();
+        // Fresh latch per delivery: a static count of 0 after the first push made await()
+        // a no-op, so Firebase could kill the process before later pushes finished posting.
+        countDownLatch = new CountDownLatch(1);
         AndroidUtilities.runOnUIThread(() -> {
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d(tag + " PRE INIT APP");

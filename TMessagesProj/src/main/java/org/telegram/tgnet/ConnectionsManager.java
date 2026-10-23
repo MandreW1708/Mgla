@@ -289,15 +289,15 @@ public class ConnectionsManager extends BaseController {
     }
 
     public boolean isPushConnectionEnabled() {
+        // Save-deleted needs a live MTProto link; otherwise match stock Telegram (FCM by default).
         if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
             return true;
         }
         SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
         if (preferences.contains("pushConnection")) {
-            return preferences.getBoolean("pushConnection", true);
-        } else {
-            return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("backgroundConnection", false);
+            return preferences.getBoolean("pushConnection", false);
         }
+        return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("backgroundConnection", false);
     }
 
     public long getCurrentTimeMillis() {
