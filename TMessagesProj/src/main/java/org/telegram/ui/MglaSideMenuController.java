@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.TextUtils;
 
+import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.R;
 
 import java.util.ArrayList;
@@ -25,6 +26,14 @@ public class MglaSideMenuController {
     public static final int ITEM_BROWSER = 7;
     public static final int ITEM_ARCHIVE = 8;
     public static final int ITEM_NEW_CHANNEL = 9;
+    public static final int ITEM_MGLA_SETTINGS = 10;
+    public static final int ITEM_MEMORY = 11;
+    public static final int ITEM_INVITE = 12;
+    public static final int ITEM_PROXY = 13;
+    public static final int ITEM_WALLET = 14;
+    public static final int ITEM_MUSIC = 15;
+    public static final int ITEM_TASKS = 16;
+    public static final int ITEM_AI = 17;
     public static final int ITEM_DIVIDER = 100;
 
     // Разделители: 100, 101, 102, ... (множественные)
@@ -36,21 +45,55 @@ public class MglaSideMenuController {
         ITEM_NEW_GROUP,
         ITEM_CONTACTS,
         ITEM_CALLS,
+        ITEM_ARCHIVE,
+        ITEM_NEW_CHANNEL,
         ITEM_DIVIDER,
         ITEM_SETTINGS,
         ITEM_QR,
         ITEM_BROWSER,
-        ITEM_ARCHIVE,
-        ITEM_NEW_CHANNEL
+        ITEM_INVITE,
+        ITEM_PROXY,
+        ITEM_WALLET,
+        ITEM_MUSIC,
+        ITEM_TASKS,
+        ITEM_AI,
+        ITEM_MEMORY,
+        ITEM_MGLA_SETTINGS
     };
 
     // Элементы, скрытые по умолчанию
     private static final int[] DEFAULT_HIDDEN = new int[] {
+        ITEM_PROFILE,
         ITEM_ARCHIVE,
         ITEM_NEW_GROUP,
         ITEM_SAVED,
         ITEM_NEW_CHANNEL,
-        ITEM_CALLS
+        ITEM_CALLS,
+        ITEM_INVITE,
+        ITEM_PROXY,
+        ITEM_WALLET
+    };
+
+    private static final int[] KNOWN_ITEMS = new int[] {
+        ITEM_PROFILE,
+        ITEM_SAVED,
+        ITEM_NEW_GROUP,
+        ITEM_CONTACTS,
+        ITEM_CALLS,
+        ITEM_SETTINGS,
+        ITEM_QR,
+        ITEM_BROWSER,
+        ITEM_ARCHIVE,
+        ITEM_NEW_CHANNEL,
+        ITEM_MGLA_SETTINGS,
+        ITEM_MEMORY,
+        ITEM_INVITE,
+        ITEM_PROXY,
+        ITEM_WALLET,
+        ITEM_MUSIC,
+        ITEM_TASKS,
+        ITEM_AI,
+        ITEM_DIVIDER
     };
 
     public static String getTitle(int item) {
@@ -66,6 +109,14 @@ public class MglaSideMenuController {
             case ITEM_BROWSER: return "Браузер";
             case ITEM_ARCHIVE: return "Архив";
             case ITEM_NEW_CHANNEL: return "Создать канал";
+            case ITEM_MGLA_SETTINGS: return "Настройки Mgla";
+            case ITEM_MEMORY: return "Живая память";
+            case ITEM_INVITE: return "Пригласить друзей";
+            case ITEM_PROXY: return "Прокси";
+            case ITEM_WALLET: return "Кошелёк";
+            case ITEM_MUSIC: return "Музыка";
+            case ITEM_TASKS: return "Задачи";
+            case ITEM_AI: return "ИИ";
         }
         return "Элемент " + item;
     }
@@ -83,6 +134,14 @@ public class MglaSideMenuController {
             case ITEM_BROWSER: return R.drawable.outline_header_search;
             case ITEM_ARCHIVE: return R.drawable.msg_archive;
             case ITEM_NEW_CHANNEL: return R.drawable.settings_channel;
+            case ITEM_MGLA_SETTINGS: return R.drawable.msg_settings;
+            case ITEM_MEMORY: return R.drawable.msg_saved;
+            case ITEM_INVITE: return R.drawable.settings_invite;
+            case ITEM_PROXY: return R.drawable.settings_data;
+            case ITEM_WALLET: return R.drawable.settings_wallet;
+            case ITEM_MUSIC: return R.drawable.msg_filled_data_music;
+            case ITEM_TASKS: return R.drawable.msg_folders;
+            case ITEM_AI: return R.drawable.input_ai_star;
         }
         return 0;
     }
@@ -146,9 +205,13 @@ public class MglaSideMenuController {
         ArrayList<Integer> order = getOrder(context);
         ArrayList<Integer> result = new ArrayList<>();
         for (int item : order) {
-            if (isEnabled(context, item)) {
-                result.add(item);
+            if (!isEnabled(context, item)) {
+                continue;
             }
+            if (item == ITEM_MEMORY && !MglaMemoryConfig.isActive()) {
+                continue;
+            }
+            result.add(item);
         }
         return result;
     }
@@ -181,7 +244,7 @@ public class MglaSideMenuController {
     }
 
     private static boolean isKnownItem(int item) {
-        for (int known : DEFAULT_ORDER) {
+        for (int known : KNOWN_ITEMS) {
             if (known == item) return true;
         }
         return isDivider(item);

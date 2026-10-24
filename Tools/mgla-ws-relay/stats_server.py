@@ -86,6 +86,8 @@ AI_MODELS = (
 )
 
 IID_RE = re.compile(r"^[0-9a-f]{32}$")
+DK_RE = re.compile(r"^[0-9a-f]{32}$")
+LIFECYCLE_OK = frozenset({"fresh", "upgrade", "reinstall", "same", "unknown"})
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_:./=-]{1,64}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -99,8 +101,29 @@ CREATE TABLE IF NOT EXISTS installs (
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
     ver TEXT, tg TEXT, age_days INTEGER,
+    sdk INTEGER, man TEXT, model TEXT, lang TEXT, rom TEXT,
+    dk TEXT
+);
+CREATE TABLE IF NOT EXISTS devices (
+    dk TEXT PRIMARY KEY,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    first_ver TEXT,
+    last_ver TEXT,
+    primary_iid TEXT,
     sdk INTEGER, man TEXT, model TEXT, lang TEXT, rom TEXT
 );
+CREATE TABLE IF NOT EXISTS version_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day TEXT NOT NULL,
+    dk TEXT NOT NULL,
+    from_ver TEXT,
+    to_ver TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    iid TEXT
+);
+CREATE INDEX IF NOT EXISTS version_events_day ON version_events(day);
+CREATE INDEX IF NOT EXISTS version_events_dk ON version_events(dk);
 CREATE TABLE IF NOT EXISTS counters (
     day TEXT NOT NULL,
     iid TEXT NOT NULL,
@@ -184,13 +207,52 @@ class Store:
         self._lock = threading.Lock()
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
+        # Base schema first (CREATE TABLE IF NOT EXISTS is a no-op on existing DBs).
+        # Indexes that need new columns must run after migration — see below.
         self._db.executescript(SCHEMA)
+        self._ensure_stats_identity_columns()
         mgla_token.ensure_schema(self._db)
         mgla_tasks_sync.ensure_schema(self._db)
         self._ensure_default_models()
         self.ensure_subscriptions_table()
         self._db.commit()
         self._last_cleanup = 0.0
+
+    def _ensure_stats_identity_columns(self):
+        """Migrate older DBs that predate device-key dedup."""
+        cols = {
+            r[1]
+            for r in self._db.execute("PRAGMA table_info(installs)").fetchall()
+        }
+        if "dk" not in cols:
+            self._db.execute("ALTER TABLE installs ADD COLUMN dk TEXT")
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS installs_dk ON installs(dk)"
+        )
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS devices (
+                dk TEXT PRIMARY KEY,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                first_ver TEXT,
+                last_ver TEXT,
+                primary_iid TEXT,
+                sdk INTEGER, man TEXT, model TEXT, lang TEXT, rom TEXT
+            );
+            CREATE TABLE IF NOT EXISTS version_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                day TEXT NOT NULL,
+                dk TEXT NOT NULL,
+                from_ver TEXT,
+                to_ver TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                iid TEXT
+            );
+            CREATE INDEX IF NOT EXISTS version_events_day ON version_events(day);
+            CREATE INDEX IF NOT EXISTS version_events_dk ON version_events(dk);
+            """
+        )
 
     def _ensure_default_models(self):
         row = self._db.execute(
@@ -213,23 +275,90 @@ class Store:
                     (key, "[]"),
                 )
 
+    def _ingest_device(self, db, dk, iid, today_s, ver, prev_ver, lifecycle, dev):
+        """Upsert device by anonymous dk; record version upgrades / reinstalls."""
+        row = db.execute(
+            "SELECT last_ver FROM devices WHERE dk = ?", (dk,)
+        ).fetchone()
+        sdk = _int(dev.get("sdk"))
+        man = _short(dev.get("man"))
+        model = _short(dev.get("model"))
+        lang = _short(dev.get("lang"), 8)
+        rom = _short(dev.get("rom"), 16)
+        if row is None:
+            # Migrating clients already have an installs row — keep their original
+            # first_seen so enabling dk does not look like a brand-new person.
+            prior = db.execute(
+                "SELECT first_seen, ver FROM installs WHERE iid = ?", (iid,)
+            ).fetchone()
+            first_seen = prior[0] if prior and prior[0] else today_s
+            first_ver = (prior[1] if prior and prior[1] else None) or ver
+            db.execute(
+                """INSERT INTO devices(dk, first_seen, last_seen, first_ver, last_ver,
+                      primary_iid, sdk, man, model, lang, rom)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (dk, first_seen, today_s, first_ver, ver, iid, sdk, man, model, lang, rom),
+            )
+            return
+        old_ver = row[0]
+        kind = None
+        if ver and old_ver and ver != old_ver:
+            kind = "upgrade"
+        elif lifecycle == "reinstall":
+            kind = "reinstall"
+        elif prev_ver and ver and prev_ver != ver:
+            kind = "upgrade"
+        if kind:
+            already = db.execute(
+                """SELECT 1 FROM version_events
+                   WHERE day=? AND dk=? AND to_ver=? AND kind=? LIMIT 1""",
+                (today_s, dk, ver or "?", kind),
+            ).fetchone()
+            if already is None:
+                db.execute(
+                    """INSERT INTO version_events(day, dk, from_ver, to_ver, kind, iid)
+                       VALUES(?,?,?,?,?,?)""",
+                    (today_s, dk, old_ver or prev_ver, ver or "?", kind, iid),
+                )
+        db.execute(
+            """UPDATE devices SET last_seen=?, last_ver=COALESCE(?, last_ver),
+                  primary_iid=?, sdk=COALESCE(?, sdk), man=COALESCE(?, man),
+                  model=COALESCE(?, model), lang=COALESCE(?, lang),
+                  rom=COALESCE(?, rom)
+               WHERE dk=?""",
+            (today_s, ver, iid, sdk, man, model, lang, rom, dk),
+        )
+
     def ingest(self, batch):
         today = datetime.now(timezone.utc).date()
+        today_s = today.isoformat()
         iid = batch["iid"]
+        dk = batch.get("dk") or None
         app = batch.get("app") or {}
         dev = batch.get("dev") or {}
+        ver = _short(app.get("ver"))
+        prev_ver = _short(app.get("prev_ver"))
+        lifecycle = app.get("lifecycle") if isinstance(app.get("lifecycle"), str) else "unknown"
+        if lifecycle not in LIFECYCLE_OK:
+            lifecycle = "unknown"
         with self._lock, self._db:
             db = self._db
             db.execute(
-                """INSERT INTO installs(iid, first_seen, last_seen, ver, tg, age_days, sdk, man, model, lang, rom)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO installs(iid, first_seen, last_seen, ver, tg, age_days, sdk, man, model, lang, rom, dk)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(iid) DO UPDATE SET last_seen=excluded.last_seen, ver=excluded.ver,
                      tg=excluded.tg, age_days=excluded.age_days, sdk=excluded.sdk, man=excluded.man,
-                     model=excluded.model, lang=excluded.lang, rom=excluded.rom""",
-                (iid, today.isoformat(), today.isoformat(),
-                 _short(app.get("ver")), _short(app.get("tg")), _int(app.get("age_days")),
+                     model=excluded.model, lang=excluded.lang, rom=excluded.rom,
+                     dk=COALESCE(excluded.dk, installs.dk)""",
+                (iid, today_s, today_s,
+                 ver, _short(app.get("tg")), _int(app.get("age_days")),
                  _int(dev.get("sdk")), _short(dev.get("man")), _short(dev.get("model")),
-                 _short(dev.get("lang"), 8), _short(dev.get("rom"), 16)))
+                 _short(dev.get("lang"), 8), _short(dev.get("rom"), 16), dk))
+
+            if dk:
+                self._ingest_device(
+                    db, dk, iid, today_s, ver, prev_ver, lifecycle, dev
+                )
 
             for day, data in batch["days"].items():
                 for name, count in (data.get("c") or {}).items():
@@ -255,10 +384,14 @@ class Store:
                 cutoff = (today - timedelta(days=RETENTION_DAYS)).isoformat()
                 db.execute("DELETE FROM counters WHERE day < ?", (cutoff,))
                 db.execute("DELETE FROM search_miss WHERE day < ?", (cutoff,))
+                db.execute("DELETE FROM version_events WHERE day < ?", (cutoff,))
                 stale = [r[0] for r in db.execute("SELECT iid FROM installs WHERE last_seen < ?", (cutoff,))]
                 for s in stale:
                     db.execute("DELETE FROM snapshot WHERE iid = ?", (s,))
                     db.execute("DELETE FROM installs WHERE iid = ?", (s,))
+                stale_dk = [r[0] for r in db.execute("SELECT dk FROM devices WHERE last_seen < ?", (cutoff,))]
+                for s in stale_dk:
+                    db.execute("DELETE FROM devices WHERE dk = ?", (s,))
 
     def get_global_disabled(self):
         with self._lock:
@@ -694,11 +827,17 @@ def _int(v):
 
 def validate(raw):
     """Returns a cleaned batch, or raises ValueError."""
-    if not isinstance(raw, dict) or raw.get("v") != 1:
+    if not isinstance(raw, dict) or raw.get("v") not in (1, 2):
         raise ValueError("bad version")
     iid = raw.get("iid")
     if not isinstance(iid, str) or not IID_RE.match(iid):
         raise ValueError("bad iid")
+
+    dk = raw.get("dk")
+    if dk is None or dk == "":
+        dk = None
+    elif not isinstance(dk, str) or not DK_RE.match(dk):
+        raise ValueError("bad dk")
 
     today = datetime.now(timezone.utc).date()
     earliest = today - timedelta(days=30)
@@ -748,9 +887,25 @@ def validate(raw):
             elif isinstance(value, str) and len(value) <= 32:
                 settings[key] = CTRL_RE.sub("", value)
 
+    app_in = raw.get("app") if isinstance(raw.get("app"), dict) else {}
+    app_out = {}
+    for key in ("ver", "tg", "prev_ver"):
+        if isinstance(app_in.get(key), str):
+            app_out[key] = CTRL_RE.sub("", app_in[key])[:64]
+    lc = app_in.get("lifecycle")
+    if isinstance(lc, str) and lc in LIFECYCLE_OK:
+        app_out["lifecycle"] = lc
+    if isinstance(app_in.get("age_days"), int) and not isinstance(app_in.get("age_days"), bool):
+        app_out["age_days"] = max(0, min(app_in["age_days"], 36500))
+    for key in ("fit", "lut"):
+        val = app_in.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            app_out[key] = int(val)
+
     return {
         "iid": iid,
-        "app": raw.get("app") if isinstance(raw.get("app"), dict) else {},
+        "dk": dk,
+        "app": app_out,
         "dev": raw.get("dev") if isinstance(raw.get("dev"), dict) else {},
         "days": days,
         "settings": settings,

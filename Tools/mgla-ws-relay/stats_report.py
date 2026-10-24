@@ -162,10 +162,94 @@ class Report:
     def one(self, sql, params=()):
         return self.db.execute(sql, params).fetchone()[0] or 0
 
-    def active_between(self, start, end):
+    def _has_devices(self):
+        try:
+            self.db.execute("SELECT 1 FROM devices LIMIT 1")
+            return True
+        except sqlite3.Error:
+            return False
+
+    def unique_clients(self):
+        """People: devices by dk + legacy installs without dk (not double-counted)."""
+        if not self._has_devices():
+            return self.one("SELECT COUNT(*) FROM installs")
         return self.one(
-            "SELECT COUNT(DISTINCT iid) FROM counters WHERE day BETWEEN ? AND ?",
-            (start.isoformat(), end.isoformat()))
+            """SELECT
+                 (SELECT COUNT(*) FROM devices)
+               + (SELECT COUNT(*) FROM installs WHERE dk IS NULL OR dk = '')"""
+        )
+
+    def new_clients(self, since):
+        if not self._has_devices():
+            return self.one(
+                "SELECT COUNT(*) FROM installs WHERE first_seen >= ?", (since,)
+            )
+        return self.one(
+            """SELECT
+                 (SELECT COUNT(*) FROM devices WHERE first_seen >= ?)
+               + (SELECT COUNT(*) FROM installs
+                  WHERE (dk IS NULL OR dk = '') AND first_seen >= ?)""",
+            (since, since),
+        )
+
+    def updates_in_period(self, since):
+        if not self._has_devices():
+            return 0
+        try:
+            return self.one(
+                """SELECT COUNT(*) FROM version_events
+                   WHERE day >= ? AND kind IN ('upgrade', 'reinstall')""",
+                (since,),
+            )
+        except sqlite3.Error:
+            return 0
+
+    def active_between(self, start, end):
+        """Unique people active in range — prefer dk over raw iid."""
+        if not self._has_devices():
+            return self.one(
+                "SELECT COUNT(DISTINCT iid) FROM counters WHERE day BETWEEN ? AND ?",
+                (start.isoformat(), end.isoformat()),
+            )
+        return self.one(
+            """SELECT COUNT(DISTINCT COALESCE(NULLIF(i.dk, ''), i.iid))
+               FROM counters c
+               JOIN installs i ON i.iid = c.iid
+               WHERE c.day BETWEEN ? AND ?""",
+            (start.isoformat(), end.isoformat()),
+        )
+
+    def client_attr_counts(self, column, since, limit):
+        """Attribute histogram deduped by device key (legacy iids without dk included)."""
+        allowed = {"ver", "man", "model", "sdk", "lang", "rom"}
+        if column not in allowed:
+            return []
+        if not self._has_devices():
+            return self.q(
+                f"SELECT COALESCE({column}, '?'), COUNT(*) FROM installs WHERE last_seen >= ? "
+                f"GROUP BY 1 ORDER BY 2 DESC LIMIT ?",
+                (since, limit),
+            )
+        # devices use last_ver for app version; installs use ver.
+        if column == "ver":
+            return self.q(
+                """SELECT COALESCE(v, '?'), COUNT(*) FROM (
+                     SELECT last_ver AS v FROM devices WHERE last_seen >= ?
+                     UNION ALL
+                     SELECT ver FROM installs
+                     WHERE (dk IS NULL OR dk = '') AND last_seen >= ?
+                   ) GROUP BY 1 ORDER BY 2 DESC LIMIT ?""",
+                (since, since, limit),
+            )
+        return self.q(
+            f"""SELECT COALESCE(v, '?'), COUNT(*) FROM (
+                  SELECT {column} AS v FROM devices WHERE last_seen >= ?
+                  UNION ALL
+                  SELECT {column} FROM installs
+                  WHERE (dk IS NULL OR dk = '') AND last_seen >= ?
+                ) GROUP BY 1 ORDER BY 2 DESC LIMIT ?""",
+            (since, since, limit),
+        )
 
     def counters(self, prefix, limit=None):
         rows = self.q(
@@ -174,12 +258,19 @@ class Report:
             (self.since, prefix + "%", limit or self.top))
         return [(n, u, c) for n, u, c in rows]
 
-    def insight_lines(self, total, new, dau, wau, mau, ai_users, quota_users, misses_top):
+    def insight_lines(self, total, new, updates, dau, wau, mau, ai_users, quota_users, misses_top):
         lines = []
         if total == 0:
             lines.append("Пока нет данных: клиенты ещё не успели отправить статистику.")
             return lines
-        lines.append(f"Всего в базе {total} установок. За выбранный период впервые появились {new}.")
+        lines.append(
+            f"Уникальных устройств (людей) в базе — {total}. "
+            f"За период впервые появились {new}, обновили клиент — {updates}."
+        )
+        lines.append(
+            "Обновление с v1.x на v2.x на том же телефоне считается одним человеком, "
+            "а не второй установкой."
+        )
         if mau:
             lines.append(
                 f"За месяц заходили {mau} человек, за неделю — {wau}, сегодня уже отметились {dau}.")
@@ -201,8 +292,10 @@ class Report:
         today = self.today
         sections = []
 
-        total = self.one("SELECT COUNT(*) FROM installs")
-        new = self.one("SELECT COUNT(*) FROM installs WHERE first_seen >= ?", (self.since,))
+        total = self.unique_clients()
+        new = self.new_clients(self.since)
+        updates = self.updates_in_period(self.since)
+        raw_iids = self.one("SELECT COUNT(*) FROM installs")
         dau = self.active_between(today, today)
         dau_y = self.active_between(today - timedelta(days=1), today - timedelta(days=1))
         wau = self.active_between(today - timedelta(days=6), today)
@@ -210,20 +303,60 @@ class Report:
 
         cohort_start = (today - timedelta(days=14)).isoformat()
         cohort_end = (today - timedelta(days=8)).isoformat()
-        cohort = self.one(
-            "SELECT COUNT(*) FROM installs WHERE first_seen BETWEEN ? AND ?",
-            (cohort_start, cohort_end))
-        retained = self.one(
-            """SELECT COUNT(DISTINCT c.iid) FROM counters c JOIN installs i ON i.iid = c.iid
-               WHERE i.first_seen BETWEEN ? AND ? AND c.day >= ?""",
-            (cohort_start, cohort_end, (today - timedelta(days=6)).isoformat()))
+        if self._has_devices():
+            cohort = self.one(
+                """SELECT
+                     (SELECT COUNT(*) FROM devices WHERE first_seen BETWEEN ? AND ?)
+                   + (SELECT COUNT(*) FROM installs
+                      WHERE (dk IS NULL OR dk = '') AND first_seen BETWEEN ? AND ?)""",
+                (cohort_start, cohort_end, cohort_start, cohort_end),
+            )
+            retained = self.one(
+                """SELECT COUNT(DISTINCT COALESCE(NULLIF(i.dk, ''), i.iid))
+                   FROM counters c
+                   JOIN installs i ON i.iid = c.iid
+                   WHERE c.day >= ?
+                     AND (
+                       i.dk IN (SELECT dk FROM devices WHERE first_seen BETWEEN ? AND ?)
+                       OR ((i.dk IS NULL OR i.dk = '') AND i.first_seen BETWEEN ? AND ?)
+                     )""",
+                (
+                    (today - timedelta(days=6)).isoformat(),
+                    cohort_start,
+                    cohort_end,
+                    cohort_start,
+                    cohort_end,
+                ),
+            )
+        else:
+            cohort = self.one(
+                "SELECT COUNT(*) FROM installs WHERE first_seen BETWEEN ? AND ?",
+                (cohort_start, cohort_end),
+            )
+            retained = self.one(
+                """SELECT COUNT(DISTINCT c.iid) FROM counters c JOIN installs i ON i.iid = c.iid
+                   WHERE i.first_seen BETWEEN ? AND ? AND c.day >= ?""",
+                (cohort_start, cohort_end, (today - timedelta(days=6)).isoformat()),
+            )
 
         ai_users = self.one(
+            """SELECT COUNT(DISTINCT COALESCE(NULLIF(i.dk, ''), i.iid))
+               FROM counters c JOIN installs i ON i.iid = c.iid
+               WHERE c.day >= ? AND c.name LIKE 'ai:request:%'""",
+            (self.since,),
+        ) if self._has_devices() else self.one(
             "SELECT COUNT(DISTINCT iid) FROM counters WHERE day >= ? AND name LIKE 'ai:request:%'",
-            (self.since,))
+            (self.since,),
+        )
         quota_users = self.one(
+            """SELECT COUNT(DISTINCT COALESCE(NULLIF(i.dk, ''), i.iid))
+               FROM counters c JOIN installs i ON i.iid = c.iid
+               WHERE c.day >= ? AND c.name = 'ai:quota_exhausted'""",
+            (self.since,),
+        ) if self._has_devices() else self.one(
             "SELECT COUNT(DISTINCT iid) FROM counters WHERE day >= ? AND name = 'ai:quota_exhausted'",
-            (self.since,))
+            (self.since,),
+        )
         misses_top = self.q(
             "SELECT query, SUM(count) FROM search_miss WHERE day >= ? GROUP BY query "
             "ORDER BY 2 DESC LIMIT 1", (self.since,))
@@ -231,23 +364,33 @@ class Report:
         sections.append({
             "kind": "insights",
             "title": "📌 Коротко: что происходит",
-            "lines": self.insight_lines(total, new, dau, wau, mau, ai_users, quota_users, misses_top),
+            "lines": self.insight_lines(
+                total, new, updates, dau, wau, mau, ai_users, quota_users, misses_top
+            ),
         })
 
         kpi_rows = [
-            ("📦 Всего установок", total, "Сколько раз поставили Mgla (анонимно)"),
+            ("📱 Уникальных устройств", total,
+             "Один телефон = один человек (обновление APK не плодит дубли)"),
         ]
+        if raw_iids != total:
+            kpi_rows.append(
+                ("🧾 Сырых install id", raw_iids,
+                 "Технический счётчик; больше устройств = были переустановки"))
         if self.all_time:
             kpi_rows.append(
                 ("👥 Когда-либо активны", self.active, "Хоть раз прислали счётчики за всё время"))
         else:
             kpi_rows.append(
-                (f"🆕 Новых {self.period_label}", new, "Первый раз прислали статистику"))
+                (f"🆕 Новых {self.period_label}", new, "Первый раз увидели это устройство"))
+            kpi_rows.append(
+                (f"⬆️ Обновлений {self.period_label}", updates,
+                 "Смена версии или переустановка APK на том же телефоне"))
         kpi_rows += [
             ("☀️ Сегодня", dau, "Хоть раз что-то сделали сегодня"),
             ("🌙 Вчера", dau_y, "Были активны вчера"),
-            ("📅 За 7 дней", wau, "Уникальные установки за неделю"),
-            ("🗓️ За 30 дней", mau, "Уникальные установки за месяц"),
+            ("📅 За 7 дней", wau, "Уникальные люди за неделю"),
+            ("🗓️ За 30 дней", mau, "Уникальные люди за месяц"),
             ("↩️ Возвращаемость", pct(retained, cohort),
              "Из тех, кто пришёл 8–14 дней назад, сколько ещё заходят"),
         ]
@@ -257,8 +400,43 @@ class Report:
             "kv": kpi_rows,
         })
 
+        ver_rows = self.client_attr_counts("ver", self.since, self.top)
+        ver_sum = sum(r[1] for r in ver_rows)
+        sections.append({
+            "kind": "table",
+            "title": "🏷️ Версии Mgla",
+            "subtitle": "Текущая версия на устройстве (без дублей от переустановок)",
+            "headers": ["Значение", "Устройств", "Доля"],
+            "rows": [(v, n, pct(n, ver_sum)) for v, n in ver_rows],
+            "bar": 1,
+            "group": "devices",
+        })
+
+        up_rows = []
+        if self._has_devices():
+            try:
+                up_rows = self.q(
+                    """SELECT COALESCE(from_ver, '?') || ' → ' || COALESCE(to_ver, '?'), COUNT(*)
+                       FROM version_events
+                       WHERE day >= ? AND kind IN ('upgrade', 'reinstall')
+                       GROUP BY 1 ORDER BY 2 DESC LIMIT ?""",
+                    (self.since, self.top),
+                )
+            except sqlite3.Error:
+                up_rows = []
+        if up_rows:
+            up_sum = sum(r[1] for r in up_rows)
+            sections.append({
+                "kind": "table",
+                "title": "⬆️ Переходы версий",
+                "subtitle": "Обновления и переустановки APK на том же телефоне",
+                "headers": ["Переход", "Событий", "Доля"],
+                "rows": [(v, n, pct(n, up_sum)) for v, n in up_rows],
+                "bar": 1,
+                "group": "devices",
+            })
+
         for column, title, hint in (
-            ("ver", "🏷️ Версии Mgla", "Какая сборка у людей"),
             ("man", "🏭 Производители", None),
             ("model", "📱 Модели", "По производителям"),
             ("sdk", "🤖 Android (SDK)", "Чем выше — тем новее Android"),
@@ -267,27 +445,43 @@ class Report:
             if column == "model":
                 sections.append(self.models_by_manufacturer_section(title, hint))
                 continue
-            rows = self.q(
-                f"SELECT COALESCE({column}, '?'), COUNT(*) FROM installs WHERE last_seen >= ? "
-                f"GROUP BY 1 ORDER BY 2 DESC LIMIT ?", (self.since, self.top))
+            rows = self.client_attr_counts(column, self.since, self.top)
             s = sum(r[1] for r in rows)
             sections.append({
                 "kind": "table",
                 "title": title,
                 "subtitle": hint,
-                "headers": ["Значение", "Установок", "Доля"],
+                "headers": ["Значение", "Устройств", "Доля"],
                 "rows": [(v, n, pct(n, s)) for v, n in rows],
                 "bar": 1,
                 "group": "devices",
             })
 
         chart_days = min(self.days, 120) if self.all_time else self.days
-        active_by_day = dict(self.q(
-            "SELECT day, COUNT(DISTINCT iid) FROM counters WHERE day >= ? GROUP BY day",
-            ((today - timedelta(days=chart_days - 1)).isoformat(),)))
-        new_by_day = dict(self.q(
-            "SELECT first_seen, COUNT(*) FROM installs WHERE first_seen >= ? GROUP BY first_seen",
-            ((today - timedelta(days=chart_days - 1)).isoformat(),)))
+        chart_since = (today - timedelta(days=chart_days - 1)).isoformat()
+        if self._has_devices():
+            active_by_day = dict(self.q(
+                """SELECT c.day, COUNT(DISTINCT COALESCE(NULLIF(i.dk, ''), i.iid))
+                   FROM counters c JOIN installs i ON i.iid = c.iid
+                   WHERE c.day >= ? GROUP BY c.day""",
+                (chart_since,)))
+            new_by_day = dict(self.q(
+                """SELECT day, SUM(n) FROM (
+                     SELECT first_seen AS day, COUNT(*) AS n FROM devices
+                     WHERE first_seen >= ? GROUP BY first_seen
+                     UNION ALL
+                     SELECT first_seen, COUNT(*) FROM installs
+                     WHERE (dk IS NULL OR dk = '') AND first_seen >= ?
+                     GROUP BY first_seen
+                   ) GROUP BY day""",
+                (chart_since, chart_since)))
+        else:
+            active_by_day = dict(self.q(
+                "SELECT day, COUNT(DISTINCT iid) FROM counters WHERE day >= ? GROUP BY day",
+                (chart_since,)))
+            new_by_day = dict(self.q(
+                "SELECT first_seen, COUNT(*) FROM installs WHERE first_seen >= ? GROUP BY first_seen",
+                (chart_since,)))
         chart = []
         for i in range(chart_days):
             d = (today - timedelta(days=chart_days - 1 - i)).isoformat()
@@ -295,7 +489,7 @@ class Report:
         chart_note = (
             f"За последние {chart_days} дн. (весь период длиннее)."
             if self.all_time and chart_days < self.days else
-            "Синие столбцы — сколько людей пользовались приложением. Зелёная линия — новые установки."
+            "Синие столбцы — сколько людей пользовались приложением. Зелёная линия — новые устройства."
         )
         sections.append({
             "kind": "chart",
@@ -397,11 +591,22 @@ class Report:
     def models_by_manufacturer_section(self, title, hint=None):
         """Модели устройства, сгруппированные по производителю (не плоский топ)."""
         limit = max(self.top * 5, 120)
-        rows = self.q(
-            "SELECT COALESCE(man, '?'), COALESCE(model, '?'), COUNT(*) FROM installs "
-            "WHERE last_seen >= ? GROUP BY 1, 2 ORDER BY 3 DESC LIMIT ?",
-            (self.since, limit),
-        )
+        if self._has_devices():
+            rows = self.q(
+                """SELECT COALESCE(man, '?'), COALESCE(model, '?'), COUNT(*) FROM (
+                     SELECT man, model FROM devices WHERE last_seen >= ?
+                     UNION ALL
+                     SELECT man, model FROM installs
+                     WHERE (dk IS NULL OR dk = '') AND last_seen >= ?
+                   ) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT ?""",
+                (self.since, self.since, limit),
+            )
+        else:
+            rows = self.q(
+                "SELECT COALESCE(man, '?'), COALESCE(model, '?'), COUNT(*) FROM installs "
+                "WHERE last_seen >= ? GROUP BY 1, 2 ORDER BY 3 DESC LIMIT ?",
+                (self.since, limit),
+            )
         by_man = {}
         for man, model, n in rows:
             by_man.setdefault(man, []).append((model, n))

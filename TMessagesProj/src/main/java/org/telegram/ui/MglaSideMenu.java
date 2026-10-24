@@ -28,6 +28,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
 import androidx.core.graphics.Insets;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.view.ViewCompat;
@@ -37,7 +38,6 @@ import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesStorage;
-import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.NotificationCenter;
@@ -53,6 +53,12 @@ import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawableRenderNode;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProviderBuilder;
+import org.telegram.ui.Wallet.WalletActivity;
 import org.telegram.ui.web.WebBrowserSettings;
 
 import java.util.ArrayList;
@@ -60,20 +66,11 @@ import java.util.Collections;
 
 public class MglaSideMenu extends FrameLayout implements NotificationCenter.NotificationCenterDelegate {
 
-    private static final int NAV_PROFILE = 0;
-    private static final int NAV_SAVED = 1;
-    private static final int NAV_NEW_GROUP = 2;
-    private static final int NAV_CONTACTS = 3;
-    private static final int NAV_CALLS = 4;
-    private static final int NAV_SETTINGS = 5;
-    private static final int NAV_QR = 6;
-    private static final int NAV_BROWSER = 7;
-    private static final int NAV_MGLA_SETTINGS = 1001;
-    private static final int NAV_MEMORY = 1002;
-
     private final LaunchActivity activity;
     private View scrim;
+    private FrameLayout panelHost;
     private LinearLayout panel;
+    private ScrollView panelScroll;
     private boolean isOpen;
     private boolean isTablet;
     private boolean observerRegistered;
@@ -100,9 +97,15 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private LinearLayout navContainer;
     private final ArrayList<View> navRows = new ArrayList<>();
     private final ArrayList<ImageView> navIcons = new ArrayList<>();
+    private final ArrayList<FrameLayout> navIconWells = new ArrayList<>();
     private final ArrayList<TextView> navLabels = new ArrayList<>();
     private final ArrayList<View> accountRows = new ArrayList<>();
     private final ArrayList<View> animatedViews = new ArrayList<>();
+
+    @Nullable
+    private BlurredBackgroundDrawable panelGlass;
+    @Nullable
+    private View glassSourceRoot;
 
     private int panelWidthPx;
     private float openProgress;
@@ -135,24 +138,35 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         setFocusable(true);
 
         scrim = new View(context);
-        scrim.setBackgroundColor(0x52000000);
+        scrim.setBackgroundColor(0x66000000);
         scrim.setVisibility(GONE);
         scrim.setClickable(true);
         scrim.setOnClickListener(v -> close(true));
         addView(scrim, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
+        panelHost = new FrameLayout(context);
+        panelHost.setClipToPadding(false);
+        panelHost.setClipChildren(false);
+        GradientDrawable hostBg = new GradientDrawable();
+        hostBg.setColor(Theme.getColor(Theme.key_chats_menuBackground));
+        hostBg.setCornerRadii(new float[]{0, 0, dp(24), dp(24), dp(24), dp(24), 0, 0});
+        panelHost.setBackground(hostBg);
         panel = buildPanel(context);
+        panelHost.addView(panel, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         // Full height edge-to-edge panel — left margin made it look like only a thin strip opens.
-        addView(panel, LayoutHelper.createFrame(PANEL_WIDTH_DP, LayoutHelper.MATCH_PARENT, Gravity.LEFT));
+        addView(panelHost, LayoutHelper.createFrame(PANEL_WIDTH_DP, LayoutHelper.MATCH_PARENT, Gravity.LEFT));
 
-        ViewCompat.setOnApplyWindowInsetsListener(panel, (v, insets) -> {
+        ViewCompat.setOnApplyWindowInsetsListener(panelHost, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            // keep the panel itself unpadded so the accent header reaches the very top;
+            // keep the panel itself unpadded so the glass header reaches the very top;
             // the top inset is applied to the profile wrapper's content instead
             panel.setPadding(0, 0, 0, 0);
             panel.setClipToPadding(true);
             if (profileWrap != null) {
-                profileWrap.setPadding(0, bars.top, 0, 0);
+                profileWrap.setPadding(dp(10), bars.top + dp(8), dp(10), dp(8));
+            }
+            if (panelScroll != null) {
+                panelScroll.setPadding(0, 0, 0, bars.bottom);
             }
             if (bars.top > 0) {
                 AndroidUtilities.statusBarHeight = bars.top;
@@ -161,7 +175,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         });
         ViewCompat.requestApplyInsets(this);
 
-        panel.setTranslationX(-panelWidthPx);
+        panelHost.setTranslationX(-panelWidthPx);
         openProgress = 0f;
         scrim.setAlpha(0f);
         setVisibility(GONE);
@@ -170,24 +184,29 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private LinearLayout buildPanel(Context context) {
         LinearLayout p = new LinearLayout(context);
         p.setOrientation(LinearLayout.VERTICAL);
-        p.setElevation(dp(8));
+        p.setElevation(dp(10));
+        p.setClipToPadding(false);
+        p.setClipChildren(false);
 
-        GradientDrawable panelBg = new GradientDrawable();
-        panelBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        panelBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), dp(20), dp(20), 0, 0});
-        p.setBackground(panelBg);
+        p.setBackgroundColor(Color.TRANSPARENT);
 
         ScrollView scrollView = new ScrollView(context);
+        panelScroll = scrollView;
         scrollView.setFillViewport(true);
         scrollView.setVerticalScrollBarEnabled(false);
+        scrollView.setClipToPadding(false);
+        scrollView.setClipChildren(false);
 
         LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
+        content.setClipToPadding(false);
+        content.setClipChildren(false);
+        content.setPadding(0, 0, 0, dp(20));
 
         content.addView(buildProfileSection(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        content.addView(buildGhostButton(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, 8));
-        content.addView(buildAccountsBlock(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 0, 8, 12));
-        content.addView(buildNavSection(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 4, 0, dp(16)));
+        content.addView(buildGhostButton(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 6, 8, 4));
+        content.addView(buildAccountsBlock(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 10, 4, 10, 10));
+        content.addView(buildNavSection(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 4, 0, 4, 0));
 
         scrollView.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
         p.addView(scrollView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -197,10 +216,11 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
     private View buildProfileSection(Context context) {
         profileWrap = new FrameLayout(context);
+        profileWrap.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         profileSection = new LinearLayout(context);
         profileSection.setOrientation(LinearLayout.VERTICAL);
-        profileSection.setPadding(dp(16), dp(16), dp(16), dp(12));
+        profileSection.setPadding(dp(14), dp(14), dp(48), dp(14));
 
         avatarView = new BackupImageView(context);
         avatarView.setRoundRadius(dp(28));
@@ -210,20 +230,20 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         texts.setOrientation(LinearLayout.VERTICAL);
 
         nameText = new TextView(context);
-        nameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        nameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
         nameText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         nameText.setTypeface(AndroidUtilities.bold());
         nameText.setSingleLine(true);
         texts.addView(nameText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         usernameText = new TextView(context);
-        usernameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        usernameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         usernameText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         usernameText.setSingleLine(true);
-        texts.addView(usernameText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 1, 0, 0));
+        texts.addView(usernameText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
 
         phoneText = new TextView(context);
-        phoneText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        phoneText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         phoneText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         phoneText.setSingleLine(true);
         texts.addView(phoneText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 1, 0, 0));
@@ -247,7 +267,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         themeToggleBtn.setScaleType(ImageView.ScaleType.CENTER);
         themeToggleBtn.setBackground(Theme.createSelectorDrawable(ColorUtils.setAlphaComponent(Color.WHITE, 70), Theme.RIPPLE_MASK_CIRCLE_20DP));
         themeToggleBtn.setOnClickListener(v -> toggleTheme());
-        profileWrap.addView(themeToggleBtn, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.TOP, 0, 12, 12, 0));
+        profileWrap.addView(themeToggleBtn, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.TOP, 0, 18, 18, 0));
         registerAnimatedView(profileWrap);
 
         return profileWrap;
@@ -255,9 +275,10 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
     private View buildGhostButton(Context context) {
         FrameLayout row = new FrameLayout(context);
-        row.setPadding(dp(20), dp(12), dp(20), dp(12));
+        row.setMinimumHeight(dp(48));
+        row.setPadding(dp(16), dp(10), dp(16), dp(10));
         row.setClickable(true);
-        row.setBackground(createRectSelector());
+        row.setBackground(createRoundedSelector(dp(14)));
 
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.mgla_ic_eye);
@@ -350,8 +371,25 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private View buildNavSection(Context context) {
         navContainer = new LinearLayout(context);
         navContainer.setOrientation(LinearLayout.VERTICAL);
-        navContainer.setClipChildren(true);
-        navContainer.setClipToPadding(true);
+        navContainer.setClipChildren(false);
+        navContainer.setClipToPadding(false);
+        rebuildNavSection();
+        return navContainer;
+    }
+
+    private void rebuildNavSection() {
+        if (navContainer == null) {
+            return;
+        }
+        Context context = navContainer.getContext();
+        for (View row : navRows) {
+            animatedViews.remove(row);
+        }
+        navContainer.removeAllViews();
+        navRows.clear();
+        navIcons.clear();
+        navIconWells.clear();
+        navLabels.clear();
 
         ArrayList<Integer> visibleItems = MglaSideMenuController.getVisibleItems(context);
         for (int i = 0; i < visibleItems.size(); i++) {
@@ -359,49 +397,53 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             if (MglaSideMenuController.isDivider(item)) {
                 View divider = new View(context);
                 divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-                navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 20, 8, 20, 8));
+                navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 22, 8, 22, 8));
             } else {
                 addNavItem(context, MglaSideMenuController.getIcon(item), MglaSideMenuController.getTitle(item), item);
             }
         }
-
-        View divider = new View(context);
-        divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
-        navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, dp(0.5f), 20, 8, 20, 8));
-
-        if (MglaMemoryConfig.isActive()) {
-            addNavItem(context, R.drawable.msg_saved, "Живая память", NAV_MEMORY);
-        }
-        addNavItem(context, R.drawable.msg_settings, "Настройки Mgla", NAV_MGLA_SETTINGS);
-
-        return navContainer;
+        updatePanelColors();
+        updateAnimatedViewsProgress();
     }
 
     private ImageView addNavItem(Context context, int iconRes, String title, int id) {
         FrameLayout row = new FrameLayout(context);
-        row.setPadding(dp(20), dp(12), dp(20), dp(12));
+        row.setMinimumHeight(dp(50));
+        row.setPadding(dp(12), dp(8), dp(16), dp(8));
         row.setClickable(true);
-        row.setBackground(createRectSelector());
+        row.setBackground(createRoundedSelector(dp(14)));
+
+        FrameLayout iconWell = new FrameLayout(context);
+        GradientDrawable wellBg = new GradientDrawable();
+        wellBg.setShape(GradientDrawable.OVAL);
+        wellBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 0x18));
+        iconWell.setBackground(wellBg);
 
         ImageView icon = new ImageView(context);
         icon.setImageResource(iconRes);
         icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
-        row.addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+        iconWell.addView(icon, LayoutHelper.createFrame(20, 20, Gravity.CENTER));
+        row.addView(iconWell, LayoutHelper.createFrame(36, 36, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         TextView label = new TextView(context);
         label.setText(title);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         label.setTextColor(Theme.getColor(Theme.key_chats_menuItemText));
         label.setSingleLine(true);
-        row.addView(label, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 0, 0));
+        row.addView(label, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 48, 0, 0, 0));
 
         row.setOnClickListener(v -> handleNavClick(id));
-        navContainer.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        navContainer.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 6, 1, 6, 1));
         navRows.add(row);
         navIcons.add(icon);
+        navIconWells.add(iconWell);
         navLabels.add(label);
         registerAnimatedView(row);
         return icon;
+    }
+
+    private Drawable createRoundedSelector(int radius) {
+        return Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector), radius, radius);
     }
 
     private void handleNavClick(int id) {
@@ -440,18 +482,48 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             case MglaSideMenuController.ITEM_BROWSER:
                 openFragment(new WebBrowserSettings(null));
                 break;
-            case MglaSideMenuController.ITEM_ARCHIVE:
-                openFragment(new ArchivedStickersActivity(org.telegram.messenger.MediaDataController.TYPE_IMAGE));
+            case MglaSideMenuController.ITEM_ARCHIVE: {
+                Bundle args = new Bundle();
+                args.putInt("folderId", 1);
+                openFragment(new DialogsActivity(args));
                 break;
+            }
             case MglaSideMenuController.ITEM_NEW_CHANNEL:
                 openFragment(new ChannelCreateActivity(new Bundle()));
                 break;
-            case NAV_MEMORY:
+            case MglaSideMenuController.ITEM_MEMORY:
                 openFragment(new MglaMemoryActivity());
                 break;
-            case NAV_MGLA_SETTINGS:
+            case MglaSideMenuController.ITEM_MGLA_SETTINGS:
                 openFragment(new MglaSettingsActivity());
                 break;
+            case MglaSideMenuController.ITEM_INVITE:
+                openFragment(new InviteContactsActivity());
+                break;
+            case MglaSideMenuController.ITEM_PROXY:
+                openFragment(new ProxyListActivity());
+                break;
+            case MglaSideMenuController.ITEM_WALLET:
+                openFragment(new WalletActivity());
+                break;
+            case MglaSideMenuController.ITEM_MUSIC: {
+                Bundle args = new Bundle();
+                args.putBoolean("hasMainTabs", false);
+                openFragment(new MglaMusicActivity(args));
+                break;
+            }
+            case MglaSideMenuController.ITEM_TASKS: {
+                Bundle args = new Bundle();
+                args.putBoolean("hasMainTabs", false);
+                openFragment(new MglaTasksActivity(args));
+                break;
+            }
+            case MglaSideMenuController.ITEM_AI: {
+                Bundle args = new Bundle();
+                args.putBoolean("hasMainTabs", false);
+                openFragment(new MglaAiChatActivity(args));
+                break;
+            }
         }
     }
 
@@ -571,6 +643,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         applySystemInsets();
         ViewCompat.requestApplyInsets(this);
         registerObserver();
+        attachLiquidGlass();
+        rebuildNavSection();
         refreshData();
         bringMenuToFront();
         isOpen = false;
@@ -578,7 +652,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         scrim.setVisibility(VISIBLE);
         ensurePanelLaidOut(() -> {
             float closed = getClosedTranslationX();
-            panel.setTranslationX(closed);
+            panelHost.setTranslationX(closed);
             openProgress = 0f;
             scrim.setAlpha(0f);
             updateAnimatedViewsProgress();
@@ -698,7 +772,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                     velocityX = velocityTracker.getXVelocity();
                 }
                 float closed = getClosedTranslationX();
-                float current = panel.getTranslationX();
+                float current = panelHost.getTranslationX();
                 boolean shouldOpen;
         // Any noticeable open swipe completes fully — no stuck half-open panel.
         if (dragOpening) {
@@ -730,7 +804,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         scrim.setVisibility(VISIBLE);
         isOpen = false;
         float closed = getClosedTranslationX();
-        panel.setTranslationX(closed);
+        panelHost.setTranslationX(closed);
         openProgress = 0f;
         scrim.setAlpha(0f);
         updateAnimatedViewsProgress();
@@ -743,7 +817,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                     return;
                 }
                 float newClosed = getClosedTranslationX();
-                float shown = panel.getTranslationX() - dragStartTranslationX;
+                float shown = panelHost.getTranslationX() - dragStartTranslationX;
                 dragStartTranslationX = newClosed;
                 setPanelTranslation(newClosed + shown);
             });
@@ -756,22 +830,22 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         dragOpening = false;
         cancelAnimation();
         trackingStartRawX = rawX;
-        dragStartTranslationX = panel.getTranslationX();
+        dragStartTranslationX = panelHost.getTranslationX();
     }
 
     private void ensurePanelLaidOut(Runnable after) {
-        if (panel.getWidth() > 0) {
+        if (panelHost.getWidth() > 0) {
             after.run();
             return;
         }
         setVisibility(VISIBLE);
-        panel.post(after);
+        panelHost.post(after);
     }
 
     private float getClosedTranslationX() {
-        int width = panel.getWidth();
+        int width = panelHost.getWidth();
         if (width <= 0) {
-            width = panel.getMeasuredWidth();
+            width = panelHost.getMeasuredWidth();
         }
         if (width <= 0) {
             width = panelWidthPx;
@@ -785,11 +859,14 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             closed = -panelWidthPx;
         }
         translationX = Math.max(closed, Math.min(0f, translationX));
-        panel.setTranslationX(translationX);
+        panelHost.setTranslationX(translationX);
         openProgress = 1f - (translationX / closed);
         openProgress = Utilities.clamp(openProgress, 1f, 0f);
         scrim.setAlpha(openProgress);
         updateAnimatedViewsProgress();
+        if (openProgress > 0.01f) {
+            syncGlassSourceOffset();
+        }
     }
 
     private void animatePanelTo(float targetTranslationX, boolean opening) {
@@ -797,7 +874,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         bringMenuToFront();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
-        float startX = panel.getTranslationX();
+        float startX = panelHost.getTranslationX();
         float closed = getClosedTranslationX();
         if (opening) {
             targetTranslationX = 0f;
@@ -886,7 +963,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             progressAnimator.cancel();
             progressAnimator = null;
         }
-        panel.animate().cancel();
+        panelHost.animate().cancel();
         scrim.animate().cancel();
         isAnimating = false;
     }
@@ -894,11 +971,13 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private void showOpened() {
         isOpen = true;
         openProgress = 1f;
-        panel.setTranslationX(0f);
+        panelHost.setTranslationX(0f);
         scrim.setAlpha(1f);
         updateAnimatedViewsProgress();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
+        syncGlassSourceOffset();
+        invalidateGlass();
     }
 
     private void hideImmediate() {
@@ -907,7 +986,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         openProgress = 0f;
         unregisterObserver();
         resetDrawerTracking();
-        panel.setTranslationX(getClosedTranslationX());
+        panelHost.setTranslationX(getClosedTranslationX());
         scrim.setAlpha(0f);
         updateAnimatedViewsProgress();
         setVisibility(GONE);
@@ -945,6 +1024,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         updateThemeIcon();
         updateGhostButton();
         updatePanelColors();
+        syncGlassSourceOffset();
+        invalidateGlass();
     }
 
     private void refreshAccountsList() {
@@ -1198,34 +1279,53 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void updatePanelColors() {
+        // Called from rebuildNavSection during buildPanel, before `panel` field is assigned.
+        if (nameText == null || ghostButtonLabel == null) {
+            return;
+        }
+        final boolean dark = Theme.isCurrentThemeDark();
         int accent = Theme.getColor(Theme.key_featuredStickers_addButton);
         int itemText = Theme.getColor(Theme.key_chats_menuItemText);
         int grayText = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
 
-        // profile header sits on the accent fill — use white text for contrast
+        // Glass profile capsule: light text on accent-tinted surface.
         nameText.setTextColor(Color.WHITE);
-        usernameText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 205));
-        phoneText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 205));
+        usernameText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 210));
+        phoneText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 210));
         ghostButtonLabel.setTextColor(itemText);
 
-        GradientDrawable panelBg = new GradientDrawable();
-        panelBg.setColor(Theme.getColor(Theme.key_chats_menuBackground));
-        panelBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), dp(20), dp(20), 0, 0});
-        panel.setBackground(panelBg);
+        if (panelGlass == null) {
+            if (panelHost != null) {
+                GradientDrawable panelBg = new GradientDrawable();
+                int base = Theme.getColor(Theme.key_chats_menuBackground);
+                panelBg.setColor(ColorUtils.setAlphaComponent(base, dark ? 0xF2 : 0xF5));
+                panelBg.setCornerRadii(new float[]{0, 0, dp(24), dp(24), dp(24), dp(24), 0, 0});
+                panelHost.setBackground(panelBg);
+            }
+            if (panel != null) {
+                panel.setBackgroundColor(Color.TRANSPARENT);
+            }
+        } else {
+            panelGlass.updateColors();
+            if (panel != null) {
+                panel.setBackgroundColor(Color.TRANSPARENT);
+            }
+        }
 
         if (profileWrap != null) {
             GradientDrawable profileBg = new GradientDrawable();
-            profileBg.setColor(accent);
-            // follow the panel's rounded top-right corner
-            profileBg.setCornerRadii(new float[]{0, 0, dp(20), dp(20), 0, 0, 0, 0});
+            profileBg.setColor(ColorUtils.setAlphaComponent(accent, dark ? 0xB3 : 0xCC));
+            profileBg.setCornerRadius(dp(20));
             profileWrap.setBackground(profileBg);
         }
 
-        GradientDrawable accountsBg = new GradientDrawable();
-        accountsBg.setCornerRadius(dp(14));
-        accountsBg.setColor(Color.TRANSPARENT);
-        accountsBg.setStroke(dp(1), ColorUtils.blendARGB(Theme.getColor(Theme.key_featuredStickers_addButton), Color.BLACK, 0.25f));
-        accountsBlock.setBackground(accountsBg);
+        if (accountsBlock != null) {
+            GradientDrawable accountsBg = new GradientDrawable();
+            accountsBg.setCornerRadius(dp(18));
+            accountsBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhite), dark ? 0x1A : 0x59));
+            accountsBlock.setBackground(accountsBg);
+        }
+
         if (accountsExpandBtn != null) {
             accountsExpandBtn.setColorFilter(new PorterDuffColorFilter(grayText, PorterDuff.Mode.SRC_IN));
         }
@@ -1234,14 +1334,129 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         }
 
         if (ghostButton != null) {
-            ghostButton.setBackground(createRectSelector());
+            ghostButton.setBackground(createRoundedSelector(dp(14)));
         }
-        navContainer.setBackground(null);
+        if (navContainer != null) {
+            navContainer.setBackground(null);
+        }
 
+        int wellColor = ColorUtils.setAlphaComponent(grayText, dark ? 0x28 : 0x18);
         for (int i = 0; i < navRows.size(); i++) {
-            navRows.get(i).setBackground(createRectSelector());
+            navRows.get(i).setBackground(createRoundedSelector(dp(14)));
             navIcons.get(i).setColorFilter(new PorterDuffColorFilter(grayText, PorterDuff.Mode.SRC_IN));
             navLabels.get(i).setTextColor(itemText);
+            if (i < navIconWells.size()) {
+                GradientDrawable wellBg = new GradientDrawable();
+                wellBg.setShape(GradientDrawable.OVAL);
+                wellBg.setColor(wellColor);
+                navIconWells.get(i).setBackground(wellBg);
+            }
+        }
+        invalidateGlass();
+    }
+
+    private void attachLiquidGlass() {
+        BlurredBackgroundDrawableViewFactory factory = resolveGlassFactory();
+        BaseFragment last = LaunchActivity.getLastFragment();
+        glassSourceRoot = last != null ? last.getFragmentView() : null;
+        if (glassSourceRoot == null && last instanceof MainTabsActivity) {
+            DialogsActivity dialogs = ((MainTabsActivity) last).getDialogsActivity();
+            if (dialogs != null) {
+                glassSourceRoot = dialogs.getFragmentView();
+            }
+        }
+
+        if (factory == null) {
+            panelGlass = null;
+            return;
+        }
+
+        // One full-panel glass on the host — separate profile/accounts glass looked like
+        // only the top/bottom strips were glassy.
+        if (panelGlass == null) {
+            BlurredBackgroundProvider panelProvider = new BlurredBackgroundProviderBuilder(null)
+                    .setBackgroundColor((r, isDark) -> {
+                        int base = Theme.getColor(Theme.key_chats_menuBackground);
+                        float a = Math.min(0.72f, MglaGlassConfig.getGlassBackgroundAlpha(isDark));
+                        return ColorUtils.setAlphaComponent(base, Math.round(255 * a));
+                    })
+                    .setStrokeColorTop((r, isDark) -> 0)
+                    .setStrokeColorBottom((r, isDark) -> 0)
+                    .setStrokeWidth(0, 0)
+                    .setShadowColor((r, isDark) -> 0)
+                    .build();
+            panelGlass = factory.create((View) null, panelProvider);
+            panelGlass.setRadius(0, dp(24), dp(24), 0);
+            panelGlass.setThickness(dp(14));
+            panelGlass.setIntensity(0.88f);
+            panelHost.setBackground(panelGlass);
+            if (panel != null) {
+                panel.setBackgroundColor(Color.TRANSPARENT);
+            }
+        }
+
+        syncGlassSourceOffset();
+        invalidateGlass();
+    }
+
+    private BlurredBackgroundDrawableViewFactory resolveGlassFactory() {
+        BaseFragment last = LaunchActivity.getLastFragment();
+        BlurredBackgroundDrawableViewFactory fromLast = liquidGlassFromFragment(last);
+        if (fromLast != null) {
+            return fromLast;
+        }
+        if (last instanceof MainTabsActivity) {
+            fromLast = liquidGlassFromFragment(((MainTabsActivity) last).getDialogsActivity());
+            if (fromLast != null) {
+                return fromLast;
+            }
+            fromLast = ((MainTabsActivity) last).getLiquidGlassFactory();
+            if (fromLast != null) {
+                return fromLast;
+            }
+        }
+        MainTabsActivity tabs = LaunchActivity.findFragment(MainTabsActivity.class);
+        if (tabs != null) {
+            BlurredBackgroundDrawableViewFactory factory = liquidGlassFromFragment(tabs.getDialogsActivity());
+            if (factory != null) {
+                return factory;
+            }
+            return tabs.getLiquidGlassFactory();
+        }
+        return null;
+    }
+
+    private static BlurredBackgroundDrawableViewFactory liquidGlassFromFragment(BaseFragment fragment) {
+        if (fragment instanceof ChatActivity) {
+            return ((ChatActivity) fragment).getLiquidGlassFactory();
+        }
+        if (fragment instanceof DialogsActivity) {
+            return ((DialogsActivity) fragment).getLiquidGlassFactory();
+        }
+        return null;
+    }
+
+    private void syncGlassSourceOffset() {
+        if (panelHost == null || panelGlass == null) {
+            return;
+        }
+        final int[] hostLoc = new int[2];
+        panelHost.getLocationInWindow(hostLoc);
+        if (glassSourceRoot != null && glassSourceRoot.isAttachedToWindow()) {
+            final int[] rootLoc = new int[2];
+            glassSourceRoot.getLocationInWindow(rootLoc);
+            panelGlass.setSourceOffset(hostLoc[0] - rootLoc[0], hostLoc[1] - rootLoc[1]);
+        } else {
+            panelGlass.setSourceOffset(Math.max(0, hostLoc[0]), Math.max(0, hostLoc[1]));
+        }
+    }
+
+    private void invalidateGlass() {
+        if (panelGlass instanceof BlurredBackgroundDrawableRenderNode) {
+            ((BlurredBackgroundDrawableRenderNode) panelGlass).invalidateDisplayList();
+        }
+        if (panelHost != null) {
+            panelHost.invalidate();
         }
     }
 
@@ -1251,12 +1466,15 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             return;
         }
         int top = 0;
+        int bottom = 0;
         WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(this);
         if (insets == null && activity != null && activity.getWindow() != null) {
             insets = ViewCompat.getRootWindowInsets(activity.getWindow().getDecorView());
         }
         if (insets != null) {
-            top = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            top = bars.top;
+            bottom = bars.bottom;
         }
         if (top <= 0) {
             AndroidUtilities.fillStatusBarHeight(ctx, AndroidUtilities.statusBarHeight == 0);
@@ -1268,10 +1486,16 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         if (top > 0) {
             AndroidUtilities.statusBarHeight = top;
         }
+        if (bottom <= 0) {
+            bottom = AndroidUtilities.navigationBarHeight;
+        }
         panel.setPadding(0, 0, 0, 0);
         panel.setClipToPadding(true);
         if (profileWrap != null) {
-            profileWrap.setPadding(0, top, 0, 0);
+            profileWrap.setPadding(dp(10), top + dp(8), dp(10), dp(8));
+        }
+        if (panelScroll != null) {
+            panelScroll.setPadding(0, 0, 0, bottom);
         }
     }
 
@@ -1307,17 +1531,17 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         super.onConfigurationChanged(newConfig);
         isTablet = AndroidUtilities.isTablet();
         panelWidthPx = dp(PANEL_WIDTH_DP);
-        ViewGroup.LayoutParams lp = panel.getLayoutParams();
+        ViewGroup.LayoutParams lp = panelHost.getLayoutParams();
         if (lp != null) {
             lp.width = panelWidthPx;
-            panel.setLayoutParams(lp);
+            panelHost.setLayoutParams(lp);
         }
         applySystemInsets();
         if (isOpen) {
-            panel.setTranslationX(0f);
+            panelHost.setTranslationX(0f);
             openProgress = 1f;
         } else {
-            panel.setTranslationX(getClosedTranslationX());
+            panelHost.setTranslationX(getClosedTranslationX());
             openProgress = 0f;
         }
         scrim.setAlpha(openProgress);
@@ -1352,12 +1576,16 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void updateAnimatedViewsProgress() {
-        for (int i = 0; i < animatedViews.size(); i++) {
+        final int count = animatedViews.size();
+        // shrink the stagger step when there are many views, otherwise the last
+        // items never reach full progress (start + 0.42 would exceed 1.0)
+        final float step = count > 1 ? Math.min(0.05f, 0.58f / (count - 1)) : 0f;
+        for (int i = 0; i < count; i++) {
             View view = animatedViews.get(i);
             if (view == null) {
                 continue;
             }
-            float start = i * 0.05f;
+            float start = i * step;
             float itemProgress = Utilities.clamp((openProgress - start) / 0.42f, 1f, 0f);
             view.setAlpha(itemProgress);
             view.setTranslationY(dp(18) * (1f - itemProgress));

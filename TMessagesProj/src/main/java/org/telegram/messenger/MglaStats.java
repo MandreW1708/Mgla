@@ -2,7 +2,9 @@ package org.telegram.messenger;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.os.Build;
+import android.provider.Settings;
 import android.text.TextUtils;
 
 import org.json.JSONObject;
@@ -33,8 +35,11 @@ import javax.net.ssl.HttpsURLConnection;
  * <p>
  * Collected: daily usage counters (screens opened, Mgla settings toggled, AI features used,
  * settings-search misses), a snapshot of Mgla settings, app version and device model.
- * Keyed by a random install id only — never Telegram user ids, phone numbers, chats,
- * contacts or message text.
+ * <p>
+ * Identity: random {@code iid} (survives in-place updates) plus anonymous {@code dk}
+ * (SHA-256 of ANDROID_ID + package, no raw ids). Server dedupes people by {@code dk}
+ * so uninstall→reinstall of a newer APK is an update, not a second install.
+ * Never Telegram user ids, phone numbers, chats, contacts or message text.
  */
 public final class MglaStats {
 
@@ -44,6 +49,9 @@ public final class MglaStats {
     private static final String KEY_FIRST_SEEN = "first_seen";
     private static final String KEY_PENDING = "pending";
     private static final String KEY_LAST_UPLOAD = "last_upload";
+    /** Last Mgla version successfully uploaded — detects in-place upgrades. */
+    private static final String KEY_LAST_SENT_VER = "last_sent_ver";
+    private static final String DK_SALT = "mgla-dk-v1";
 
     private static final long UPLOAD_INTERVAL_MS = 6L * 60 * 60 * 1000;
     private static final long SAVE_DELAY_MS = 2000;
@@ -221,7 +229,10 @@ public final class MglaStats {
                 uploading = false;
             }
             if (ok) {
-                prefs().edit().putLong(KEY_LAST_UPLOAD, System.currentTimeMillis()).apply();
+                prefs().edit()
+                    .putLong(KEY_LAST_UPLOAD, System.currentTimeMillis())
+                    .putString(KEY_LAST_SENT_VER, BuildVars.MGLA_VERSION_STRING)
+                    .apply();
             }
             saveNow();
         });
@@ -230,14 +241,33 @@ public final class MglaStats {
     private static String buildPayload(Map<String, Map<String, Integer>> sentCounters,
                                        Map<String, Map<String, Integer>> sentMisses) throws Exception {
         JSONObject root = new JSONObject();
-        root.put("v", 1);
+        root.put("v", 2);
         root.put("iid", installId());
+        String dk = deviceKey();
+        if (!TextUtils.isEmpty(dk)) {
+            root.put("dk", dk);
+        }
+
+        String currentVer = BuildVars.MGLA_VERSION_STRING;
+        String prevVer = prefs().getString(KEY_LAST_SENT_VER, null);
+        String lifecycle = classifyLifecycle(prevVer, currentVer);
 
         JSONObject app = new JSONObject();
-        app.put("ver", BuildVars.MGLA_VERSION_STRING);
+        app.put("ver", currentVer);
         app.put("tg", BuildVars.BUILD_VERSION_STRING);
+        if (!TextUtils.isEmpty(prevVer)) {
+            app.put("prev_ver", prevVer);
+        }
+        app.put("lifecycle", lifecycle);
         long firstSeen = prefs().getLong(KEY_FIRST_SEEN, System.currentTimeMillis());
         app.put("age_days", Math.max(0, (System.currentTimeMillis() - firstSeen) / 86_400_000L));
+        try {
+            PackageInfo pi = ApplicationLoader.applicationContext.getPackageManager()
+                .getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
+            app.put("fit", pi.firstInstallTime);
+            app.put("lut", pi.lastUpdateTime);
+        } catch (Throwable ignored) {
+        }
         root.put("app", app);
 
         JSONObject dev = new JSONObject();
@@ -386,6 +416,52 @@ public final class MglaStats {
             prefs.edit().putString(KEY_INSTALL_ID, id).apply();
         }
         return id;
+    }
+
+    /**
+     * Anonymous device key: first 16 bytes of SHA-256({@code salt|ANDROID_ID|package}).
+     * Survives uninstall/reinstall for the same signing key (Android 8+). Empty if unavailable.
+     */
+    private static String deviceKey() {
+        try {
+            Context ctx = ApplicationLoader.applicationContext;
+            String androidId = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
+            if (TextUtils.isEmpty(androidId) || "9774d56d682e549c".equals(androidId)) {
+                // Legacy emulator / broken providers — do not pretend uniqueness.
+                return "";
+            }
+            String pkg = ctx.getPackageName();
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest((DK_SALT + "|" + androidId + "|" + pkg).getBytes(StandardCharsets.UTF_8));
+            // 32 hex chars — same width as iid, enough for analytics-scale uniqueness.
+            return Utilities.bytesToHex(digest).substring(0, 32).toLowerCase(Locale.ROOT);
+        } catch (Throwable e) {
+            return "";
+        }
+    }
+
+    /**
+     * Client hint only; server is authoritative via {@code dk} history.
+     * {@code upgrade} = same prefs, version changed; {@code reinstall} = prefs reset but package
+     * was updated before; {@code fresh} = looks like first install of this package instance.
+     */
+    private static String classifyLifecycle(String prevVer, String currentVer) {
+        if (!TextUtils.isEmpty(prevVer)) {
+            if (!TextUtils.equals(prevVer, currentVer)) {
+                return "upgrade";
+            }
+            return "same";
+        }
+        try {
+            PackageInfo pi = ApplicationLoader.applicationContext.getPackageManager()
+                .getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
+            // Clear-data after an in-place update: install time older than last update.
+            if (pi.lastUpdateTime > pi.firstInstallTime + 60_000L) {
+                return "reinstall";
+            }
+        } catch (Throwable ignored) {
+        }
+        return "fresh";
     }
 
     private static String today() {

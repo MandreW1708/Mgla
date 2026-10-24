@@ -7,11 +7,11 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -22,21 +22,32 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
-import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.GraySectionCell;
+import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
-import java.util.Collections;
 
+/**
+ * Side-menu item editor.
+ * Pattern: FiltersSetupActivity — one full-screen RecyclerListView + setSections() + reorder handle.
+ * No ScrollView around the list (that broke ItemTouchHelper).
+ */
 public class MglaSideMenuElementsActivity extends MglaBaseSettingsActivity {
 
-    private RecyclerListView visibleList;
-    private RecyclerListView hiddenList;
-    private VisibleAdapter visibleAdapter;
-    private HiddenAdapter hiddenAdapter;
-    private ItemTouchHelper visibleTouchHelper;
+    private static final int TYPE_HEADER = 0;
+    private static final int TYPE_VISIBLE = 1;
+    private static final int TYPE_ADD_DIVIDER = 2;
+    private static final int TYPE_GAP = 3;
+    private static final int TYPE_HIDDEN = 4;
+    private static final int TYPE_HINT = 5;
+
+    private RecyclerListView listView;
+    private ListAdapter adapter;
+    private ItemTouchHelper itemTouchHelper;
 
     private ArrayList<Integer> visibleItems;
     private ArrayList<Integer> hiddenItems;
@@ -65,50 +76,78 @@ public class MglaSideMenuElementsActivity extends MglaBaseSettingsActivity {
 
         loadData(context);
 
-        LinearLayout rootLayout = new LinearLayout(context);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
-        rootLayout.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
+        FrameLayout root = new FrameLayout(context);
+        root.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        // Блок видимых элементов
-        LinearLayout visibleBlock = createBlock(context, "Видимые");
+        listView = new RecyclerListView(context);
+        listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+        listView.setVerticalScrollBarEnabled(false);
+        listView.setSections(dp(16), dp(MglaUi.BLOCK_CORNER_RADIUS_DP), true);
+        listView.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight);
+        listView.setClipToPadding(false);
+        listView.setAdapter(adapter = new ListAdapter(context));
 
-        visibleList = new RecyclerListView(context);
-        visibleList.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
-        visibleList.setNestedScrollingEnabled(false);
-        visibleList.setAdapter(visibleAdapter = new VisibleAdapter(context));
-        visibleList.setOnItemClickListener((view, position) -> {
-            if (position < 0 || position >= visibleItems.size()) return;
-            int item = visibleItems.get(position);
-            if (MglaSideMenuController.isDivider(item)) {
-                visibleItems.remove(position);
-                MglaSideMenuController.removeDivider(getContext(), item);
+        listView.setOnItemClickListener((view, position) -> {
+            if (position < 0 || position >= adapter.getItemCount()) {
+                return;
+            }
+            int type = adapter.getItemViewType(position);
+            if (type == TYPE_ADD_DIVIDER) {
+                int newId = MglaSideMenuController.addDivider(getContext());
+                visibleItems.add(newId);
                 saveFullOrder();
-                refreshLists();
-            } else {
-                visibleItems.remove(position);
-                hiddenItems.add(item);
-                MglaSideMenuController.setEnabled(getContext(), item, false);
-                saveFullOrder();
-                refreshLists();
+                adapter.notifyDataSetChanged();
+                return;
+            }
+            Object tag = view.getTag(R.id.object_tag);
+            if (!(tag instanceof Integer)) {
+                return;
+            }
+            int itemId = (Integer) tag;
+            if (type == TYPE_VISIBLE) {
+                hideById(itemId);
+            } else if (type == TYPE_HIDDEN) {
+                showById(itemId);
             }
         });
 
-        visibleTouchHelper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
+        itemTouchHelper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
             @Override
             public int getMovementFlags(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
+                if (viewHolder.getItemViewType() != TYPE_VISIBLE) {
+                    return makeMovementFlags(0, 0);
+                }
                 return makeMovementFlags(ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0);
             }
 
             @Override
+            public boolean canDropOver(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder current, @NonNull RecyclerView.ViewHolder target) {
+                return current.getItemViewType() == TYPE_VISIBLE && target.getItemViewType() == TYPE_VISIBLE;
+            }
+
+            @Override
             public boolean onMove(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder, @NonNull RecyclerView.ViewHolder target) {
-                int from = viewHolder.getAdapterPosition();
-                int to = target.getAdapterPosition();
-                if (from < 0 || to < 0 || from >= visibleItems.size() || to >= visibleItems.size() || from == to) {
+                if (viewHolder.getItemViewType() != TYPE_VISIBLE || target.getItemViewType() != TYPE_VISIBLE) {
                     return false;
                 }
-                Collections.swap(visibleItems, from, to);
-                visibleAdapter.notifyItemMoved(from, to);
+                Object fromTag = viewHolder.itemView.getTag(R.id.object_tag);
+                Object toTag = target.itemView.getTag(R.id.object_tag);
+                if (!(fromTag instanceof Integer) || !(toTag instanceof Integer)) {
+                    return false;
+                }
+                int from = indexOfId(visibleItems, (Integer) fromTag);
+                int to = indexOfId(visibleItems, (Integer) toTag);
+                if (from < 0 || to < 0 || from == to) {
+                    return false;
+                }
+                int item = visibleItems.remove(from);
+                visibleItems.add(to, item);
+                int fromPos = viewHolder.getAdapterPosition();
+                int toPos = target.getAdapterPosition();
+                if (fromPos < 0 || toPos < 0) {
+                    return false;
+                }
+                adapter.notifyItemMoved(fromPos, toPos);
                 saveFullOrder();
                 return true;
             }
@@ -119,89 +158,97 @@ public class MglaSideMenuElementsActivity extends MglaBaseSettingsActivity {
 
             @Override
             public boolean isLongPressDragEnabled() {
-                return false; // Отключаем автоматический drag по long press
+                return false;
+            }
+
+            @Override
+            public void onSelectedChanged(RecyclerView.ViewHolder viewHolder, int actionState) {
+                if (actionState != ItemTouchHelper.ACTION_STATE_IDLE) {
+                    listView.cancelClickRunnables(false);
+                    if (viewHolder != null) {
+                        viewHolder.itemView.setPressed(true);
+                    }
+                }
+                super.onSelectedChanged(viewHolder, actionState);
             }
 
             @Override
             public void clearView(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
                 super.clearView(recyclerView, viewHolder);
-                viewHolder.itemView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
+                viewHolder.itemView.setPressed(false);
+                // Retag children so clicks stay bound to item ids after reorder.
+                retagVisibleRows(recyclerView);
             }
         });
-        visibleTouchHelper.attachToRecyclerView(visibleList);
+        itemTouchHelper.attachToRecyclerView(listView);
 
-        // Ручной запуск drag по long press
-        visibleList.setOnItemLongClickListener((view, position) -> {
-            if (position < 0 || position >= visibleItems.size()) {
-                return false;
-            }
-            RecyclerView.ViewHolder holder = visibleList.findContainingViewHolder(view);
-            if (holder == null) {
-                holder = visibleList.findViewHolderForAdapterPosition(position);
-            }
-            if (holder != null && visibleTouchHelper != null) {
-                visibleTouchHelper.startDrag(holder);
-                // ItemTouchHelper перехватит события, и ACTION_UP сюда не придёт —
-                // без сброса залипнет нажатое состояние и currentChildView.
-                visibleList.cancelClickRunnables(true);
-                return true;
-            }
-            return false;
-        });
-
-        visibleBlock.addView(visibleList, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        // Кнопка добавления разделителя
-        TextView addDividerBtn = new TextView(context);
-        addDividerBtn.setText("+ Добавить разделитель");
-        addDividerBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        addDividerBtn.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText));
-        addDividerBtn.setGravity(Gravity.CENTER);
-        addDividerBtn.setPadding(dp(16), dp(14), dp(16), dp(14));
-        addDividerBtn.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
-        addDividerBtn.setOnClickListener(v -> {
-            int newDividerId = MglaSideMenuController.addDivider(getContext());
-            visibleItems.add(newDividerId);
-            saveFullOrder();
-            refreshLists();
-        });
-        visibleBlock.addView(addDividerBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        rootLayout.addView(visibleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
-
-        // Блок скрытых элементов
-        LinearLayout hiddenBlock = createBlock(context, "Скрытые");
-
-        hiddenList = new RecyclerListView(context);
-        hiddenList.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
-        hiddenList.setNestedScrollingEnabled(false);
-        hiddenList.setAdapter(hiddenAdapter = new HiddenAdapter(context));
-        hiddenList.setOnItemClickListener((view, position) -> {
-            if (position < 0 || position >= hiddenItems.size()) return;
-            int item = hiddenItems.remove(position);
-            visibleItems.add(item);
-            MglaSideMenuController.setEnabled(getContext(), item, true);
-            saveFullOrder();
-            refreshLists();
-        });
-
-        hiddenBlock.addView(hiddenList, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        rootLayout.addView(hiddenBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
-
-        android.widget.ScrollView scrollView = new android.widget.ScrollView(context);
-        scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
-        scrollView.setFillViewport(true);
-
-        fragmentView = scrollView;
+        root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        fragmentView = root;
         return fragmentView;
     }
 
+    private void hideById(int itemId) {
+        int index = indexOfId(visibleItems, itemId);
+        if (index < 0) {
+            return;
+        }
+        visibleItems.remove(index);
+        if (MglaSideMenuController.isDivider(itemId)) {
+            MglaSideMenuController.removeDivider(getContext(), itemId);
+        } else {
+            hiddenItems.add(itemId);
+            MglaSideMenuController.setEnabled(getContext(), itemId, false);
+        }
+        saveFullOrder();
+        adapter.notifyDataSetChanged();
+    }
+
+    private void showById(int itemId) {
+        int index = indexOfId(hiddenItems, itemId);
+        if (index < 0) {
+            return;
+        }
+        hiddenItems.remove(index);
+        visibleItems.add(itemId);
+        MglaSideMenuController.setEnabled(getContext(), itemId, true);
+        saveFullOrder();
+        adapter.notifyDataSetChanged();
+    }
+
+    private static int indexOfId(ArrayList<Integer> list, int id) {
+        if (list == null) {
+            return -1;
+        }
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i) != null && list.get(i) == id) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void retagVisibleRows(RecyclerView recyclerView) {
+        if (recyclerView == null || visibleItems == null) {
+            return;
+        }
+        for (int i = 0; i < recyclerView.getChildCount(); i++) {
+            View child = recyclerView.getChildAt(i);
+            int pos = recyclerView.getChildAdapterPosition(child);
+            if (pos == RecyclerView.NO_POSITION || adapter.getItemViewType(pos) != TYPE_VISIBLE) {
+                continue;
+            }
+            int index = pos - adapter.visibleStart();
+            if (index >= 0 && index < visibleItems.size()) {
+                child.setTag(R.id.object_tag, visibleItems.get(index));
+            }
+        }
+    }
+
     private void loadData(Context context) {
-        ArrayList<Integer> allItems = MglaSideMenuController.getOrder(context);
+        ArrayList<Integer> all = MglaSideMenuController.getOrder(context);
         visibleItems = new ArrayList<>();
         hiddenItems = new ArrayList<>();
-        for (int item : allItems) {
+        for (int item : all) {
             if (MglaSideMenuController.isEnabled(context, item)) {
                 visibleItems.add(item);
             } else {
@@ -211,120 +258,219 @@ public class MglaSideMenuElementsActivity extends MglaBaseSettingsActivity {
     }
 
     private void saveFullOrder() {
-        ArrayList<Integer> fullOrder = new ArrayList<>();
-        fullOrder.addAll(visibleItems);
-        fullOrder.addAll(hiddenItems);
-        MglaSideMenuController.saveOrder(getContext(), fullOrder);
+        ArrayList<Integer> full = new ArrayList<>();
+        full.addAll(visibleItems);
+        full.addAll(hiddenItems);
+        MglaSideMenuController.saveOrder(getContext(), full);
     }
 
-    private void refreshLists() {
-        if (visibleAdapter != null) visibleAdapter.notifyDataSetChanged();
-        if (hiddenAdapter != null) hiddenAdapter.notifyDataSetChanged();
-    }
-
-    private LinearLayout createBlock(Context context, String title) {
-        return MglaUi.createBlock(context, title);
-    }
-
-    private void setupItemView(FrameLayout container, int item) {
-        container.removeAllViews();
-        container.setPadding(dp(21), dp(12), dp(18), dp(12));
-        container.setMinimumHeight(dp(50));
-
-        if (MglaSideMenuController.isDivider(item)) {
-            ImageView icon = new ImageView(container.getContext());
-            icon.setImageResource(R.drawable.msg_divider_icon);
-            icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
-            container.addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
-
-            TextView label = new TextView(container.getContext());
-            label.setText("Разделитель");
-            label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            container.addView(label, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 0, 0));
+    private void bindRow(ItemCell cell, int itemId, boolean showHandle) {
+        cell.bind(itemId, showHandle);
+        cell.setTag(R.id.object_tag, itemId);
+        if (showHandle) {
+            cell.setReorderTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    RecyclerView.ViewHolder holder = listView.getChildViewHolder(cell);
+                    if (holder != null && itemTouchHelper != null && holder.getAdapterPosition() != RecyclerView.NO_POSITION) {
+                        itemTouchHelper.startDrag(holder);
+                    }
+                }
+                return false;
+            });
         } else {
-            ImageView icon = new ImageView(container.getContext());
-            icon.setImageResource(MglaSideMenuController.getIcon(item));
-            icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.SRC_IN));
-            container.addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
-
-            TextView title = new TextView(container.getContext());
-            title.setText(MglaSideMenuController.getTitle(item));
-            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            container.addView(title, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 0, 0));
+            cell.setReorderTouchListener(null);
         }
     }
 
-    private class VisibleAdapter extends RecyclerListView.SelectionAdapter {
-        private final Context context;
+    private class ItemCell extends FrameLayout {
+        private final ImageView iconView;
+        private final TextView titleView;
+        private final ImageView reorderView;
+        private final LayoutParams titleLp;
 
-        VisibleAdapter(Context context) {
-            this.context = context;
+        ItemCell(Context context) {
+            super(context);
+            setPadding(dp(21), 0, dp(6), 0);
+
+            iconView = new ImageView(context);
+            iconView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            addView(iconView, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+            titleView = new TextView(context);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            titleView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            titleView.setIncludeFontPadding(false);
+            // WRAP_CONTENT height — MATCH_PARENT inside WRAP_CONTENT row measures to 0 and clips text.
+            titleLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                    Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, 0, 48, 0);
+            addView(titleView, titleLp);
+
+            reorderView = new ImageView(context);
+            reorderView.setImageResource(R.drawable.list_reorder);
+            reorderView.setScaleType(ImageView.ScaleType.CENTER);
+            reorderView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chats_pinnedIcon), PorterDuff.Mode.MULTIPLY));
+            reorderView.setContentDescription("Перетащить");
+            addView(reorderView, LayoutHelper.createFrame(40, LayoutHelper.MATCH_PARENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
         }
 
         @Override
-        public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return true;
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(
+                    MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(dp(50), MeasureSpec.EXACTLY)
+            );
+        }
+
+        void bind(int itemId, boolean showHandle) {
+            titleView.setText(MglaSideMenuController.getTitle(itemId));
+            iconView.setImageResource(MglaSideMenuController.getIcon(itemId));
+            int color = MglaSideMenuController.isDivider(itemId)
+                    ? Theme.getColor(Theme.key_windowBackgroundWhiteGrayText)
+                    : Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
+            iconView.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+            reorderView.setVisibility(showHandle ? VISIBLE : GONE);
+            titleLp.rightMargin = showHandle ? dp(44) : dp(12);
+            titleView.setLayoutParams(titleLp);
+        }
+
+        void setReorderTouchListener(OnTouchListener listener) {
+            reorderView.setOnTouchListener(listener);
+        }
+    }
+
+    private class ListAdapter extends RecyclerListView.SelectionAdapter {
+        private final Context context;
+
+        ListAdapter(Context context) {
+            this.context = context;
+        }
+
+        int visibleStart() {
+            return 1;
+        }
+
+        int addDividerPos() {
+            return visibleStart() + size(visibleItems);
+        }
+
+        int gapPos() {
+            return addDividerPos() + 1;
+        }
+
+        int hiddenHeaderPos() {
+            return gapPos() + 1;
+        }
+
+        int hiddenStart() {
+            return hiddenHeaderPos() + 1;
+        }
+
+        int hintPos() {
+            return hiddenStart() + size(hiddenItems);
+        }
+
+        private int size(ArrayList<?> list) {
+            return list == null ? 0 : list.size();
         }
 
         @Override
         public int getItemCount() {
-            return visibleItems == null ? 0 : visibleItems.size();
+            return hintPos() + 1;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (position == 0 || position == hiddenHeaderPos()) {
+                return TYPE_HEADER;
+            }
+            if (position == addDividerPos()) {
+                return TYPE_ADD_DIVIDER;
+            }
+            if (position == gapPos()) {
+                return TYPE_GAP;
+            }
+            if (position == hintPos()) {
+                return TYPE_HINT;
+            }
+            if (position >= visibleStart() && position < addDividerPos()) {
+                return TYPE_VISIBLE;
+            }
+            return TYPE_HIDDEN;
+        }
+
+        @Override
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
+            int type = holder.getItemViewType();
+            return type == TYPE_VISIBLE || type == TYPE_HIDDEN || type == TYPE_ADD_DIVIDER;
         }
 
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            FrameLayout container = new FrameLayout(context);
-            container.setLayoutParams(new RecyclerView.LayoutParams(
-                    RecyclerView.LayoutParams.MATCH_PARENT,
-                    RecyclerView.LayoutParams.WRAP_CONTENT));
-            return new RecyclerListView.Holder(container);
+            View view;
+            switch (viewType) {
+                case TYPE_HEADER: {
+                    HeaderCell header = new HeaderCell(context, 22);
+                    header.setBackground(null);
+                    view = header;
+                    break;
+                }
+                case TYPE_GAP: {
+                    GraySectionCell gap = new GraySectionCell(context);
+                    gap.setText("");
+                    view = gap;
+                    break;
+                }
+                case TYPE_ADD_DIVIDER: {
+                    TextView btn = new TextView(context);
+                    btn.setText("+ Добавить разделитель");
+                    btn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+                    btn.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText));
+                    btn.setGravity(Gravity.CENTER_VERTICAL);
+                    btn.setPadding(dp(21), dp(14), dp(21), dp(14));
+                    btn.setMinHeight(dp(48));
+                    btn.setBackground(null);
+                    view = btn;
+                    break;
+                }
+                case TYPE_HINT: {
+                    TextInfoPrivacyCell hint = new TextInfoPrivacyCell(context);
+                    hint.setText("Зажмите иконку справа, чтобы переставить. Нажмите на пункт — скрыть или показать.\nШапка профиля, режим призрака и аккаунты всегда на панели.");
+                    hint.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                    view = hint;
+                    break;
+                }
+                case TYPE_VISIBLE:
+                case TYPE_HIDDEN:
+                default: {
+                    ItemCell cell = new ItemCell(context);
+                    cell.setLayoutParams(new RecyclerView.LayoutParams(
+                            RecyclerView.LayoutParams.MATCH_PARENT, dp(50)));
+                    view = cell;
+                    break;
+                }
+            }
+            return new RecyclerListView.Holder(view);
         }
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            FrameLayout container = (FrameLayout) holder.itemView;
-            container.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
-            int item = visibleItems.get(position);
-            setupItemView(container, item);
-        }
-    }
-
-    private class HiddenAdapter extends RecyclerListView.SelectionAdapter {
-        private final Context context;
-
-        HiddenAdapter(Context context) {
-            this.context = context;
-        }
-
-        @Override
-        public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return true;
-        }
-
-        @Override
-        public int getItemCount() {
-            return hiddenItems == null ? 0 : hiddenItems.size();
-        }
-
-        @NonNull
-        @Override
-        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            FrameLayout container = new FrameLayout(context);
-            container.setLayoutParams(new RecyclerView.LayoutParams(
-                    RecyclerView.LayoutParams.MATCH_PARENT,
-                    RecyclerView.LayoutParams.WRAP_CONTENT));
-            return new RecyclerListView.Holder(container);
-        }
-
-        @Override
-        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            FrameLayout container = (FrameLayout) holder.itemView;
-            container.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
-            int item = hiddenItems.get(position);
-            setupItemView(container, item);
+            int type = holder.getItemViewType();
+            if (type == TYPE_HEADER) {
+                ((HeaderCell) holder.itemView).setText(position == 0 ? "Видимые" : "Скрытые");
+                holder.itemView.setTag(R.id.object_tag, null);
+            } else if (type == TYPE_VISIBLE) {
+                int index = position - visibleStart();
+                bindRow((ItemCell) holder.itemView, visibleItems.get(index), true);
+            } else if (type == TYPE_HIDDEN) {
+                int index = position - hiddenStart();
+                bindRow((ItemCell) holder.itemView, hiddenItems.get(index), false);
+            } else {
+                holder.itemView.setTag(R.id.object_tag, null);
+            }
         }
     }
 }

@@ -271,7 +271,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         TextInfoPrivacyCell statsNote = new TextInfoPrivacyCell(context);
-        statsNote.setText("Собираются только обезличенные модели устройств и частота использования функций, а также Telegram ID — для выдачи подписки. Личные сообщения, контакты и содержимое чатов не собираются.");
+        statsNote.setText("Собираются только обезличенные модели устройств, анонимный отпечаток устройства (чтобы обновление APK не считалось новой установкой) и частота использования функций, а также Telegram ID — для выдачи подписки. Личные сообщения, контакты и содержимое чатов не собираются.");
         statsNote.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
         rootLayout.addView(statsNote, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, AndroidUtilities.navigationBarHeight + 8));
 

@@ -60,15 +60,13 @@ public class MglaSideMenuSettingsActivity extends MglaBaseSettingsActivity {
 
         rootLayout.addView(toggleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
-        LinearLayout elementsBlock = createBlock(context, "Элементы");
-
+        LinearLayout elementsBlock = MglaUi.createBlock(context, "Элементы");
         TextSettingsCell configureElementsCell = new TextSettingsCell(context);
         configureElementsCell.setBackground(null);
         configureElementsCell.setText("Настроить элементы", true);
         configureElementsCell.setCanDisable(false);
         configureElementsCell.setOnClickListener(v -> presentFragment(new MglaSideMenuElementsActivity()));
         elementsBlock.addView(configureElementsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
         rootLayout.addView(elementsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         TextInfoPrivacyCell infoCell = new TextInfoPrivacyCell(context);
@@ -78,9 +76,5 @@ public class MglaSideMenuSettingsActivity extends MglaBaseSettingsActivity {
 
         fragmentView = rootLayout;
         return fragmentView;
-    }
-
-    private LinearLayout createBlock(Context context, String title) {
-        return MglaUi.createBlock(context, title);
     }
 }
