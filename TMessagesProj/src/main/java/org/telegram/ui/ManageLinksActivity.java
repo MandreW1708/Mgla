@@ -417,11 +417,7 @@ public class ManageLinksActivity extends BaseFragment implements NotificationCen
                         loadLinks(false);
                     }
 
-                    if (updateByDiffUtils && listViewAdapter != null && listView.getChildCount() > 0) {
-                        updateRecyclerViewAnimated(callback);
-                    } else {
-                        updateRows(true);
-                    }
+                    updateRows(true);
                 }));
             });
             getConnectionsManager().bindRequestToGuid(reqId, getClassGuid());
@@ -587,13 +583,7 @@ public class ManageLinksActivity extends BaseFragment implements NotificationCen
                 }
             }
         });
-        recyclerItemsEnterAnimator = new RecyclerItemsEnterAnimator(listView, false);
-        DefaultItemAnimator defaultItemAnimator = new DefaultItemAnimator();
-        defaultItemAnimator.setDurations(420);
-        defaultItemAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-        defaultItemAnimator.setDelayAnimations(false);
-        defaultItemAnimator.setSupportsChangeAnimations(false);
-        listView.setItemAnimator(defaultItemAnimator);
+        listView.setItemAnimator(null);
         listView.setVerticalScrollbarPosition(LocaleController.isRTL ? RecyclerListView.SCROLLBAR_POSITION_LEFT : RecyclerListView.SCROLLBAR_POSITION_RIGHT);
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
@@ -1559,14 +1549,7 @@ public class ManageLinksActivity extends BaseFragment implements NotificationCen
     };
 
     private void updateRecyclerViewAnimated(DiffCallback callback) {
-        if (isPaused || listViewAdapter == null || listView == null) {
-            updateRows(true);
-            return;
-        }
-        updateRows(false);
-        callback.fillPositions(callback.newPositionToItem);
-        DiffUtil.calculateDiff(callback).dispatchUpdatesTo(listViewAdapter);
-        AndroidUtilities.updateVisibleRows(listView);
+        updateRows(true);
     }
 
 
@@ -1752,7 +1735,7 @@ public class ManageLinksActivity extends BaseFragment implements NotificationCen
 
     @Override
     public boolean needDelayOpenAnimation() {
-        return true;
+        return false;
     }
 
     AnimationNotificationsLocker notificationsLocker = new AnimationNotificationsLocker();
