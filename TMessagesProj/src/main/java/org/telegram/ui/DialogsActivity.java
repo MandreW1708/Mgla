@@ -14672,10 +14672,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     private final ArrayList<RectF> iBlur3Positions = new ArrayList<>();
     private final RectF iBlur3PositionActionBar = new RectF();
-    private final RectF iBlur3PositionMainTabs = new RectF(); {
-        iBlur3Positions.add(iBlur3PositionActionBar);
-        iBlur3Positions.add(iBlur3PositionMainTabs);
-    }
+    private final RectF iBlur3PositionMainTabs = new RectF();
+    private final RectF iBlur3PositionContent = new RectF();
 
     private void blur3_InvalidateBlur() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || scrollableViewNoiseSuppressor == null || fragmentView == null || actionBar == null) {
@@ -14717,7 +14715,25 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             hasBottomBlur = true;
         }
 
-        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, hasBottomBlur ? 2 : 1);
+        final boolean sideMenuVisible = isMglaSideMenuVisibleForBlur();
+        if (sideMenuVisible) {
+            // While the Mgla side menu is on screen, also capture the middle of the
+            // list so the panel glass has real blurred content behind its whole area.
+            final float contentTop = Math.max(0f, iBlur3PositionActionBar.bottom);
+            final float contentBottom = hasBottomBlur ? iBlur3PositionMainTabs.top : fragmentView.getMeasuredHeight();
+            iBlur3PositionContent.set(0, contentTop, fragmentView.getMeasuredWidth(), Math.max(contentTop, contentBottom));
+        }
+
+        iBlur3Positions.clear();
+        iBlur3Positions.add(iBlur3PositionActionBar);
+        if (hasBottomBlur) {
+            iBlur3Positions.add(iBlur3PositionMainTabs);
+        }
+        if (sideMenuVisible) {
+            iBlur3Positions.add(iBlur3PositionContent);
+        }
+
+        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, iBlur3Positions.size());
         scrollableViewNoiseSuppressor.invalidateResultRenderNodes(iBlur3Capture, fragmentView.getMeasuredWidth(), fragmentView.getMeasuredHeight());
 
         if (iBlur3SourceGlassFrosted != null) {
@@ -14728,6 +14744,16 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             iBlur3SourceGlass.setSize(fragmentView.getMeasuredWidth(), fragmentView.getMeasuredHeight());
             iBlur3SourceGlass.updateDisplayListIfNeeded();
         }
+    }
+
+    private boolean isMglaSideMenuVisibleForBlur() {
+        return MglaSideMenuConfig.isGlassEnabled()
+                && getParentActivity() instanceof LaunchActivity
+                && ((LaunchActivity) getParentActivity()).isMglaSideMenuVisible();
+    }
+
+    public void invalidateBlur3ForSideMenu() {
+        blur3_InvalidateBlur();
     }
 
     private int calculateListViewPaddingBottom() {

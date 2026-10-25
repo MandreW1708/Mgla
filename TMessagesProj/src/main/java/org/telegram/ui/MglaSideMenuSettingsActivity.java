@@ -58,6 +58,18 @@ public class MglaSideMenuSettingsActivity extends MglaBaseSettingsActivity {
         });
         toggleBlock.addView(enableCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        toggleBlock.addView(MglaUi.createDivider(context));
+
+        TextCheckCell glassCell = new TextCheckCell(context);
+        glassCell.setBackground(null);
+        glassCell.setTextAndCheck("Жидкое стекло", MglaSideMenuConfig.isGlassEnabled(), false);
+        glassCell.setOnClickListener(v -> {
+            boolean newVal = !MglaSideMenuConfig.isGlassEnabled();
+            MglaSideMenuConfig.setGlassEnabled(newVal);
+            glassCell.setChecked(newVal);
+        });
+        toggleBlock.addView(glassCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         rootLayout.addView(toggleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
 
         LinearLayout elementsBlock = MglaUi.createBlock(context, "Элементы");

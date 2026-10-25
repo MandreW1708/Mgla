@@ -141,7 +141,7 @@ public class MglaSideMenuController {
             case ITEM_WALLET: return R.drawable.settings_wallet;
             case ITEM_MUSIC: return R.drawable.msg_filled_data_music;
             case ITEM_TASKS: return R.drawable.msg_folders;
-            case ITEM_AI: return R.drawable.input_ai_star;
+            case ITEM_AI: return R.drawable.mgla_ic_ai_star;
         }
         return 0;
     }

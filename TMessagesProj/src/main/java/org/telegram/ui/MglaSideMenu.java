@@ -650,6 +650,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         isOpen = false;
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
+        invalidateDialogsBlur();
         ensurePanelLaidOut(() -> {
             float closed = getClosedTranslationX();
             panelHost.setTranslationX(closed);
@@ -797,11 +798,15 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         drawerIntercepted = true;
         dragOpening = true;
         cancelAnimation();
+        applySystemInsets();
         registerObserver();
+        attachLiquidGlass();
+        rebuildNavSection();
         refreshData();
         bringMenuToFront();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
+        invalidateDialogsBlur();
         isOpen = false;
         float closed = getClosedTranslationX();
         panelHost.setTranslationX(closed);
@@ -978,6 +983,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         scrim.setVisibility(VISIBLE);
         syncGlassSourceOffset();
         invalidateGlass();
+        invalidateDialogsBlur();
     }
 
     private void hideImmediate() {
@@ -991,6 +997,20 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         updateAnimatedViewsProgress();
         setVisibility(GONE);
         scrim.setVisibility(GONE);
+        invalidateDialogsBlur();
+    }
+
+    private void invalidateDialogsBlur() {
+        BaseFragment last = LaunchActivity.getLastFragment();
+        DialogsActivity dialogs = null;
+        if (last instanceof DialogsActivity) {
+            dialogs = (DialogsActivity) last;
+        } else if (last instanceof MainTabsActivity) {
+            dialogs = ((MainTabsActivity) last).getDialogsActivity();
+        }
+        if (dialogs != null) {
+            dialogs.invalidateBlur3ForSideMenu();
+        }
     }
 
     private Drawable createRectSelector() {
@@ -1323,6 +1343,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             GradientDrawable accountsBg = new GradientDrawable();
             accountsBg.setCornerRadius(dp(18));
             accountsBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhite), dark ? 0x1A : 0x59));
+            accountsBg.setStroke(dp(1), ColorUtils.blendARGB(accent, Color.BLACK, 0.25f));
             accountsBlock.setBackground(accountsBg);
         }
 
@@ -1356,6 +1377,11 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void attachLiquidGlass() {
+        if (!MglaSideMenuConfig.isGlassEnabled()) {
+            panelGlass = null;
+            glassSourceRoot = null;
+            return;
+        }
         BlurredBackgroundDrawableViewFactory factory = resolveGlassFactory();
         BaseFragment last = LaunchActivity.getLastFragment();
         glassSourceRoot = last != null ? last.getFragmentView() : null;
