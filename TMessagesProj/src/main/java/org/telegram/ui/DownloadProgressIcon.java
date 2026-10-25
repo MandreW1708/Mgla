@@ -3,71 +3,61 @@ package org.telegram.ui;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
+import android.graphics.Path;
 import android.view.View;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DownloadController;
 import org.telegram.messenger.FileLoader;
-import org.telegram.messenger.ImageReceiver;
-import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
-import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Components.RLottieDrawable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 
 public class DownloadProgressIcon extends View implements NotificationCenter.NotificationCenterDelegate {
 
-    Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    Paint paint2 = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private int currentAccount;
-    ArrayList<ProgressObserver> currentListeners = new ArrayList<>();
-    float progress;
-    float currentProgress;
-    float progressDt;
+    private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint paint2 = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path arrowPath = new Path();
+    private final Path trayPath = new Path();
 
-    ImageReceiver downloadImageReceiver = new ImageReceiver(this);
-    ImageReceiver downloadCompleteImageReceiver = new ImageReceiver(this);
-    RLottieDrawable downloadDrawable;
-    RLottieDrawable downloadCompleteDrawable;
-    boolean showCompletedIcon;
-    boolean hasUnviewedDownloads;
-    int currentColor;
-    private boolean wasDrawn;
+    private final int currentAccount;
+    private final ArrayList<ProgressObserver> currentListeners = new ArrayList<>();
+    private float progress;
+    private float currentProgress;
+    private float progressDt;
+    private int currentColor;
 
     public DownloadProgressIcon(int currentAccount, Context context) {
         super(context);
         this.currentAccount = currentAccount;
-        downloadImageReceiver.ignoreNotifications = true;
-        downloadCompleteImageReceiver.ignoreNotifications = true;
 
-        downloadDrawable = new RLottieDrawable(R.raw.download_progress, AndroidUtilities.dp(28), AndroidUtilities.dp(28), true, null);
-        downloadCompleteDrawable = new RLottieDrawable(R.raw.download_finish, AndroidUtilities.dp(28), AndroidUtilities.dp(28), true, null);
+        iconPaint.setStyle(Paint.Style.STROKE);
+        iconPaint.setStrokeWidth(AndroidUtilities.dp(2f));
+        iconPaint.setStrokeCap(Paint.Cap.ROUND);
+        iconPaint.setStrokeJoin(Paint.Join.ROUND);
 
-        downloadImageReceiver.setImageBitmap(downloadDrawable);
-        downloadCompleteImageReceiver.setImageBitmap(downloadCompleteDrawable);
-
-        downloadImageReceiver.setAutoRepeat(1);
-        downloadDrawable.setAutoRepeat(1);
-        downloadDrawable.start();
+        paint.setStyle(Paint.Style.FILL);
+        paint2.setStyle(Paint.Style.FILL);
     }
 
     public void updateColors() {
-        downloadDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_actionBarDefaultIcon), PorterDuff.Mode.SRC_IN));
-        downloadCompleteDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_actionBarDefaultIcon), PorterDuff.Mode.SRC));
+        currentColor = Theme.getColor(Theme.key_actionBarDefaultIcon);
+        iconPaint.setColor(currentColor);
+        paint.setColor(currentColor);
+        paint2.setColor(currentColor);
+        paint2.setAlpha(70);
         invalidate();
     }
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(heightMeasureSpec), MeasureSpec.EXACTLY));
-        int padding = AndroidUtilities.dp(15);
-        downloadImageReceiver.setImageCoords(padding, padding, getMeasuredWidth() - padding * 2, getMeasuredHeight() - padding * 2);
-        downloadCompleteImageReceiver.setImageCoords(padding, padding, getMeasuredWidth() - padding * 2, getMeasuredHeight() - padding * 2);
+        super.onMeasure(
+            MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(heightMeasureSpec), MeasureSpec.EXACTLY)
+        );
     }
 
     @Override
@@ -77,16 +67,18 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
             return;
         }
 
-        if (currentColor != Theme.getColor(Theme.key_actionBarDefaultIcon)) {
-            currentColor = Theme.getColor(Theme.key_actionBarDefaultIcon);
-            paint.setColor(Theme.getColor(Theme.key_actionBarDefaultIcon));
-            paint2.setColor(Theme.getColor(Theme.key_actionBarDefaultIcon));
-            downloadImageReceiver.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_actionBarDefaultIcon), PorterDuff.Mode.SRC_IN));
-            downloadCompleteImageReceiver.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_actionBarDefaultIcon), PorterDuff.Mode.SRC_IN));
-            paint2.setAlpha(100);
+        int themeColor = Theme.getColor(Theme.key_actionBarDefaultIcon);
+        if (currentColor != themeColor) {
+            currentColor = themeColor;
+            iconPaint.setColor(currentColor);
+            paint.setColor(currentColor);
+            paint2.setColor(currentColor);
+            paint2.setAlpha(70);
         }
 
-        if (currentProgress != progress) {
+        final boolean isDownloading = !currentListeners.isEmpty();
+
+        if (isDownloading && currentProgress != progress) {
             currentProgress += progressDt;
             if (progressDt > 0 && currentProgress > progress) {
                 currentProgress = progress;
@@ -97,38 +89,54 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
             }
         }
 
-        int cy = getMeasuredHeight() / 2 + AndroidUtilities.dp(8);
-        float r = AndroidUtilities.dp(1f);
+        final float cx = getMeasuredWidth() / 2f;
+        // Смещаем иконку чуть выше только когда активен нижний индикатор прогресса
+        final float cy = isDownloading
+                ? (getMeasuredHeight() / 2f - AndroidUtilities.dp(2.5f))
+                : (getMeasuredHeight() / 2f);
 
-        float startPadding = AndroidUtilities.dp(16);
-        float width = getMeasuredWidth() - startPadding * 2;
-        AndroidUtilities.rectTmp.set(startPadding, cy - r, getMeasuredWidth() - startPadding, cy + r);
-        canvas.drawRoundRect(AndroidUtilities.rectTmp, r, r, paint2);
+        // --- Аккуратная статичная векторная иконка загрузки (стрелка + лоток ~21x19dp) ---
+        // 1. Вертикальный стержень стрелки
+        canvas.drawLine(cx, cy - AndroidUtilities.dp(8f), cx, cy + AndroidUtilities.dp(3.0f), iconPaint);
 
-        AndroidUtilities.rectTmp.set(startPadding, cy - r, startPadding + width * currentProgress, cy + r);
-        canvas.drawRoundRect(AndroidUtilities.rectTmp, r, r, paint);
+        // 2. Наконечник стрелки (шеврон)
+        arrowPath.reset();
+        arrowPath.moveTo(cx - AndroidUtilities.dp(5.5f), cy - AndroidUtilities.dp(2.2f));
+        arrowPath.lineTo(cx, cy + AndroidUtilities.dp(3.0f));
+        arrowPath.lineTo(cx + AndroidUtilities.dp(5.5f), cy - AndroidUtilities.dp(2.2f));
+        canvas.drawPath(arrowPath, iconPaint);
 
-        canvas.save();
-        canvas.clipRect(0, 0, getMeasuredWidth(), cy - r);
-        if (progress != 1f) {
-            showCompletedIcon = false;
-        }
-        if (showCompletedIcon) {
-            downloadCompleteImageReceiver.draw(canvas);
-        } else {
-            downloadImageReceiver.draw(canvas);
-        }
+        // 3. Лоток под стрелкой со скругленными краями (ширина 19dp)
+        final float trayLeft = cx - AndroidUtilities.dp(9.5f);
+        final float trayRight = cx + AndroidUtilities.dp(9.5f);
+        final float trayTop = cy + AndroidUtilities.dp(4.0f);
+        final float trayBottom = cy + AndroidUtilities.dp(8.8f);
+        final float cornerR = AndroidUtilities.dp(3.0f);
 
-        if (progress == 1f && !showCompletedIcon) {
-            if (downloadDrawable.getCurrentFrame() == 0) {
-                downloadCompleteDrawable.setCurrentFrame(0, false);
-                downloadCompleteDrawable.start();
-                showCompletedIcon = true;
-            }
-        }
-        canvas.restore();
-        if (getAlpha() != 0) {
-            wasDrawn = true;
+        trayPath.reset();
+        trayPath.moveTo(trayLeft, trayTop);
+        trayPath.lineTo(trayLeft, trayBottom - cornerR);
+        trayPath.quadTo(trayLeft, trayBottom, trayLeft + cornerR, trayBottom);
+        trayPath.lineTo(trayRight - cornerR, trayBottom);
+        trayPath.quadTo(trayRight, trayBottom, trayRight, trayBottom - cornerR);
+        trayPath.lineTo(trayRight, trayTop);
+        canvas.drawPath(trayPath, iconPaint);
+
+        // --- Индикатор прогресса внизу (только когда реально идет скачивание) ---
+        if (isDownloading) {
+            final float barY = getMeasuredHeight() - AndroidUtilities.dp(8.5f);
+            final float barR = AndroidUtilities.dp(1.25f);
+            final float startPadding = AndroidUtilities.dp(13f);
+            final float totalWidth = getMeasuredWidth() - startPadding * 2;
+
+            // Фоновая подложка трека
+            AndroidUtilities.rectTmp.set(startPadding, barY - barR, getMeasuredWidth() - startPadding, barY + barR);
+            canvas.drawRoundRect(AndroidUtilities.rectTmp, barR, barR, paint2);
+
+            // Активный прогресс скачивания
+            final float activeWidth = Math.max(barR * 2, totalWidth * Math.max(0f, Math.min(1f, currentProgress)));
+            AndroidUtilities.rectTmp.set(startPadding, barY - barR, startPadding + activeWidth, barY + barR);
+            canvas.drawRoundRect(AndroidUtilities.rectTmp, barR, barR, paint);
         }
     }
 
@@ -137,8 +145,6 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
         super.onAttachedToWindow();
         updateDownloadingListeners();
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.onDownloadingFilesChanged);
-        downloadImageReceiver.onAttachedToWindow();
-        downloadCompleteImageReceiver.onAttachedToWindow();
     }
 
     @Override
@@ -146,17 +152,14 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
         super.onDetachedFromWindow();
         detachCurrentListeners();
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.onDownloadingFilesChanged);
-        downloadImageReceiver.onDetachedFromWindow();
-        downloadCompleteImageReceiver.onDetachedFromWindow();
     }
-
 
     private void updateDownloadingListeners() {
         DownloadController downloadController = DownloadController.getInstance(currentAccount);
         HashMap<String, ProgressObserver> observerHashMap = new HashMap<>();
         for (int i = 0; i < currentListeners.size(); i++) {
             observerHashMap.put(currentListeners.get(i).fileName, currentListeners.get(i));
-            DownloadController.getInstance(currentAccount).removeLoadingFileObserver(currentListeners.get(i));
+            downloadController.removeLoadingFileObserver(currentListeners.get(i));
         }
         currentListeners.clear();
         for (int i = 0; i < downloadController.downloadingFiles.size(); i++) {
@@ -166,25 +169,26 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
                 if (progressObserver == null) {
                     progressObserver = new ProgressObserver(filename);
                 }
-                DownloadController.getInstance(currentAccount).addLoadingFileObserver(filename, progressObserver);
+                downloadController.addLoadingFileObserver(filename, progressObserver);
                 currentListeners.add(progressObserver);
             }
         }
-        if (currentListeners.size() == 0 && !wasDrawn) {
-            if (DownloadController.getInstance(currentAccount).hasUnviewedDownloads()) {
-                progress = 1f;
-                currentProgress = 1f;
-                showCompletedIcon = true;
-            } else {
-                progress = 0;
-                currentProgress = 0;
-                showCompletedIcon = false;
-            }
+        if (currentListeners.isEmpty()) {
+            progress = 0f;
+            currentProgress = 0f;
+            progressDt = 0f;
         }
+        invalidate();
     }
 
     public void updateProgress() {
-        MessagesStorage messagesStorage = MessagesStorage.getInstance(currentAccount);
+        if (currentListeners.isEmpty()) {
+            progress = 0f;
+            currentProgress = 0f;
+            progressDt = 0f;
+            invalidate();
+            return;
+        }
         long total = 0;
         long downloaded = 0;
         for (int i = 0; i < currentListeners.size(); i++) {
@@ -192,7 +196,7 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
             downloaded += currentListeners.get(i).downloaded;
         }
         if (total == 0) {
-            progress = 1f;
+            progress = 0f;
         } else {
             progress = downloaded / (float) total;
         }
@@ -207,8 +211,9 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
     }
 
     private void detachCurrentListeners() {
+        DownloadController downloadController = DownloadController.getInstance(currentAccount);
         for (int i = 0; i < currentListeners.size(); i++) {
-            DownloadController.getInstance(currentAccount).removeLoadingFileObserver(currentListeners.get(i));
+            downloadController.removeLoadingFileObserver(currentListeners.get(i));
         }
         currentListeners.clear();
     }
@@ -222,7 +227,6 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
     }
 
     private class ProgressObserver implements DownloadController.FileDownloadProgressListener {
-
         long total;
         long downloaded;
         private final String fileName;
@@ -233,12 +237,10 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
 
         @Override
         public void onFailedDownload(String fileName, boolean canceled) {
-
         }
 
         @Override
         public void onSuccessDownload(String fileName) {
-
         }
 
         @Override
@@ -250,7 +252,6 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
 
         @Override
         public void onProgressUpload(String fileName, long downloadSize, long totalSize, boolean isEncrypted) {
-
         }
 
         @Override
@@ -261,17 +262,11 @@ public class DownloadProgressIcon extends View implements NotificationCenter.Not
 
     @Override
     public void setAlpha(float alpha) {
-        if (alpha == 0) {
-            wasDrawn = false;
-        }
         super.setAlpha(alpha);
     }
 
     @Override
     public void setVisibility(int visibility) {
-        if (visibility != View.VISIBLE) {
-            wasDrawn = false;
-        }
         super.setVisibility(visibility);
     }
 }

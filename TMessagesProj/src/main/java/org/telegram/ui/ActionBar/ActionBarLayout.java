@@ -1386,6 +1386,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         if (!backAnimation) {
             if (fragmentsStack.size() < 2) {
                 checkBlackScreen("onSlideAnimationEnd exit");
+                resetSlideVisualState();
                 return;
             }
             BaseFragment lastFragment = fragmentsStack.get(fragmentsStack.size() - 1);
@@ -1440,9 +1441,16 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             }
             layoutToIgnore = null;
         }
+        resetSlideVisualState();
+    }
+
+    private void resetSlideVisualState() {
         containerViewBack.setVisibility(View.INVISIBLE);
         startedTracking = false;
         animationInProgress = false;
+        predictiveBackInProgress = false;
+        predictiveBackHasProgress = false;
+        predictiveInput = false;
         predictiveBackStyle = MglaGlassConfig.PREDICTIVE_BACK_DEFAULT;
         spatialAnimProgress = -1f;
         containerView.setTranslationX(0);
@@ -1450,6 +1458,67 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         containerViewBack.setTranslationX(0);
         clearSlideHardwareLayers();
         setInnerTranslationX(0);
+    }
+
+    private long slideStateStartTime;
+
+    // The fork's spatial back animations render both containers via canvas transforms.
+    // If a completion callback is ever lost (aborted system back gesture, a fragment's
+    // custom transition animator that never ends, a half-registered back gesture), two
+    // layers stay visible and all touches stay intercepted — recover forcefully.
+    // Slide animations never legitimately last longer than a few hundred ms, so a
+    // total-duration cap is safe even when a runaway animator keeps "reporting activity".
+    private void checkSlideAnimationWatchdog() {
+        final boolean slideActive = startedTracking || animationInProgress
+                || predictiveBackInProgress || spatialOpenInProgress;
+        if (!slideActive) {
+            slideStateStartTime = 0;
+            return;
+        }
+        final long now = System.currentTimeMillis();
+        if (slideStateStartTime == 0) {
+            slideStateStartTime = now;
+            return;
+        }
+        if (now - slideStateStartTime < 2500) {
+            return;
+        }
+        slideStateStartTime = 0;
+        resetStuckSlideState();
+    }
+
+    private void resetStuckSlideState() {
+        if (backAnimator != null) {
+            AnimatorSet animator = backAnimator;
+            backAnimator = null;
+            animator.removeAllListeners();
+            animator.cancel();
+        }
+        if (reverseOpenAnimation != null) {
+            AnimatorSet animator = reverseOpenAnimation;
+            reverseOpenAnimation = null;
+            animator.removeAllListeners();
+            animator.cancel();
+        }
+        predictiveBackInProgress = false;
+        predictiveBackHasProgress = false;
+        predictiveInput = false;
+        predictiveBackStyle = MglaGlassConfig.PREDICTIVE_BACK_DEFAULT;
+        predictiveBackProgress = 0f;
+        spatialOpenInProgress = false;
+        spatialAnimProgress = -1f;
+        startedTracking = false;
+        maybeStartTracking = false;
+        beginTrackingSent = false;
+        animationInProgress = false;
+        layoutToIgnore = null;
+        containerView.setTranslationX(0);
+        containerView.setAlpha(1.0f);
+        containerViewBack.setTranslationX(0);
+        containerViewBack.setVisibility(View.INVISIBLE);
+        clearSlideHardwareLayers();
+        setInnerTranslationX(0);
+        invalidate();
     }
 
     private void clearSlideHardwareLayers() {
@@ -2458,6 +2527,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         if (transitionAnimationInProgress && (transitionAnimationStartTime < System.currentTimeMillis() - 1500 || inPreviewMode)) {
             onAnimationEndCheck(true);
         }
+        checkSlideAnimationWatchdog();
         return transitionAnimationInProgress;
     }
 
