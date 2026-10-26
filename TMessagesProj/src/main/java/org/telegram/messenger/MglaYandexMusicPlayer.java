@@ -51,6 +51,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     private boolean observersRegistered;
     /** After a one-shot track ends, start wave seeded by this track id. */
     private String waveSeedAfterQueue;
+    private long lastProgressNotifyMs;
 
     private MglaYandexMusicPlayer() {
         ensureObservers();
@@ -96,11 +97,17 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     }
 
     private void notifyProgress(long positionMs, long durationMs) {
-        AndroidUtilities.runOnUIThread(() -> {
+        if (Thread.currentThread() == ApplicationLoader.applicationHandler.getLooper().getThread()) {
             for (PlayerListener l : listeners) {
                 l.onProgress(positionMs, durationMs);
             }
-        });
+        } else {
+            AndroidUtilities.runOnUIThread(() -> {
+                for (PlayerListener l : listeners) {
+                    l.onProgress(positionMs, durationMs);
+                }
+            });
+        }
     }
 
     private void notifyQueueChanged() {
@@ -769,7 +776,11 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         } else if (id == NotificationCenter.messagePlayingProgressDidChanged) {
             MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
             if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
-                notifyProgress(getCurrentPosition(), getDuration());
+                long now = android.os.SystemClock.uptimeMillis();
+                if (now - lastProgressNotifyMs >= 45) {
+                    lastProgressNotifyMs = now;
+                    notifyProgress(getCurrentPosition(), getDuration());
+                }
             }
         } else if (id == NotificationCenter.playerDidStartPlaying) {
             // Non-Yandex VideoPlayer started — pause Yandex via MediaController already handled by MediaController

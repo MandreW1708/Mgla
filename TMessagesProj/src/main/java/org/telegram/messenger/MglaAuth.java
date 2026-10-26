@@ -28,9 +28,11 @@ public final class MglaAuth {
     private static final String KEY_IID = "auth_iid";
 
     private static final long REFRESH_SKEW_MS = 5L * 60L * 1000L;
+    private static final long FAILURE_COOLDOWN_MS = 60L * 1000L;
     private static final Object lock = new Object();
     private static boolean initStarted;
     private static boolean ensuring;
+    private static volatile long lastFailureMs;
 
     private MglaAuth() {
     }
@@ -71,15 +73,18 @@ public final class MglaAuth {
         if (!TextUtils.isEmpty(cached)) {
             return cached;
         }
-        // Schedule refresh in background; return legacy immediately so connects don't stall.
-        try {
-            Utilities.globalQueue.postRunnable(() -> {
-                try {
-                    ensureAccessToken(false);
-                } catch (Throwable ignored) {
-                }
-            });
-        } catch (Throwable ignored) {
+        long now = System.currentTimeMillis();
+        if (now - lastFailureMs > FAILURE_COOLDOWN_MS) {
+            // Schedule refresh in background; return legacy immediately so connects don't stall.
+            try {
+                Utilities.globalQueue.postRunnable(() -> {
+                    try {
+                        ensureAccessToken(false);
+                    } catch (Throwable ignored) {
+                    }
+                });
+            } catch (Throwable ignored) {
+            }
         }
         return legacyFallbackToken();
     }
@@ -116,11 +121,14 @@ public final class MglaAuth {
             if (ensuring) {
                 return;
             }
+            long now = System.currentTimeMillis();
+            if (!force && now - lastFailureMs < FAILURE_COOLDOWN_MS) {
+                return;
+            }
             SharedPreferences prefs = prefs();
             if (prefs == null) {
                 return;
             }
-            long now = System.currentTimeMillis();
             String access = prefs.getString(KEY_ACCESS, null);
             long exp = prefs.getLong(KEY_ACCESS_EXPIRES_AT, 0);
             if (!force && !TextUtils.isEmpty(access) && exp - REFRESH_SKEW_MS > now) {
@@ -153,12 +161,14 @@ public final class MglaAuth {
                 }
             }
             if (body == null) {
+                lastFailureMs = System.currentTimeMillis();
                 return;
             }
             String newAccess = body.optString("access_token", "");
             String newRefresh = body.optString("refresh_token", "");
             int expiresIn = body.optInt("expires_in", 0);
             if (TextUtils.isEmpty(newAccess) || TextUtils.isEmpty(newRefresh) || expiresIn <= 0) {
+                lastFailureMs = System.currentTimeMillis();
                 return;
             }
             prefs.edit()
@@ -167,7 +177,9 @@ public final class MglaAuth {
                 .putString(KEY_IID, iid)
                 .putLong(KEY_ACCESS_EXPIRES_AT, System.currentTimeMillis() + expiresIn * 1000L)
                 .apply();
+            lastFailureMs = 0;
         } catch (Throwable e) {
+            lastFailureMs = System.currentTimeMillis();
             FileLog.e("MglaAuth ensure failed", e);
         } finally {
             synchronized (lock) {

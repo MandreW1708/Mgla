@@ -30,6 +30,8 @@ public final class MglaMusicImageHelper {
     private static final int DISK_COVER_SIDE = 240; // good on xxhdpi lists, ~30–60 KB JPEG each
     private static final int JPEG_QUALITY = 82;
 
+    public static final DispatchQueue musicImageQueue = new DispatchQueue("mglaMusicImageQueue");
+
     private static final LruCache<String, Bitmap> memoryCache = new LruCache<String, Bitmap>(CACHE_SIZE) {
         @Override
         protected int sizeOf(String key, Bitmap bitmap) {
@@ -126,7 +128,7 @@ public final class MglaMusicImageHelper {
             imageView.setImageResource(placeholderResId);
         }
 
-        Utilities.globalQueue.postRunnable(() -> {
+        musicImageQueue.postRunnable(() -> {
             try {
                 Bitmap processed = loadProcessedCover(url, roundRadiusDp, maxSide);
                 if (processed != null) {
@@ -161,7 +163,7 @@ public final class MglaMusicImageHelper {
         if (TextUtils.isEmpty(url)) {
             return;
         }
-        Utilities.globalQueue.postRunnable(() -> {
+        musicImageQueue.postRunnable(() -> {
             try {
                 loadProcessedCover(url, 0, DISK_COVER_SIDE);
             } catch (Throwable e) {

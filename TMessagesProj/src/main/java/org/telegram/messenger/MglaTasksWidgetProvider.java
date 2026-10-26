@@ -6,8 +6,11 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.RemoteViews;
+import android.widget.Toast;
 
 import org.telegram.ui.LaunchActivity;
 
@@ -18,6 +21,9 @@ import java.util.Collections;
 import java.util.Locale;
 
 public class MglaTasksWidgetProvider extends AppWidgetProvider {
+
+    public static final String ACTION_COMPLETE_TASK = "org.telegram.messenger.MGLA_TASKS_WIDGET_COMPLETE";
+    public static final String EXTRA_TASK_ID = "extra_task_id";
 
     private static final int[] ITEM_IDS = new int[] {
             R.id.widget_item_1,
@@ -60,7 +66,52 @@ public class MglaTasksWidgetProvider extends AppWidgetProvider {
     };
 
     @Override
+    public void onReceive(Context context, Intent intent) {
+        super.onReceive(context, intent);
+        if (intent == null) {
+            return;
+        }
+        if (ACTION_COMPLETE_TASK.equals(intent.getAction())) {
+            long taskId = intent.getLongExtra(EXTRA_TASK_ID, 0);
+            if (taskId != 0) {
+                final PendingResult pendingResult = goAsync();
+                MglaTasksStorage.getInstance().ensureLoaded(() -> {
+                    try {
+                        MglaTask task = MglaTasksStorage.getInstance().getTask(taskId);
+                        MglaTasksReminderScheduler.completeTask(taskId);
+                        if (task != null && context != null) {
+                            try {
+                                String msg = !TextUtils.isEmpty(task.title)
+                                        ? ("Выполнено: " + task.title)
+                                        : "Задача выполнена";
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+                            } catch (Throwable ignore) {
+                            }
+                        }
+                    } finally {
+                        if (pendingResult != null) {
+                            try {
+                                pendingResult.finish();
+                            } catch (Throwable ignore) {
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
+        MglaTasksStorage storage = MglaTasksStorage.getInstance();
+        if (!storage.isLoaded()) {
+            storage.ensureLoaded(() -> {
+                for (int id : appWidgetIds) {
+                    updateWidget(context, appWidgetManager, id);
+                }
+            });
+            return;
+        }
         for (int id : appWidgetIds) {
             updateWidget(context, appWidgetManager, id);
         }
@@ -74,6 +125,15 @@ public class MglaTasksWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, MglaTasksWidgetProvider.class));
         if (ids == null || ids.length == 0) {
+            return;
+        }
+        MglaTasksStorage storage = MglaTasksStorage.getInstance();
+        if (!storage.isLoaded()) {
+            storage.ensureLoaded(() -> {
+                for (int id : ids) {
+                    updateWidget(context, manager, id);
+                }
+            });
             return;
         }
         for (int id : ids) {
@@ -173,17 +233,19 @@ public class MglaTasksWidgetProvider extends AppWidgetProvider {
                         views.setImageViewResource(CHECK_IDS[a], R.drawable.mgla_widget_checkbox);
                     }
 
-                    // Individual click on this task row
-                    Intent itemIntent = new Intent(context, LaunchActivity.class);
-                    itemIntent.setAction("mgla_task://" + task.id);
-                    itemIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                    PendingIntent itemPending = PendingIntent.getActivity(
+                    // Complete task directly from widget without opening the client
+                    Intent completeIntent = new Intent(context, MglaTasksWidgetProvider.class);
+                    completeIntent.setAction(ACTION_COMPLETE_TASK);
+                    completeIntent.setData(Uri.parse("mgla_task_complete://" + task.id));
+                    completeIntent.putExtra(EXTRA_TASK_ID, task.id);
+                    PendingIntent completePending = PendingIntent.getBroadcast(
                             context,
-                            appWidgetId * 100 + a + 1,
-                            itemIntent,
+                            (int) (task.id ^ (appWidgetId * 100 + a + 1)),
+                            completeIntent,
                             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                     );
-                    views.setOnClickPendingIntent(ITEM_IDS[a], itemPending);
+                    views.setOnClickPendingIntent(CHECK_IDS[a], completePending);
+                    views.setOnClickPendingIntent(ITEM_IDS[a], completePending);
                 } else {
                     views.setViewVisibility(ITEM_IDS[a], View.GONE);
                 }

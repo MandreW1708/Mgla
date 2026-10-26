@@ -16,6 +16,7 @@ import android.graphics.drawable.Drawable;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -48,19 +49,33 @@ public class MglaYandexMusicService extends Service {
     private boolean foregroundStarted;
 
     private final MglaYandexMusicPlayer.PlayerListener playerListener = new MglaYandexMusicPlayer.PlayerListener() {
+        private long lastReportedPositionMs = -1;
+        private long lastReportedTimeMs = 0;
+
         @Override
         public void onTrackChanged(MglaYandexMusicModel.Track track) {
+            lastReportedPositionMs = -1;
             createNotification(true);
         }
 
         @Override
         public void onPlaybackStateChanged(boolean isPlaying, boolean isBuffering) {
+            lastReportedPositionMs = -1;
             createNotification(false);
         }
 
         @Override
         public void onProgress(long positionMs, long durationMs) {
-            updatePlaybackStateOnly();
+            long now = SystemClock.elapsedRealtime();
+            // Android MediaSession interpolates position automatically based on elapsedRealtime.
+            // Spamming setPlaybackState() every 17ms floods SystemUI with Binder IPC calls and causes
+            // the system notification shade to lag terribly.
+            // We only report position if a seek occurred (drift > 2000ms) or on first tick.
+            if (lastReportedPositionMs < 0 || Math.abs(positionMs - (lastReportedPositionMs + (now - lastReportedTimeMs))) > 2000) {
+                lastReportedPositionMs = positionMs;
+                lastReportedTimeMs = now;
+                updatePlaybackStateOnly();
+            }
         }
     };
 
@@ -269,6 +284,9 @@ public class MglaYandexMusicService extends Service {
 
     @SuppressLint("NewApi")
     private void createNotification(boolean reloadCover) {
+        if (mediaSession == null) {
+            return;
+        }
         MglaYandexMusicPlayer player = MglaYandexMusicPlayer.getInstance();
         MglaYandexMusicModel.Track track = player.getCurrentTrack();
         if (track == null) {
@@ -337,6 +355,9 @@ public class MglaYandexMusicService extends Service {
                 .setActions(actions)
                 .setState(state, position, isPlaying ? 1f : 0f);
 
+        if (mediaSession == null) {
+            return;
+        }
         mediaSession.setPlaybackState(playbackState.build());
         mediaSession.setMetadata(new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
@@ -455,13 +476,13 @@ public class MglaYandexMusicService extends Service {
             return;
         }
 
-        Utilities.globalQueue.postRunnable(() -> {
+        MglaMusicImageHelper.musicImageQueue.postRunnable(() -> {
             Bitmap bitmap = MglaMusicImageHelper.loadBitmapSync(requestUrl, 300);
             if (bitmap != null) {
                 MglaMusicImageHelper.putInCache(requestUrl + "_notif", bitmap);
             }
             AndroidUtilities.runOnUIThread(() -> {
-                if (!TextUtils.equals(loadingCoverUrl, requestUrl)) {
+                if (mediaSession == null || !TextUtils.equals(loadingCoverUrl, requestUrl)) {
                     return;
                 }
                 currentAlbumArt = bitmap;
@@ -492,6 +513,8 @@ public class MglaYandexMusicService extends Service {
         } catch (Throwable ignored) {
         }
         MglaYandexMusicPlayer.getInstance().removeListener(playerListener);
+        loadingCoverUrl = null;
+        currentAlbumArt = null;
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();

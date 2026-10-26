@@ -216,7 +216,6 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path perimeterPath = new Path();
     private final Path progressPath = new Path();
-    private final Path glassClipPath = new Path();
     private final PathMeasure pathMeasure = new PathMeasure();
     private final RectF glassRect = new RectF();
     private final RectF glowRect = new RectF();
@@ -230,39 +229,22 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     private boolean progressTicking;
     private float perimeterLength;
     private boolean perimeterDirty = true;
-    private int underglowProgressBucket = -1;
 
     private float cornerRadius;
-    private float glowPulse = 1f;
-    private ValueAnimator pulseAnimator;
     private boolean observersRegistered;
     private VisibilityListener visibilityListener;
 
-    /** LOW devices only: progress UI at ~4 Hz instead of every display frame. */
-    private static final long LOW_PROGRESS_TICK_MS = 250L;
+    private static final long PROGRESS_TICK_MS = 33L; // ~30 FPS — smooth and lightweight
 
-    private final Choreographer.FrameCallback progressFrameCallback = new Choreographer.FrameCallback() {
+    private final Runnable progressTickRunnable = new Runnable() {
         @Override
-        public void doFrame(long frameTimeNanos) {
+        public void run() {
             if (!progressTicking) {
                 return;
             }
             invalidateProgressVisuals();
             if (progressTicking) {
-                Choreographer.getInstance().postFrameCallback(this);
-            }
-        }
-    };
-
-    private final Runnable lowProgressTickRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (!progressTicking || !SharedConfig.deviceIsLow()) {
-                return;
-            }
-            invalidateProgressVisuals();
-            if (progressTicking) {
-                AndroidUtilities.runOnUIThread(this, LOW_PROGRESS_TICK_MS);
+                AndroidUtilities.runOnUIThread(this, SharedConfig.deviceIsLow() ? 100L : PROGRESS_TICK_MS);
             }
         }
     };
@@ -272,14 +254,6 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             return;
         }
         progressView.invalidate();
-        // Underglow only needs coarse progress — avoid dual invalidates every frame.
-        // LOW: fewer buckets (matches slower tick).
-        float buckets = SharedConfig.deviceIsLow() ? 16f : 40f;
-        int bucket = (int) (displayProgress * buckets);
-        if (bucket != underglowProgressBucket) {
-            underglowProgressBucket = bucket;
-            underglowView.invalidate();
-        }
     }
 
     public interface VisibilityListener {
@@ -756,13 +730,12 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         long delta = positionMs - extrapolated;
         boolean seekLike = force || Math.abs(delta) > 450;
 
-        if (!running || getVisibility() != VISIBLE) {
+        if (!running || getVisibility() != VISIBLE || getWindowVisibility() != VISIBLE) {
             progressAnchorPosMs = positionMs;
             progressAnchorUptime = now;
             snapDisplayProgress(positionMs);
             stopProgressTicker();
             progressView.invalidate();
-            underglowView.invalidate();
             return;
         }
 
@@ -770,6 +743,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             progressAnchorPosMs = positionMs;
             progressAnchorUptime = now;
             snapDisplayProgress(positionMs);
+            progressView.invalidate();
         } else if (delta > 30) {
             // Player ahead of our clock — catch up without visible snap-back.
             progressAnchorPosMs = positionMs;
@@ -778,7 +752,6 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         // delta <= 0 and small: ignore (prevents 1s / stale-ms jerks)
 
         startProgressTicker();
-        progressView.invalidate();
     }
 
     private void snapDisplayProgress(long positionMs) {
@@ -800,11 +773,13 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             }
             next = Math.max(0f, Math.min(1f, pos / (float) progressAnchorDurMs));
         }
-        if (Math.abs(next - displayProgress) < 0.00002f) {
+        // At least ~0.75 pixel of movement on the perimeter before triggering a redraw
+        float minStep = perimeterLength > 0 ? (0.75f / perimeterLength) : 0.001f;
+        if (Math.abs(next - displayProgress) < minStep) {
             return false;
         }
         // Never move backwards while actively playing (seeks use snapDisplayProgress).
-        if (isActivelyPlaying() && next + 0.0005f < displayProgress) {
+        if (isActivelyPlaying() && next + minStep < displayProgress) {
             return false;
         }
         displayProgress = next;
@@ -812,15 +787,11 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     }
 
     private void startProgressTicker() {
-        if (progressTicking) {
+        if (progressTicking || getVisibility() != VISIBLE || getWindowVisibility() != VISIBLE) {
             return;
         }
         progressTicking = true;
-        if (SharedConfig.deviceIsLow()) {
-            AndroidUtilities.runOnUIThread(lowProgressTickRunnable, LOW_PROGRESS_TICK_MS);
-        } else {
-            Choreographer.getInstance().postFrameCallback(progressFrameCallback);
-        }
+        AndroidUtilities.runOnUIThread(progressTickRunnable, SharedConfig.deviceIsLow() ? 100L : PROGRESS_TICK_MS);
     }
 
     private void stopProgressTicker() {
@@ -828,40 +799,15 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             return;
         }
         progressTicking = false;
-        Choreographer.getInstance().removeFrameCallback(progressFrameCallback);
-        AndroidUtilities.cancelRunOnUIThread(lowProgressTickRunnable);
+        AndroidUtilities.cancelRunOnUIThread(progressTickRunnable);
     }
 
     private void startPulse() {
-        // Soft glow pulse is decorative — skip continuous invalidates on weak GPUs.
-        if (SharedConfig.deviceIsLow()) {
-            glowPulse = 1f;
-            return;
-        }
-        if (pulseAnimator != null && pulseAnimator.isRunning()) {
-            return;
-        }
-        pulseAnimator = ValueAnimator.ofFloat(0.85f, 1.15f);
-        pulseAnimator.setDuration(2200);
-        pulseAnimator.setRepeatMode(ValueAnimator.REVERSE);
-        pulseAnimator.setRepeatCount(ValueAnimator.INFINITE);
-        pulseAnimator.setInterpolator(new LinearInterpolator());
-        pulseAnimator.addUpdateListener(a -> {
-            glowPulse = (float) a.getAnimatedValue();
-            underglowView.invalidate();
-        });
-        pulseAnimator.start();
+        // Soft underglow is static and battery-efficient — no continuous 120 FPS animator needed.
     }
 
     private void stopPulse() {
-        if (pulseAnimator != null) {
-            pulseAnimator.cancel();
-            pulseAnimator = null;
-        }
-        glowPulse = 1f;
-        if (underglowView != null) {
-            underglowView.invalidate();
-        }
+        // no-op
     }
 
     @Override
@@ -928,38 +874,14 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
         final int ag = Color.green(accent);
         final int ab = Color.blue(accent);
 
-        canvas.save();
-        glassClipPath.reset();
-        glassClipPath.addRoundRect(glassRect, r, r, Path.Direction.CW);
-        if (Build.VERSION.SDK_INT >= 26) {
-            canvas.clipOutPath(glassClipPath);
-        }
-
-        if (SharedConfig.deviceIsLow()) {
-            // 2 layers instead of 12 — same accent glow, far cheaper on weak GPUs.
-            for (int i = 2; i >= 1; i--) {
-                float t = i / 2f;
-                float spread = dp(14) * t;
-                float alpha = (0.16f * (1f - t * 0.45f))
-                        * (0.55f + 0.45f * Math.min(1f, displayProgress + 0.35f));
-                underglowPaint.setColor(Color.argb(
-                        Math.max(0, Math.min(255, (int) (alpha * 255))),
-                        ar, ag, ab
-                ));
-                glowRect.set(glassRect);
-                glowRect.inset(-spread, -spread);
-                canvas.drawRoundRect(glowRect, r + spread, r + spread, underglowPaint);
-            }
-            canvas.restore();
-            return;
-        }
-
-        final int layers = 8;
-        float maxSpread = dp(18) * glowPulse;
+        // No canvas.clipOutPath: glassIsland is rendered on top with its own blurred background,
+        // completely occluding the interior. Avoiding clipOutPath eliminates GPU stencil buffer stalls.
+        final int layers = SharedConfig.deviceIsLow() ? 2 : 3;
+        final float baseSpread = dp(14);
         for (int i = layers; i >= 1; i--) {
             float t = i / (float) layers;
-            float spread = maxSpread * t;
-            float alpha = (0.12f * (1f - t) * (1f - t)) * (0.55f + 0.45f * Math.min(1f, displayProgress + 0.35f));
+            float spread = baseSpread * t;
+            float alpha = 0.12f * (1f - t) * (1f - t);
             underglowPaint.setColor(Color.argb(
                     Math.max(0, Math.min(255, (int) (alpha * 255))),
                     ar, ag, ab
@@ -968,20 +890,6 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
             glowRect.inset(-spread, -spread);
             canvas.drawRoundRect(glowRect, r + spread, r + spread, underglowPaint);
         }
-
-        for (int i = 4; i >= 1; i--) {
-            float t = i / 4f;
-            float spread = dp(10) * t * glowPulse;
-            float alpha = 0.10f * (1f - t) * (0.4f + 0.6f * displayProgress);
-            underglowPaint.setColor(Color.argb(
-                    Math.max(0, Math.min(255, (int) (alpha * 255))),
-                    ar, ag, ab
-            ));
-            glowRect.set(glassRect);
-            glowRect.inset(-spread, -spread);
-            canvas.drawRoundRect(glowRect, r + spread, r + spread, underglowPaint);
-        }
-        canvas.restore();
     }
 
     private void ensurePerimeterPath() {
@@ -1033,7 +941,7 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.messagePlayingProgressDidChanged) {
-            if (getVisibility() != VISIBLE) {
+            if (getVisibility() != VISIBLE || isYandexActive()) {
                 return;
             }
             MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
@@ -1074,10 +982,31 @@ public class MglaGlobalMusicBar extends FrameLayout implements NotificationCente
 
     @Override
     public void onProgress(long positionMs, long durationMs) {
-        if (getVisibility() != VISIBLE || durationMs <= 0) {
+        if (getVisibility() != VISIBLE || getWindowVisibility() != VISIBLE || durationMs <= 0) {
             return;
         }
         syncProgressFromPlayer(positionMs / (float) durationMs, durationMs, isActivelyPlaying(), false);
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (isActivelyPlaying() && getVisibility() == VISIBLE && getWindowVisibility() == VISIBLE) {
+            startPulse();
+            startProgressTicker();
+        }
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        if (visibility != VISIBLE) {
+            stopPulse();
+            stopProgressTicker();
+        } else if (isActivelyPlaying() && getVisibility() == VISIBLE) {
+            startPulse();
+            startProgressTicker();
+        }
     }
 
     @Override

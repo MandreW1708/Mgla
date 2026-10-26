@@ -21,6 +21,7 @@ public final class MglaYandexMusicPlayback {
 
     private static final ConcurrentHashMap<Long, MglaYandexMusicModel.Track> tracksByDocId = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<Integer, String> trackIdByMsgId = new ConcurrentHashMap<>();
+    public static final DispatchQueue musicDownloadQueue = new DispatchQueue("mglaMusicDownloadQueue");
 
     private MglaYandexMusicPlayback() {
     }
@@ -180,7 +181,7 @@ public final class MglaYandexMusicPlayback {
         }
 
         final String trackId = track.id;
-        Utilities.globalQueue.postRunnable(() -> {
+        musicDownloadQueue.postRunnable(() -> {
             try {
                 // Prefer offline store path if a download finished while we were waiting.
                 File offline = MglaYandexMusicOffline.getInstance().fileForTrack(trackId);

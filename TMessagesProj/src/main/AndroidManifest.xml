@@ -811,6 +811,7 @@
                 android:resource="@xml/mgla_tasks_widget_info" />
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="org.telegram.messenger.MGLA_TASKS_WIDGET_COMPLETE" />
             </intent-filter>
         </receiver>
 
