@@ -806,7 +806,7 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".MglaTasksWidgetProvider" android:exported="false" android:label="Задачи">
+        <receiver android:name=".MglaTasksWidgetProvider" android:exported="true" android:label="Задачи">
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/mgla_tasks_widget_info" />
             <intent-filter>

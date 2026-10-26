@@ -8,4 +8,16 @@
     <color name="widget_divider">#000000</color>
     <color name="widget_action_text">#75ADE5</color>
     <color name="widget_edit_text">#8D949B</color>
+
+    <!-- MD3 Tasks Widget (Dark) -->
+    <color name="mgla_widget_bg">#FF1D1E24</color>
+    <color name="mgla_widget_primary">#AEC6FF</color>
+    <color name="mgla_widget_primary_container">#1B3F73</color>
+    <color name="mgla_widget_on_primary_container">#D8E2FF</color>
+    <color name="mgla_widget_text_primary">#E3E2E6</color>
+    <color name="mgla_widget_text_secondary">#8E9099</color>
+    <color name="mgla_widget_checkbox_outline">#8E9099</color>
+    <color name="mgla_widget_priority_high">#FFB4AB</color>
+    <color name="mgla_widget_priority_high_bg">#601410</color>
+    <color name="mgla_widget_divider">#2A2B33</color>
 </resources>

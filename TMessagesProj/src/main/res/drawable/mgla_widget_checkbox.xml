@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <stroke
+        android:width="2dp"
+        android:color="@color/mgla_widget_checkbox_outline" />
+    <solid android:color="#00000000" />
+    <size
+        android:width="18dp"
+        android:height="18dp" />
+</shape>

@@ -614,6 +614,10 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
         }
         openTaskId = 0;
         pendingOpenTaskId = 0;
+        if (id == -1) {
+            openTaskEditor(null);
+            return;
+        }
         MglaTasksStorage.getInstance().ensureLoaded(() -> {
             MglaTask task = MglaTasksStorage.getInstance().getTask(id);
             if (task != null) {
