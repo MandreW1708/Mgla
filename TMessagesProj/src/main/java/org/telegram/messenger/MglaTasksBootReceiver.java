@@ -15,6 +15,7 @@ public class MglaTasksBootReceiver extends BroadcastReceiver {
         MglaTasksStorage.getInstance().ensureLoaded(() -> {
             MglaTasksReminderScheduler.rescheduleAll();
             MglaTasksWidgetProvider.updateAll();
+            MglaMusicWidgetProvider.updateAll();
             pendingResult.finish();
         });
     }

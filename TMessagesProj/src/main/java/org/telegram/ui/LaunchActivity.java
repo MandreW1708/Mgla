@@ -1606,6 +1606,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         boolean showCallLog = false;
         long open_mgla_task_id = 0;
         boolean open_mgla_tasks_tab = false;
+        boolean open_mgla_music_tab = false;
         boolean audioCallUser = false;
         boolean videoCallUser = false;
         boolean needCallAlert = false;
@@ -2923,6 +2924,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 } else if (MglaTasksReminderScheduler.ACTION_OPEN_TASK.equals(intent.getAction())) {
                     open_mgla_task_id = intent.getLongExtra(MglaTasksReminderScheduler.EXTRA_TASK_ID, 0);
                     open_mgla_tasks_tab = open_mgla_task_id == 0;
+                } else if ("org.telegram.messenger.OPEN_MGLA_MUSIC".equals(intent.getAction())) {
+                    open_mgla_music_tab = true;
                 } else if (intent.getAction() != null && intent.getAction().startsWith("mgla_task://")) {
                     try {
                         open_mgla_task_id = Long.parseLong(intent.getAction().substring("mgla_task://".length()));
@@ -3346,6 +3349,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 pushOpened = true;
             } else if (open_mgla_tasks_tab) {
                 openMglaTasksTab();
+                pushOpened = true;
+            } else if (open_mgla_music_tab) {
+                openMglaMusicTab();
                 pushOpened = true;
             } else if (openBot) {
                 processAttachedMenuBotFromShortcut(botId);
@@ -6208,6 +6214,18 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 return;
             }
             presentFragment(new MglaTasksActivity(null));
+        }, 50);
+    }
+
+    private void openMglaMusicTab() {
+        AndroidUtilities.runOnUIThread(() -> {
+            MainTabsActivity tabs = findFragment(MainTabsActivity.class);
+            if (tabs != null && tabs.openTab(org.telegram.messenger.MglaMainTabsConfig.TabId.MUSIC)) {
+                return;
+            }
+            Bundle args = new Bundle();
+            args.putBoolean("hasMainTabs", false);
+            presentFragment(new MglaMusicActivity(args));
         }, 50);
     }
 

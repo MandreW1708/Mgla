@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/mgla_tasks_widget_bg"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="12dp">
+
+    <!-- Header Row -->
+    <LinearLayout
+        android:id="@+id/widget_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Music App Icon Squircle -->
+        <ImageView
+            android:id="@+id/widget_app_icon"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:padding="5dp"
+            android:background="@drawable/mgla_widget_icon_container"
+            android:src="@drawable/msg_filled_data_music"
+            android:contentDescription="@null" />
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/widget_header_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:text="Музыка"
+            android:textSize="16sp"
+            android:fontFamily="sans-serif-medium"
+            android:textColor="@color/mgla_widget_text_primary" />
+
+        <!-- Mode / Source Badge (e.g. "Моя волна") -->
+        <TextView
+            android:id="@+id/music_widget_source_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:background="@drawable/mgla_widget_badge_bg"
+            android:fontFamily="sans-serif-medium"
+            android:textSize="11sp"
+            android:textColor="@color/mgla_widget_on_primary_container"
+            android:text="Моя волна" />
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Quick "Моя волна" Action Button -->
+        <TextView
+            android:id="@+id/music_widget_wave_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/mgla_widget_badge_bg"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:fontFamily="sans-serif-medium"
+            android:textSize="11sp"
+            android:textColor="@color/mgla_widget_on_primary_container"
+            android:text="⚡ Волна" />
+
+    </LinearLayout>
+
+    <!-- Divider -->
+    <FrameLayout
+        android:id="@+id/music_widget_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:background="@color/mgla_widget_divider" />
+
+    <!-- Main Player Body -->
+    <LinearLayout
+        android:id="@+id/music_widget_body"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- Album Cover -->
+        <ImageView
+            android:id="@+id/music_widget_cover"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:scaleType="centerCrop"
+            android:background="@drawable/mgla_music_widget_cover_bg"
+            android:src="@drawable/bot_music"
+            android:contentDescription="@null" />
+
+        <!-- Track Info (Title + Artist + Status) -->
+        <LinearLayout
+            android:id="@+id/music_widget_info"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="8dp"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/music_widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="15sp"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="@color/mgla_widget_text_primary"
+                android:text="Моя волна" />
+
+            <TextView
+                android:id="@+id/music_widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif"
+                android:textColor="@color/mgla_widget_text_secondary"
+                android:text="Яндекс Музыка" />
+
+            <TextView
+                android:id="@+id/music_widget_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="11sp"
+                android:textColor="@color/mgla_widget_primary"
+                android:text="Нажмите ▶ для воспроизведения" />
+
+        </LinearLayout>
+
+        <!-- Media Controls -->
+        <LinearLayout
+            android:id="@+id/music_widget_controls"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <!-- Like / Favorite -->
+            <ImageView
+                android:id="@+id/music_widget_like"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginEnd="6dp"
+                android:padding="7dp"
+                android:background="@drawable/mgla_music_widget_control_bg"
+                android:src="@drawable/media_like"
+                android:scaleType="centerInside"
+                android:contentDescription="@null" />
+
+            <!-- Previous -->
+            <ImageView
+                android:id="@+id/music_widget_prev"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginEnd="6dp"
+                android:padding="6dp"
+                android:background="@drawable/mgla_music_widget_control_bg"
+                android:src="@drawable/mgla_music_widget_ic_prev"
+                android:scaleType="centerInside"
+                android:contentDescription="@null" />
+
+            <!-- Play / Pause (Large Accent FAB) -->
+            <ImageView
+                android:id="@+id/music_widget_play_pause"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_marginEnd="6dp"
+                android:padding="11dp"
+                android:background="@drawable/mgla_music_widget_play_bg"
+                android:src="@drawable/ic_action_play"
+                android:scaleType="centerInside"
+                android:contentDescription="@null" />
+
+            <!-- Next -->
+            <ImageView
+                android:id="@+id/music_widget_next"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:padding="6dp"
+                android:background="@drawable/mgla_music_widget_control_bg"
+                android:src="@drawable/mgla_music_widget_ic_next"
+                android:scaleType="centerInside"
+                android:contentDescription="@null" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

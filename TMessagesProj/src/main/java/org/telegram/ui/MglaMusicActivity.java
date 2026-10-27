@@ -806,6 +806,41 @@ public class MglaMusicActivity extends BaseFragment implements
         card.setClickable(true);
         card.setFocusable(true);
         card.setOnClickListener(click);
+
+        // Subtle refresh button in top right of hero card to regenerate stream at any time
+        ImageView refreshBtn = new ImageView(context);
+        refreshBtn.setImageResource(R.drawable.msg_retry);
+        refreshBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        refreshBtn.setColorFilter(new PorterDuffColorFilter(MD3_ON_PRIMARY_CONTAINER, PorterDuff.Mode.SRC_IN));
+        GradientDrawable rBg = new GradientDrawable();
+        rBg.setShape(GradientDrawable.OVAL);
+        rBg.setColor(ColorUtils.setAlphaComponent(MD3_ON_PRIMARY_CONTAINER, 0x22));
+        refreshBtn.setBackground(rBg);
+        refreshBtn.setPadding(dp(7), dp(7), dp(7), dp(7));
+        refreshBtn.setClickable(true);
+        refreshBtn.setFocusable(true);
+        refreshBtn.setContentDescription("Обновить поток");
+        refreshBtn.setOnClickListener(v -> {
+            v.animate().rotationBy(360f).setDuration(500).start();
+            if ("Моя волна".equals(statusText)) {
+                MglaYandexMusicPlayer.getInstance().startFreshMyWave();
+            } else {
+                MglaYandexMusicPlayer.getInstance().playCollectionWave();
+            }
+            Toast.makeText(context, "Подбираем новый поток…", Toast.LENGTH_SHORT).show();
+        });
+        card.addView(refreshBtn, LayoutHelper.createFrame(32, 32, Gravity.TOP | Gravity.RIGHT, 0, 0, 0, 0));
+
+        card.setOnLongClickListener(v -> {
+            if ("Моя волна".equals(statusText)) {
+                MglaYandexMusicPlayer.getInstance().startFreshMyWave();
+            } else {
+                MglaYandexMusicPlayer.getInstance().playCollectionWave();
+            }
+            Toast.makeText(context, "Подбираем новый поток…", Toast.LENGTH_SHORT).show();
+            return true;
+        });
+
         card.setTag(new Object[]{status, title, actionIcon});
         return card;
     }

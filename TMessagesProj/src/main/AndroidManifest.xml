@@ -815,6 +815,19 @@
             </intent-filter>
         </receiver>
 
+        <receiver android:name=".MglaMusicWidgetProvider" android:exported="true" android:label="Музыка">
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/mgla_music_widget_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="org.telegram.messenger.MGLA_MUSIC_WIDGET_PLAY_PAUSE" />
+                <action android:name="org.telegram.messenger.MGLA_MUSIC_WIDGET_NEXT" />
+                <action android:name="org.telegram.messenger.MGLA_MUSIC_WIDGET_PREV" />
+                <action android:name="org.telegram.messenger.MGLA_MUSIC_WIDGET_LIKE" />
+                <action android:name="org.telegram.messenger.MGLA_MUSIC_WIDGET_WAVE" />
+            </intent-filter>
+        </receiver>
+
         <receiver android:name=".RefererReceiver" android:exported="true" android:permission="android.permission.INSTALL_PACKAGES">
             <intent-filter>
                 <action android:name="com.android.vending.INSTALL_REFERRER" />

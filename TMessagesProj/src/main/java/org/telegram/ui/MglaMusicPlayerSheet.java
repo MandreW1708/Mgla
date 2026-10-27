@@ -221,7 +221,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (playing != null) {
             return MglaYandexMusicPlayback.isYandexMessage(playing);
         }
-        return player.getCurrentTrack() != null && (player.isPlaying() || player.isBuffering());
+        return player.getCurrentTrack() != null;
     }
 
     private void initView(Context context) {
@@ -1385,11 +1385,20 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             sourceTitle.setText(source);
         }
 
-        String coverUrl = track.getCoverUrl(400);
-        // Load square bitmap; rounded corners come from coverWrap clipPath.
-        MglaMusicImageHelper.bindCover(coverImage, coverUrl, 0, R.drawable.bot_music);
+        lastCoverUrl = null;
+        // Player cover: high resolution (1000x1000) when online, fallback to downloaded cover when offline.
+        MglaMusicImageHelper.bindPlayerCover(coverImage, track, R.drawable.bot_music, new MglaMusicImageHelper.ImageCallback() {
+            @Override
+            public void onLoaded(Bitmap bitmap) {
+                extractAmbientColorsFromBitmap(bitmap);
+            }
+
+            @Override
+            public void onFailed() {
+                applyAccentColor(ACCENT_FALLBACK);
+            }
+        });
         MglaMusicImageHelper.bindCircleCover(artistAvatar, track.getCoverUrl(100), R.drawable.bot_music);
-        extractAmbientColors(coverUrl);
 
         if (waveIslandText != null) {
             waveIslandText.setText("Запустить волну по треку");
@@ -2403,12 +2412,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             return;
         }
         observersRegistered = true;
-        int account = UserConfig.selectedAccount;
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingDidStart);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingDidReset);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.musicIdsLoaded);
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingDidStart);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingDidReset);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.musicIdsLoaded);
+        }
         ensureSavedMusicIdsLoading();
     }
 
@@ -2417,12 +2427,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             return;
         }
         observersRegistered = false;
-        int account = UserConfig.selectedAccount;
-        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingDidStart);
-        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
-        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingDidReset);
-        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
-        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.musicIdsLoaded);
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.messagePlayingDidStart);
+            NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
+            NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.messagePlayingDidReset);
+            NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+            NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.musicIdsLoaded);
+        }
     }
 
     private void extractAmbientColors(String coverUrl) {

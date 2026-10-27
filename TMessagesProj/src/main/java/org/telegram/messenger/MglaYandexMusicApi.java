@@ -16,11 +16,15 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -674,7 +678,9 @@ public final class MglaYandexMusicApi {
                 }
                 JSONObject event = new JSONObject();
                 event.put("type", eventType);
-                event.put("timestamp", System.currentTimeMillis() / 1000.0);
+                SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+                iso.setTimeZone(TimeZone.getTimeZone("UTC"));
+                event.put("timestamp", iso.format(new Date()));
                 if (!TextUtils.isEmpty(trackId)) {
                     event.put("trackId", trackId);
                 }

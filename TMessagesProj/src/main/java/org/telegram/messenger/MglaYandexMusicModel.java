@@ -42,18 +42,40 @@ public final class MglaYandexMusicModel {
             this.durationMs = durationMs;
         }
 
-        public String getCoverUrl(int size) {
+        public String getCoverUrl(String size) {
             if (TextUtils.isEmpty(coverUri)) {
                 return null;
             }
-            String s = size + "x" + size;
-            String url = coverUri.replace("%%", s);
+            String targetSize = !TextUtils.isEmpty(size) ? size : "400x400";
+            String url;
+            if (coverUri.contains("%%")) {
+                url = coverUri.replace("%%", targetSize);
+            } else {
+                int lastSlash = coverUri.lastIndexOf('/');
+                if (lastSlash >= 0 && lastSlash < coverUri.length() - 1) {
+                    String lastPart = coverUri.substring(lastSlash + 1);
+                    if (lastPart.matches("m?\\d+x\\d+") || "orig".equals(lastPart) || "origin".equals(lastPart)) {
+                        url = coverUri.substring(0, lastSlash + 1) + targetSize;
+                    } else {
+                        url = coverUri + "/" + targetSize;
+                    }
+                } else {
+                    url = coverUri + "/" + targetSize;
+                }
+            }
             if (url.startsWith("//")) {
                 url = "https:" + url;
             } else if (!url.startsWith("http://") && !url.startsWith("https://")) {
                 url = "https://" + url;
             }
             return url;
+        }
+
+        public String getCoverUrl(int size) {
+            if (size >= 1000) {
+                return getCoverUrl("1000x1000");
+            }
+            return getCoverUrl(size + "x" + size);
         }
 
         public String getFormattedDuration() {

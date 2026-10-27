@@ -320,7 +320,7 @@ public class MglaYandexMusicService extends Service {
                 fixFlags(PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE));
         PendingIntent pendingPlayPause = PendingIntent.getBroadcast(this, 2,
                 new Intent(isPlaying ? NOTIFY_PAUSE : NOTIFY_PLAY).setComponent(new ComponentName(this, MglaYandexMusicReceiver.class)),
-                fixFlags(PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE));
+                fixFlags(PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_MUTABLE));
         PendingIntent pendingNext = PendingIntent.getBroadcast(this, 3,
                 new Intent(NOTIFY_NEXT).setComponent(new ComponentName(this, MglaYandexMusicReceiver.class)),
                 fixFlags(PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE));

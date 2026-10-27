@@ -52,6 +52,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     /** After a one-shot track ends, start wave seeded by this track id. */
     private String waveSeedAfterQueue;
     private long lastProgressNotifyMs;
+    private final List<String> recentWaveTrackIds = new ArrayList<>();
 
     private MglaYandexMusicPlayer() {
         ensureObservers();
@@ -62,11 +63,12 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             return;
         }
         observersRegistered = true;
-        int account = UserConfig.selectedAccount;
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingDidStart);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingDidReset);
-        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingDidStart);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingDidReset);
+            NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+        }
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.playerDidStartPlaying);
     }
 
@@ -85,6 +87,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             for (PlayerListener l : listeners) {
                 l.onTrackChanged(track);
             }
+            MglaMusicWidgetProvider.updateAll();
         });
     }
 
@@ -93,6 +96,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             for (PlayerListener l : listeners) {
                 l.onPlaybackStateChanged(playing, buffering);
             }
+            MglaMusicWidgetProvider.updateAll();
         });
     }
 
@@ -133,10 +137,18 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     }
 
     public boolean isPlaying() {
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+            return !MediaController.getInstance().isMessagePaused();
+        }
         return isPlaying;
     }
 
     public boolean isBuffering() {
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+            return MediaController.getInstance().isDownloadingCurrentMessage();
+        }
         return isBuffering;
     }
 
@@ -239,22 +251,41 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         playRotorSession(seeds, "Моя волна");
     }
 
+    /** Always force-starts a brand new «Моя волна» stream with fresh recommendations. */
+    public void startFreshMyWave() {
+        currentRotorSessionId = null;
+        currentRotorBatchId = null;
+        synchronized (queue) {
+            queue.clear();
+            currentIndex = -1;
+            currentTrack = null;
+        }
+        notifyQueueChanged();
+        playMyWave();
+    }
+
     /** Start or pause/resume personal «Моя волна» with current saved settings. */
     public void toggleMyWave() {
         if (isPersonalWaveActive()) {
-            togglePlayPause();
+            if (isPlaying) {
+                pause();
+            } else if (currentTrack != null) {
+                play();
+            } else {
+                startFreshMyWave();
+            }
         } else {
-            playMyWave();
+            startFreshMyWave();
         }
     }
 
     /**
      * If personal wave is already playing, restart it so new diversity/mood/language
-     * settings take effect immediately.
+     * settings take effect immediately with fresh recommendations.
      */
     public void restartPersonalWaveIfActive() {
         if (isPersonalWaveActive()) {
-            playMyWave();
+            startFreshMyWave();
         }
     }
 
@@ -342,25 +373,19 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         isBuffering = true;
         notifyPlaybackState(isPlaying, true);
 
-        if (currentRotorSeeds.contains("user:onyourwave")) {
-            List<MglaYandexMusicModel.Track> cached = MglaYandexMusicStore.getInstance().getCachedRotor();
-            if (cached != null && !cached.isEmpty()) {
-                synchronized (queue) {
-                    queue.clear();
-                    queue.addAll(cached);
-                    currentIndex = 0;
-                }
-                notifyQueueChanged();
-                loadAndPlayCurrent();
-            }
-        }
         fetchRotorTracks(false);
     }
 
     /** Toggle collection wave: start, or pause/resume when already active. */
     public void toggleCollectionWave() {
         if (isCollectionWaveActive()) {
-            togglePlayPause();
+            if (isPlaying) {
+                pause();
+            } else if (currentTrack != null) {
+                play();
+            } else {
+                playCollectionWave();
+            }
         } else {
             playCollectionWave();
         }
@@ -430,6 +455,15 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
                     @Override
                     public void onError(Exception e2) {
                         isRotorLoading = false;
+                        if (!append && queue.isEmpty()) {
+                            List<MglaYandexMusicModel.Track> cached = MglaYandexMusicStore.getInstance().getCachedRotor();
+                            if (cached != null && !cached.isEmpty()) {
+                                applyRotorTracks(cached, false);
+                                return;
+                            }
+                        }
+                        isBuffering = false;
+                        notifyPlaybackState(false, false);
                     }
                 });
             }
@@ -445,6 +479,9 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         if (!TextUtils.isEmpty(batch.batchId)) {
             currentRotorBatchId = batch.batchId;
         }
+        if (!append && !TextUtils.isEmpty(batch.sessionId)) {
+            MglaYandexMusicApi.sendRotorFeedback(batch.sessionId, batch.batchId, "radioStarted", null, 0, null);
+        }
         applyRotorTracks(batch.tracks, append);
     }
 
@@ -454,9 +491,23 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             if (append) {
                 queue.addAll(tracks);
             } else {
-                // Always replace — starting a wave must interrupt library playback.
+                List<MglaYandexMusicModel.Track> fresh = new ArrayList<>(tracks);
+                if (fresh.size() > 1 && !recentWaveTrackIds.isEmpty()) {
+                    int bestIdx = 0;
+                    for (int i = 0; i < fresh.size(); i++) {
+                        MglaYandexMusicModel.Track t = fresh.get(i);
+                        if (t != null && !recentWaveTrackIds.contains(t.id)) {
+                            bestIdx = i;
+                            break;
+                        }
+                    }
+                    if (bestIdx > 0) {
+                        MglaYandexMusicModel.Track first = fresh.remove(bestIdx);
+                        fresh.add(0, first);
+                    }
+                }
                 queue.clear();
-                queue.addAll(tracks);
+                queue.addAll(fresh);
                 currentIndex = 0;
                 loadAndPlayCurrent();
             }
@@ -474,11 +525,22 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         }
         currentTrack = track;
         track.isLiked = MglaYandexMusicStore.getInstance().isLiked(track.id);
+        if (isMyWaveActive && !TextUtils.isEmpty(track.id)) {
+            recentWaveTrackIds.remove(track.id);
+            recentWaveTrackIds.add(track.id);
+            if (recentWaveTrackIds.size() > 50) {
+                recentWaveTrackIds.remove(0);
+            }
+        }
         notifyTrackChanged(track);
 
         isBuffering = true;
         isPlaying = false;
         notifyPlaybackState(false, true);
+
+        if (isMyWaveActive && !TextUtils.isEmpty(currentRotorSessionId) && !TextUtils.isEmpty(track.id)) {
+            MglaYandexMusicApi.sendRotorFeedback(currentRotorSessionId, currentRotorBatchId, "trackStarted", track.id, 0, null);
+        }
 
         if (isMyWaveActive && currentIndex >= queue.size() - 2) {
             fetchRotorTracks(true);
@@ -536,12 +598,18 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
             if (MediaController.getInstance().isMessagePaused()) {
                 MediaController.getInstance().playMessage(playing);
+                isPlaying = true;
+                isBuffering = false;
+                notifyPlaybackState(true, false);
             } else {
                 MediaController.getInstance().pauseMessage(playing);
+                isPlaying = false;
+                isBuffering = false;
+                notifyPlaybackState(false, false);
             }
             return;
         }
-        if (isPlaying) {
+        if (isPlaying()) {
             pause();
         } else {
             play();
@@ -551,7 +619,12 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     public void play() {
         MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
         if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
-            MediaController.getInstance().playMessage(playing);
+            if (MediaController.getInstance().isMessagePaused()) {
+                MediaController.getInstance().playMessage(playing);
+            }
+            isPlaying = true;
+            isBuffering = false;
+            notifyPlaybackState(true, false);
             return;
         }
         if (!queue.isEmpty()) {
@@ -565,6 +638,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             MediaController.getInstance().pauseMessage(playing);
         }
         isPlaying = false;
+        isBuffering = false;
         notifyPlaybackState(false, false);
     }
 
@@ -572,9 +646,18 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         MediaController.getInstance().cleanupPlayer(true, true);
         isPlaying = false;
         isBuffering = false;
+        isMyWaveActive = false;
+        currentSourceTitle = "";
+        currentRotorSessionId = null;
+        currentRotorBatchId = null;
         currentTrack = null;
+        synchronized (queue) {
+            queue.clear();
+            currentIndex = -1;
+        }
         notifyPlaybackState(false, false);
         notifyTrackChanged(null);
+        notifyQueueChanged();
         try {
             MglaYandexMusicService.stop(ApplicationLoader.applicationContext);
         } catch (Throwable ignored) {
@@ -584,6 +667,13 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
     public void next() {
         synchronized (queue) {
             if (queue.isEmpty()) return;
+            if (isMyWaveActive && !TextUtils.isEmpty(currentRotorSessionId) && currentTrack != null && !TextUtils.isEmpty(currentTrack.id)) {
+                long pos = getCurrentPosition();
+                long dur = getDuration();
+                float playedSec = pos / 1000f;
+                String type = (dur > 0 && (pos >= dur * 0.8f || pos >= dur - 5000)) ? "trackFinished" : "skip";
+                MglaYandexMusicApi.sendRotorFeedback(currentRotorSessionId, currentRotorBatchId, type, currentTrack.id, playedSec, null);
+            }
             int repeatMode = MglaYandexMusicStore.getInstance().getRepeatMode();
             if (repeatMode == 2) {
                 seekTo(0);
@@ -617,6 +707,10 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         }
         synchronized (queue) {
             if (queue.isEmpty()) return;
+            if (isMyWaveActive && !TextUtils.isEmpty(currentRotorSessionId) && currentTrack != null && !TextUtils.isEmpty(currentTrack.id)) {
+                float playedSec = getCurrentPosition() / 1000f;
+                MglaYandexMusicApi.sendRotorFeedback(currentRotorSessionId, currentRotorBatchId, "skip", currentTrack.id, playedSec, null);
+            }
             if (currentIndex - 1 >= 0) {
                 currentIndex--;
                 loadAndPlayCurrent();
@@ -732,6 +826,10 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         }
         isPlaying = false;
         isBuffering = false;
+        isMyWaveActive = false;
+        currentSourceTitle = "";
+        currentRotorSessionId = null;
+        currentRotorBatchId = null;
         currentTrack = null;
         notifyPlaybackState(false, false);
         notifyTrackChanged(null);
@@ -767,6 +865,7 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
             } else if (playing != null) {
                 // Telegram voice / round / music replaced Yandex — release session state only.
                 clearSessionWithoutStoppingPlayer();
+                MglaMusicWidgetProvider.updateAll();
             }
         } else if (id == NotificationCenter.messagePlayingDidReset) {
             // Natural end is handled via MediaController.playNextMessageWithoutOrder → next()
@@ -776,6 +875,13 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         } else if (id == NotificationCenter.messagePlayingProgressDidChanged) {
             MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
             if (playing != null && MglaYandexMusicPlayback.isYandexMessage(playing)) {
+                boolean curPlaying = !MediaController.getInstance().isMessagePaused();
+                boolean curBuffering = MediaController.getInstance().isDownloadingCurrentMessage();
+                if (curPlaying != isPlaying || curBuffering != isBuffering) {
+                    isPlaying = curPlaying;
+                    isBuffering = curBuffering;
+                    notifyPlaybackState(isPlaying, isBuffering);
+                }
                 long now = android.os.SystemClock.uptimeMillis();
                 if (now - lastProgressNotifyMs >= 45) {
                     lastProgressNotifyMs = now;
