@@ -628,7 +628,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
         actionBar.setAddToContainer(false);
         actionBar.setCastShadows(false);
         actionBar.setClipContent(true);
-        actionBar.setOccupyStatusBar(!AndroidUtilities.isTablet() && !inPreviewMode);
+        actionBar.setOccupyStatusBar((!AndroidUtilities.isTablet() || parentLayout != null && parentLayout.isSheet()) && !inPreviewMode);
         if (inPreviewMode) {
             actionBar.setBackgroundColor(Color.TRANSPARENT);
             actionBar.setInterceptTouches(false);
@@ -879,7 +879,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
         avatarContainer.getAvatarImageView().setRoundRadius(AndroidUtilities.dp(16));
         // Must match actionBar: in right-sliding preview the AB sits below the status bar,
         // so avatar/title must NOT add statusBarHeight again (title sank under the back button).
-        avatarContainer.setOccupyStatusBar(!AndroidUtilities.isTablet() && !inPreviewMode);
+        avatarContainer.setOccupyStatusBar((!AndroidUtilities.isTablet() || parentLayout != null && parentLayout.isSheet()) && !inPreviewMode);
         avatarContainer.allowDrawStories = getDialogId() < 0;
         avatarContainer.setClipChildren(false);
         actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, 56, 0, 86, 0));
