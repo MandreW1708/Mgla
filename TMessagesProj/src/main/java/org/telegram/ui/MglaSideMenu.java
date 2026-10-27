@@ -58,6 +58,7 @@ import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawableRenderNode;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProviderBuilder;
+import org.telegram.ui.QrShare.QrShareActivity;
 import org.telegram.ui.Wallet.WalletActivity;
 import org.telegram.ui.web.WebBrowserSettings;
 
@@ -105,7 +106,10 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     @Nullable
     private BlurredBackgroundDrawable panelGlass;
     @Nullable
+    private BlurredBackgroundDrawableViewFactory glassFactoryRef;
+    @Nullable
     private View glassSourceRoot;
+    private int glassAttachRetryToken;
 
     private int panelWidthPx;
     private float openProgress;
@@ -475,7 +479,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 AndroidUtilities.runOnUIThread(() -> {
                     BaseFragment fragment = activity.getActionBarLayout().getLastFragment();
                     if (fragment != null) {
-                        QrActivity.openCameraScanActivity(fragment);
+                        QrShareActivity.openCameraScanActivity(fragment);
                     }
                 }, 220);
                 break;
@@ -643,20 +647,24 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         applySystemInsets();
         ViewCompat.requestApplyInsets(this);
         registerObserver();
-        attachLiquidGlass();
         rebuildNavSection();
         refreshData();
         bringMenuToFront();
         isOpen = false;
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
+        // Blur capture must see the menu as visible before glass attaches, otherwise
+        // the middle-of-list strip is missing and the panel looks like flat color.
         invalidateDialogsBlur();
+        attachLiquidGlass();
         ensurePanelLaidOut(() -> {
             float closed = getClosedTranslationX();
             panelHost.setTranslationX(closed);
             openProgress = 0f;
             scrim.setAlpha(0f);
             updateAnimatedViewsProgress();
+            invalidateDialogsBlur();
+            attachLiquidGlass();
             animatePanelTo(0f, true);
         });
     }
@@ -800,13 +808,13 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         cancelAnimation();
         applySystemInsets();
         registerObserver();
-        attachLiquidGlass();
         rebuildNavSection();
         refreshData();
         bringMenuToFront();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
         invalidateDialogsBlur();
+        attachLiquidGlass();
         isOpen = false;
         float closed = getClosedTranslationX();
         panelHost.setTranslationX(closed);
@@ -981,9 +989,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         updateAnimatedViewsProgress();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
-        syncGlassSourceOffset();
-        invalidateGlass();
         invalidateDialogsBlur();
+        attachLiquidGlass();
     }
 
     private void hideImmediate() {
@@ -1001,16 +1008,26 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void invalidateDialogsBlur() {
-        BaseFragment last = LaunchActivity.getLastFragment();
-        DialogsActivity dialogs = null;
-        if (last instanceof DialogsActivity) {
-            dialogs = (DialogsActivity) last;
-        } else if (last instanceof MainTabsActivity) {
-            dialogs = ((MainTabsActivity) last).getDialogsActivity();
-        }
+        DialogsActivity dialogs = resolveDialogsActivity();
         if (dialogs != null) {
             dialogs.invalidateBlur3ForSideMenu();
         }
+    }
+
+    @Nullable
+    private DialogsActivity resolveDialogsActivity() {
+        BaseFragment last = LaunchActivity.getLastFragment();
+        if (last instanceof DialogsActivity) {
+            return (DialogsActivity) last;
+        }
+        if (last instanceof MainTabsActivity) {
+            DialogsActivity dialogs = ((MainTabsActivity) last).getDialogsActivity();
+            if (dialogs != null) {
+                return dialogs;
+            }
+        }
+        MainTabsActivity tabs = LaunchActivity.findFragment(MainTabsActivity.class);
+        return tabs != null ? tabs.getDialogsActivity() : null;
     }
 
     private Drawable createRectSelector() {
@@ -1315,18 +1332,12 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         ghostButtonLabel.setTextColor(itemText);
 
         if (panelGlass == null) {
-            if (panelHost != null) {
-                GradientDrawable panelBg = new GradientDrawable();
-                int base = Theme.getColor(Theme.key_chats_menuBackground);
-                panelBg.setColor(ColorUtils.setAlphaComponent(base, dark ? 0xF2 : 0xF5));
-                panelBg.setCornerRadii(new float[]{0, 0, dp(24), dp(24), dp(24), dp(24), 0, 0});
-                panelHost.setBackground(panelBg);
-            }
-            if (panel != null) {
-                panel.setBackgroundColor(Color.TRANSPARENT);
-            }
+            applySolidPanelBackground(dark);
         } else {
             panelGlass.updateColors();
+            if (panelHost != null && panelHost.getBackground() != panelGlass) {
+                panelHost.setBackground(panelGlass);
+            }
             if (panel != null) {
                 panel.setBackgroundColor(Color.TRANSPARENT);
             }
@@ -1378,28 +1389,26 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
 
     private void attachLiquidGlass() {
         if (!MglaSideMenuConfig.isGlassEnabled()) {
-            panelGlass = null;
-            glassSourceRoot = null;
+            clearPanelGlass();
             return;
         }
-        BlurredBackgroundDrawableViewFactory factory = resolveGlassFactory();
-        BaseFragment last = LaunchActivity.getLastFragment();
-        glassSourceRoot = last != null ? last.getFragmentView() : null;
-        if (glassSourceRoot == null && last instanceof MainTabsActivity) {
-            DialogsActivity dialogs = ((MainTabsActivity) last).getDialogsActivity();
-            if (dialogs != null) {
-                glassSourceRoot = dialogs.getFragmentView();
+
+        GlassBind bind = resolveGlassBind();
+        if (bind == null || bind.factory == null) {
+            // Factory may not be ready yet (cold start / fragment not created). Retry shortly.
+            scheduleGlassAttachRetry();
+            if (panelGlass == null) {
+                applySolidPanelBackground(Theme.isCurrentThemeDark());
             }
-        }
-
-        if (factory == null) {
-            panelGlass = null;
             return;
         }
 
+        glassSourceRoot = bind.sourceRoot;
+        final boolean factoryChanged = glassFactoryRef != bind.factory;
         // One full-panel glass on the host — separate profile/accounts glass looked like
         // only the top/bottom strips were glassy.
-        if (panelGlass == null) {
+        if (panelGlass == null || factoryChanged) {
+            glassFactoryRef = bind.factory;
             BlurredBackgroundProvider panelProvider = new BlurredBackgroundProviderBuilder(null)
                     .setBackgroundColor((r, isDark) -> {
                         int base = Theme.getColor(Theme.key_chats_menuBackground);
@@ -1411,53 +1420,110 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                     .setStrokeWidth(0, 0)
                     .setShadowColor((r, isDark) -> 0)
                     .build();
-            panelGlass = factory.create((View) null, panelProvider);
+            // Menu lives outside fragment contentView; sync offsets manually like popup glass.
+            panelGlass = bind.factory.create((View) null, panelProvider);
             panelGlass.setRadius(0, dp(24), dp(24), 0);
             panelGlass.setThickness(dp(14));
             panelGlass.setIntensity(0.88f);
-            panelHost.setBackground(panelGlass);
-            if (panel != null) {
-                panel.setBackgroundColor(Color.TRANSPARENT);
-            }
         }
 
+        if (panelHost != null) {
+            panelHost.setBackground(panelGlass);
+        }
+        if (panel != null) {
+            panel.setBackgroundColor(Color.TRANSPARENT);
+        }
         syncGlassSourceOffset();
         invalidateGlass();
     }
 
-    private BlurredBackgroundDrawableViewFactory resolveGlassFactory() {
-        BaseFragment last = LaunchActivity.getLastFragment();
-        BlurredBackgroundDrawableViewFactory fromLast = liquidGlassFromFragment(last);
-        if (fromLast != null) {
-            return fromLast;
-        }
-        if (last instanceof MainTabsActivity) {
-            fromLast = liquidGlassFromFragment(((MainTabsActivity) last).getDialogsActivity());
-            if (fromLast != null) {
-                return fromLast;
+    private void scheduleGlassAttachRetry() {
+        final int token = ++glassAttachRetryToken;
+        AndroidUtilities.runOnUIThread(() -> {
+            if (token != glassAttachRetryToken) {
+                return;
             }
-            fromLast = ((MainTabsActivity) last).getLiquidGlassFactory();
-            if (fromLast != null) {
-                return fromLast;
+            if (!MglaSideMenuConfig.isGlassEnabled() || !isVisibleOrAnimating()) {
+                return;
             }
-        }
-        MainTabsActivity tabs = LaunchActivity.findFragment(MainTabsActivity.class);
-        if (tabs != null) {
-            BlurredBackgroundDrawableViewFactory factory = liquidGlassFromFragment(tabs.getDialogsActivity());
-            if (factory != null) {
-                return factory;
+            if (panelGlass != null && glassFactoryRef != null) {
+                return;
             }
-            return tabs.getLiquidGlassFactory();
-        }
-        return null;
+            invalidateDialogsBlur();
+            attachLiquidGlass();
+        }, 48);
     }
 
-    private static BlurredBackgroundDrawableViewFactory liquidGlassFromFragment(BaseFragment fragment) {
-        if (fragment instanceof ChatActivity) {
-            return ((ChatActivity) fragment).getLiquidGlassFactory();
+    private void clearPanelGlass() {
+        glassAttachRetryToken++;
+        panelGlass = null;
+        glassFactoryRef = null;
+        glassSourceRoot = null;
+        applySolidPanelBackground(Theme.isCurrentThemeDark());
+    }
+
+    private void applySolidPanelBackground(boolean dark) {
+        if (panelHost == null) {
+            return;
         }
-        if (fragment instanceof DialogsActivity) {
-            return ((DialogsActivity) fragment).getLiquidGlassFactory();
+        GradientDrawable panelBg = new GradientDrawable();
+        int base = Theme.getColor(Theme.key_chats_menuBackground);
+        panelBg.setColor(ColorUtils.setAlphaComponent(base, dark ? 0xF2 : 0xF5));
+        panelBg.setCornerRadii(new float[]{0, 0, dp(24), dp(24), dp(24), dp(24), 0, 0});
+        panelHost.setBackground(panelBg);
+        if (panel != null) {
+            panel.setBackgroundColor(Color.TRANSPARENT);
+        }
+    }
+
+    private static final class GlassBind {
+        final BlurredBackgroundDrawableViewFactory factory;
+        @Nullable
+        final View sourceRoot;
+
+        GlassBind(BlurredBackgroundDrawableViewFactory factory, @Nullable View sourceRoot) {
+            this.factory = factory;
+            this.sourceRoot = sourceRoot;
+        }
+    }
+
+    @Nullable
+    private GlassBind resolveGlassBind() {
+        BaseFragment last = LaunchActivity.getLastFragment();
+
+        // Prefer the currently visible chat/dialogs factory so sampling matches the UI behind the panel.
+        if (last instanceof ChatActivity) {
+            BlurredBackgroundDrawableViewFactory factory = ((ChatActivity) last).getLiquidGlassFactory();
+            if (factory != null) {
+                return new GlassBind(factory, last.getFragmentView());
+            }
+        }
+        if (last instanceof DialogsActivity) {
+            BlurredBackgroundDrawableViewFactory factory = ((DialogsActivity) last).getLiquidGlassFactory();
+            if (factory != null) {
+                return new GlassBind(factory, last.getFragmentView());
+            }
+        }
+        if (last instanceof MainTabsActivity) {
+            DialogsActivity dialogs = ((MainTabsActivity) last).getDialogsActivity();
+            if (dialogs != null && dialogs.getLiquidGlassFactory() != null) {
+                return new GlassBind(dialogs.getLiquidGlassFactory(), dialogs.getFragmentView());
+            }
+            BlurredBackgroundDrawableViewFactory tabsFactory = ((MainTabsActivity) last).getLiquidGlassFactory();
+            if (tabsFactory != null) {
+                return new GlassBind(tabsFactory, last.getFragmentView());
+            }
+        }
+
+        // From Settings / Profile / etc.: always fall back to Dialogs (has side-menu blur strip).
+        DialogsActivity dialogs = resolveDialogsActivity();
+        if (dialogs != null && dialogs.getLiquidGlassFactory() != null) {
+            return new GlassBind(dialogs.getLiquidGlassFactory(), dialogs.getFragmentView());
+        }
+
+        MainTabsActivity tabs = LaunchActivity.findFragment(MainTabsActivity.class);
+        if (tabs != null && tabs.getLiquidGlassFactory() != null) {
+            return new GlassBind(tabs.getLiquidGlassFactory(), tabs.getFragmentView());
         }
         return null;
     }

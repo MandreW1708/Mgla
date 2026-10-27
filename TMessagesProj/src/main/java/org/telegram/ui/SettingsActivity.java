@@ -536,6 +536,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     public void onResume() {
         super.onResume();
         updateMglaPremiumGlow();
+        if (listView != null && listView.adapter != null) {
+            listView.adapter.notifyDataSetChanged();
+        }
     }
 
     @Override
@@ -676,14 +679,6 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         }
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        if (listView.adapter != null) {
-            listView.adapter.notifyDataSetChanged();
-        }
-    }
-
     private ArrayList<Integer> accountNumbers = new ArrayList<>();
     private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
         if (searchItem.isSearchFieldVisible2()) {
@@ -816,7 +811,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             items.add(UItem.asShadow(null));
             items.add(UItem.asHeader("Experimental"));
             items.add(SettingCell.Factory.of(24, 0xFFF45255, 0xFFDF3955, 0, getString(R.string.RoundVideoSettings)));
-            items.add(SettingCell.Factory.of(26, 0xFF55CA47, 0xFF27B434, 0, getString(R.string.AudioRecorderSettings)));
+            items.add(SettingCell.Factory.of(27, 0xFF55CA47, 0xFF27B434, 0, getString(R.string.AudioRecorderSettings)));
         }
 
         if (BuildVars.LOGS_ENABLED || BuildVars.DEBUG_PRIVATE_VERSION) {
@@ -979,7 +974,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 presentFragment(new RoundVideoSettingsActivity());
                 break;
             }
-            case 26: {
+            case 27: {
                 presentFragment(new AudioRecorderSettingsActivity());
                 break;
             }
