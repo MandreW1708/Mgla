@@ -6,6 +6,7 @@ import android.text.TextUtils;
 
 import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.R;
+import org.telegram.ui.Components.IconBackgroundColors;
 
 import java.util.ArrayList;
 
@@ -123,27 +124,53 @@ public class MglaSideMenuController {
 
     public static int getIcon(int item) {
         if (isDivider(item)) return R.drawable.msg_divider_icon;
+        // Prefer Telegram outline / vector icons (tintable), not filled webp that wash out on glass.
         switch (item) {
-            case ITEM_PROFILE: return R.drawable.msg_openprofile;
+            case ITEM_PROFILE: return R.drawable.outline_profile_photo;
             case ITEM_SAVED: return R.drawable.outline_saved_24;
             case ITEM_NEW_GROUP: return R.drawable.outline_groups_24;
-            case ITEM_CONTACTS: return R.drawable.msg_contacts;
-            case ITEM_CALLS: return R.drawable.msg_calls;
-            case ITEM_SETTINGS: return R.drawable.msg_settings_old;
-            case ITEM_QR: return R.drawable.msg_qrcode;
-            case ITEM_BROWSER: return R.drawable.outline_header_search;
+            case ITEM_CONTACTS: return R.drawable.outline_profile_member_24;
+            case ITEM_CALLS: return R.drawable.outline_profile_call_24;
+            case ITEM_SETTINGS: return R.drawable.outline_profile_settings;
+            case ITEM_QR: return R.drawable.outline_header_qr_24;
+            case ITEM_BROWSER: return R.drawable.outline_search_1_24;
             case ITEM_ARCHIVE: return R.drawable.msg_archive;
             case ITEM_NEW_CHANNEL: return R.drawable.settings_channel;
-            case ITEM_MGLA_SETTINGS: return R.drawable.msg_settings;
-            case ITEM_MEMORY: return R.drawable.msg_saved;
+            case ITEM_MGLA_SETTINGS: return R.drawable.outline_profile_settings;
+            case ITEM_MEMORY: return R.drawable.menu_feature_hourglass;
             case ITEM_INVITE: return R.drawable.settings_invite;
-            case ITEM_PROXY: return R.drawable.settings_data;
-            case ITEM_WALLET: return R.drawable.settings_wallet;
-            case ITEM_MUSIC: return R.drawable.msg_filled_data_music;
-            case ITEM_TASKS: return R.drawable.msg_folders;
+            case ITEM_PROXY: return R.drawable.outline_shield_plain_24;
+            case ITEM_WALLET: return R.drawable.outline_gram_24;
+            case ITEM_MUSIC: return R.drawable.mgla_ic_music_24;
+            case ITEM_TASKS: return R.drawable.menu_folder_add;
             case ITEM_AI: return R.drawable.mgla_ic_ai_star;
         }
         return 0;
+    }
+
+    /** Gradient circle colors for «цветные иконки» mode (Telegram Settings style). */
+    public static IconBackgroundColors getIconColors(int item) {
+        switch (item) {
+            case ITEM_PROFILE: return IconBackgroundColors.CYAN;
+            case ITEM_SAVED: return IconBackgroundColors.BLUE;
+            case ITEM_NEW_GROUP: return IconBackgroundColors.GREEN;
+            case ITEM_CONTACTS: return IconBackgroundColors.BLUE_ALT;
+            case ITEM_CALLS: return IconBackgroundColors.GREEN;
+            case ITEM_SETTINGS: return IconBackgroundColors.GRAY;
+            case ITEM_QR: return IconBackgroundColors.PURPLE;
+            case ITEM_BROWSER: return IconBackgroundColors.BLUE_LIGHT;
+            case ITEM_ARCHIVE: return IconBackgroundColors.ORANGE;
+            case ITEM_NEW_CHANNEL: return IconBackgroundColors.ORANGE_DEEP;
+            case ITEM_MGLA_SETTINGS: return IconBackgroundColors.BURGUNDY;
+            case ITEM_MEMORY: return IconBackgroundColors.CYAN;
+            case ITEM_INVITE: return IconBackgroundColors.BLUE_DEEP;
+            case ITEM_PROXY: return IconBackgroundColors.BLUE_DEEP;
+            case ITEM_WALLET: return IconBackgroundColors.ORANGE;
+            case ITEM_MUSIC: return IconBackgroundColors.PURPLE;
+            case ITEM_TASKS: return IconBackgroundColors.ORANGE_DEEP;
+            case ITEM_AI: return IconBackgroundColors.PURPLE;
+            default: return IconBackgroundColors.GRAY;
+        }
     }
 
     public static boolean isDivider(int item) {

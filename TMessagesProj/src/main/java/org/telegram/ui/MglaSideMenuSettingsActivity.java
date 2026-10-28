@@ -81,6 +81,18 @@ public class MglaSideMenuSettingsActivity extends MglaBaseSettingsActivity {
 
         toggleBlock.addView(MglaUi.createDivider(context));
 
+        TextCheckCell coloredIconsCell = new TextCheckCell(context);
+        coloredIconsCell.setBackground(null);
+        coloredIconsCell.setTextAndCheck("Цветные иконки", MglaSideMenuConfig.isColoredIconsEnabled(), false);
+        coloredIconsCell.setOnClickListener(v -> {
+            boolean newVal = !MglaSideMenuConfig.isColoredIconsEnabled();
+            MglaSideMenuConfig.setColoredIconsEnabled(newVal);
+            coloredIconsCell.setChecked(newVal);
+        });
+        toggleBlock.addView(coloredIconsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        toggleBlock.addView(MglaUi.createDivider(context));
+
         opacityTitle = new TextView(context);
         opacityTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         opacityTitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));

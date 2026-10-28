@@ -9,6 +9,7 @@ public class MglaSideMenuConfig {
     public static final String KEY_ENABLED = "side_menu_enabled";
     public static final String KEY_GLASS_ENABLED = "side_menu_glass_enabled";
     public static final String KEY_BACKGROUND_OPACITY = "side_menu_background_opacity";
+    public static final String KEY_COLORED_ICONS = "side_menu_colored_icons";
 
     /** Fully opaque solid panel when liquid glass is off. */
     public static final int DEFAULT_BACKGROUND_OPACITY = 100;
@@ -66,6 +67,19 @@ public class MglaSideMenuConfig {
 
     public static float getBackgroundOpacityAlpha() {
         return getBackgroundOpacity() / 100f;
+    }
+
+    public static boolean isColoredIconsEnabled() {
+        SharedPreferences prefs = prefs();
+        return prefs != null && prefs.getBoolean(KEY_COLORED_ICONS, false);
+    }
+
+    public static void setColoredIconsEnabled(boolean enabled) {
+        SharedPreferences prefs = prefs();
+        if (prefs != null) {
+            prefs.edit().putBoolean(KEY_COLORED_ICONS, enabled).apply();
+            notifyChanged();
+        }
     }
 
     private static void notifyChanged() {

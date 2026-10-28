@@ -52,6 +52,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
+import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
@@ -98,8 +99,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private LinearLayout navContainer;
     private final ArrayList<View> navRows = new ArrayList<>();
     private final ArrayList<ImageView> navIcons = new ArrayList<>();
-    private final ArrayList<FrameLayout> navIconWells = new ArrayList<>();
     private final ArrayList<TextView> navLabels = new ArrayList<>();
+    private final ArrayList<Integer> navItemIds = new ArrayList<>();
+    private ImageView ghostIcon;
     private final ArrayList<View> accountRows = new ArrayList<>();
     private final ArrayList<View> animatedViews = new ArrayList<>();
 
@@ -286,10 +288,11 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         row.setClickable(true);
         row.setBackground(createRoundedSelector(dp(14)));
 
-        ImageView icon = new ImageView(context);
-        icon.setImageResource(R.drawable.mgla_ic_eye);
-        icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
-        row.addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+        ghostIcon = new ImageView(context);
+        ghostIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        ghostIcon.setImageResource(R.drawable.mgla_ic_eye);
+        ghostIcon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chats_menuItemIcon), PorterDuff.Mode.SRC_IN));
+        row.addView(ghostIcon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         ghostButtonLabel = new TextView(context);
         ghostButtonLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
@@ -394,8 +397,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         navContainer.removeAllViews();
         navRows.clear();
         navIcons.clear();
-        navIconWells.clear();
         navLabels.clear();
+        navItemIds.clear();
 
         ArrayList<Integer> visibleItems = MglaSideMenuController.getVisibleItems(context);
         for (int i = 0; i < visibleItems.size(); i++) {
@@ -405,47 +408,61 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 divider.setBackgroundColor(Theme.getColor(Theme.key_divider));
                 navContainer.addView(divider, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 22, 8, 22, 8));
             } else {
-                addNavItem(context, MglaSideMenuController.getIcon(item), MglaSideMenuController.getTitle(item), item);
+                addNavItem(context, item);
             }
         }
         updatePanelColors();
         updateAnimatedViewsProgress();
     }
 
-    private ImageView addNavItem(Context context, int iconRes, String title, int id) {
+    private ImageView addNavItem(Context context, int id) {
+        final boolean colored = MglaSideMenuConfig.isColoredIconsEnabled();
+        final int iconSize = colored ? 28 : 24;
+        final int labelLeft = colored ? 44 : 40;
+
         FrameLayout row = new FrameLayout(context);
-        row.setMinimumHeight(dp(50));
-        row.setPadding(dp(12), dp(8), dp(16), dp(8));
+        row.setMinimumHeight(dp(48));
+        row.setPadding(dp(16), dp(10), dp(16), dp(10));
         row.setClickable(true);
         row.setBackground(createRoundedSelector(dp(14)));
 
-        FrameLayout iconWell = new FrameLayout(context);
-        GradientDrawable wellBg = new GradientDrawable();
-        wellBg.setShape(GradientDrawable.OVAL);
-        wellBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), 0x18));
-        iconWell.setBackground(wellBg);
-
         ImageView icon = new ImageView(context);
-        icon.setImageResource(iconRes);
-        icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
-        iconWell.addView(icon, LayoutHelper.createFrame(20, 20, Gravity.CENTER));
-        row.addView(iconWell, LayoutHelper.createFrame(36, 36, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        applyNavIconStyle(icon, id);
+        row.addView(icon, LayoutHelper.createFrame(iconSize, iconSize, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         TextView label = new TextView(context);
-        label.setText(title);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        label.setText(MglaSideMenuController.getTitle(id));
+        label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         label.setTextColor(Theme.getColor(Theme.key_chats_menuItemText));
         label.setSingleLine(true);
-        row.addView(label, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 48, 0, 0, 0));
+        row.addView(label, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, labelLeft, 0, 0, 0));
 
         row.setOnClickListener(v -> handleNavClick(id));
         navContainer.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 6, 1, 6, 1));
         navRows.add(row);
         navIcons.add(icon);
-        navIconWells.add(iconWell);
         navLabels.add(label);
+        navItemIds.add(id);
         registerAnimatedView(row);
         return icon;
+    }
+
+    private void applyNavIconStyle(ImageView icon, int itemId) {
+        if (icon == null) {
+            return;
+        }
+        icon.setImageResource(MglaSideMenuController.getIcon(itemId));
+        if (MglaSideMenuConfig.isColoredIconsEnabled()) {
+            IconBackgroundColors colors = MglaSideMenuController.getIconColors(itemId);
+            icon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+            icon.setBackground(Theme.createCircleDrawable(dp(28), colors.top, colors.bottom));
+            icon.setPadding(dp(5), dp(5), dp(5), dp(5));
+        } else {
+            icon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chats_menuItemIcon), PorterDuff.Mode.SRC_IN));
+            icon.setBackground(null);
+            icon.setPadding(0, 0, 0, 0);
+        }
     }
 
     private Drawable createRoundedSelector(int radius) {
@@ -1325,6 +1342,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         final boolean dark = Theme.isCurrentThemeDark();
         int accent = Theme.getColor(Theme.key_featuredStickers_addButton);
         int itemText = Theme.getColor(Theme.key_chats_menuItemText);
+        int itemIcon = Theme.getColor(Theme.key_chats_menuItemIcon);
         int grayText = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
 
         // Glass profile capsule: light text on accent-tinted surface.
@@ -1332,6 +1350,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         usernameText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 210));
         phoneText.setTextColor(ColorUtils.setAlphaComponent(Color.WHITE, 210));
         ghostButtonLabel.setTextColor(itemText);
+        if (ghostIcon != null) {
+            ghostIcon.setColorFilter(new PorterDuffColorFilter(itemIcon, PorterDuff.Mode.SRC_IN));
+        }
 
         if (panelGlass == null) {
             applySolidPanelBackground(dark);
@@ -1374,16 +1395,28 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             navContainer.setBackground(null);
         }
 
-        int wellColor = ColorUtils.setAlphaComponent(grayText, dark ? 0x28 : 0x18);
+        final boolean colored = MglaSideMenuConfig.isColoredIconsEnabled();
+        final int iconSize = colored ? 28 : 24;
+        final int labelLeft = colored ? 44 : 40;
         for (int i = 0; i < navRows.size(); i++) {
             navRows.get(i).setBackground(createRoundedSelector(dp(14)));
-            navIcons.get(i).setColorFilter(new PorterDuffColorFilter(grayText, PorterDuff.Mode.SRC_IN));
             navLabels.get(i).setTextColor(itemText);
-            if (i < navIconWells.size()) {
-                GradientDrawable wellBg = new GradientDrawable();
-                wellBg.setShape(GradientDrawable.OVAL);
-                wellBg.setColor(wellColor);
-                navIconWells.get(i).setBackground(wellBg);
+            ImageView icon = navIcons.get(i);
+            if (i < navItemIds.size()) {
+                applyNavIconStyle(icon, navItemIds.get(i));
+            } else if (!colored) {
+                icon.setColorFilter(new PorterDuffColorFilter(itemIcon, PorterDuff.Mode.SRC_IN));
+            }
+            ViewGroup.LayoutParams iconLp = icon.getLayoutParams();
+            if (iconLp instanceof FrameLayout.LayoutParams) {
+                iconLp.width = dp(iconSize);
+                iconLp.height = dp(iconSize);
+                icon.setLayoutParams(iconLp);
+            }
+            ViewGroup.LayoutParams labelLp = navLabels.get(i).getLayoutParams();
+            if (labelLp instanceof FrameLayout.LayoutParams) {
+                ((FrameLayout.LayoutParams) labelLp).leftMargin = dp(labelLeft);
+                navLabels.get(i).setLayoutParams(labelLp);
             }
         }
         invalidateGlass();

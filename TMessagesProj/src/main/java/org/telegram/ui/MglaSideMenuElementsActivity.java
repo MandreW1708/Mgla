@@ -3,6 +3,7 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.util.TypedValue;
@@ -20,12 +21,14 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MglaSideMenuConfig;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
+import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
@@ -327,10 +330,32 @@ public class MglaSideMenuElementsActivity extends MglaBaseSettingsActivity {
         void bind(int itemId, boolean showHandle) {
             titleView.setText(MglaSideMenuController.getTitle(itemId));
             iconView.setImageResource(MglaSideMenuController.getIcon(itemId));
-            int color = MglaSideMenuController.isDivider(itemId)
-                    ? Theme.getColor(Theme.key_windowBackgroundWhiteGrayText)
-                    : Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
-            iconView.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+            final boolean colored = !MglaSideMenuController.isDivider(itemId)
+                    && MglaSideMenuConfig.isColoredIconsEnabled();
+            ViewGroup.LayoutParams iconLp = iconView.getLayoutParams();
+            if (iconLp != null) {
+                int size = colored ? dp(28) : dp(24);
+                iconLp.width = size;
+                iconLp.height = size;
+                iconView.setLayoutParams(iconLp);
+            }
+            titleLp.leftMargin = colored ? dp(44) : dp(40);
+            if (MglaSideMenuController.isDivider(itemId)) {
+                iconView.setBackground(null);
+                iconView.setPadding(0, 0, 0, 0);
+                iconView.setColorFilter(new PorterDuffColorFilter(
+                        Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
+            } else if (colored) {
+                IconBackgroundColors colors = MglaSideMenuController.getIconColors(itemId);
+                iconView.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+                iconView.setBackground(Theme.createCircleDrawable(dp(28), colors.top, colors.bottom));
+                iconView.setPadding(dp(5), dp(5), dp(5), dp(5));
+            } else {
+                iconView.setBackground(null);
+                iconView.setPadding(0, 0, 0, 0);
+                iconView.setColorFilter(new PorterDuffColorFilter(
+                        Theme.getColor(Theme.key_chats_menuItemIcon), PorterDuff.Mode.SRC_IN));
+            }
             reorderView.setVisibility(showHandle ? VISIBLE : GONE);
             titleLp.rightMargin = showHandle ? dp(44) : dp(12);
             titleView.setLayoutParams(titleLp);
