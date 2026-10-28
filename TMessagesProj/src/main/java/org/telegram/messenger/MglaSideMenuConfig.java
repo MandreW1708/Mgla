@@ -8,6 +8,10 @@ public class MglaSideMenuConfig {
     public static final String PREFS = "mgla_config";
     public static final String KEY_ENABLED = "side_menu_enabled";
     public static final String KEY_GLASS_ENABLED = "side_menu_glass_enabled";
+    public static final String KEY_BACKGROUND_OPACITY = "side_menu_background_opacity";
+
+    /** Fully opaque solid panel when liquid glass is off. */
+    public static final int DEFAULT_BACKGROUND_OPACITY = 100;
 
     public static boolean isEnabled() {
         SharedPreferences prefs = prefs();
@@ -18,9 +22,7 @@ public class MglaSideMenuConfig {
         SharedPreferences prefs = prefs();
         if (prefs != null) {
             prefs.edit().putBoolean(KEY_ENABLED, enabled).apply();
-            AndroidUtilities.runOnUIThread(() ->
-                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaHeaderSettingsChanged)
-            );
+            notifyChanged();
         }
     }
 
@@ -33,7 +35,43 @@ public class MglaSideMenuConfig {
         SharedPreferences prefs = prefs();
         if (prefs != null) {
             prefs.edit().putBoolean(KEY_GLASS_ENABLED, enabled).apply();
+            notifyChanged();
         }
+    }
+
+    /**
+     * Solid-panel opacity when liquid glass is off, 0–100 (100 = fully opaque).
+     * Ignored while liquid glass is enabled — that uses appearance «Затемнение стекла».
+     */
+    public static int getBackgroundOpacity() {
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return DEFAULT_BACKGROUND_OPACITY;
+        }
+        return Math.max(0, Math.min(100, prefs.getInt(KEY_BACKGROUND_OPACITY, DEFAULT_BACKGROUND_OPACITY)));
+    }
+
+    public static void setBackgroundOpacity(int opacity) {
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return;
+        }
+        int clamped = Math.max(0, Math.min(100, opacity));
+        if (prefs.getInt(KEY_BACKGROUND_OPACITY, DEFAULT_BACKGROUND_OPACITY) == clamped) {
+            return;
+        }
+        prefs.edit().putInt(KEY_BACKGROUND_OPACITY, clamped).apply();
+        notifyChanged();
+    }
+
+    public static float getBackgroundOpacityAlpha() {
+        return getBackgroundOpacity() / 100f;
+    }
+
+    private static void notifyChanged() {
+        AndroidUtilities.runOnUIThread(() ->
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaHeaderSettingsChanged)
+        );
     }
 
     private static SharedPreferences prefs() {

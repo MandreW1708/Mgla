@@ -247,6 +247,8 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1069, sideMenu, hub, appearance, appearanceIcon, sideMenuScreen, null, "appearance/side-menu"));
         l.add(new Entry(1070, "Включить боковое меню", hub, sideMenu, appearanceIcon, sideMenuScreen, "Включить боковое меню", "appearance/side-menu/enable"));
         l.add(new Entry(1071, "Настроить элементы", hub, sideMenu, appearanceIcon, sideMenuScreen, "Настроить элементы", "appearance/side-menu/elements"));
+        l.add(new Entry(1072, "Жидкое стекло", hub, sideMenu, appearanceIcon, sideMenuScreen, "Жидкое стекло", "appearance/side-menu/glass"));
+        l.add(new Entry(1073, "Непрозрачность фона", hub, sideMenu, appearanceIcon, sideMenuScreen, "Непрозрачность фона", "appearance/side-menu/opacity"));
         final String animCommon = "Общие анимации";
         final String animChats = "В чатах";
         final String animDialogs = "В списке чатов";

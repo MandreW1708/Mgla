@@ -16329,12 +16329,30 @@ public class ChatActivityEnterView extends FrameLayout implements
                 return false;
             }
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                // Disc is vertically centered in the slot; hit-test against backgroundRect
-                // (stock bottom-right math leaves a dead zone on the top of a 44dp row).
-                checkBackgroundRect();
                 final float pad = dp(2);
-                if (event.getX() < backgroundRect.left - pad || event.getX() > backgroundRect.right + pad
-                        || event.getY() < backgroundRect.top - pad || event.getY() > backgroundRect.bottom + pad) {
+                final float left;
+                final float top;
+                final float right;
+                final float bottom;
+                if (isNewDesignSendButton || externalGlassBackground || centerBackground) {
+                    // Chat input row (~44dp): disc is vertically centered — hit that rect
+                    // (stock bottom-right math leaves a dead zone on the top of the row).
+                    checkBackgroundRect();
+                    left = backgroundRect.left;
+                    top = backgroundRect.top;
+                    right = backgroundRect.right;
+                    bottom = backgroundRect.bottom;
+                } else {
+                    // PhotoViewer / legacy: glass disc is drawn bottom-right (see getBounds / onDraw).
+                    // Centered 38dp hit-test on a 120dp slot barely overlaps the visible button.
+                    getBounds(AndroidUtilities.rectTmp);
+                    left = AndroidUtilities.rectTmp.left;
+                    top = AndroidUtilities.rectTmp.top;
+                    right = AndroidUtilities.rectTmp.right;
+                    bottom = AndroidUtilities.rectTmp.bottom;
+                }
+                if (event.getX() < left - pad || event.getX() > right + pad
+                        || event.getY() < top - pad || event.getY() > bottom + pad) {
                     return false;
                 }
             }

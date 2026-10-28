@@ -110,6 +110,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     @Nullable
     private View glassSourceRoot;
     private int glassAttachRetryToken;
+    /** While true, glass keeps the fully-open sample so the slide-in is glassy from frame one. */
+    private boolean glassFrozenForOpenAnim;
 
     private int panelWidthPx;
     private float openProgress;
@@ -653,18 +655,14 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         isOpen = false;
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
-        // Blur capture must see the menu as visible before glass attaches, otherwise
-        // the middle-of-list strip is missing and the panel looks like flat color.
-        invalidateDialogsBlur();
-        attachLiquidGlass();
         ensurePanelLaidOut(() -> {
             float closed = getClosedTranslationX();
             panelHost.setTranslationX(closed);
             openProgress = 0f;
             scrim.setAlpha(0f);
             updateAnimatedViewsProgress();
-            invalidateDialogsBlur();
-            attachLiquidGlass();
+            // Warm blur + glass display list before the slide so the panel opens already glassy.
+            prepareLiquidGlassForOpen();
             animatePanelTo(0f, true);
         });
     }
@@ -673,6 +671,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         if (!isOpen && !isAnimating && getVisibility() != VISIBLE) {
             return;
         }
+        glassFrozenForOpenAnim = false;
         if (!animated) {
             cancelAnimation();
             hideImmediate();
@@ -813,14 +812,13 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         bringMenuToFront();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
-        invalidateDialogsBlur();
-        attachLiquidGlass();
         isOpen = false;
         float closed = getClosedTranslationX();
         panelHost.setTranslationX(closed);
         openProgress = 0f;
         scrim.setAlpha(0f);
         updateAnimatedViewsProgress();
+        prepareLiquidGlassForOpen();
         trackingStartRawX = rawX;
         dragStartTranslationX = closed;
         // Re-sync after first layout if width was unknown.
@@ -832,6 +830,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
                 float newClosed = getClosedTranslationX();
                 float shown = panelHost.getTranslationX() - dragStartTranslationX;
                 dragStartTranslationX = newClosed;
+                prepareLiquidGlassForOpen();
                 setPanelTranslation(newClosed + shown);
             });
         }
@@ -877,8 +876,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         openProgress = Utilities.clamp(openProgress, 1f, 0f);
         scrim.setAlpha(openProgress);
         updateAnimatedViewsProgress();
-        if (openProgress > 0.01f) {
+        if (panelGlass != null && openProgress > 0.001f && !glassFrozenForOpenAnim) {
             syncGlassSourceOffset();
+            invalidateGlass();
         }
     }
 
@@ -984,19 +984,21 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private void showOpened() {
         isOpen = true;
         openProgress = 1f;
+        glassFrozenForOpenAnim = false;
         panelHost.setTranslationX(0f);
         scrim.setAlpha(1f);
         updateAnimatedViewsProgress();
         setVisibility(VISIBLE);
         scrim.setVisibility(VISIBLE);
-        invalidateDialogsBlur();
-        attachLiquidGlass();
+        // Unfreeze and resync to the live pose now that the panel is at rest.
+        prepareLiquidGlassForOpen();
     }
 
     private void hideImmediate() {
         isOpen = false;
         isAnimating = false;
         openProgress = 0f;
+        glassFrozenForOpenAnim = false;
         unregisterObserver();
         resetDrawerTracking();
         panelHost.setTranslationX(getClosedTranslationX());
@@ -1387,6 +1389,24 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         invalidateGlass();
     }
 
+    /**
+     * Capture blur + attach glass + build the liquid-glass display list before the panel
+     * slides in, so the first visible frames are already glassy (not solid → glass at the end).
+     */
+    private void prepareLiquidGlassForOpen() {
+        if (!MglaSideMenuConfig.isGlassEnabled()) {
+            clearPanelGlass();
+            glassFrozenForOpenAnim = false;
+            return;
+        }
+        invalidateDialogsBlur();
+        attachLiquidGlass();
+        warmPanelGlassDisplayList();
+        // Keep the open-pose sample during the slide; live tracking would resample off-screen
+        // and make the panel look solid until it fully settles.
+        glassFrozenForOpenAnim = !isOpen || openProgress < 0.999f || isAnimating || drawerTracking;
+    }
+
     private void attachLiquidGlass() {
         if (!MglaSideMenuConfig.isGlassEnabled()) {
             clearPanelGlass();
@@ -1411,8 +1431,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             glassFactoryRef = bind.factory;
             BlurredBackgroundProvider panelProvider = new BlurredBackgroundProviderBuilder(null)
                     .setBackgroundColor((r, isDark) -> {
+                        // Side-menu liquid glass follows appearance «Затемнение стекла».
                         int base = Theme.getColor(Theme.key_chats_menuBackground);
-                        float a = Math.min(0.72f, MglaGlassConfig.getGlassBackgroundAlpha(isDark));
+                        float a = MglaGlassConfig.getGlassBackgroundAlpha(isDark);
                         return ColorUtils.setAlphaComponent(base, Math.round(255 * a));
                     })
                     .setStrokeColorTop((r, isDark) -> 0)
@@ -1437,6 +1458,29 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         invalidateGlass();
     }
 
+    private void warmPanelGlassDisplayList() {
+        if (panelGlass == null || panelHost == null) {
+            return;
+        }
+        final int w = panelHost.getWidth() > 0 ? panelHost.getWidth() : panelHost.getMeasuredWidth();
+        final int h = panelHost.getHeight() > 0 ? panelHost.getHeight() : panelHost.getMeasuredHeight();
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        // Background bounds are only assigned on draw; set them now so we can build the
+        // liquid-glass RenderNode while the panel is still off-screen.
+        panelGlass.setBounds(0, 0, w, h);
+        panelGlass.updateColors();
+        // Sample as if the panel is already open — matches what the user will see as it slides in.
+        syncGlassSourceOffsetAsOpen();
+        if (panelGlass instanceof BlurredBackgroundDrawableRenderNode) {
+            BlurredBackgroundDrawableRenderNode node = (BlurredBackgroundDrawableRenderNode) panelGlass;
+            node.invalidateDisplayList();
+            node.updateDisplayList();
+        }
+        panelHost.invalidate();
+    }
+
     private void scheduleGlassAttachRetry() {
         final int token = ++glassAttachRetryToken;
         AndroidUtilities.runOnUIThread(() -> {
@@ -1449,8 +1493,7 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
             if (panelGlass != null && glassFactoryRef != null) {
                 return;
             }
-            invalidateDialogsBlur();
-            attachLiquidGlass();
+            prepareLiquidGlassForOpen();
         }, 48);
     }
 
@@ -1468,12 +1511,31 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
         }
         GradientDrawable panelBg = new GradientDrawable();
         int base = Theme.getColor(Theme.key_chats_menuBackground);
-        panelBg.setColor(ColorUtils.setAlphaComponent(base, dark ? 0xF2 : 0xF5));
+        int alpha = Math.round(255 * MglaSideMenuConfig.getBackgroundOpacityAlpha());
+        panelBg.setColor(ColorUtils.setAlphaComponent(base, alpha));
         panelBg.setCornerRadii(new float[]{0, 0, dp(24), dp(24), dp(24), dp(24), 0, 0});
         panelHost.setBackground(panelBg);
         if (panel != null) {
             panel.setBackgroundColor(Color.TRANSPARENT);
         }
+    }
+
+    /** Refresh solid opacity / glass tint when settings or appearance darkening change. */
+    private void applyAppearanceFromSettings() {
+        if (!isVisibleOrAnimating()) {
+            return;
+        }
+        if (MglaSideMenuConfig.isGlassEnabled()) {
+            if (panelGlass == null) {
+                prepareLiquidGlassForOpen();
+            } else {
+                panelGlass.updateColors();
+                invalidateGlass();
+            }
+        } else {
+            clearPanelGlass();
+        }
+        updatePanelColors();
     }
 
     private static final class GlassBind {
@@ -1529,17 +1591,30 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     }
 
     private void syncGlassSourceOffset() {
+        syncGlassSourceOffset(panelHost != null ? panelHost.getTranslationX() : 0f,
+                panelHost != null ? panelHost.getTranslationY() : 0f);
+    }
+
+    /** Offset as if translation were 0 — used to pre-build glass before the open animation. */
+    private void syncGlassSourceOffsetAsOpen() {
+        syncGlassSourceOffset(0f, 0f);
+    }
+
+    private void syncGlassSourceOffset(float assumeTranslationX, float assumeTranslationY) {
         if (panelHost == null || panelGlass == null) {
             return;
         }
         final int[] hostLoc = new int[2];
         panelHost.getLocationInWindow(hostLoc);
+        // getLocationInWindow includes the current translation; remap to the assumed pose.
+        final float hostX = hostLoc[0] - panelHost.getTranslationX() + assumeTranslationX;
+        final float hostY = hostLoc[1] - panelHost.getTranslationY() + assumeTranslationY;
         if (glassSourceRoot != null && glassSourceRoot.isAttachedToWindow()) {
             final int[] rootLoc = new int[2];
             glassSourceRoot.getLocationInWindow(rootLoc);
-            panelGlass.setSourceOffset(hostLoc[0] - rootLoc[0], hostLoc[1] - rootLoc[1]);
+            panelGlass.setSourceOffset(hostX - rootLoc[0], hostY - rootLoc[1]);
         } else {
-            panelGlass.setSourceOffset(Math.max(0, hostLoc[0]), Math.max(0, hostLoc[1]));
+            panelGlass.setSourceOffset(Math.max(0f, hostX), Math.max(0f, hostY));
         }
     }
 
@@ -1594,6 +1669,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private void registerObserver() {
         if (!observerRegistered) {
             NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.ghostModeChanged);
+            NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+            NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.didSetNewTheme);
             observerRegistered = true;
         }
     }
@@ -1601,6 +1678,8 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     private void unregisterObserver() {
         if (observerRegistered) {
             NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.ghostModeChanged);
+            NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mglaHeaderSettingsChanged);
+            NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.didSetNewTheme);
             observerRegistered = false;
         }
     }
@@ -1644,6 +1723,9 @@ public class MglaSideMenu extends FrameLayout implements NotificationCenter.Noti
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.ghostModeChanged) {
             updateGhostButton();
+        } else if (id == NotificationCenter.mglaHeaderSettingsChanged
+                || id == NotificationCenter.didSetNewTheme) {
+            applyAppearanceFromSettings();
         }
     }
 
