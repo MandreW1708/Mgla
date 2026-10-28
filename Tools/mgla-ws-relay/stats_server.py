@@ -45,6 +45,13 @@ DB_PATH = os.environ.get("MGLA_STATS_DB", "/opt/mgla-ws-relay/stats.db")
 RETENTION_DAYS = int(os.environ.get("MGLA_STATS_RETENTION_DAYS", "400"))
 REPORT_USER = os.environ.get("MGLA_STATS_REPORT_USER", "admin")
 REPORT_PASSWORD = os.environ.get("MGLA_STATS_REPORT_PASSWORD", "")
+# Separate credentials for /admin* (subscriptions, flags, updates).
+# Must differ from report password — otherwise anyone with stats access can grant plans.
+ADMIN_USER = (
+    os.environ.get("MGLA_HUB_ADMIN_USER", "").strip()
+    or REPORT_USER
+)
+ADMIN_PASSWORD = os.environ.get("MGLA_HUB_ADMIN_PASSWORD", "").strip()
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 HUB_SYNC_TOKEN = os.environ.get("MGLA_HUB_SYNC_TOKEN", "").strip()
 BOT_AI_URL = os.environ.get("MGLA_BOT_AI_URL", "").strip().rstrip("/")
@@ -1069,20 +1076,46 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._reply(404)
 
-    def _check_basic_auth(self, *, realm: str = "Mgla Hub"):
-        if not REPORT_PASSWORD:
-            self._reply(404)
-            return False
-        expected = base64.b64encode(f"{REPORT_USER}:{REPORT_PASSWORD}".encode()).decode()
+    def _check_basic_auth(self, *, realm: str = "Mgla Hub", admin: bool = False):
+        if admin:
+            user, password = ADMIN_USER, ADMIN_PASSWORD
+            if not password:
+                body = (
+                    "<!doctype html><meta charset=utf-8><title>503</title>"
+                    "<body style='font:15px system-ui;padding:2rem'>"
+                    "<h1>503 — админка не настроена</h1>"
+                    "<p>Задайте <code>MGLA_HUB_ADMIN_PASSWORD</code> на хабе "
+                    "(отдельный пароль от статистики).</p>"
+                    "</body>"
+                ).encode("utf-8")
+                self.send_response(503)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Robots-Tag", "noindex, nofollow")
+                self.end_headers()
+                self.wfile.write(body)
+                return False
+        else:
+            user, password = REPORT_USER, REPORT_PASSWORD
+            if not password:
+                self._reply(404)
+                return False
+        expected = base64.b64encode(f"{user}:{password}".encode()).decode()
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Basic ") or not hmac.compare_digest(
             auth[6:].strip().encode(), expected.encode()
         ):
+            hint = (
+                "Нужен отдельный пароль админки (не пароль статистики)."
+                if admin
+                else "Страница закрыта Basic Auth. Обновите страницу и введите пароль."
+            )
             body = (
                 "<!doctype html><meta charset=utf-8><title>401</title>"
                 "<body style='font:15px system-ui;padding:2rem'>"
                 "<h1>401 — нужен логин</h1>"
-                "<p>Страница закрыта Basic Auth. Обновите страницу и введите пароль.</p>"
+                f"<p>{hint}</p>"
                 "</body>"
             ).encode("utf-8")
             self.send_response(401)
@@ -1142,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
         self._html_reply(body)
 
     def _admin_get(self, query):
-        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+        if not self._check_basic_auth(realm="Mgla Hub Admin", admin=True):
             return
         flash_ok = unquote(query.get("ok", [""])[0] or "")
         flash_err = unquote(query.get("err", [""])[0] or "")
@@ -1179,7 +1212,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def _admin_post(self):
-        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+        if not self._check_basic_auth(realm="Mgla Hub Admin", admin=True):
             return
         form = self._read_form_body()
         if form is None:
@@ -1251,7 +1284,7 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect(hub_admin.flash_redirect(err="ошибка БД"))
 
     def _admin_subscriptions_get(self, query):
-        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+        if not self._check_basic_auth(realm="Mgla Hub Admin", admin=True):
             return
         flash_ok = unquote(query.get("ok", [""])[0] or "")
         flash_err = unquote(query.get("err", [""])[0] or "")
@@ -1271,7 +1304,7 @@ class Handler(BaseHTTPRequestHandler):
         self._html_reply(body)
 
     def _admin_subscriptions_post(self):
-        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+        if not self._check_basic_auth(realm="Mgla Hub Admin", admin=True):
             return
         form = self._read_form_body()
         if form is None:
@@ -1381,7 +1414,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _admin_csrf_token(self) -> str:
         """Hourly CSRF token derived from panel password (no server state)."""
-        secret = (REPORT_PASSWORD or "mgla").encode("utf-8")
+        secret = (ADMIN_PASSWORD or REPORT_PASSWORD or "mgla").encode("utf-8")
         slot = str(int(time.time()) // 3600)
         return hmac.new(secret, slot.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
@@ -1389,7 +1422,7 @@ class Handler(BaseHTTPRequestHandler):
         got = (form.get("csrf") or [""])[0].strip()
         if not got:
             return False
-        secret = (REPORT_PASSWORD or "mgla").encode("utf-8")
+        secret = (ADMIN_PASSWORD or REPORT_PASSWORD or "mgla").encode("utf-8")
         for slot in (0, -1):  # current + previous hour
             candidate = hmac.new(
                 secret,
@@ -1500,7 +1533,7 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(500, b'{"error":"token failed"}')
 
     def _admin_updates_get(self, query):
-        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+        if not self._check_basic_auth(realm="Mgla Hub Admin", admin=True):
             return
         flash_ok = unquote(query.get("ok", [""])[0] or "")
         flash_err = unquote(query.get("err", [""])[0] or "")
@@ -1514,7 +1547,7 @@ class Handler(BaseHTTPRequestHandler):
         self._html_reply(body)
 
     def _admin_updates_post(self):
-        if not self._check_basic_auth(realm="Mgla Hub Admin"):
+        if not self._check_basic_auth(realm="Mgla Hub Admin", admin=True):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))

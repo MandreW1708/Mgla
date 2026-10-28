@@ -694,21 +694,21 @@ def render_text(sections, days, since):
 
 CSS = """
 :root {
-  --bg0:#050304;
-  --bg1:#100a0c;
-  --card:#1a1014;
-  --card2:#22161a;
-  --line:#3d2a32;
-  --text:#f3e9ec;
-  --muted:#b09aa2;
-  --accent:#8b1e3f;
-  --accent-hi:#c23b5f;
-  --accent2:#9a6b78;
-  --accent3:#5a3a44;
-  --ok:#7d9e8a;
+  --bg0:#02040a;
+  --bg1:#060b16;
+  --card:#0b1220;
+  --card2:#101a2c;
+  --line:#1c2a42;
+  --text:#e6eefb;
+  --muted:#8b9bb4;
+  --accent:#1a4b9c;
+  --accent-hi:#2f6fd6;
+  --accent2:#3d5f8f;
+  --accent3:#152238;
+  --ok:#6f9e8a;
   --danger:#b33a4a;
   --radius:16px;
-  --shadow:0 16px 40px rgba(0,0,0,.45);
+  --shadow:0 16px 40px rgba(0,0,0,.55);
 }
 * { box-sizing:border-box; }
 html {
@@ -720,9 +720,9 @@ body {
   margin:0; color:var(--text);
   font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
   background:
-    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
-    radial-gradient(700px 420px at 100% 0%, rgba(90,58,68,.22), transparent 50%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
+    radial-gradient(900px 480px at 8% -8%, rgba(26,75,156,.32), transparent 55%),
+    radial-gradient(700px 420px at 100% 0%, rgba(8,16,36,.55), transparent 50%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #010204);
   min-height:100vh;
   max-width:100vw;
   overflow-x:hidden;
@@ -738,9 +738,9 @@ body {
 .brand { display:flex; gap:12px; align-items:center; min-width:0; flex:1 1 200px; }
 .logo {
   width:48px; height:48px; border-radius:14px; flex:0 0 auto;
-  background:linear-gradient(145deg, #c23b5f, #6e152f);
-  box-shadow:0 10px 28px rgba(139,30,63,.4);
-  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
+  background:linear-gradient(145deg, #2f6fd6, #0d2a66);
+  box-shadow:0 10px 28px rgba(26,75,156,.45);
+  display:grid; place-items:center; font-weight:800; color:#eef4ff; font-size:18px;
 }
 .brand h1 { margin:0; font-size:24px; letter-spacing:-.02em; line-height:1.15; }
 .brand p { margin:3px 0 0; color:var(--muted); font-size:13px; }
@@ -757,13 +757,13 @@ body {
 .nav a.on { color:#fff; background:var(--accent); border-color:var(--accent-hi); font-weight:650; }
 .meta { color:var(--muted); font-size:13px; margin:0 0 16px; word-break:break-word; }
 .insights {
-  background:linear-gradient(135deg, rgba(139,30,63,.18), rgba(58,40,48,.35));
-  border:1px solid rgba(139,30,63,.35); border-radius:var(--radius);
+  background:linear-gradient(135deg, rgba(26,75,156,.22), rgba(8,16,36,.55));
+  border:1px solid rgba(47,111,214,.35); border-radius:var(--radius);
   padding:16px 18px; margin-bottom:16px; box-shadow:var(--shadow);
 }
 .insights h2 { margin:0 0 10px; font-size:16px; }
 .insights ul { margin:0; padding-left:18px; }
-.insights li { margin:6px 0; color:#e8dce0; }
+.insights li { margin:6px 0; color:#d7e3f7; }
 .kpis {
   display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px;
   margin-bottom:8px;
@@ -797,7 +797,7 @@ td.name { word-break:break-word; overflow-wrap:anywhere; }
 td.bar { width:36%; min-width:90px; }
 .bar div { display:flex; align-items:center; gap:8px; }
 .bar b { font-weight:600; min-width:28px; text-align:right; }
-.bar span { flex:1; height:8px; border-radius:999px; background:#2a1c22; overflow:hidden; }
+.bar span { flex:1; height:8px; border-radius:999px; background:#121a2a; overflow:hidden; }
 .bar span i {
   display:block; height:100%; border-radius:999px;
   background:linear-gradient(90deg, var(--accent), var(--accent-hi));
@@ -813,20 +813,20 @@ td.bar { width:36%; min-width:90px; }
 .feat-ico {
   width:38px; height:38px; border-radius:12px; flex:0 0 auto;
   display:grid; place-items:center; font-size:17px;
-  background:rgba(139,30,63,.15); border:1px solid var(--line);
+  background:rgba(26,75,156,.18); border:1px solid var(--line);
 }
 .feat-name { font-weight:650; font-size:13.5px; line-height:1.3; }
 .feat-meta { color:var(--muted); font-size:12px; margin-top:3px; }
-.feat-track { height:9px; border-radius:999px; background:#2a1c22; overflow:hidden; display:flex; }
-.feat-track .on { background:linear-gradient(90deg,#6e152f,var(--accent-hi)); height:100%; }
-.feat-track .off { background:#3a2a32; height:100%; }
+.feat-track { height:9px; border-radius:999px; background:#121a2a; overflow:hidden; display:flex; }
+.feat-track .on { background:linear-gradient(90deg,#0d2a66,var(--accent-hi)); height:100%; }
+.feat-track .off { background:#1c2a42; height:100%; }
 .feat-pills { display:flex; flex-wrap:wrap; gap:6px; }
 .pill {
   font-size:11px; font-weight:650; padding:4px 8px; border-radius:999px;
   border:1px solid var(--line);
 }
-.pill.yes { color:#e8c4cf; background:rgba(139,30,63,.2); border-color:rgba(194,59,95,.4); }
-.pill.no { color:#c5b4ba; background:rgba(255,255,255,.04); }
+.pill.yes { color:#c9daf7; background:rgba(26,75,156,.25); border-color:rgba(47,111,214,.45); }
+.pill.no { color:#9aabbf; background:rgba(255,255,255,.04); }
 .empty { color:var(--muted); padding:10px 0; }
 .legend { color:var(--muted); font-size:12px; margin-bottom:8px; }
 .legend i {
@@ -889,16 +889,16 @@ svg text { fill:var(--muted); font-size:10px; }
   transition:transform .18s ease, color .18s ease, border-color .18s ease;
 }
 .man-group > summary:hover .man-toggle {
-  color:#f3e9ec; border-color:rgba(194,59,95,.45);
+  color:#e6eefb; border-color:rgba(47,111,214,.45);
 }
 .man-group[open] > summary { border-bottom:1px solid var(--line); }
 .man-group[open] .man-toggle {
   transform:rotate(180deg);
-  color:#f3e9ec; border-color:rgba(194,59,95,.5);
-  background:rgba(139,30,63,.2);
+  color:#e6eefb; border-color:rgba(47,111,214,.5);
+  background:rgba(26,75,156,.22);
 }
 .man-group .table-wrap { padding:4px 10px 8px; }
-.man-group td.name { padding-left:10px; color:#e8dce0; }
+.man-group td.name { padding-left:10px; color:#d7e3f7; }
 """
 
 
@@ -922,15 +922,15 @@ def render_chart(points):
         bh = plot_h * active / top
         parts.append(
             f'<rect x="{x:.1f}" y="{pad_t + plot_h - bh:.1f}" width="{bar_w:.1f}" height="{bh:.1f}" '
-            f'rx="3" fill="#8b1e3f" opacity=".95"><title>{d}: активны {active}, новых {new}</title></rect>')
+            f'rx="3" fill="#1a4b9c" opacity=".95"><title>{d}: активны {active}, новых {new}</title></rect>')
         line.append(f"{x + bar_w / 2:.1f},{pad_t + plot_h - plot_h * new / top:.1f}")
         if i % label_every == 0 or i == n - 1:
             parts.append(f'<text x="{x + bar_w / 2:.1f}" y="{h - 8}" text-anchor="middle">{d[5:]}</text>')
-    parts.append(f'<polyline points="{" ".join(line)}" fill="none" stroke="#c23b5f" stroke-width="2.5"/>')
+    parts.append(f'<polyline points="{" ".join(line)}" fill="none" stroke="#2f6fd6" stroke-width="2.5"/>')
     parts.append("</svg>")
     return (
-        '<div class="legend"><i style="background:#8b1e3f"></i>Активные люди'
-        '<i style="background:#c23b5f"></i>Новые установки</div>' + "".join(parts))
+        '<div class="legend"><i style="background:#1a4b9c"></i>Активные люди'
+        '<i style="background:#2f6fd6"></i>Новые установки</div>' + "".join(parts))
 
 
 def render_table(s):
@@ -965,8 +965,8 @@ def render_features(s):
         return '<div class="empty">Пока нет снимков настроек за этот период</div>'
     legend = (
         '<div class="legend feat-legend">'
-        '<i style="background:linear-gradient(90deg,#6e152f,#c23b5f)"></i>доля «включено»'
-        '<i style="background:#3a2a32"></i>доля «выключено»'
+        '<i style="background:linear-gradient(90deg,#0d2a66,#2f6fd6)"></i>доля «включено»'
+        '<i style="background:#1c2a42"></i>доля «выключено»'
         ' · каждая карточка — одна опция у активных за период'
         '</div>'
     )

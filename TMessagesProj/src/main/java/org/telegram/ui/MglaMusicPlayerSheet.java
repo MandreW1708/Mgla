@@ -33,8 +33,10 @@ import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.animation.LinearInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
@@ -44,6 +46,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.core.content.FileProvider;
+import androidx.core.widget.NestedScrollView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -64,6 +67,7 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MglaMusicImageHelper;
 import org.telegram.messenger.audioinfo.AudioInfo;
+import org.telegram.messenger.MglaYandexMusicApi;
 import org.telegram.messenger.MglaYandexMusicModel;
 import org.telegram.messenger.MglaYandexMusicPlayback;
 import org.telegram.messenger.MglaYandexMusicPlayer;
@@ -99,6 +103,8 @@ import org.telegram.ui.Stories.recorder.DominantColors;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 
 /**
@@ -133,13 +139,31 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private GradientDrawable playPauseFabBg;
     private ImageView playPauseIcon;
     private ImageView shufflePillIcon;
+    private ImageView repeatPillIcon;
+    private TextView lyricsPillLabel;
     private TextView waveIslandText;
     private FrameLayout root;
     private LinearLayout contentLayout;
     private View shufflePill;
     private View lyricsPill;
-    private View checkPill;
+    private View repeatPill;
     private View pillsRow;
+    private View lyricsScrim;
+    private NestedScrollView lyricsScroll;
+    private LinearLayout lyricsLinesCol;
+    private boolean lyricsVisible;
+    private String lyricsRequestTrackId;
+    private String lyricsBoundTrackId;
+    private final HashSet<String> lyricsInflight = new HashSet<>();
+    private MglaYandexMusicApi.LyricsData activeLyrics;
+    private int activeLyricsLine = -1;
+    private boolean lyricsUserScrolling;
+    private long lyricsUserScrollUntil;
+    private ValueAnimator lyricsHighlightAnimator;
+    private ValueAnimator lyricsScrollAnimator;
+    private final HashMap<String, MglaYandexMusicApi.LyricsData> lyricsCache = new HashMap<>();
+    private final HashSet<String> lyricsMissing = new HashSet<>();
+    private final Runnable lyricsResumeAutoScroll = () -> lyricsUserScrolling = false;
     private View telegramControlsSpacer;
     private View waveIsland;
     private ImageView prevBtn;
@@ -331,6 +355,59 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         avatarCoverView.setVisibility(View.GONE);
         avatarCoverView.setRoundRadius((int) coverRadius);
         coverWrap.addView(avatarCoverView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // Lyrics overlay: no solid panel — ambient player background shows through the cover window.
+        lyricsScrim = new View(context);
+        lyricsScrim.setBackgroundColor(Color.TRANSPARENT);
+        lyricsScrim.setVisibility(View.GONE);
+        coverWrap.addView(lyricsScrim, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        lyricsScroll = new NestedScrollView(context) {
+            @Override
+            public boolean onInterceptTouchEvent(MotionEvent ev) {
+                if (ev.getAction() == MotionEvent.ACTION_DOWN || ev.getAction() == MotionEvent.ACTION_MOVE) {
+                    ViewParent parent = getParent();
+                    if (parent != null) {
+                        parent.requestDisallowInterceptTouchEvent(true);
+                    }
+                }
+                return super.onInterceptTouchEvent(ev);
+            }
+
+            @Override
+            public boolean onTouchEvent(MotionEvent ev) {
+                if (ev.getAction() == MotionEvent.ACTION_DOWN || ev.getAction() == MotionEvent.ACTION_MOVE) {
+                    ViewParent parent = getParent();
+                    if (parent != null) {
+                        parent.requestDisallowInterceptTouchEvent(true);
+                    }
+                    markLyricsUserScrolling();
+                }
+                return super.onTouchEvent(ev);
+            }
+        };
+        lyricsScroll.setFillViewport(true);
+        lyricsScroll.setVerticalScrollBarEnabled(false);
+        lyricsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        lyricsScroll.setBackgroundColor(Color.TRANSPARENT);
+        lyricsScroll.setVisibility(View.GONE);
+        lyricsScroll.setOnScrollChangeListener((NestedScrollView v, int scrollX, int scrollY, int oldScrollX, int oldScrollY) -> {
+            if (Math.abs(scrollY - oldScrollY) > 2) {
+                markLyricsUserScrolling();
+            }
+        });
+        lyricsLinesCol = new LinearLayout(context);
+        lyricsLinesCol.setOrientation(LinearLayout.VERTICAL);
+        lyricsLinesCol.setGravity(Gravity.CENTER_HORIZONTAL);
+        lyricsLinesCol.setBackgroundColor(Color.TRANSPARENT);
+        // Side inset keeps wrapped lines inside the rounded cover clip.
+        lyricsLinesCol.setPadding(dp(12), dp(18), dp(12), dp(22));
+        // Exact width (coverSize) — NestedScrollView otherwise measures child UNSPECIFIED
+        // and long centered lines draw past the left/right edges of the window.
+        lyricsScroll.addView(lyricsLinesCol, new FrameLayout.LayoutParams(coverSize, ViewGroup.LayoutParams.WRAP_CONTENT));
+        coverWrap.addView(lyricsScroll, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        coverWrap.setClipChildren(true);
+
         contentLayout.addView(coverWrap, LayoutHelper.createLinear(coverSize, coverSize, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 16));
 
         // Track info row
@@ -386,7 +463,10 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             @Override
             public void onProgressChanged(float progress, boolean fromUser) {
                 if (fromUser) {
-                    timeCurrentView.setText(formatTime((long) (getActiveDurationMs() * progress)));
+                    long pos = (long) (getActiveDurationMs() * progress);
+                    timeCurrentView.setText(formatTime(pos));
+                    lyricsUserScrolling = false;
+                    updateSyncedLyrics(pos);
                 }
             }
 
@@ -404,8 +484,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                     seekBar.setProgress(progress, false);
                 }
                 if (dur > 0) {
-                    timeCurrentView.setText(formatTime((long) (dur * progress)));
-                    seekActiveTo((long) (dur * progress));
+                    long pos = (long) (dur * progress);
+                    timeCurrentView.setText(formatTime(pos));
+                    seekActiveTo(pos);
+                    lyricsUserScrolling = false;
+                    updateSyncedLyrics(pos);
                 }
                 AndroidUtilities.cancelRunOnUIThread(clearUserSeekingRunnable);
                 AndroidUtilities.runOnUIThread(clearUserSeekingRunnable, 400);
@@ -550,21 +633,30 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
 
         FrameLayout lyricsPillFrame = makePill(context);
         lyricsPill = lyricsPillFrame;
-        TextView lyricsText = new TextView(context);
-        lyricsText.setText("Текст");
-        lyricsText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        lyricsText.setTextColor(Color.WHITE);
-        lyricsText.setGravity(Gravity.CENTER);
-        lyricsPillFrame.addView(lyricsText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+        lyricsPillLabel = new TextView(context);
+        lyricsPillLabel.setText("Текст");
+        lyricsPillLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        lyricsPillLabel.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        lyricsPillLabel.setTextColor(Color.WHITE);
+        lyricsPillLabel.setGravity(Gravity.CENTER);
+        lyricsPillFrame.addView(lyricsPillLabel, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+        lyricsPillFrame.setOnClickListener(v -> onLyricsPillClicked());
         pills.addView(lyricsPillFrame, LayoutHelper.createLinear(0, 48, 1f, 0, 0, 8, 0));
 
-        FrameLayout checkPillFrame = makePill(context);
-        checkPill = checkPillFrame;
-        ImageView checkIcon = new ImageView(context);
-        checkIcon.setImageResource(R.drawable.msg_mini_checks);
-        checkIcon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-        checkPillFrame.addView(checkIcon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
-        pills.addView(checkPillFrame, LayoutHelper.createLinear(0, 48, 1f));
+        FrameLayout repeatPillFrame = makePill(context);
+        repeatPill = repeatPillFrame;
+        repeatPillIcon = new ImageView(context);
+        repeatPillIcon.setImageResource(R.drawable.player_new_repeatall);
+        repeatPillIcon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+        repeatPillFrame.addView(repeatPillIcon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
+        repeatPillFrame.setOnClickListener(v -> {
+            if (!isYandexMode()) {
+                return;
+            }
+            player.toggleRepeat();
+            updateControlsState();
+        });
+        pills.addView(repeatPillFrame, LayoutHelper.createLinear(0, 48, 1f));
         contentLayout.addView(pills, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
         contentLayout.addView(new View(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 0, 1f));
@@ -704,7 +796,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         artistView.animate().alpha(0f).translationY(dp(4)).setDuration(dur / 2)
                 .setInterpolator(CubicBezierInterpolator.EASE_OUT).start();
 
-        if (coverWrap != null && MglaPlayerConfig.isTrackChangeAnimationEnabled()) {
+        if (coverWrap != null && !lyricsVisible && MglaPlayerConfig.isTrackChangeAnimationEnabled()) {
             coverWrap.animate().cancel();
             coverWrap.animate().scaleX(0.94f).scaleY(0.94f).alpha(0.85f)
                     .setDuration(MglaPlayerConfig.scaleDuration(160))
@@ -772,15 +864,9 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (coverWrap == null) {
             return;
         }
-        if (!playing || !MglaPlayerConfig.isCoverPulseEnabled()) {
-            if (coverPulseAnimator != null) {
-                coverPulseAnimator.cancel();
-                coverPulseAnimator = null;
-            }
-            coverWrap.animate().scaleX(1f).scaleY(1f)
-                    .setDuration(MglaPlayerConfig.scaleDuration(220))
-                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
-                    .start();
+        // Lyrics replace the cover window — never pulse/scale while text is shown.
+        if (lyricsVisible || !playing || !MglaPlayerConfig.isCoverPulseEnabled()) {
+            stopCoverPulse(true);
             return;
         }
         if (coverPulseAnimator != null && coverPulseAnimator.isRunning()) {
@@ -792,11 +878,35 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         coverPulseAnimator.setRepeatMode(ValueAnimator.REVERSE);
         coverPulseAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
         coverPulseAnimator.addUpdateListener(a -> {
+            if (lyricsVisible) {
+                stopCoverPulse(false);
+                return;
+            }
             float s = (float) a.getAnimatedValue();
             coverWrap.setScaleX(s);
             coverWrap.setScaleY(s);
         });
         coverPulseAnimator.start();
+    }
+
+    private void stopCoverPulse(boolean animate) {
+        if (coverPulseAnimator != null) {
+            coverPulseAnimator.cancel();
+            coverPulseAnimator = null;
+        }
+        if (coverWrap == null) {
+            return;
+        }
+        coverWrap.animate().cancel();
+        if (animate && (coverWrap.getScaleX() != 1f || coverWrap.getScaleY() != 1f)) {
+            coverWrap.animate().scaleX(1f).scaleY(1f)
+                    .setDuration(MglaPlayerConfig.scaleDuration(180))
+                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
+                    .start();
+        } else {
+            coverWrap.setScaleX(1f);
+            coverWrap.setScaleY(1f);
+        }
     }
 
     private void playOpenAnimation() {
@@ -1281,8 +1391,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (lyricsPill != null) {
             lyricsPill.setVisibility(yandexVis);
         }
-        if (checkPill != null) {
-            checkPill.setVisibility(yandexVis);
+        if (repeatPill != null) {
+            repeatPill.setVisibility(yandexVis);
+        }
+        if (!yandex) {
+            hideLyricsOverlay(false);
         }
         if (waveIsland != null) {
             waveIsland.setVisibility(yandexVis);
@@ -1335,9 +1448,11 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     private void showMusicCover() {
         if (coverImage != null) {
             coverImage.setVisibility(View.VISIBLE);
+            coverImage.setAlpha(1f);
         }
         if (avatarCoverView != null) {
             avatarCoverView.setVisibility(View.GONE);
+            avatarCoverView.setAlpha(1f);
             avatarCoverView.setImageDrawable(null);
         }
     }
@@ -1354,7 +1469,16 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
     }
 
     private void updateTrackUi(MglaYandexMusicModel.Track track) {
-        showMusicCover();
+        String newId = track != null ? track.id : null;
+        boolean trackChanged = !TextUtils.equals(lyricsBoundTrackId, newId);
+        lyricsBoundTrackId = newId;
+        // Don't tear down lyrics on every refreshUi — only when the track actually changes.
+        if (trackChanged) {
+            hideLyricsOverlay(false);
+        }
+        if (!lyricsVisible) {
+            showMusicCover();
+        }
         if (artistAvatar != null) {
             artistAvatar.setVisibility(View.VISIBLE);
         }
@@ -1371,6 +1495,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             if (sourceTitle != null) {
                 sourceTitle.setText("Яндекс Музыка");
             }
+            updateLyricsPillState(null);
             return;
         }
         setTrackTexts(track.title, track.artist);
@@ -1405,6 +1530,8 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         }
 
         updateLikeButton();
+        updateLyricsPillState(track);
+        prefetchLyrics(track);
     }
 
     private void updateTelegramUi(MessageObject playing) {
@@ -2361,6 +2488,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
             timeCurrentView.setText(formatTime(pos));
             timeTotalView.setText(formatTime(dur));
         }
+        updateSyncedLyrics(pos);
     }
 
     private void togglePlayPause() {
@@ -2486,6 +2614,417 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         likeButton.setColorFilter(new PorterDuffColorFilter(liked ? 0xFFFF334B : Color.WHITE, PorterDuff.Mode.SRC_IN));
     }
 
+    private void updateYandexRepeatIcon() {
+        if (repeatPillIcon == null) {
+            return;
+        }
+        int mode = MglaYandexMusicStore.getInstance().getRepeatMode();
+        // 0 = off, 1 = whole queue/playlist, 2 = one track
+        if (mode == 2) {
+            repeatPillIcon.setImageResource(R.drawable.player_new_repeatone);
+            repeatPillIcon.setColorFilter(new PorterDuffColorFilter(currentAccent, PorterDuff.Mode.SRC_IN));
+            repeatPillIcon.setAlpha(1f);
+        } else if (mode == 1) {
+            repeatPillIcon.setImageResource(R.drawable.player_new_repeatall);
+            repeatPillIcon.setColorFilter(new PorterDuffColorFilter(currentAccent, PorterDuff.Mode.SRC_IN));
+            repeatPillIcon.setAlpha(1f);
+        } else {
+            repeatPillIcon.setImageResource(R.drawable.player_new_repeat_off);
+            repeatPillIcon.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+            repeatPillIcon.setAlpha(0.55f);
+        }
+    }
+
+    private void updateLyricsPillState(MglaYandexMusicModel.Track track) {
+        if (lyricsPill == null || lyricsPillLabel == null) {
+            return;
+        }
+        boolean has;
+        if (track == null || TextUtils.isEmpty(track.id)) {
+            has = false;
+        } else if (lyricsMissing.contains(track.id)) {
+            has = false;
+        } else if (lyricsCache.containsKey(track.id)) {
+            MglaYandexMusicApi.LyricsData d = lyricsCache.get(track.id);
+            has = d != null && !d.isEmpty();
+        } else {
+            has = true;
+        }
+        lyricsPill.setEnabled(has);
+        lyricsPill.setClickable(has);
+        lyricsPill.setAlpha(has ? 1f : 0.35f);
+        lyricsPillLabel.setAlpha(1f);
+        lyricsPillLabel.setTextColor(lyricsVisible && has ? currentAccent : Color.WHITE);
+    }
+
+    private void prefetchLyrics(MglaYandexMusicModel.Track track) {
+        if (track == null || TextUtils.isEmpty(track.id)) {
+            return;
+        }
+        final String id = track.id;
+        if (lyricsCache.containsKey(id) || lyricsMissing.contains(id) || lyricsInflight.contains(id)) {
+            updateLyricsPillState(track);
+            return;
+        }
+        lyricsRequestTrackId = id;
+        lyricsInflight.add(id);
+        MglaYandexMusicApi.fetchLyrics(id, new MglaYandexMusicApi.Callback<MglaYandexMusicApi.LyricsData>() {
+            @Override
+            public void onSuccess(MglaYandexMusicApi.LyricsData result) {
+                lyricsInflight.remove(id);
+                if (result == null || result.isEmpty()) {
+                    lyricsMissing.add(id);
+                    lyricsCache.remove(id);
+                } else {
+                    lyricsMissing.remove(id);
+                    lyricsCache.put(id, result);
+                }
+                MglaYandexMusicModel.Track current = player.getCurrentTrack();
+                if (current != null && id.equals(current.id)) {
+                    updateLyricsPillState(current);
+                    if (lyricsVisible) {
+                        if (result != null && !result.isEmpty()) {
+                            showLyricsOverlay(result);
+                        } else {
+                            showLyricsUnavailable();
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onError(Exception error) {
+                lyricsInflight.remove(id);
+                lyricsMissing.add(id);
+                FileLog.e("lyrics fetch failed id=" + id, error);
+                MglaYandexMusicModel.Track current = player.getCurrentTrack();
+                if (current != null && id.equals(current.id)) {
+                    updateLyricsPillState(current);
+                    if (lyricsVisible) {
+                        showLyricsUnavailable();
+                    }
+                }
+            }
+        });
+    }
+
+    private void onLyricsPillClicked() {
+        if (!isYandexMode() || lyricsPill == null) {
+            return;
+        }
+        // Always allow closing lyrics, even if the pill later becomes disabled (no lyrics).
+        if (lyricsVisible) {
+            hideLyricsOverlay(true);
+            return;
+        }
+        if (!lyricsPill.isEnabled()) {
+            return;
+        }
+        MglaYandexMusicModel.Track track = player.getCurrentTrack();
+        if (track == null || TextUtils.isEmpty(track.id)) {
+            return;
+        }
+        MglaYandexMusicApi.LyricsData cached = lyricsCache.get(track.id);
+        if (cached != null && !cached.isEmpty()) {
+            showLyricsOverlay(cached);
+            return;
+        }
+        if (lyricsMissing.contains(track.id)) {
+            showLyricsUnavailable();
+            updateLyricsPillState(track);
+            return;
+        }
+        showLyricsLoading();
+        prefetchLyrics(track);
+    }
+
+    private void showLyricsLoading() {
+        MglaYandexMusicApi.LyricsData loading = new MglaYandexMusicApi.LyricsData(false);
+        loading.lines.add(new MglaYandexMusicApi.LyricsLine(-1, "Загрузка текста…"));
+        showLyricsOverlay(loading);
+    }
+
+    private void showLyricsUnavailable() {
+        MglaYandexMusicApi.LyricsData empty = new MglaYandexMusicApi.LyricsData(false);
+        empty.lines.add(new MglaYandexMusicApi.LyricsLine(-1, "Текст недоступен"));
+        showLyricsOverlay(empty);
+    }
+
+    private void showLyricsOverlay(MglaYandexMusicApi.LyricsData data) {
+        lyricsVisible = true;
+        activeLyrics = data;
+        activeLyricsLine = -1;
+        lyricsUserScrolling = false;
+        AndroidUtilities.cancelRunOnUIThread(lyricsResumeAutoScroll);
+
+        if (lyricsScrim != null) {
+            lyricsScrim.setVisibility(View.VISIBLE);
+        }
+        if (lyricsScroll != null) {
+            lyricsScroll.setVisibility(View.VISIBLE);
+            lyricsScroll.scrollTo(0, 0);
+        }
+        bindLyricsLines(data);
+
+        // Cover must not show through — lyrics replace the art in this window.
+        if (coverImage != null) {
+            coverImage.setVisibility(View.INVISIBLE);
+            coverImage.setBackground(null);
+        }
+        if (avatarCoverView != null) {
+            avatarCoverView.setVisibility(View.INVISIBLE);
+        }
+        // Drop the grey plate + elevation shadow bands so only ambient gradient shows.
+        if (coverWrap != null) {
+            coverWrap.setBackground(null);
+            coverWrap.setElevation(0f);
+        }
+        stopCoverPulse(false);
+        updateLyricsPillState(player.getCurrentTrack());
+        updateSyncedLyrics(getActivePositionMs());
+    }
+
+    private void bindLyricsLines(MglaYandexMusicApi.LyricsData data) {
+        if (lyricsLinesCol == null) {
+            return;
+        }
+        // Lock column width to the cover window so TextViews must wrap.
+        int windowW = coverWrap != null && coverWrap.getWidth() > 0 ? coverWrap.getWidth() : coverSize;
+        ViewGroup.LayoutParams colLp = lyricsLinesCol.getLayoutParams();
+        if (colLp != null) {
+            colLp.width = windowW;
+            lyricsLinesCol.setLayoutParams(colLp);
+        }
+        lyricsLinesCol.removeAllViews();
+        final int lineWidth = Math.max(dp(48), windowW - lyricsLinesCol.getPaddingLeft() - lyricsLinesCol.getPaddingRight());
+        if (data == null || data.isEmpty()) {
+            TextView empty = makeLyricsLineView("Текст недоступен", false, lineWidth);
+            empty.setAlpha(0.7f);
+            lyricsLinesCol.addView(empty, new LinearLayout.LayoutParams(lineWidth, ViewGroup.LayoutParams.WRAP_CONTENT));
+            return;
+        }
+        for (int i = 0; i < data.lines.size(); i++) {
+            MglaYandexMusicApi.LyricsLine line = data.lines.get(i);
+            TextView tv = makeLyricsLineView(line.text, data.synced, lineWidth);
+            if (data.synced && line.timeMs >= 0) {
+                tv.setOnClickListener(v -> {
+                    if (!isYandexMode()) {
+                        return;
+                    }
+                    player.seekTo(line.timeMs);
+                    activeLyricsLine = -1;
+                    lyricsUserScrolling = false;
+                    updateSyncedLyrics(line.timeMs);
+                });
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(lineWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = dp(data.synced ? 12 : 8);
+            lp.gravity = Gravity.CENTER_HORIZONTAL;
+            lyricsLinesCol.addView(tv, lp);
+        }
+    }
+
+    private TextView makeLyricsLineView(String text, boolean syncedStyle, int maxWidthPx) {
+        TextView tv = new TextView(lyricsLinesCol.getContext()) {
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int exact = MeasureSpec.makeMeasureSpec(maxWidthPx, MeasureSpec.EXACTLY);
+                super.onMeasure(exact, heightMeasureSpec);
+            }
+        };
+        tv.setText(text);
+        // Fixed size for all lines — highlight is color/alpha only (no jump/cut on long lines).
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, syncedStyle ? 15 : 14);
+        tv.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        tv.setTextColor(Color.argb(140, 255, 255, 255));
+        tv.setGravity(Gravity.CENTER_HORIZONTAL);
+        tv.setLineSpacing(dp(3), 1.05f);
+        tv.setShadowLayer(dp(5), 0, dp(1), 0xAA000000);
+        tv.setSingleLine(false);
+        tv.setMaxLines(12);
+        tv.setEllipsize(null);
+        tv.setHorizontallyScrolling(false);
+        tv.setPadding(dp(2), 0, dp(2), 0);
+        if (Build.VERSION.SDK_INT >= 23) {
+            tv.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_SIMPLE);
+            tv.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
+        }
+        return tv;
+    }
+
+    private void markLyricsUserScrolling() {
+        lyricsUserScrolling = true;
+        lyricsUserScrollUntil = System.currentTimeMillis() + 2500;
+        AndroidUtilities.cancelRunOnUIThread(lyricsResumeAutoScroll);
+        AndroidUtilities.runOnUIThread(lyricsResumeAutoScroll, 2500);
+    }
+
+    private void updateSyncedLyrics(long positionMs) {
+        if (!lyricsVisible || activeLyrics == null || lyricsLinesCol == null) {
+            return;
+        }
+        if (!activeLyrics.synced) {
+            return;
+        }
+        int idx = findLyricsLineIndex(activeLyrics, positionMs);
+        if (idx == activeLyricsLine) {
+            return;
+        }
+        int prev = activeLyricsLine;
+        activeLyricsLine = idx;
+        animateLyricsHighlight(prev, idx);
+        if (!lyricsUserScrolling && System.currentTimeMillis() >= lyricsUserScrollUntil) {
+            scrollLyricsToLine(idx);
+        }
+    }
+
+    private static int findLyricsLineIndex(MglaYandexMusicApi.LyricsData data, long positionMs) {
+        if (data == null || data.lines.isEmpty()) {
+            return -1;
+        }
+        int best = -1;
+        for (int i = 0; i < data.lines.size(); i++) {
+            long t = data.lines.get(i).timeMs;
+            if (t < 0) {
+                continue;
+            }
+            if (t <= positionMs) {
+                best = i;
+            } else {
+                break;
+            }
+        }
+        return best;
+    }
+
+    private void animateLyricsHighlight(int prevIndex, int nextIndex) {
+        if (lyricsHighlightAnimator != null) {
+            lyricsHighlightAnimator.cancel();
+            lyricsHighlightAnimator = null;
+        }
+        final TextView prev = lyricsLineAt(prevIndex);
+        final TextView next = lyricsLineAt(nextIndex);
+        final int inactiveColor = Color.argb(140, 255, 255, 255);
+        final int activeColor = Color.WHITE;
+        if (prev == null && next == null) {
+            return;
+        }
+        final float prevStartA = prev != null ? prev.getAlpha() : 0f;
+        final float nextStartA = next != null ? next.getAlpha() : 0f;
+        lyricsHighlightAnimator = ValueAnimator.ofFloat(0f, 1f);
+        lyricsHighlightAnimator.setDuration(MglaPlayerConfig.scaleDuration(320));
+        lyricsHighlightAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        lyricsHighlightAnimator.addUpdateListener(a -> {
+            float t = (float) a.getAnimatedValue();
+            if (prev != null) {
+                prev.setAlpha(prevStartA + (0.45f - prevStartA) * t);
+                prev.setTextColor(blendArgb(activeColor, inactiveColor, t));
+            }
+            if (next != null) {
+                next.setAlpha(nextStartA + (1f - nextStartA) * t);
+                next.setTextColor(blendArgb(inactiveColor, activeColor, t));
+            }
+        });
+        lyricsHighlightAnimator.start();
+    }
+
+    private TextView lyricsLineAt(int index) {
+        if (lyricsLinesCol == null || index < 0 || index >= lyricsLinesCol.getChildCount()) {
+            return null;
+        }
+        View child = lyricsLinesCol.getChildAt(index);
+        return child instanceof TextView ? (TextView) child : null;
+    }
+
+    private static int blendArgb(int from, int to, float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        int a = (int) (Color.alpha(from) + (Color.alpha(to) - Color.alpha(from)) * t);
+        int r = (int) (Color.red(from) + (Color.red(to) - Color.red(from)) * t);
+        int g = (int) (Color.green(from) + (Color.green(to) - Color.green(from)) * t);
+        int b = (int) (Color.blue(from) + (Color.blue(to) - Color.blue(from)) * t);
+        return Color.argb(a, r, g, b);
+    }
+
+    private void scrollLyricsToLine(int index) {
+        if (lyricsScroll == null || lyricsLinesCol == null || index < 0 || index >= lyricsLinesCol.getChildCount()) {
+            return;
+        }
+        View child = lyricsLinesCol.getChildAt(index);
+        if (child == null) {
+            return;
+        }
+        int target = child.getTop() + child.getHeight() / 2 - lyricsScroll.getHeight() / 2
+                + lyricsLinesCol.getPaddingTop();
+        target = Math.max(0, Math.min(target, Math.max(0, lyricsLinesCol.getHeight() - lyricsScroll.getHeight())));
+        if (lyricsScrollAnimator != null) {
+            lyricsScrollAnimator.cancel();
+        }
+        final int from = lyricsScroll.getScrollY();
+        if (Math.abs(from - target) < dp(2)) {
+            return;
+        }
+        lyricsScrollAnimator = ValueAnimator.ofInt(from, target);
+        lyricsScrollAnimator.setDuration(MglaPlayerConfig.scaleDuration(420));
+        lyricsScrollAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        lyricsScrollAnimator.addUpdateListener(a -> {
+            if (lyricsScroll != null) {
+                lyricsScroll.scrollTo(0, (int) a.getAnimatedValue());
+            }
+        });
+        lyricsScrollAnimator.start();
+    }
+
+    private void hideLyricsOverlay(boolean unused) {
+        lyricsVisible = false;
+        activeLyrics = null;
+        activeLyricsLine = -1;
+        lyricsUserScrolling = false;
+        AndroidUtilities.cancelRunOnUIThread(lyricsResumeAutoScroll);
+        if (lyricsHighlightAnimator != null) {
+            lyricsHighlightAnimator.cancel();
+            lyricsHighlightAnimator = null;
+        }
+        if (lyricsScrollAnimator != null) {
+            lyricsScrollAnimator.cancel();
+            lyricsScrollAnimator = null;
+        }
+        if (lyricsScrim != null) {
+            lyricsScrim.setVisibility(View.GONE);
+        }
+        if (lyricsScroll != null) {
+            lyricsScroll.setVisibility(View.GONE);
+        }
+        if (lyricsLinesCol != null) {
+            lyricsLinesCol.removeAllViews();
+        }
+        if (coverImage != null) {
+            coverImage.setVisibility(View.VISIBLE);
+            coverImage.setAlpha(1f);
+            GradientDrawable coverBg = new GradientDrawable();
+            coverBg.setCornerRadius(coverRadius);
+            coverBg.setColor(0xFF2A2A2A);
+            coverImage.setBackground(coverBg);
+        }
+        if (coverWrap != null) {
+            GradientDrawable wrapBg = new GradientDrawable();
+            wrapBg.setCornerRadius(coverRadius);
+            wrapBg.setColor(0xFF2A2A2A);
+            coverWrap.setBackground(wrapBg);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                coverWrap.setElevation(dp(4));
+            }
+        }
+        if (avatarCoverView != null) {
+            avatarCoverView.setAlpha(1f);
+            // Visibility restored by showMusicCover / showAvatarCover on next bind.
+        }
+        updateLyricsPillState(player.getCurrentTrack());
+        boolean playing = isYandexMode() ? player.isPlaying()
+                : (MediaController.getInstance().getPlayingMessageObject() != null
+                && !MediaController.getInstance().isMessagePaused());
+        updateCoverPulse(playing);
+    }
+
     private void updateControlsState() {
         boolean isPlaying;
         if (isYandexMode()) {
@@ -2503,8 +3042,13 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (shufflePillIcon != null) {
             boolean shuffle = MglaYandexMusicStore.getInstance().isShuffle();
             shufflePillIcon.setColorFilter(new PorterDuffColorFilter(shuffle ? currentAccent : Color.WHITE, PorterDuff.Mode.SRC_IN));
+            if (shufflePill != null) {
+                shufflePill.setAlpha(1f);
+            }
         }
-        if (!isYandexMode()) {
+        if (isYandexMode()) {
+            updateYandexRepeatIcon();
+        } else {
             updateTelegramRepeatIcon();
         }
         if (openAnimationPlayed || !MglaPlayerConfig.isOpenAnimationEnabled()) {
@@ -2576,6 +3120,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (!isYandexMode()) return;
         AndroidUtilities.runOnUIThread(() -> {
             if (isUserSeeking || (seekBar != null && seekBar.isTracking())) {
+                updateSyncedLyrics(positionMs);
                 return;
             }
             if (durationMs > 0 && seekBar != null) {
@@ -2583,6 +3128,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
                 timeCurrentView.setText(formatTime(positionMs));
                 timeTotalView.setText(formatTime(durationMs));
             }
+            updateSyncedLyrics(positionMs);
         });
     }
 
@@ -2597,6 +3143,7 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         }
         sheetCleanupDone = true;
         AndroidUtilities.cancelRunOnUIThread(clearUserSeekingRunnable);
+        AndroidUtilities.cancelRunOnUIThread(lyricsResumeAutoScroll);
         isUserSeeking = false;
         if (ambientBg != null) {
             ambientBg.stop();
@@ -2604,6 +3151,14 @@ public class MglaMusicPlayerSheet extends BottomSheet implements MglaYandexMusic
         if (coverPulseAnimator != null) {
             coverPulseAnimator.cancel();
             coverPulseAnimator = null;
+        }
+        if (lyricsHighlightAnimator != null) {
+            lyricsHighlightAnimator.cancel();
+            lyricsHighlightAnimator = null;
+        }
+        if (lyricsScrollAnimator != null) {
+            lyricsScrollAnimator.cancel();
+            lyricsScrollAnimator = null;
         }
         if (fabColorAnimator != null) {
             fabColorAnimator.cancel();

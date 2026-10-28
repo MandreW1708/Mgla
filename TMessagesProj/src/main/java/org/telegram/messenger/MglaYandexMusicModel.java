@@ -29,6 +29,8 @@ public final class MglaYandexMusicModel {
 
         public String albumId;
         public boolean isExplicit;
+        /** From API: whether lyrics can be fetched for this track. */
+        public boolean lyricsAvailable;
 
         public Track() {
         }
@@ -100,6 +102,7 @@ public final class MglaYandexMusicModel {
                 obj.put("durationMs", durationMs);
                 obj.put("isLiked", isLiked);
                 obj.put("isExplicit", isExplicit);
+                obj.put("lyricsAvailable", lyricsAvailable);
             } catch (Exception ignored) {
             }
             return obj;
@@ -117,6 +120,7 @@ public final class MglaYandexMusicModel {
             t.durationMs = obj.optLong("durationMs", 0);
             t.isLiked = obj.optBoolean("isLiked", false);
             t.isExplicit = obj.optBoolean("isExplicit", false);
+            t.lyricsAvailable = obj.optBoolean("lyricsAvailable", false);
             return t;
         }
 
@@ -159,6 +163,7 @@ public final class MglaYandexMusicModel {
 
             t.durationMs = obj.optLong("durationMs", 0);
             t.isExplicit = obj.optBoolean("explicit", false) || obj.optInt("contentWarning", 0) > 0;
+            t.lyricsAvailable = obj.optBoolean("lyricsAvailable", false);
             return t;
         }
     }

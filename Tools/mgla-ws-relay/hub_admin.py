@@ -316,9 +316,9 @@ def render_admin_html(
 <title>Mgla Hub — управление</title>
 <style>
 :root {{
-  --bg0:#050304; --bg1:#100a0c; --card:#1a1014; --line:#3d2a32;
-  --text:#f3e9ec; --muted:#b09aa2; --accent:#8b1e3f; --accent-hi:#c23b5f;
-  --accent2:#9a6b78; --danger:#b33a4a; --radius:16px;
+  --bg0:#02040a; --bg1:#060b16; --card:#0b1220; --line:#1c2a42;
+  --text:#e6eefb; --muted:#8b9bb4; --accent:#1a4b9c; --accent-hi:#2f6fd6;
+  --accent2:#3d5f8f; --danger:#b33a4a; --radius:16px;
 }}
 * {{ box-sizing:border-box; }}
 html {{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }}
@@ -326,9 +326,9 @@ body {{
   margin:0; color:var(--text); max-width:100vw; overflow-x:hidden;
   font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
   background:
-    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
-    radial-gradient(700px 420px at 100% 0%, rgba(90,58,68,.22), transparent 50%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
+    radial-gradient(900px 480px at 8% -8%, rgba(26,75,156,.32), transparent 55%),
+    radial-gradient(700px 420px at 100% 0%, rgba(8,16,36,.55), transparent 50%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #010204);
   min-height:100vh;
 }}
 .wrap {{ width:100%; max-width:960px; margin:0 auto; padding:24px 16px 64px; }}
@@ -336,8 +336,8 @@ body {{
 .brand {{ display:flex; gap:12px; align-items:center; min-width:0; }}
 .logo {{
   width:48px; height:48px; border-radius:14px; flex:0 0 auto;
-  background:linear-gradient(145deg, #c23b5f, #6e152f);
-  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
+  background:linear-gradient(145deg, #2f6fd6, #0d2a66);
+  display:grid; place-items:center; font-weight:800; color:#eef4ff; font-size:18px;
 }}
 .brand h1 {{ margin:0; font-size:24px; letter-spacing:-.02em; }}
 .brand p {{ margin:2px 0 0; color:var(--muted); font-size:13px; }}
@@ -370,17 +370,17 @@ tr:last-child td {{ border-bottom:0; }}
 td.num {{ white-space:nowrap; font-variant-numeric:tabular-nums; }}
 td.name {{ word-break:break-word; overflow-wrap:anywhere; }}
 .fico {{ display:inline-block; width:1.4em; text-align:center; }}
-code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
+code {{ font-size:12px; color:#c9daf7; word-break:break-all; }}
 .empty {{ color:var(--muted); padding:10px 0; }}
 .flash {{
   border-radius:14px; padding:12px 14px; margin-bottom:14px; border:1px solid var(--line);
 }}
-.flash.ok {{ background:rgba(139,30,63,.18); border-color:rgba(194,59,95,.4); }}
+.flash.ok {{ background:rgba(26,75,156,.22); border-color:rgba(47,111,214,.4); }}
 .flash.err {{ background:rgba(179,58,74,.16); border-color:rgba(179,58,74,.45); }}
 .row {{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:12px; }}
 label.field {{ display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:12px; flex:1 1 160px; }}
 input[type=text], input[type=number], select, textarea {{
-  background:#120c0e; color:var(--text); border:1px solid var(--line);
+  background:#070d18; color:var(--text); border:1px solid var(--line);
   border-radius:10px; padding:9px 11px; font:inherit; width:100%; min-width:0;
 }}
 textarea {{ width:100%; min-height:160px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; }}
@@ -388,7 +388,7 @@ textarea {{ width:100%; min-height:160px; font-family:ui-monospace, SFMono-Regul
   appearance:none; border:0; border-radius:10px; padding:11px 14px; font:inherit; font-weight:650;
   cursor:pointer; background:var(--accent); color:#fff;
 }}
-.btn.secondary {{ background:#2a1c22; color:var(--text); }}
+.btn.secondary {{ background:#121a2a; color:var(--text); }}
 .btn.danger {{ background:var(--danger); color:#fff; }}
 form.inline {{ display:inline; margin:0; }}
 .footer {{ margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; }}
@@ -619,8 +619,8 @@ def render_subscriptions_html(
 <title>Mgla Hub — Подписка</title>
 <style>
 :root {{
-  --bg0:#050304; --bg1:#100a0c; --card:#1a1014; --line:#3d2a32;
-  --text:#f3e9ec; --muted:#b09aa2; --accent:#8b1e3f; --accent-hi:#c23b5f;
+  --bg0:#02040a; --bg1:#060b16; --card:#0b1220; --line:#1c2a42;
+  --text:#e6eefb; --muted:#8b9bb4; --accent:#1a4b9c; --accent-hi:#2f6fd6;
   --danger:#b33a4a; --radius:16px;
 }}
 * {{ box-sizing:border-box; }}
@@ -628,8 +628,8 @@ body {{
   margin:0; color:var(--text);
   font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
   background:
-    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
+    radial-gradient(900px 480px at 8% -8%, rgba(26,75,156,.32), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #010204);
   min-height:100vh;
 }}
 .wrap {{ width:100%; max-width:1040px; margin:0 auto; padding:24px 16px 64px; }}
@@ -637,8 +637,8 @@ body {{
 .brand {{ display:flex; gap:12px; align-items:center; }}
 .logo {{
   width:48px; height:48px; border-radius:14px;
-  background:linear-gradient(145deg, #c23b5f, #6e152f);
-  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
+  background:linear-gradient(145deg, #2f6fd6, #0d2a66);
+  display:grid; place-items:center; font-weight:800; color:#eef4ff; font-size:18px;
 }}
 .brand h1 {{ margin:0; font-size:24px; }}
 .brand p {{ margin:2px 0 0; color:var(--muted); font-size:13px; }}
@@ -657,7 +657,7 @@ body {{
 .row {{ display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }}
 .field {{ display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--muted); min-width:140px; flex:1 1 160px; }}
 .field input, .field select {{
-  background:#120c0f; border:1px solid var(--line); border-radius:10px; color:var(--text);
+  background:#070d18; border:1px solid var(--line); border-radius:10px; color:var(--text);
   padding:10px 12px; font:inherit;
 }}
 .btn {{

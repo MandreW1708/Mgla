@@ -3249,7 +3249,9 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         } else {
             neededAudioFocus = 1;
         }
-        if (hasAudioFocus == neededAudioFocus && audioFocus == AUDIO_FOCUSED && !waitingForAudioFocusToPlay) {
+        final boolean yandexMusic = MglaYandexMusicPlayback.isYandexMessage(messageObject);
+        // Yandex always re-requests exclusive GAIN — a prior MAY_DUCK grant must not be reused.
+        if (!yandexMusic && hasAudioFocus == neededAudioFocus && audioFocus == AUDIO_FOCUSED && !waitingForAudioFocusToPlay) {
             return true;
         }
         if (hasAudioFocus != 0 || playbackFocusRequest != null) {
@@ -3259,7 +3261,11 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         int focusGain;
         if (neededAudioFocus == 3) {
             focusGain = AudioManager.AUDIOFOCUS_GAIN;
-        } else if (neededAudioFocus == 2 || MglaAudioConfig.useTransientAutopause(messageObject) || SharedConfig.pauseMusicOnMedia) {
+        } else if (neededAudioFocus == 2
+                || MglaAudioConfig.useTransientAutopause(messageObject)
+                || SharedConfig.pauseMusicOnMedia
+                || yandexMusic) {
+            // Yandex Music: exclusive focus so YouTube / other apps pause (not just duck).
             focusGain = AudioManager.AUDIOFOCUS_GAIN;
         } else {
             focusGain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK;
@@ -3276,7 +3282,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     // false: HyperOS 3 sometimes returns DELAYED with nothing else playing when
                     // acceptsDelayed is true, which stalls the first ~2s of voice/round audio.
                     .setAcceptsDelayedFocusGain(false)
-                    .setWillPauseWhenDucked(false)
+                    .setWillPauseWhenDucked(yandexMusic || neededAudioFocus == 1)
                     .build();
             result = NotificationsController.audioManager.requestAudioFocus(playbackFocusRequest);
         } else if (neededAudioFocus == 3) {

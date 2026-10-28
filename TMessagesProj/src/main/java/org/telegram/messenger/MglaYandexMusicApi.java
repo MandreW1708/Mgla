@@ -1626,4 +1626,259 @@ public final class MglaYandexMusicApi {
             return "";
         }
     }
+
+    /** Android client key for signed /tracks/{id}/lyrics requests. */
+    private static final String LYRICS_SIGN_KEY = "p93jhgh689SBReK6ghtw62";
+
+    public static final class LyricsLine {
+        public final long timeMs;
+        public final String text;
+
+        public LyricsLine(long timeMs, String text) {
+            this.timeMs = timeMs;
+            this.text = text != null ? text : "";
+        }
+    }
+
+    public static final class LyricsData {
+        public final ArrayList<LyricsLine> lines = new ArrayList<>();
+        public final boolean synced;
+
+        public LyricsData(boolean synced) {
+            this.synced = synced;
+        }
+
+        public boolean isEmpty() {
+            return lines.isEmpty();
+        }
+
+        public String asPlainText() {
+            StringBuilder sb = new StringBuilder();
+            for (LyricsLine line : lines) {
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append(line.text);
+            }
+            return sb.toString().trim();
+        }
+    }
+
+    /**
+     * Fetch lyrics for a track. Prefers timed LRC for karaoke sync; falls back to plain TEXT / supplement.
+     */
+    public static void fetchLyrics(String trackId, Callback<LyricsData> callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                LyricsData data = fetchLyricsSync(trackId);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) {
+                        callback.onSuccess(data);
+                    }
+                });
+            } catch (Exception e) {
+                FileLog.e("MglaYandexMusicApi: lyrics failed track=" + trackId, e);
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (callback != null) {
+                        callback.onError(e);
+                    }
+                });
+            }
+        });
+    }
+
+    private static LyricsData fetchLyricsSync(String trackId) {
+        if (TextUtils.isEmpty(trackId)) {
+            return null;
+        }
+        String pureId = trackId;
+        int colon = trackId.indexOf(':');
+        if (colon > 0) {
+            pureId = trackId.substring(0, colon);
+        }
+
+        // Each source is isolated — 404 on LRC must not abort TEXT / supplement.
+        try {
+            LyricsData lrc = fetchSignedLyrics(pureId, "LRC");
+            if (lrc != null && !lrc.isEmpty()) {
+                return lrc;
+            }
+        } catch (Exception e) {
+            FileLog.e("MglaYandexMusicApi: LRC lyrics failed track=" + pureId, e);
+        }
+        try {
+            LyricsData text = fetchSignedLyrics(pureId, "TEXT");
+            if (text != null && !text.isEmpty()) {
+                return text;
+            }
+        } catch (Exception e) {
+            FileLog.e("MglaYandexMusicApi: TEXT lyrics failed track=" + pureId, e);
+        }
+        try {
+            LyricsData supplement = fetchSupplementLyrics(pureId);
+            if (supplement != null && !supplement.isEmpty()) {
+                return supplement;
+            }
+        } catch (Exception e) {
+            FileLog.e("MglaYandexMusicApi: supplement lyrics failed track=" + pureId, e);
+        }
+        return null;
+    }
+
+    private static LyricsData fetchSupplementLyrics(String pureId) throws Exception {
+        HttpURLConnection conn = setupConnection(BASE_URL + "/tracks/" + Uri.encode(pureId) + "/supplement", "GET");
+        String resp = readResponse(conn);
+        JSONObject root = new JSONObject(resp);
+        JSONObject result = root.optJSONObject("result");
+        if (result == null) {
+            return null;
+        }
+        JSONObject lyrics = result.optJSONObject("lyrics");
+        String full = null;
+        if (lyrics != null) {
+            full = firstNonEmpty(
+                    lyrics.optString("fullLyrics", null),
+                    lyrics.optString("text", null),
+                    lyrics.optString("lyrics", null));
+        }
+        if (TextUtils.isEmpty(full)) {
+            Object raw = result.opt("lyrics");
+            if (raw instanceof String) {
+                full = (String) raw;
+            }
+        }
+        return parseLyricsBody(full);
+    }
+
+    private static LyricsData fetchSignedLyrics(String pureId, String format) throws Exception {
+        long ts = System.currentTimeMillis() / 1000L;
+        String message = pureId + ts;
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(LYRICS_SIGN_KEY.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        // Android client expects padded Base64 (same as MarshalX get_sign_request).
+        String sign = Base64.encodeToString(mac.doFinal(message.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+        String url = BASE_URL + "/tracks/" + Uri.encode(pureId)
+                + "/lyrics?format=" + Uri.encode(format)
+                + "&timeStamp=" + ts + "&sign=" + Uri.encode(sign);
+        HttpURLConnection conn = setupConnection(url, "GET");
+        String resp = readResponse(conn);
+        JSONObject root = new JSONObject(resp);
+        JSONObject result = root.optJSONObject("result");
+        if (result == null) {
+            return null;
+        }
+        String downloadUrl = result.optString("downloadUrl", null);
+        if (TextUtils.isEmpty(downloadUrl) || "null".equalsIgnoreCase(downloadUrl)) {
+            return null;
+        }
+        return parseLyricsBody(downloadUrlText(downloadUrl));
+    }
+
+    private static String downloadUrlText(String url) throws Exception {
+        HttpURLConnection conn = MglaDirectHttp.open(url);
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(12000);
+        conn.setInstanceFollowRedirects(true);
+        conn.setRequestProperty("User-Agent", USER_AGENT);
+        conn.setRequestProperty("Accept", "text/plain, */*");
+        String auth = getAuthHeader();
+        if (auth != null) {
+            conn.setRequestProperty("Authorization", auth);
+        }
+        int code = conn.getResponseCode();
+        // Follow one manual redirect if needed (some stacks disable auto-follow for HTTPS→HTTP).
+        if (code == HttpURLConnection.HTTP_MOVED_PERM || code == HttpURLConnection.HTTP_MOVED_TEMP
+                || code == HttpURLConnection.HTTP_SEE_OTHER || code == 307 || code == 308) {
+            String loc = conn.getHeaderField("Location");
+            conn.disconnect();
+            if (!TextUtils.isEmpty(loc)) {
+                conn = MglaDirectHttp.open(loc);
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(12000);
+                conn.setReadTimeout(12000);
+                conn.setRequestProperty("User-Agent", USER_AGENT);
+                code = conn.getResponseCode();
+            }
+        }
+        InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+        if (is == null) {
+            throw new Exception("lyrics download HTTP " + code);
+        }
+        BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            sb.append(line).append('\n');
+        }
+        reader.close();
+        conn.disconnect();
+        if (code < 200 || code >= 300) {
+            throw new Exception("lyrics download HTTP " + code + ": " + sb);
+        }
+        return sb.toString();
+    }
+
+    private static LyricsData parseLyricsBody(String raw) {
+        if (TextUtils.isEmpty(raw)) {
+            return null;
+        }
+        Pattern meta = Pattern.compile("^\\s*\\[(ar|ti|al|by|offset|length):.*\\]\\s*$", Pattern.CASE_INSENSITIVE);
+        Pattern stamp = Pattern.compile("\\[(\\d{1,2}):(\\d{2})(?:[.:](\\d{1,3}))?\\]");
+        ArrayList<LyricsLine> timed = new ArrayList<>();
+        ArrayList<String> plain = new ArrayList<>();
+        String[] rows = raw.split("\n");
+        for (String row : rows) {
+            if (meta.matcher(row).matches()) {
+                continue;
+            }
+            Matcher m = stamp.matcher(row);
+            boolean found = false;
+            int lastEnd = 0;
+            ArrayList<Long> times = new ArrayList<>();
+            while (m.find()) {
+                found = true;
+                lastEnd = m.end();
+                int min = Integer.parseInt(m.group(1));
+                int sec = Integer.parseInt(m.group(2));
+                int frac = 0;
+                if (m.group(3) != null) {
+                    String f = m.group(3);
+                    if (f.length() == 1) {
+                        frac = Integer.parseInt(f) * 100;
+                    } else if (f.length() == 2) {
+                        frac = Integer.parseInt(f) * 10;
+                    } else {
+                        frac = Integer.parseInt(f.substring(0, Math.min(3, f.length())));
+                    }
+                }
+                times.add(min * 60_000L + sec * 1000L + frac);
+            }
+            String text = found ? row.substring(lastEnd).trim() : row.trim();
+            if (found) {
+                if (TextUtils.isEmpty(text)) {
+                    continue;
+                }
+                for (Long t : times) {
+                    timed.add(new LyricsLine(t, text));
+                }
+            } else if (!TextUtils.isEmpty(text)) {
+                plain.add(text);
+            }
+        }
+        if (!timed.isEmpty()) {
+            java.util.Collections.sort(timed, (a, b) -> Long.compare(a.timeMs, b.timeMs));
+            LyricsData data = new LyricsData(true);
+            data.lines.addAll(timed);
+            return data;
+        }
+        if (plain.isEmpty()) {
+            return null;
+        }
+        LyricsData data = new LyricsData(false);
+        for (String t : plain) {
+            data.lines.add(new LyricsLine(-1, t));
+        }
+        return data;
+    }
 }

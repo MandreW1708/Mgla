@@ -527,9 +527,9 @@ def render_updates_html(meta: Dict[str, Any], flash_ok: str = "", flash_err: str
 <title>Mgla Hub — обновления</title>
 <style>
 :root {{
-  --bg0:#050304; --bg1:#100a0c; --card:#1a1014; --line:#3d2a32;
-  --text:#f3e9ec; --muted:#b09aa2; --accent:#8b1e3f; --accent-hi:#c23b5f;
-  --accent2:#9a6b78; --danger:#b33a4a; --radius:16px;
+  --bg0:#02040a; --bg1:#060b16; --card:#0b1220; --line:#1c2a42;
+  --text:#e6eefb; --muted:#8b9bb4; --accent:#1a4b9c; --accent-hi:#2f6fd6;
+  --accent2:#3d5f8f; --danger:#b33a4a; --radius:16px;
 }}
 * {{ box-sizing:border-box; }}
 html {{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }}
@@ -537,9 +537,9 @@ body {{
   margin:0; color:var(--text); max-width:100vw; overflow-x:hidden;
   font:15px/1.45 "Segoe UI", "SF Pro Display", system-ui, sans-serif;
   background:
-    radial-gradient(900px 480px at 8% -8%, rgba(139,30,63,.28), transparent 55%),
-    radial-gradient(700px 420px at 100% 0%, rgba(90,58,68,.22), transparent 50%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030203);
+    radial-gradient(900px 480px at 8% -8%, rgba(26,75,156,.32), transparent 55%),
+    radial-gradient(700px 420px at 100% 0%, rgba(8,16,36,.55), transparent 50%),
+    linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #010204);
   min-height:100vh;
 }}
 .wrap {{ width:100%; max-width:820px; margin:0 auto; padding:24px 16px 64px; }}
@@ -547,8 +547,8 @@ body {{
 .brand {{ display:flex; gap:12px; align-items:center; min-width:0; }}
 .logo {{
   width:48px; height:48px; border-radius:14px; flex:0 0 auto;
-  background:linear-gradient(145deg, #c23b5f, #6e152f);
-  display:grid; place-items:center; font-weight:800; color:#f8eef1; font-size:18px;
+  background:linear-gradient(145deg, #2f6fd6, #0d2a66);
+  display:grid; place-items:center; font-weight:800; color:#eef4ff; font-size:18px;
 }}
 .brand h1 {{ margin:0; font-size:24px; letter-spacing:-.02em; }}
 .brand p {{ margin:2px 0 0; color:var(--muted); font-size:13px; }}
@@ -572,12 +572,12 @@ body {{
 .flash {{
   border-radius:14px; padding:12px 14px; margin-bottom:14px; border:1px solid var(--line);
 }}
-.flash.ok {{ background:rgba(139,30,63,.18); border-color:rgba(194,59,95,.4); }}
+.flash.ok {{ background:rgba(26,75,156,.22); border-color:rgba(47,111,214,.4); }}
 .flash.err {{ background:rgba(179,58,74,.16); border-color:rgba(179,58,74,.45); }}
 .grid {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }}
 label.field {{ display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:12px; }}
 input[type=text], input[type=number], textarea {{
-  background:#120c0e; color:var(--text); border:1px solid var(--line);
+  background:#070d18; color:var(--text); border:1px solid var(--line);
   border-radius:10px; padding:9px 11px; font:inherit; width:100%;
 }}
 textarea {{ min-height:180px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; resize:vertical; }}
@@ -590,17 +590,17 @@ textarea {{ min-height:180px; font-family:ui-monospace, SFMono-Regular, Menlo, C
   margin-top:8px; border:1.5px dashed var(--line); border-radius:14px; padding:28px 18px;
   text-align:center; color:var(--muted); background:rgba(255,255,255,.03); transition:.15s;
 }}
-.drop.over {{ border-color:var(--accent-hi); background:rgba(139,30,63,.12); color:var(--text); }}
+.drop.over {{ border-color:var(--accent-hi); background:rgba(26,75,156,.16); color:var(--text); }}
 .drop strong {{ color:var(--text); }}
 .fileinfo {{ margin-top:10px; font-size:13px; color:var(--muted); }}
 .pill {{
   display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:650;
-  background:rgba(139,30,63,.2); color:#e8c4cf; border:1px solid rgba(194,59,95,.4);
+  background:rgba(26,75,156,.25); color:#c9daf7; border:1px solid rgba(47,111,214,.45);
 }}
-.pill.draft {{ background:rgba(176,154,162,.12); color:var(--muted); border-color:var(--line); }}
-.pill.supporters {{ background:rgba(154,107,120,.22); color:#f0d6de; border-color:rgba(154,107,120,.5); }}
+.pill.draft {{ background:rgba(139,155,180,.12); color:var(--muted); border-color:var(--line); }}
+.pill.supporters {{ background:rgba(61,95,143,.22); color:#d7e3f7; border-color:rgba(61,95,143,.5); }}
 .footer {{ margin-top:28px; color:var(--muted); font-size:12.5px; text-align:center; }}
-code {{ font-size:12px; color:#e0d0d6; word-break:break-all; }}
+code {{ font-size:12px; color:#c9daf7; word-break:break-all; }}
 .supporters-box {{
   margin-top:16px; padding:14px; border-radius:14px; border:1px solid var(--line);
   background:rgba(255,255,255,.025);
