@@ -3085,22 +3085,43 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
                     }
                     currentAnimation = animation;
                     // Reverse predictive-open is owned here (other custom transitions start themselves).
-                    // Never wait for needDelayOpenAnimation/firstLoading — that 200ms feels like a freeze.
+                    // Still respect needDelayOpenAnimation/firstLoading: starting the transition before
+                    // the first messagesDidLoad marks fragmentOpened early and the list paints with
+                    // item/skeleton animations — looks like a full reload.
                     if (animation == reverseOpenAnimation) {
                         final AnimatorSet toStart = animation;
-                        if (!noDelay) {
-                            if (currentFragment != null) {
-                                currentFragment.onTransitionAnimationStart(false, false);
-                            }
-                            fragment.onTransitionAnimationStart(true, false);
-                        }
-                        // Next frame only: start transforms are already applied; avoid a long delay.
-                        AndroidUtilities.runOnUIThread(() -> {
+                        final Runnable startReverseOpen = () -> {
                             if (currentAnimation != toStart || reverseOpenAnimation != toStart) {
                                 return;
                             }
+                            if (!noDelay) {
+                                if (currentFragment != null) {
+                                    currentFragment.onTransitionAnimationStart(false, false);
+                                }
+                                fragment.onTransitionAnimationStart(true, false);
+                            }
                             toStart.start();
-                        });
+                        };
+                        if (!noDelay) {
+                            delayedOpenAnimationRunnable = new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (delayedOpenAnimationRunnable != this) {
+                                        return;
+                                    }
+                                    delayedOpenAnimationRunnable = null;
+                                    startReverseOpen.run();
+                                }
+                            };
+                            if (delayedAnimationResumed) {
+                                delayedOpenAnimationRunnable.run();
+                            } else {
+                                AndroidUtilities.runOnUIThread(delayedOpenAnimationRunnable, 200);
+                            }
+                        } else {
+                            // Transforms already applied; start next frame to avoid a hitch.
+                            AndroidUtilities.runOnUIThread(startReverseOpen);
+                        }
                     }
                 }
             }
