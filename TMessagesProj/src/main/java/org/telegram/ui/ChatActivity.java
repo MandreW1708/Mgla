@@ -22848,7 +22848,11 @@ public class ChatActivity extends BaseFragment implements
                     invalidatePaidMessagesPriceOnIncoming(arr);
                 }
                 processNewMessages(arr);
-                MglaHapticManager.vibrate();
+                // ChatActivity stays subscribed while backgrounded; openedDialogId is cleared on
+                // pause (notifications still fire). Don't haptic as if the user is still in-chat.
+                if (!paused && !ApplicationLoader.mainInterfacePaused) {
+                    MglaHapticManager.vibrate();
+                }
             } else if (ChatObject.isChannel(currentChat) && !currentChat.megagroup && chatInfo != null && did == -chatInfo.linked_chat_id) {
                 for (int a = 0, N = arr.size(); a < N; a++) {
                     MessageObject messageObject = arr.get(a);

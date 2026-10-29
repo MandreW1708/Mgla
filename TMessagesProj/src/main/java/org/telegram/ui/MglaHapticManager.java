@@ -257,6 +257,10 @@ public class MglaHapticManager {
         if (!force && !isEnabled()) {
             return;
         }
+        // Previews (force) still work in settings; never buzz while the app is backgrounded.
+        if (!force && ApplicationLoader.mainInterfacePaused) {
+            return;
+        }
         try {
             Vibrator vibrator = getVibrator();
             if (vibrator == null || !vibrator.hasVibrator()) {
