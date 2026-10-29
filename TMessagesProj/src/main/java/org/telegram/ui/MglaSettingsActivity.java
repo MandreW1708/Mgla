@@ -2,11 +2,16 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.animation.ValueAnimator;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.ColorFilter;
+import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
@@ -19,20 +24,28 @@ import android.text.TextUtils;
 import android.text.style.ImageSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+import androidx.core.graphics.ColorUtils;
+import androidx.core.view.NestedScrollingParent3;
+import androidx.core.view.NestedScrollingParentHelper;
+import androidx.core.view.ViewCompat;
+import androidx.core.widget.NestedScrollView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.MglaMemoryConfig;
 import org.telegram.messenger.MglaSubscription;
+import org.telegram.messenger.MglaUpdateChecker;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
@@ -40,10 +53,9 @@ import org.telegram.messenger.browser.Browser;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
-import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
@@ -53,14 +65,29 @@ import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.utils.dpi.MglaDpiBypass;
 import org.telegram.utils.wsbypass.MglaWsBypass;
+
 public class MglaSettingsActivity extends MglaBaseSettingsActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private static final int MENU_PRIVACY = 1;
     private static final int MENU_TERMS = 2;
 
-    private SettingCell dpiBypassCell;
-    private SettingCell memoryCell;
-    private View memoryDivider;
+    private static final int COLOR_HEADER_TOP = 0xFF2A1530;
+    private static final int COLOR_HEADER_MID = 0xFF1A3A52;
+    private static final int COLOR_HEADER_BOTTOM = 0xFF1E4F5C;
+    private static final int COLOR_SHEET = 0xFF121417;
+    private static final int COLOR_CARD = 0xFF1E1F24;
+    private static final int COLOR_TEXT = 0xFFF2F3F5;
+    private static final int COLOR_TEXT_SECONDARY = 0xFF9AA0A6;
+    private static final int COLOR_HANDLE = 0xFF3A3D45;
+    private static final int COLOR_ACCENT = 0xFF4DB8C9;
+    private static final int COLOR_DIVIDER = 0x14FFFFFF;
+
+    private HubLayout hubLayout;
+    private View headerBrand;
+    private TextView dpiBypassValueView;
+    private View memoryRow;
+    private TextView memoryValueView;
+    private ImageView headerIconView;
 
     public MglaSettingsActivity() {
         this(null);
@@ -89,27 +116,28 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     @Override
     public void onResume() {
         super.onResume();
-        updateMemoryCell();
-        updateDpiBypassCell();
+        updateMemoryRow();
+        updateDpiBypassValue();
+    }
+
+    @Override
+    public boolean isLightStatusBar() {
+        return false;
     }
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.dpiBypassChanged) {
-            updateDpiBypassCell();
+            updateDpiBypassValue();
         } else if (id == NotificationCenter.mglaHeaderSettingsChanged
                 || id == NotificationCenter.mglaSubscriptionHintChanged) {
-            updateMemoryCell();
+            updateMemoryRow();
         }
     }
 
-    private void updateDpiBypassCell() {
-        if (dpiBypassCell != null) {
-            dpiBypassCell.set(
-                IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
-                R.drawable.mgla_dpi_shield, "Подключение без VPN", null,
-                bypassStatusLabel(), false, null
-            );
+    private void updateDpiBypassValue() {
+        if (dpiBypassValueView != null) {
+            dpiBypassValueView.setText(bypassStatusLabel());
         }
     }
 
@@ -123,7 +151,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         }
         if (!MglaMemoryConfig.isEnabled()) {
             BulletinFactory.of(this).createSimpleBulletin(R.raw.info,
-                "Сначала включите живую память в разделе «Искусственный интеллект»").show();
+                    "Сначала включите живую память в разделе «Искусственный интеллект»").show();
             MglaAiSettingsActivity ai = new MglaAiSettingsActivity();
             presentFragment(ai);
             ai.highlightMemoryToggle();
@@ -141,34 +169,23 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         ).show();
     }
 
-    private void updateMemoryCell() {
-        boolean allowed = MglaMemoryConfig.isActive();
-        int visibility = allowed ? View.VISIBLE : View.GONE;
-        if (memoryDivider != null) {
-            memoryDivider.setVisibility(visibility);
-        }
-        if (memoryCell == null) {
+    private void updateMemoryRow() {
+        if (memoryRow == null) {
             return;
         }
-        memoryCell.setVisibility(visibility);
+        boolean allowed = MglaMemoryConfig.isActive();
+        memoryRow.setVisibility(allowed ? View.VISIBLE : View.GONE);
         if (!allowed) {
             return;
         }
         boolean unlocked = MglaSubscription.canUseLiveMemory();
-        // isEnabled() = подписка + переключатель; статус «Вкл» только когда реально работает.
         boolean on = MglaMemoryConfig.isEnabled();
-        memoryCell.set(
-            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom,
-            R.drawable.msg_saved, liveMemoryPremiumLabel(getContext()), null,
-            on ? "Вкл" : "Выкл", false, "alpha"
-        );
-        // Приглушаем только без подписки. Выключенный переключатель у Premium — нормальный «Выкл», не «замок».
-        memoryCell.setAlpha(unlocked ? 1f : 0.4f);
-        memoryCell.setEnabled(true);
-        memoryCell.setClickable(true);
+        if (memoryValueView != null) {
+            memoryValueView.setText(on ? "Вкл" : "Выкл");
+        }
+        memoryRow.setAlpha(unlocked ? 1f : 0.4f);
     }
 
-    /** Gold premium star to the left of «Живая память». */
     private static CharSequence liveMemoryPremiumLabel(Context context) {
         SpannableStringBuilder sb = new SpannableStringBuilder("  Живая память");
         Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
@@ -192,9 +209,16 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
     @Override
     public View createView(Context context) {
+        hasOwnBackground = true;
+
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
-        actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle("Настройки Mgla");
+        actionBar.setOccupyStatusBar(true);
+        actionBar.setCastShadows(false);
+        actionBar.setAddToContainer(false);
+        actionBar.setBackgroundColor(Color.TRANSPARENT);
+        actionBar.setTitleColor(Color.TRANSPARENT);
+        actionBar.setItemsColor(0xFFFFFFFF, false);
+        actionBar.setItemsBackgroundColor(0x33FFFFFF, false);
         ActionBarMenu menu = actionBar.createMenu();
         ActionBarMenuItem other = menu.addItem(0, R.drawable.ic_ab_other);
         other.setContentDescription("Ещё");
@@ -213,175 +237,28 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             }
         });
 
-        ScrollView scrollView = new ScrollView(context);
-        scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
-
-        LinearLayout rootLayout = new LinearLayout(context);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        scrollView.addView(rootLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
-
-        rootLayout.addView(createHeader(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 12, 0, 8));
-
-        LinearLayout mainBlock = createBlock(context, "Главное");
-        addMenuItem(mainBlock, () -> presentFragment(new MglaMainSettingsActivity()),
-            IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_features, "Общие настройки");
-        mainBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(mainBlock, () -> presentFragment(new MglaChatsSettingsActivity()),
-            IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.filled_chatlist2, "Чаты");
-        mainBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(mainBlock, () -> presentFragment(new MglaNotificationsSettingsActivity()),
-            IconBackgroundColors.RED.top, IconBackgroundColors.RED.bottom, R.drawable.settings_sounds, "Уведомления");
-        mainBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(mainBlock, () -> presentFragment(new MglaAppearanceSettingsActivity()),
-            IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.msg_palette, "Внешний вид");
-        mainBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(mainBlock, () -> presentFragment(new MglaPlayerSettingsActivity()),
-            IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.files_music, "Плеер");
-        mainBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(mainBlock, () -> presentFragment(new MglaCameraSettingsActivity()),
-            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.filled_premium_camera, "Камера");
-        mainBlock.addView(MglaUi.createDivider(context));
-        dpiBypassCell = addMenuItem(mainBlock, () -> presentFragment(new MglaDpiBypassActivity()),
-            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.mgla_dpi_shield, "Подключение без VPN",
-            bypassStatusLabel());
-        mainBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(mainBlock, () -> presentFragment(new MglaAiSettingsActivity()),
-            IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.input_ai, "Искусственный интеллект");
-        memoryDivider = MglaUi.createDivider(context);
-        mainBlock.addView(memoryDivider);
-        memoryCell = addMenuItem(mainBlock, this::openMemory,
-            IconBackgroundColors.BURGUNDY.top, IconBackgroundColors.BURGUNDY.bottom, R.drawable.msg_saved,
-            liveMemoryPremiumLabel(context), "Выкл", "alpha");
-        updateMemoryCell();
-        rootLayout.addView(mainBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
-
-        LinearLayout extraBlock = createBlock(context, "Дополнительно");
-        addMenuItem(extraBlock, () -> openTelegramUsername(BuildVars.MGLA_DEV_CHANNEL_USERNAME),
-            IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_channel, "Канал разработчика");
-        extraBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(extraBlock, this::openDonate,
-            IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.wallet_buy, "Поддержать проект");
-        extraBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(extraBlock, () -> openMglaGuide(),
-            IconBackgroundColors.BLUE_DEEP.top, IconBackgroundColors.BLUE_DEEP.bottom, R.drawable.menu_website, "Инструкция");
-        extraBlock.addView(MglaUi.createDivider(context));
-        addMenuItem(extraBlock, this::openSupport,
-            IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.msg_help, "Поддержка");
-        rootLayout.addView(extraBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
-
-        TextInfoPrivacyCell statsNote = new TextInfoPrivacyCell(context);
-        statsNote.setText("Собираются только обезличенные модели устройств, анонимный отпечаток устройства (чтобы обновление APK не считалось новой установкой) и частота использования функций, а также Telegram ID — для выдачи подписки. Личные сообщения, контакты и содержимое чатов не собираются.");
-        statsNote.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
-        rootLayout.addView(statsNote, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, AndroidUtilities.navigationBarHeight + 8));
-
-        fragmentView = scrollView;
+        hubLayout = new HubLayout(context);
+        fragmentView = hubLayout;
+        AndroidUtilities.runOnUIThread(this::playEntrance, 40);
         return fragmentView;
     }
 
-    private View createHeader(Context context) {
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.VERTICAL);
-        header.setGravity(Gravity.CENTER_HORIZONTAL);
-
-        FrameLayout iconContainer = new FrameLayout(context);
-        GradientDrawable iconBg = new GradientDrawable();
-        iconBg.setCornerRadius(dp(18));
-        iconBg.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-        iconContainer.setBackground(iconBg);
-        iconContainer.setClipToOutline(true);
-        iconContainer.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-
-        ImageView iconView = new ImageView(context);
-        iconView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        // Never bind R.mipmap.ic_launcher directly — adaptive icons are huge to rasterize.
-        // Returning to this hub from subsections was stalling ~1s on every back animation.
-        iconView.setImageDrawable(new BitmapDrawable(context.getResources(), getHubIconBitmap(context)));
-        iconContainer.addView(iconView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-        header.addView(iconContainer, LayoutHelper.createLinear(80, 80, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
-
-        TextView titleView = new TextView(context);
-        titleView.setText("Mgla");
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
-        titleView.setTypeface(AndroidUtilities.bold());
-        titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        titleView.setGravity(Gravity.CENTER);
-        header.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 4));
-
-        LinearLayout versionRow = new LinearLayout(context);
-        versionRow.setOrientation(LinearLayout.HORIZONTAL);
-        versionRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView versionView = new TextView(context);
-        versionView.setText(BuildVars.MGLA_VERSION_STRING);
-        versionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        versionView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        versionView.setGravity(Gravity.CENTER);
-        versionRow.addView(versionView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-
-        TextView betaBadge = new TextView(context);
-        betaBadge.setText("beta");
-        betaBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
-        betaBadge.setTypeface(AndroidUtilities.bold());
-        betaBadge.setTextColor(0xFFFFFFFF);
-        betaBadge.setGravity(Gravity.CENTER);
-        betaBadge.setPadding(dp(5), dp(1), dp(5), dp(2));
-        GradientDrawable badgeBg = new GradientDrawable();
-        badgeBg.setCornerRadius(dp(4));
-        badgeBg.setColor(Theme.getColor(Theme.key_chat_messagePanelSend));
-        betaBadge.setBackground(badgeBg);
-        versionRow.addView(betaBadge, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
-
-        header.addView(versionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
-
-        return header;
-    }
-
-    private static Bitmap hubIconBitmap;
-
-    private static Bitmap getHubIconBitmap(Context context) {
-        if (hubIconBitmap != null && !hubIconBitmap.isRecycled()) {
-            return hubIconBitmap;
+    private void playEntrance() {
+        if (hubLayout == null || headerBrand == null) {
+            return;
         }
-        final int size = dp(80);
-        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        try {
-            Drawable src = context.getPackageManager().getApplicationIcon(context.getApplicationInfo());
-            src.setBounds(0, 0, size, size);
-            src.draw(canvas);
-        } catch (Exception e) {
-            Drawable fallback = context.getResources().getDrawable(R.drawable.msg_fave).mutate();
-            fallback.setBounds(dp(20), dp(20), size - dp(20), size - dp(20));
-            fallback.draw(canvas);
-        }
-        return hubIconBitmap = bitmap;
+        hubLayout.playEntranceAnimation();
     }
 
-    private LinearLayout createBlock(Context context, String title) {
-        return MglaUi.createBlock(context, title);
-    }
-
-    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title) {
-        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, null, null);
-    }
-
-    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value) {
-        return addMenuItem(block, onClick, iconColorTop, iconColorBottom, icon, title, value, null);
-    }
-
-    private SettingCell addMenuItem(LinearLayout block, Runnable onClick, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence value, String badgeText) {
-        SettingCell cell = new SettingCell(getContext(), null);
-        cell.set(iconColorTop, iconColorBottom, icon, title, null, value, false, badgeText);
-        if (onClick != null) {
-            cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
-            cell.setOnClickListener(v -> onClick.run());
-        } else {
-            cell.setAlpha(0.4f);
-        }
-        block.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        return cell;
+    private void checkUpdates() {
+        BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Проверяем обновления…").show();
+        MglaUpdateChecker.maybeCheck(true);
+        AndroidUtilities.runOnUIThread(() -> {
+            if (getParentActivity() == null || getFragmentView() == null) {
+                return;
+            }
+            MglaUpdateChecker.showPendingIfAny(getParentActivity());
+        }, 1100);
     }
 
     private void openUrl(String url) {
@@ -417,6 +294,667 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     private void openDonate() {
         openUrl("https://pay.cloudtips.ru/p/98e2d5e0");
     }
+
+    private static Bitmap hubIconBitmap;
+
+    private static Bitmap getHubIconBitmap(Context context) {
+        if (hubIconBitmap != null && !hubIconBitmap.isRecycled()) {
+            return hubIconBitmap;
+        }
+        final int size = dp(96);
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        try {
+            Drawable src = context.getPackageManager().getApplicationIcon(context.getApplicationInfo());
+            src.setBounds(0, 0, size, size);
+            src.draw(canvas);
+        } catch (Exception e) {
+            Drawable fallback = context.getResources().getDrawable(R.drawable.msg_fave).mutate();
+            fallback.setBounds(dp(24), dp(24), size - dp(24), size - dp(24));
+            fallback.draw(canvas);
+        }
+        return hubIconBitmap = bitmap;
+    }
+
+    // ── Hub shell ──────────────────────────────────────────────────────────
+
+    @SuppressLint("ClickableViewAccessibility")
+    private class HubLayout extends FrameLayout implements NestedScrollingParent3 {
+
+        private final NestedScrollingParentHelper nestedHelper = new NestedScrollingParentHelper(this);
+        private final FrameLayout sheet;
+        private final NestedScrollView scrollView;
+        private final LinearLayout content;
+        private final View[] staggerViews = new View[16];
+        private int staggerCount;
+
+        private float progress; // 0 = peek, 1 = expanded
+        private ValueAnimator settleAnimator;
+        private float dragStartProgress;
+        private float dragStartY;
+        private boolean draggingSheet;
+        private boolean entrancePlaying;
+        private VelocityTracker velocityTracker;
+        private final int touchSlop;
+        private final int maxFling;
+
+        HubLayout(Context context) {
+            super(context);
+            setWillNotDraw(false);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+            maxFling = ViewConfiguration.get(context).getScaledMaximumFlingVelocity();
+
+            GradientDrawable headerBg = new GradientDrawable(
+                    GradientDrawable.Orientation.TL_BR,
+                    new int[]{COLOR_HEADER_TOP, COLOR_HEADER_MID, COLOR_HEADER_BOTTOM}
+            );
+            setBackground(headerBg);
+
+            headerBrand = buildHeaderBrand(context);
+            addView(headerBrand, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+
+            addView(actionBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+
+            sheet = new FrameLayout(context) {
+                private final Path clipPath = new Path();
+                private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+                {
+                    paint.setColor(COLOR_SHEET);
+                    setOutlineProvider(new ViewOutlineProvider() {
+                        @Override
+                        public void getOutline(View view, Outline outline) {
+                            outline.setRoundRect(0, 0, view.getWidth(), view.getHeight() + dp(28), dp(28));
+                        }
+                    });
+                    setClipToOutline(true);
+                }
+
+                @Override
+                protected void dispatchDraw(Canvas canvas) {
+                    float r = dp(28);
+                    clipPath.rewind();
+                    AndroidUtilities.rectTmp.set(0, 0, getWidth(), getHeight());
+                    clipPath.addRoundRect(AndroidUtilities.rectTmp, r, r, Path.Direction.CW);
+                    canvas.drawPath(clipPath, paint);
+                    super.dispatchDraw(canvas);
+                }
+            };
+
+            View handle = new View(context);
+            GradientDrawable handleBg = new GradientDrawable();
+            handleBg.setColor(COLOR_HANDLE);
+            handleBg.setCornerRadius(dp(2));
+            handle.setBackground(handleBg);
+            sheet.addView(handle, LayoutHelper.createFrame(40, 4, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 10, 0, 0));
+
+            scrollView = new NestedScrollView(context) {
+                @Override
+                public boolean onInterceptTouchEvent(MotionEvent ev) {
+                    if (progress < 0.98f && ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                        // Let parent expand sheet before content scroll when not expanded.
+                    }
+                    return super.onInterceptTouchEvent(ev);
+                }
+            };
+            scrollView.setOverScrollMode(OVER_SCROLL_NEVER);
+            scrollView.setFillViewport(true);
+            scrollView.setClipToPadding(false);
+            scrollView.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight + dp(16));
+
+            content = new LinearLayout(context);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(16), dp(22), dp(16), dp(8));
+            buildSheetContent(context, content);
+            scrollView.addView(content, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            sheet.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP, 0, 18, 0, 0));
+
+            addView(sheet, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP));
+
+            sheet.setOnTouchListener((v, event) -> {
+                float y = event.getRawY();
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN: {
+                        if (event.getY() <= dp(36) || (progress < 0.99f && scrollView.getScrollY() == 0)) {
+                            draggingSheet = true;
+                            dragStartY = y;
+                            dragStartProgress = progress;
+                            if (velocityTracker != null) {
+                                velocityTracker.recycle();
+                            }
+                            velocityTracker = VelocityTracker.obtain();
+                            velocityTracker.addMovement(event);
+                            cancelSettle();
+                            return true;
+                        }
+                        break;
+                    }
+                    case MotionEvent.ACTION_MOVE: {
+                        if (!draggingSheet) {
+                            break;
+                        }
+                        velocityTracker.addMovement(event);
+                        float dy = dragStartY - y;
+                        float range = Math.max(1, peekTop() - expandedTop());
+                        setProgress(dragStartProgress + dy / range, false);
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        if (!draggingSheet) {
+                            break;
+                        }
+                        draggingSheet = false;
+                        float vY = 0;
+                        if (velocityTracker != null) {
+                            velocityTracker.addMovement(event);
+                            velocityTracker.computeCurrentVelocity(1000, maxFling);
+                            vY = velocityTracker.getYVelocity();
+                            velocityTracker.recycle();
+                            velocityTracker = null;
+                        }
+                        settle(vY);
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+
+        private View buildHeaderBrand(Context context) {
+            LinearLayout brand = new LinearLayout(context);
+            brand.setOrientation(LinearLayout.VERTICAL);
+            brand.setGravity(Gravity.CENTER_HORIZONTAL);
+            int topPad = AndroidUtilities.statusBarHeight + ActionBar.getCurrentActionBarHeight() + dp(8);
+            brand.setPadding(dp(24), topPad, dp(24), dp(28));
+
+            FrameLayout iconWrap = new FrameLayout(context);
+            GradientDrawable petal = new GradientDrawable();
+            petal.setShape(GradientDrawable.RECTANGLE);
+            petal.setCornerRadius(dp(36));
+            petal.setColor(0xEEFFFFFF);
+            iconWrap.setBackground(petal);
+            iconWrap.setElevation(dp(6));
+
+            headerIconView = new ImageView(context);
+            headerIconView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            headerIconView.setImageDrawable(new BitmapDrawable(context.getResources(), getHubIconBitmap(context)));
+            iconWrap.addView(headerIconView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER, 6, 6, 6, 6));
+            brand.addView(iconWrap, LayoutHelper.createLinear(88, 88, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
+
+            TextView title = new TextView(context);
+            title.setText("Mgla");
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
+            title.setTypeface(AndroidUtilities.bold());
+            title.setTextColor(COLOR_TEXT);
+            title.setGravity(Gravity.CENTER);
+            brand.addView(title, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
+
+            LinearLayout versionRow = new LinearLayout(context);
+            versionRow.setOrientation(LinearLayout.HORIZONTAL);
+            versionRow.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView version = new TextView(context);
+            version.setText(BuildVars.MGLA_VERSION_STRING);
+            version.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            version.setTextColor(ColorUtils.setAlphaComponent(COLOR_TEXT, 200));
+            versionRow.addView(version, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+            TextView beta = new TextView(context);
+            beta.setText("beta");
+            beta.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+            beta.setTypeface(AndroidUtilities.bold());
+            beta.setTextColor(0xFFFFFFFF);
+            beta.setPadding(dp(6), dp(2), dp(6), dp(3));
+            GradientDrawable betaBg = new GradientDrawable();
+            betaBg.setCornerRadius(dp(6));
+            betaBg.setColor(ColorUtils.setAlphaComponent(COLOR_ACCENT, 180));
+            beta.setBackground(betaBg);
+            versionRow.addView(beta, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 8, 0, 0, 0));
+            brand.addView(versionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
+
+            LinearLayout updateBtn = new LinearLayout(context);
+            updateBtn.setOrientation(LinearLayout.HORIZONTAL);
+            updateBtn.setGravity(Gravity.CENTER);
+            updateBtn.setPadding(dp(16), dp(10), dp(18), dp(10));
+            GradientDrawable updateBg = new GradientDrawable();
+            updateBg.setCornerRadius(dp(22));
+            updateBg.setColor(0x33FFFFFF);
+            updateBtn.setBackground(updateBg);
+            updateBtn.setOnClickListener(v -> checkUpdates());
+            MglaUi.attachPressSpring(updateBtn);
+
+            ImageView refreshIcon = new ImageView(context);
+            refreshIcon.setImageResource(R.drawable.msg_retry);
+            refreshIcon.setColorFilter(new PorterDuffColorFilter(COLOR_TEXT, PorterDuff.Mode.SRC_IN));
+            updateBtn.addView(refreshIcon, LayoutHelper.createLinear(18, 18, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
+
+            TextView updateText = new TextView(context);
+            updateText.setText("Проверить обновления");
+            updateText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            updateText.setTypeface(AndroidUtilities.bold());
+            updateText.setTextColor(COLOR_TEXT);
+            updateBtn.addView(updateText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+            brand.addView(updateBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+            return brand;
+        }
+
+        private void buildSheetContent(Context context, LinearLayout root) {
+            // 2×2 grid
+            LinearLayout row1 = new LinearLayout(context);
+            row1.setOrientation(LinearLayout.HORIZONTAL);
+            View tileGeneral = createGridTile(context, R.drawable.settings_features, IconBackgroundColors.CYAN,
+                    "Общие", () -> presentFragment(new MglaMainSettingsActivity()));
+            View tileChats = createGridTile(context, R.drawable.filled_chatlist2, IconBackgroundColors.BLUE,
+                    "Чаты", () -> presentFragment(new MglaChatsSettingsActivity()));
+            row1.addView(tileGeneral, LayoutHelper.createLinear(0, 112, 1f, Gravity.FILL, 0, 0, 6, 0));
+            row1.addView(tileChats, LayoutHelper.createLinear(0, 112, 1f, Gravity.FILL, 6, 0, 0, 0));
+            root.addView(row1, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
+            trackStagger(tileGeneral, tileChats);
+
+            LinearLayout row2 = new LinearLayout(context);
+            row2.setOrientation(LinearLayout.HORIZONTAL);
+            View tileAppear = createGridTile(context, R.drawable.msg_palette, IconBackgroundColors.ORANGE,
+                    "Внешний вид", () -> presentFragment(new MglaAppearanceSettingsActivity()));
+            View tileVpn = createGridTile(context, R.drawable.mgla_dpi_shield, IconBackgroundColors.BURGUNDY,
+                    "Подключение без VPN", () -> presentFragment(new MglaDpiBypassActivity()), true);
+            row2.addView(tileAppear, LayoutHelper.createLinear(0, 112, 1f, Gravity.FILL, 0, 0, 6, 0));
+            row2.addView(tileVpn, LayoutHelper.createLinear(0, 112, 1f, Gravity.FILL, 6, 0, 0, 0));
+            root.addView(row2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 20));
+            trackStagger(tileAppear, tileVpn);
+
+            // Возможности
+            TextView featsHeader = sectionTitle(context, "Возможности");
+            root.addView(featsHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 4, 0, 0, 8));
+            trackStagger(featsHeader);
+
+            LinearLayout feats = createCard(context);
+            addListRow(feats, R.drawable.settings_sounds, IconBackgroundColors.RED, "Уведомления", null,
+                    () -> presentFragment(new MglaNotificationsSettingsActivity()), true);
+            addListRow(feats, R.drawable.files_music, IconBackgroundColors.PURPLE, "Плеер", null,
+                    () -> presentFragment(new MglaPlayerSettingsActivity()), true);
+            addListRow(feats, R.drawable.filled_premium_camera, IconBackgroundColors.GREEN, "Камера", null,
+                    () -> presentFragment(new MglaCameraSettingsActivity()), true);
+            addListRow(feats, R.drawable.input_ai, IconBackgroundColors.PURPLE, "Искусственный интеллект", null,
+                    () -> presentFragment(new MglaAiSettingsActivity()), true);
+
+            memoryRow = addListRow(feats, R.drawable.msg_saved, IconBackgroundColors.BURGUNDY,
+                    liveMemoryPremiumLabel(context), "Выкл", MglaSettingsActivity.this::openMemory, true);
+            memoryValueView = (TextView) memoryRow.getTag();
+            updateMemoryRow();
+
+            addListRow(feats, R.drawable.settings_mgla_premium, null, "Mgla Premium", null,
+                    () -> presentFragment(new MglaPremiumActivity()), false);
+            root.addView(feats, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 20));
+            trackStagger(feats);
+
+            // Сообщество
+            TextView communityHeader = sectionTitle(context, "Сообщество");
+            root.addView(communityHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 4, 0, 0, 8));
+            trackStagger(communityHeader);
+
+            LinearLayout community = createCard(context);
+            addListRow(community, R.drawable.settings_channel, IconBackgroundColors.ORANGE, "Канал разработчика", null,
+                    () -> openTelegramUsername(BuildVars.MGLA_DEV_CHANNEL_USERNAME), true);
+            addListRow(community, R.drawable.menu_website, IconBackgroundColors.BLUE_DEEP, "Инструкция", null,
+                    MglaSettingsActivity.this::openMglaGuide, true);
+            addListRow(community, R.drawable.msg_help, IconBackgroundColors.CYAN, "Поддержка", null,
+                    MglaSettingsActivity.this::openSupport, true);
+            addListRow(community, R.drawable.wallet_buy, IconBackgroundColors.GREEN, "Поддержать проект", null,
+                    MglaSettingsActivity.this::openDonate, false);
+            root.addView(community, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 18));
+            trackStagger(community);
+
+            TextView footer = new TextView(context);
+            footer.setText("Используя Mgla, вы соглашаетесь с условиями использования. Собираются только обезличенные данные устройства и Telegram ID для подписки — личные сообщения не собираются.");
+            footer.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            footer.setTextColor(COLOR_TEXT_SECONDARY);
+            footer.setGravity(Gravity.CENTER_HORIZONTAL);
+            footer.setLineSpacing(dp(2), 1f);
+            footer.setOnClickListener(v -> openUrl(BuildVars.MGLA_TERMS_OF_SERVICE_URL));
+            root.addView(footer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 12, 0, 12, 8));
+            trackStagger(footer);
+        }
+
+        private void trackStagger(View... views) {
+            for (View v : views) {
+                if (v != null && staggerCount < staggerViews.length) {
+                    staggerViews[staggerCount++] = v;
+                    v.setAlpha(0f);
+                    v.setTranslationY(dp(16));
+                }
+            }
+        }
+
+        void playEntranceAnimation() {
+            entrancePlaying = true;
+            if (headerBrand != null) {
+                headerBrand.setAlpha(0f);
+                headerBrand.setScaleX(0.94f);
+                headerBrand.setScaleY(0.94f);
+                // Keep brand translation driven by progress after entrance.
+                headerBrand.animate()
+                        .alpha(1f)
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(480)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                        .start();
+            }
+            sheet.setAlpha(0f);
+            final float from = currentSheetTop() + dp(72);
+            final float to = currentSheetTop();
+            sheet.setTranslationY(from);
+            ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+            anim.setDuration(520);
+            anim.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            anim.addUpdateListener(a -> {
+                float f = (float) a.getAnimatedValue();
+                sheet.setAlpha(f);
+                sheet.setTranslationY(AndroidUtilities.lerp(from, to, f));
+            });
+            anim.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(android.animation.Animator animation) {
+                    entrancePlaying = false;
+                    applyVisuals();
+                }
+            });
+            anim.start();
+            staggerContent();
+        }
+
+        void staggerContent() {
+            for (int i = 0; i < staggerCount; i++) {
+                final View v = staggerViews[i];
+                if (v == null) {
+                    continue;
+                }
+                v.animate()
+                        .alpha(1f)
+                        .translationY(0)
+                        .setStartDelay(80L + i * 45L)
+                        .setDuration(380)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                        .start();
+            }
+        }
+
+        private TextView sectionTitle(Context context, String text) {
+            TextView t = new TextView(context);
+            t.setText(text);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            t.setTypeface(AndroidUtilities.bold());
+            t.setTextColor(COLOR_TEXT_SECONDARY);
+            t.setPadding(dp(4), 0, 0, 0);
+            return t;
+        }
+
+        private LinearLayout createCard(Context context) {
+            LinearLayout card = new LinearLayout(context);
+            card.setOrientation(LinearLayout.VERTICAL);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(COLOR_CARD);
+            bg.setCornerRadius(dp(18));
+            card.setBackground(bg);
+            card.setClipToOutline(true);
+            card.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(18));
+                }
+            });
+            return card;
+        }
+
+        private View createGridTile(Context context, int iconRes, IconBackgroundColors colors, String title, Runnable onClick) {
+            return createGridTile(context, iconRes, colors, title, onClick, false);
+        }
+
+        private View createGridTile(Context context, int iconRes, IconBackgroundColors colors, String title, Runnable onClick, boolean vpn) {
+            FrameLayout tile = new FrameLayout(context);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(COLOR_CARD);
+            bg.setCornerRadius(dp(18));
+            tile.setBackground(bg);
+            tile.setOnClickListener(v -> onClick.run());
+            MglaUi.attachPressSpring(tile);
+
+            FrameLayout iconBox = new FrameLayout(context);
+            SettingCell.Background iconBg = new SettingCell.Background();
+            iconBg.setColor(colors.top, colors.bottom);
+            iconBox.setBackground(iconBg);
+            ImageView icon = new ImageView(context);
+            icon.setImageResource(iconRes);
+            icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            icon.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN));
+            iconBox.addView(icon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
+            tile.addView(iconBox, LayoutHelper.createFrame(34, 34, Gravity.TOP | Gravity.LEFT, 14, 14, 0, 0));
+
+            TextView label = new TextView(context);
+            label.setText(title);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, title.length() > 12 ? 13 : 15);
+            label.setTypeface(AndroidUtilities.bold());
+            label.setTextColor(COLOR_TEXT);
+            label.setMaxLines(2);
+            label.setLineSpacing(0, 1.05f);
+            tile.addView(label, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, 14, 0, 14, 14));
+
+            if (vpn) {
+                dpiBypassValueView = new TextView(context);
+                dpiBypassValueView.setText(bypassStatusLabel());
+                dpiBypassValueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+                dpiBypassValueView.setTextColor(COLOR_ACCENT);
+                dpiBypassValueView.setTypeface(AndroidUtilities.bold());
+                tile.addView(dpiBypassValueView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT, 0, 16, 14, 0));
+            }
+            return tile;
+        }
+
+        /** @return row; tag holds value TextView when value != null */
+        private View addListRow(LinearLayout card, int iconRes, IconBackgroundColors colors, CharSequence title,
+                                CharSequence value, Runnable onClick, boolean dividerAfter) {
+            Context context = card.getContext();
+            FrameLayout row = new FrameLayout(context);
+            row.setMinimumHeight(dp(54));
+            row.setOnClickListener(v -> onClick.run());
+            row.setBackground(Theme.createSelectorDrawable(0x14FFFFFF, Theme.RIPPLE_MASK_ALL));
+            MglaUi.attachPressSpring(row);
+
+            if (iconRes != 0) {
+                FrameLayout iconBox = new FrameLayout(context);
+                if (colors != null) {
+                    SettingCell.Background iconBg = new SettingCell.Background();
+                    iconBg.setColor(colors.top, colors.bottom);
+                    iconBox.setBackground(iconBg);
+                } else {
+                    GradientDrawable flat = new GradientDrawable();
+                    flat.setCornerRadius(dp(10));
+                    flat.setColor(0xFF111111);
+                    iconBox.setBackground(flat);
+                }
+                ImageView icon = new ImageView(context);
+                icon.setImageResource(iconRes);
+                icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                icon.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN));
+                iconBox.addView(icon, LayoutHelper.createFrame(20, 20, Gravity.CENTER));
+                row.addView(iconBox, LayoutHelper.createFrame(28, 28, Gravity.CENTER_VERTICAL | Gravity.LEFT, 14, 0, 0, 0));
+            }
+
+            TextView titleView = new TextView(context);
+            titleView.setText(title);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            titleView.setTextColor(COLOR_TEXT);
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(TextUtils.TruncateAt.END);
+            row.addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                    Gravity.CENTER_VERTICAL | Gravity.LEFT, 56, 0, value != null ? 72 : 40, 0));
+
+            TextView valueView = null;
+            if (value != null) {
+                valueView = new TextView(context);
+                valueView.setText(value);
+                valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+                valueView.setTextColor(COLOR_ACCENT);
+                row.addView(valueView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
+                        Gravity.CENTER_VERTICAL | Gravity.RIGHT, 0, 0, 36, 0));
+                row.setTag(valueView);
+            }
+
+            ImageView chevron = new ImageView(context);
+            chevron.setImageResource(R.drawable.msg_arrowright);
+            chevron.setColorFilter(new PorterDuffColorFilter(COLOR_TEXT_SECONDARY, PorterDuff.Mode.SRC_IN));
+            row.addView(chevron, LayoutHelper.createFrame(16, 16, Gravity.CENTER_VERTICAL | Gravity.RIGHT, 0, 0, 14, 0));
+
+            card.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            if (dividerAfter) {
+                View d = new View(context);
+                d.setBackgroundColor(COLOR_DIVIDER);
+                card.addView(d, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 56, 0, 14, 0));
+            }
+            return row;
+        }
+
+        private int peekTop() {
+            return Math.max(expandedTop() + dp(120), (int) (getHeight() * 0.46f));
+        }
+
+        private int expandedTop() {
+            return AndroidUtilities.statusBarHeight + dp(6);
+        }
+
+        float currentSheetTop() {
+            return AndroidUtilities.lerp(peekTop(), expandedTop(), progress);
+        }
+
+        void setProgress(float p, boolean layoutOnly) {
+            progress = Math.max(0f, Math.min(1f, p));
+            applyVisuals();
+            if (!layoutOnly) {
+                invalidate();
+            }
+        }
+
+        private void applyVisuals() {
+            if (getHeight() <= 0 || entrancePlaying) {
+                return;
+            }
+            float top = currentSheetTop();
+            sheet.setTranslationY(top);
+            float fade = 1f - progress * 0.92f;
+            headerBrand.setAlpha(Math.max(0f, fade));
+            float scale = 1f - progress * 0.1f;
+            headerBrand.setScaleX(scale);
+            headerBrand.setScaleY(scale);
+            headerBrand.setTranslationY(-progress * dp(28));
+            actionBar.setAlpha(1f - progress * 0.15f);
+        }
+
+        private void cancelSettle() {
+            if (settleAnimator != null) {
+                settleAnimator.cancel();
+                settleAnimator = null;
+            }
+        }
+
+        private void settle(float velocityY) {
+            // velocityY > 0 means finger moving down → collapse
+            float target;
+            if (Math.abs(velocityY) > 1200) {
+                target = velocityY > 0 ? 0f : 1f;
+            } else {
+                target = progress >= 0.45f ? 1f : 0f;
+            }
+            cancelSettle();
+            settleAnimator = ValueAnimator.ofFloat(progress, target);
+            settleAnimator.setDuration(320);
+            settleAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            settleAnimator.addUpdateListener(a -> setProgress((float) a.getAnimatedValue(), false));
+            settleAnimator.start();
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            applyVisuals();
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            super.onLayout(changed, left, top, right, bottom);
+            // Keep sheet full-height; position via translation.
+            int sheetH = getHeight() - expandedTop() + dp(28);
+            sheet.layout(0, 0, getWidth(), Math.max(sheetH, getHeight()));
+            applyVisuals();
+        }
+
+        // Nested scroll: expand sheet before content scrolls up; collapse when pulling down at top.
+        @Override
+        public boolean onStartNestedScroll(@NonNull View child, @NonNull View target, int axes, int type) {
+            return (axes & ViewCompat.SCROLL_AXIS_VERTICAL) != 0;
+        }
+
+        @Override
+        public void onNestedScrollAccepted(@NonNull View child, @NonNull View target, int axes, int type) {
+            nestedHelper.onNestedScrollAccepted(child, target, axes, type);
+            cancelSettle();
+        }
+
+        @Override
+        public void onStopNestedScroll(@NonNull View target, int type) {
+            nestedHelper.onStopNestedScroll(target, type);
+            if (type == ViewCompat.TYPE_TOUCH) {
+                settle(0);
+            }
+        }
+
+        @Override
+        public void onNestedPreScroll(@NonNull View target, int dx, int dy, @NonNull int[] consumed, int type) {
+            // dy > 0 = scrolling content up (finger up) → expand sheet first
+            if (dy > 0 && progress < 1f) {
+                float range = Math.max(1, peekTop() - expandedTop());
+                float next = progress + dy / range;
+                float applied = Math.min(1f, next) - progress;
+                setProgress(progress + applied, false);
+                consumed[1] = Math.round(applied * range);
+            }
+        }
+
+        @Override
+        public void onNestedScroll(@NonNull View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type, @NonNull int[] consumed) {
+            // dyUnconsumed < 0 = overscroll top (finger down) → collapse
+            if (dyUnconsumed < 0 && scrollView.getScrollY() == 0 && progress > 0f) {
+                float range = Math.max(1, peekTop() - expandedTop());
+                float next = progress + dyUnconsumed / range;
+                float applied = Math.max(0f, next) - progress;
+                setProgress(progress + applied, false);
+                consumed[1] += Math.round(applied * range);
+            }
+        }
+
+        @Override
+        public void onNestedScroll(@NonNull View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type) {
+            onNestedScroll(target, dxConsumed, dyConsumed, dxUnconsumed, dyUnconsumed, type, new int[2]);
+        }
+
+        @Override
+        public boolean onNestedPreFling(@NonNull View target, float velocityX, float velocityY) {
+            return false;
+        }
+
+        @Override
+        public boolean onNestedFling(@NonNull View target, float velocityX, float velocityY, boolean consumed) {
+            return false;
+        }
+
+        @Override
+        public int getNestedScrollAxes() {
+            return nestedHelper.getNestedScrollAxes();
+        }
+    }
+
+    // ── Legacy SettingCell (kept for UItem factory compatibility) ──────────
 
     public static class SettingCell extends LinearLayout implements Theme.Colorable {
 
@@ -500,36 +1038,17 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         }
 
         private boolean twoLines;
-
         private Object object;
 
-        public void set(
-            int iconColorTop, int iconColorBottom, int icon,
-            CharSequence title,
-            CharSequence subtitle,
-            CharSequence value
-        ) {
+        public void set(int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence subtitle, CharSequence value) {
             set(iconColorTop, iconColorBottom, icon, title, subtitle, value, false, null);
         }
 
-        public void set(
-            int iconColorTop, int iconColorBottom, int icon,
-            CharSequence title,
-            CharSequence subtitle,
-            CharSequence value,
-            boolean checked
-        ) {
+        public void set(int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence subtitle, CharSequence value, boolean checked) {
             set(iconColorTop, iconColorBottom, icon, title, subtitle, value, checked, null);
         }
 
-        public void set(
-            int iconColorTop, int iconColorBottom, int icon,
-            CharSequence title,
-            CharSequence subtitle,
-            CharSequence value,
-            boolean checked,
-            String badgeText
-        ) {
+        public void set(int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence subtitle, CharSequence value, boolean checked, String badgeText) {
             iconLayout.setVisibility(icon != 0 ? View.VISIBLE : View.GONE);
             titleView.setTranslationX(icon == 0 ? dp(2) : 0);
             subtitleView.setTranslationX(icon == 0 ? dp(2) : 0);
@@ -569,8 +1088,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             super.onMeasure(
-                MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(dp(twoLines ? 60 : 50), MeasureSpec.EXACTLY)
+                    MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(dp(twoLines ? 60 : 50), MeasureSpec.EXACTLY)
             );
         }
 
@@ -582,16 +1101,17 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
             public Background() {
                 strokePaint.setStyle(Paint.Style.STROKE);
-                strokeGradient = new android.graphics.LinearGradient(0, 0, 0, dp(28), new int[] { 0x4dffffff, 0, 0x1affffff }, new float[] { 0, 0.5f, 1 }, android.graphics.Shader.TileMode.CLAMP);
+                strokeGradient = new android.graphics.LinearGradient(0, 0, 0, dp(28), new int[]{0x4dffffff, 0, 0x1affffff}, new float[]{0, 0.5f, 1}, android.graphics.Shader.TileMode.CLAMP);
                 strokePaint.setShader(strokeGradient);
             }
 
             public void setColor(int topColor, int bottomColor) {
-                gradient = new android.graphics.LinearGradient(0, 0, 0, dp(28), new int[] { topColor, bottomColor }, new float[] { 0, 1 }, android.graphics.Shader.TileMode.CLAMP);
+                gradient = new android.graphics.LinearGradient(0, 0, 0, dp(28), new int[]{topColor, bottomColor}, new float[]{0, 1}, android.graphics.Shader.TileMode.CLAMP);
                 paint.setShader(gradient);
             }
 
             private boolean border;
+
             public void setDrawBorder(boolean drawBorder) {
                 this.border = drawBorder;
             }
@@ -613,15 +1133,21 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
                 }
             }
 
-            public void setAlpha(int alpha) {}
-            public void setColorFilter(ColorFilter colorFilter) {}
+            public void setAlpha(int alpha) {
+            }
+
+            public void setColorFilter(ColorFilter colorFilter) {
+            }
+
             public int getOpacity() {
                 return PixelFormat.TRANSPARENT;
             }
         }
 
         public static class Factory extends UItem.UItemFactory<SettingCell> {
-            static { setup(new Factory()); }
+            static {
+                setup(new Factory());
+            }
 
             @Override
             public SettingCell createView(Context context, RecyclerListView listView, int currentAccount, int classGuid, Theme.ResourcesProvider resourcesProvider) {
@@ -630,25 +1156,27 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
             @Override
             public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
-                int iconColorTop    = (int) item.longValue;
+                int iconColorTop = (int) item.longValue;
                 int iconColorBottom = (int) (item.longValue >>> 32);
                 SettingCell cell = (SettingCell) view;
                 cell.object = item.object;
                 cell.set(
-                    iconColorTop, iconColorBottom, item.iconResId,
-                    item.text,
-                    item.subtext,
-                    item.textValue,
-                    item.checked
+                        iconColorTop, iconColorBottom, item.iconResId,
+                        item.text,
+                        item.subtext,
+                        item.textValue,
+                        item.checked
                 );
             }
 
             public static UItem of(int id, int iconColorTop, int iconColorBottom, int icon, CharSequence title) {
                 return of(id, iconColorTop, iconColorBottom, icon, title, null, null);
             }
+
             public static UItem of(int id, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence subtitle) {
                 return of(id, iconColorTop, iconColorBottom, icon, title, subtitle, null);
             }
+
             public static UItem of(int id, int iconColorTop, int iconColorBottom, int icon, CharSequence title, CharSequence subtitle, CharSequence value) {
                 final UItem item = UItem.ofFactory(Factory.class);
                 item.id = id;
