@@ -424,6 +424,88 @@ a:hover { color: #bfdbfe; }
   color: var(--muted);
   line-height: 1.5;
 }
+.pay-checkout-dialog {
+  width: min(460px, 100%);
+}
+.pay-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.75rem;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.pay-close:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.pay-plan-line {
+  margin: 0 0 0.75rem !important;
+  color: var(--text) !important;
+  font-weight: 650;
+}
+.pay-checkout-hint {
+  margin: 0 0 1rem !important;
+  font-size: 0.92rem;
+}
+.pay-checkout-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.pay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.pay-field input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(6, 10, 18, 0.9);
+  color: var(--text);
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+}
+.pay-field input:focus {
+  outline: none;
+  border-color: rgba(59, 140, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(59, 140, 255, 0.15);
+}
+.pay-field-error {
+  margin: 0 !important;
+  color: #ff8a8a !important;
+  font-size: 0.88rem;
+}
+.pay-checkout-note {
+  margin: 0.15rem 0 0 !important;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.pay-checkout-note a {
+  color: #8eb6ff;
+}
+.pay-checkout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.35rem;
+}
+.pay-checkout-actions .btn {
+  flex: 1 1 140px;
+  justify-content: center;
+}
+.pay-checkout-next p {
+  margin: 0 0 1rem;
+}
 
 .premium-legal {
   margin-top: 1.35rem;

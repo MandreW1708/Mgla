@@ -289,8 +289,8 @@ public class ConnectionsManager extends BaseController {
     }
 
     public boolean isPushConnectionEnabled() {
-        // Save-deleted needs a live MTProto link; otherwise match stock Telegram (FCM by default).
-        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
+        // «Висеть в фоне» keeps a live MTProto link; otherwise stock Telegram (FCM by default).
+        if (MglaSpyConfig.isHangInBackgroundEnabled()) {
             return true;
         }
         SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();

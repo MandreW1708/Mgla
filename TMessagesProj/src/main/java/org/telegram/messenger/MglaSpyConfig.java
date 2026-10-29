@@ -10,6 +10,7 @@ public class MglaSpyConfig {
     public static final String PREFS = "mgla_config";
     public static final String KEY_LAST_ONLINE = "spy_last_online";
     public static final String KEY_SAVE_DELETED = "spy_save_deleted_messages";
+    public static final String KEY_HANG_IN_BACKGROUND = "hang_in_background";
     public static final String KEY_GHOST_MODE = "spy_ghost_mode";
     private static final String KEY_DELETED_NOTIFY_PREFIX = "del_notify_";
 
@@ -107,7 +108,35 @@ public class MglaSpyConfig {
         if (!value) {
             MglaDeletedStorage.clearAllAccounts();
             clearDeletedNotifyWatermarks();
-            // Do not clear user "Keep-Alive Service" / pushService — that toggle stays independent.
+        }
+        // Background FGS is owned by «Висеть в фоне», not by save-deleted.
+    }
+
+    /**
+     * Sticky FGS («Фоновая работа») + live MTProto push. Independent of save-deleted.
+     * If the key was never set, migrate from the old coupling (save-deleted implied hang).
+     */
+    public static boolean isHangInBackgroundEnabled() {
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return false;
+        }
+        if (!prefs.contains(KEY_HANG_IN_BACKGROUND)) {
+            return prefs.getBoolean(KEY_SAVE_DELETED, false);
+        }
+        return prefs.getBoolean(KEY_HANG_IN_BACKGROUND, false);
+    }
+
+    public static void setHangInBackgroundEnabled(boolean enabled) {
+        SharedPreferences prefs = prefs();
+        if (prefs == null) {
+            return;
+        }
+        prefs.edit().putBoolean(KEY_HANG_IN_BACKGROUND, enabled).apply();
+        try {
+            MessagesController.getGlobalNotificationsSettings().edit().putBoolean("pushService", enabled).apply();
+            MessagesController.getNotificationsSettings(UserConfig.selectedAccount).edit().putBoolean("pushService", enabled).apply();
+        } catch (Throwable ignore) {
         }
         updatePushBackgroundSettings();
     }
@@ -241,14 +270,11 @@ public class MglaSpyConfig {
     }
 
     /**
-     * Save-deleted ON → keep-alive + persistent MTProto push (current spy mode).
-     * Save-deleted OFF → stock Google Play path: no forced foreground service, push
-     * connection follows user prefs (default off), FCM token re-registered so Telegram
-     * can deliver via the Firebase credentials on my.telegram.org.
+     * Sync FGS / MTProto with «Висеть в фоне». Save-deleted no longer controls this.
      */
     public static void updatePushBackgroundSettings() {
         AndroidUtilities.runOnUIThread(() -> {
-            final boolean keepAliveForDeleted = isSaveDeletedMessagesEnabled();
+            final boolean hang = isHangInBackgroundEnabled();
             ApplicationLoader.startPushService();
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 if (!UserConfig.getInstance(a).isClientActivated()) {
@@ -257,8 +283,7 @@ public class MglaSpyConfig {
                 ConnectionsManager cm = ConnectionsManager.getInstance(a);
                 cm.setPushConnectionEnabled(cm.isPushConnectionEnabled());
             }
-            if (!keepAliveForDeleted) {
-                // Leaving spy keep-alive: refresh FCM so the server switches back to Firebase.
+            if (!hang) {
                 try {
                     ApplicationLoader.getPushProvider().onRequestPushToken();
                 } catch (Throwable e) {

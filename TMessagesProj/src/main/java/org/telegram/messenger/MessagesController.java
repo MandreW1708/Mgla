@@ -5028,7 +5028,6 @@ public class MessagesController extends BaseController implements NotificationCe
             LiteMode.updatePresets(liteAppOptions);
         }
         if (keelAliveChanged) {
-            // startPushService is save-deleted-gated: starts FGS only in spy mode, otherwise tears it down.
             ApplicationLoader.startPushService();
             ConnectionsManager connectionsManager = getConnectionsManager();
             connectionsManager.setPushConnectionEnabled(connectionsManager.isPushConnectionEnabled());

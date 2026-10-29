@@ -35,7 +35,6 @@
         <a href="{{ url_for('guide') }}" class="{{ 'active' if active=='guide' else '' }}">Инструкция</a>
         <a href="{{ url_for('privacy') }}" class="{{ 'active' if active=='privacy' else '' }}">Конфиденциальность</a>
         <a href="{{ url_for('terms') }}" class="{{ 'active' if active=='terms' else '' }}">Соглашение</a>
-        <a href="{{ url_for('support') }}" class="{{ 'active' if active=='support' else '' }}">Поддержать</a>
       </nav>
     </div>
   </header>
@@ -54,16 +53,46 @@
       </div>
     </div>
   </footer>
-  <div id="pay-stub-modal" class="pay-stub-modal" hidden>
-    <div class="pay-stub-backdrop" data-pay-stub-close tabindex="-1"></div>
-    <div class="pay-stub-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-stub-title">
-      <h3 id="pay-stub-title">Оплата пока недоступна</h3>
-      <p id="pay-stub-text">Подключение платёжной системы ещё не завершено.</p>
-      <button type="button" class="btn btn-ghost" data-pay-stub-close><span>Понятно</span></button>
+  <div id="pay-checkout-modal" class="pay-stub-modal" hidden>
+    <div class="pay-stub-backdrop" data-pay-close tabindex="-1"></div>
+    <div class="pay-stub-dialog pay-checkout-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-checkout-title">
+      <button type="button" class="pay-close" data-pay-close aria-label="Закрыть">×</button>
+      <h3 id="pay-checkout-title">Оформление подписки</h3>
+      <p class="pay-plan-line" id="pay-plan-line">Mgla Premium</p>
+      <p class="pay-checkout-hint">
+        Перед оплатой укажите контакт, чтобы мы могли подтвердить платёж и выдать подписку.
+        Достаточно <strong>электронной почты</strong> или <strong>Telegram-username</strong> — одно из двух.
+      </p>
+      <form id="pay-checkout-form" class="pay-checkout-form" novalidate>
+        <input type="hidden" name="plan" id="pay-plan-input" value="">
+        <input type="hidden" name="price" id="pay-price-input" value="">
+        <label class="pay-field">
+          <span>Эл. почта</span>
+          <input type="email" name="email" id="pay-email" autocomplete="email" placeholder="name@example.com" inputmode="email">
+        </label>
+        <label class="pay-field">
+          <span>Telegram username</span>
+          <input type="text" name="tg" id="pay-tg" autocomplete="username" placeholder="@username" spellcheck="false">
+        </label>
+        <p class="pay-field-error" id="pay-form-error" hidden>Укажите почту или Telegram-username.</p>
+        <p class="pay-checkout-note">
+          Собираем только контакт для чека/поддержки и привязки подписки.
+          Сообщения и содержимое чатов не запрашиваем.
+          <a href="{{ url_for('privacy') }}">Политика конфиденциальности</a>
+        </p>
+        <div class="pay-checkout-actions">
+          <button type="button" class="btn btn-ghost" data-pay-close><span>Отмена</span></button>
+          <button type="submit" class="btn btn-primary" id="pay-submit"><span>Перейти к оплате</span></button>
+        </div>
+      </form>
+      <div id="pay-checkout-next" class="pay-checkout-next" hidden>
+        <p id="pay-next-text"></p>
+        <button type="button" class="btn btn-ghost" data-pay-close><span>Закрыть</span></button>
+      </div>
     </div>
   </div>
   <script src="{{ url_for('static', filename='js/mobile.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/fx.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/pay_stub.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/pay_checkout.js') }}" defer></script>
 </body>
 </html>

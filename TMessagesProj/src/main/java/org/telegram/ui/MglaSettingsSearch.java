@@ -192,6 +192,7 @@ public final class MglaSettingsSearch {
 
         l.add(new Entry(1010, "Прокси в шапке", hub, general, generalIcon, generalScreen, "Прокси в шапке", "general/proxy-header"));
         l.add(new Entry(1011, "Загрузки в шапке", hub, general, generalIcon, generalScreen, "Загрузки в шапке", "general/downloads-header"));
+        l.add(new Entry(1171, "Висеть в фоне", hub, general, generalIcon, generalScreen, "Висеть в фоне", "general/hang-background"));
         final String haptic = "Виброэффекты";
         l.add(new Entry(1012, haptic, hub, general, generalIcon, hapticScreen, null, "general/haptic"));
         l.add(new Entry(1126, "Виброотклик", hub, haptic, generalIcon, hapticScreen, "Виброотклик", "general/haptic/enable"));

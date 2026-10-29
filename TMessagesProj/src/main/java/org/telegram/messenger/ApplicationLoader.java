@@ -461,23 +461,16 @@ public class ApplicationLoader extends Application {
     });
 
     /**
-     * Whether NotificationsService should be running.
-     * Save-deleted → always. Otherwise → user "Keep-Alive Service" / server keepAliveService
-     * (stock Telegram), which does NOT use a sticky FGS notification.
+     * Whether NotificationsService FGS («Фоновая работа») should be running.
+     * Controlled only by Mgla «Висеть в фоне» — independent of save-deleted.
      */
     public static boolean isNotificationsKeepAliveWanted() {
-        if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
-            return true;
-        }
-        try {
-            SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
-            if (preferences.contains("pushService")) {
-                return preferences.getBoolean("pushService", false);
-            }
-            return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("keepAliveService", false);
-        } catch (Throwable ignore) {
-            return false;
-        }
+        return MglaSpyConfig.isHangInBackgroundEnabled();
+    }
+
+    /** Same as keep-alive: FGS exists only while «Висеть в фоне» is on. */
+    public static boolean isNotificationsForegroundServiceWanted() {
+        return MglaSpyConfig.isHangInBackgroundEnabled();
     }
 
     public static void startPushService() {
@@ -495,15 +488,9 @@ public class ApplicationLoader extends Application {
         }
         try {
             Intent intent = new Intent(applicationContext, NotificationsService.class);
-            if (MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
-                // Spy mode needs a real FGS (sticky "Фоновая работа").
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    applicationContext.startForegroundService(intent);
-                } else {
-                    applicationContext.startService(intent);
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                applicationContext.startForegroundService(intent);
             } else {
-                // Stock: plain startService — no ongoing notification, FCM delivers pushes.
                 applicationContext.startService(intent);
             }
         } catch (Throwable ignore) {

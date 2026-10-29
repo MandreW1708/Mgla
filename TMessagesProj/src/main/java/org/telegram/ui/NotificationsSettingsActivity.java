@@ -42,6 +42,7 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.MglaSpyConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.R;
@@ -755,15 +756,12 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     }
                 }
             } else if (position == notificationsServiceRow) {
-                // User toggle is independent of save-deleted. Save-deleted forces keep-alive on;
-                // when save-deleted is off, this switch controls the FGS (stock Telegram behavior).
+                // Keep-Alive mirrors Mgla «Висеть в фоне» (FGS). Independent of save-deleted.
+                final boolean newVal = !MglaSpyConfig.isHangInBackgroundEnabled();
+                MglaSpyConfig.setHangInBackgroundEnabled(newVal);
                 SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
-                enabled = preferences.getBoolean("pushService", getMessagesController().keepAliveService);
-                final boolean newVal = !enabled;
                 preferences.edit().putBoolean("pushService", newVal).commit();
-                // startPushService reads global (account 0) prefs — keep them in sync.
                 MessagesController.getGlobalNotificationsSettings().edit().putBoolean("pushService", newVal).commit();
-                ApplicationLoader.startPushService();
             } else if (position == callsVibrateRow) {
                 if (getParentActivity() == null) {
                     return;
@@ -1021,7 +1019,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     } else if (position == androidAutoAlertRow) {
                         checkCell.setTextAndCheck("Android Auto", preferences.getBoolean("EnableAutoNotifications", false), true);
                     } else if (position == notificationsServiceRow) {
-                        checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), ApplicationLoader.isNotificationsKeepAliveWanted(), true, true);
+                        checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), MglaSpyConfig.isHangInBackgroundEnabled(), true, true);
                     } else if (position == notificationsServiceConnectionRow) {
                         checkCell.setTextAndValueAndCheck(getString("NotificationsServiceConnection", R.string.NotificationsServiceConnection), getString("NotificationsServiceConnectionInfo", R.string.NotificationsServiceConnectionInfo), preferences.getBoolean("pushConnection", getMessagesController().backgroundConnection), true, true);
                     } else if (position == badgeNumberShowRow) {
