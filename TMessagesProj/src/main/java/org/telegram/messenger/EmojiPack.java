@@ -51,19 +51,27 @@ public final class EmojiPack {
     private final byte[][] rootMaps = new byte[ROOT_CACHE_SIZE][];
     private long age;
 
-    private static final class Holder {
-        static final EmojiPack INSTANCE = open();
-        private static EmojiPack open() {
-            try {
-                return new EmojiPack();
-            } catch (IOException e) {
-                throw new IllegalStateException("Unable to open emoji.pack", e);
-            }
-        }
-    }
+    private static volatile EmojiPack instance;
+    private static volatile boolean openFailed;
 
     public static EmojiPack getInstance() {
-        return Holder.INSTANCE;
+        EmojiPack pack = instance;
+        if (pack != null || openFailed) {
+            return pack;
+        }
+        synchronized (EmojiPack.class) {
+            pack = instance;
+            if (pack != null || openFailed) {
+                return pack;
+            }
+            try {
+                instance = pack = new EmojiPack();
+            } catch (Throwable e) {
+                openFailed = true;
+                FileLog.e(e);
+            }
+            return pack;
+        }
     }
 
     private EmojiPack() throws IOException {

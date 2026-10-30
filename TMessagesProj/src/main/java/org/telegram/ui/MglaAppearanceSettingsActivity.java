@@ -249,6 +249,18 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
             folderOutlineCell.setChecked(newVal);
         });
         foldersBlock.addView(folderOutlineCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        foldersBlock.addView(MglaUi.createDivider(context));
+
+        TextCheckCell folderNameHeaderCell = new TextCheckCell(context);
+        folderNameHeaderCell.setBackground(null);
+        folderNameHeaderCell.setTextAndCheck("Название папки в шапке", MglaGlassConfig.isFolderNameInHeaderEnabled(), false);
+        folderNameHeaderCell.setOnClickListener(v -> {
+            boolean newVal = !MglaGlassConfig.isFolderNameInHeaderEnabled();
+            MglaGlassConfig.setFolderNameInHeaderEnabled(newVal);
+            folderNameHeaderCell.setChecked(newVal);
+        });
+        foldersBlock.addView(folderNameHeaderCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         rootLayout.addView(foldersBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout mainTabsBlock = createBlock(context, "Нижний островок");

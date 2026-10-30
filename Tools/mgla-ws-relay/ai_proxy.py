@@ -932,7 +932,8 @@ def proxy_hub_update_check(body_bytes: bytes) -> tuple[int, bytes]:
         headers=_hub_headers(),
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        # Short timeout: if mglahub is down, fail fast instead of hanging the client UI.
+        with urllib.request.urlopen(req, timeout=6) as resp:
             return int(resp.status), resp.read()
     except urllib.error.HTTPError as e:
         return int(e.code), e.read()

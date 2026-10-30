@@ -255,14 +255,39 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     }
 
     private void checkUpdates() {
+        if (getParentActivity() == null || getFragmentView() == null) {
+            return;
+        }
         BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Проверяем обновления…").show();
-        MglaUpdateChecker.maybeCheck(true);
-        AndroidUtilities.runOnUIThread(() -> {
+        MglaUpdateChecker.checkManual((result, info) -> {
             if (getParentActivity() == null || getFragmentView() == null) {
                 return;
             }
-            MglaUpdateChecker.showPendingIfAny(getParentActivity());
-        }, 1100);
+            switch (result) {
+                case UPDATE_AVAILABLE:
+                    // MglaUpdateSheet already shown by checker.
+                    break;
+                case UP_TO_DATE:
+                    BulletinFactory.of(this).createSimpleBulletin(
+                        R.raw.contact_check,
+                        "У вас актуальная версия"
+                    ).show();
+                    break;
+                case BUSY:
+                    BulletinFactory.of(this).createSimpleBulletin(
+                        R.raw.chats_infotip,
+                        "Проверка уже идёт…"
+                    ).show();
+                    break;
+                case ERROR:
+                default:
+                    BulletinFactory.of(this).createSimpleBulletin(
+                        R.raw.error,
+                        "Сервер обновлений недоступен. Попробуйте позже."
+                    ).show();
+                    break;
+            }
+        });
     }
 
     private void openUrl(String url) {

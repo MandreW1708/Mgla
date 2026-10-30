@@ -160,7 +160,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     AnimatedTextView titleView;
     ActionBarAnimatedSubtitleOverlayContainer subtitleOverlayContainer;
     ImageView telegramLogoView;
-    private TextView mglaTitleView;
+    private AnimatedTextView mglaTitleView;
     ImageView emojiStatusView;
     AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable statusDrawable;
     boolean drawCircleForce;
@@ -344,13 +344,16 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         telegramLogoView.setFocusableInTouchMode(true);
         addView(telegramLogoView, LayoutHelper.createFrame(90, 22));
 
-        mglaTitleView = new TextView(context);
-        mglaTitleView.setText("Mgla");
-        mglaTitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        mglaTitleView = new AnimatedTextView(context, true, true, false);
+        mglaTitleView.setText("Mgla", false);
+        mglaTitleView.setTextSize(dp(20));
         mglaTitleView.setTypeface(AndroidUtilities.bold());
         mglaTitleView.setTextColor(getTextLogoColor());
+        mglaTitleView.setEmojiCacheType(AnimatedEmojiDrawable.CACHE_TYPE_MESSAGES);
+        mglaTitleView.setEllipsizeByGradient(true);
+        mglaTitleView.setMaxWidth(AndroidUtilities.displaySize.x / 2);
         mglaTitleView.setVisibility(GONE);
-        addView(mglaTitleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        addView(mglaTitleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 28));
 
         statusDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(null, dp(26));
         statusDrawable.center = true;
@@ -464,6 +467,32 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
 
     public void setMenuItemsOffset(float menuItemsOffset) {
         this.menuItemsOffset = menuItemsOffset;
+    }
+
+    /** Brand / folder title next to emoji status in the collapsed stories header. */
+    public void setBrandTitle(CharSequence title) {
+        setBrandTitle(title, false);
+    }
+
+    public void setBrandTitle(CharSequence title, boolean animated) {
+        if (mglaTitleView == null) {
+            return;
+        }
+        if (TextUtils.isEmpty(title)) {
+            title = "Mgla";
+        }
+        if (TextUtils.equals(mglaTitleView.getText(), title)) {
+            return;
+        }
+        mglaTitleView.setText(title, animated);
+        mglaTitleView.requestLayout();
+        invalidate();
+    }
+
+    public void setBrandEmojiCacheType(int cacheType) {
+        if (mglaTitleView != null) {
+            mglaTitleView.setEmojiCacheType(cacheType);
+        }
     }
 
     public void setStoriesExpandedOnly(boolean storiesExpandedOnly) {
@@ -627,37 +656,43 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         boolean hidden = type == TYPE_ARCHIVE;
         totalCount = Math.max(1, Math.max(storiesController.getTotalStoriesCount(hidden), size));
 
+        // Folder name in header: keep brand title + emoji status instead of "N Stories".
+        final boolean preferFolderBrand = org.telegram.ui.MglaGlassConfig.isFolderNameInHeaderEnabled();
+
         currentTitle = null;
-        if (storiesController.hasOnlySelfStories()) {
-            if (storiesController.hasUploadingStories(UserConfig.getInstance(currentAccount).getClientUserId())) {
-                String str = LocaleController.getString(R.string.UploadingStory);
-                int index = str.indexOf("…");
-                if (index > 0) {
-                    if (uploadingString == null) {
-                        SpannableStringBuilder spannableStringBuilder = SpannableStringBuilder.valueOf(str);
-                        UploadingDotsSpannable dotsSpannable = new UploadingDotsSpannable();
-                        spannableStringBuilder.setSpan(dotsSpannable, spannableStringBuilder.length() - 1, spannableStringBuilder.length(), 0);
-                        dotsSpannable.setParent(titleView, true);
-                        uploadingString = spannableStringBuilder;
+        if (!preferFolderBrand) {
+            if (storiesController.hasOnlySelfStories()) {
+                if (storiesController.hasUploadingStories(UserConfig.getInstance(currentAccount).getClientUserId())) {
+                    String str = LocaleController.getString(R.string.UploadingStory);
+                    int index = str.indexOf("…");
+                    if (index > 0) {
+                        if (uploadingString == null) {
+                            SpannableStringBuilder spannableStringBuilder = SpannableStringBuilder.valueOf(str);
+                            UploadingDotsSpannable dotsSpannable = new UploadingDotsSpannable();
+                            spannableStringBuilder.setSpan(dotsSpannable, spannableStringBuilder.length() - 1, spannableStringBuilder.length(), 0);
+                            dotsSpannable.setParent(titleView, true);
+                            uploadingString = spannableStringBuilder;
+                        }
+                        currentTitle = uploadingString;
+                    } else {
+                        currentTitle = str;
                     }
-                    currentTitle = uploadingString;
                 } else {
-                    currentTitle = str;
+                    currentTitle = menuItemsOffset < dp(50) ? null :
+                        LocaleController.getString(R.string.MyStory);
                 }
             } else {
                 currentTitle = menuItemsOffset < dp(50) ? null :
-                    LocaleController.getString(R.string.MyStory);
+                    LocaleController.formatPluralString("Stories", totalCount);
             }
-        } else {
-            currentTitle = menuItemsOffset < dp(50) ? null :
-                LocaleController.formatPluralString("Stories", totalCount);
         }
 
         if (!hasOverlayText) {
             titleView.setText(currentTitle, animated && !LocaleController.isRTL);
         }
 
-        animatorHasTitleText.setValue(!TextUtils.isEmpty(currentTitle) || hasOverlayText, animated);
+        // Overlay (proxy etc.) still wins; otherwise brand title when folder-name mode is on.
+        animatorHasTitleText.setValue(hasOverlayText || (!preferFolderBrand && !TextUtils.isEmpty(currentTitle)), animated);
 
         miniItems.clear();
         for (int i = 0; i < items.size(); i++) {
@@ -969,7 +1004,8 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             }
 
             if (mglaTitleView != null && mglaTitleView.getVisibility() == VISIBLE) {
-                emojiStatusView.setTranslationX(mglaTitleView.getTranslationX() + mglaTitleView.getMeasuredWidth() - dpf2(4));
+                float brandW = Math.max(mglaTitleView.getMeasuredWidth(), mglaTitleView.getDrawable() != null ? mglaTitleView.getDrawable().getWidth() : 0);
+                emojiStatusView.setTranslationX(mglaTitleView.getTranslationX() + brandW - dpf2(4));
             } else {
                 emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
             }
@@ -1340,7 +1376,8 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             titleView.setText(currentTitle, !LocaleController.isRTL);
         }
 
-        animatorHasTitleText.setValue(hasOverlayText, true);
+        final boolean preferFolderBrand = org.telegram.ui.MglaGlassConfig.isFolderNameInHeaderEnabled();
+        animatorHasTitleText.setValue(hasOverlayText || (!preferFolderBrand && !TextUtils.isEmpty(currentTitle)), true);
         if (hasEllipsizedText) {
             ellipsizeSpanAnimator.addView(titleView);
         } else {

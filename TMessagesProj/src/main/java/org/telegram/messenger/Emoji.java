@@ -109,6 +109,7 @@ public class Emoji {
     }
 
     private static int memoryUsage;
+    private static final DispatchQueue emojiLoadQueue = new DispatchQueue("emojiLoadQueue");
 
     private static void loadEmoji(final byte page, final short page2) {
         if (emojiBmp[page][page2] == null) {
@@ -116,20 +117,24 @@ public class Emoji {
                 return;
             }
             loadingEmoji[page][page2] = true;
-            Utilities.globalQueue.postRunnable(() -> {
+            // Own queue: Mgla work on globalQueue must not delay / stick emoji decode.
+            emojiLoadQueue.postRunnable(() -> {
                 Bitmap bitmap = null;
                 try {
                     final EmojiPack emojiPack = EmojiPack.getInstance();
-                    bitmap = emojiPack.getEmoji(page, page2);
-                } catch (Exception e) {
+                    if (emojiPack != null) {
+                        bitmap = emojiPack.getEmoji(page, page2);
+                    }
+                } catch (Throwable e) {
                     FileLog.e(e);
+                } finally {
+                    if (bitmap != null) {
+                        emojiBmp[page][page2] = bitmap;
+                        AndroidUtilities.cancelRunOnUIThread(invalidateUiRunnable);
+                        AndroidUtilities.runOnUIThread(invalidateUiRunnable);
+                    }
+                    loadingEmoji[page][page2] = false;
                 }
-                if (bitmap != null) {
-                    emojiBmp[page][page2] = bitmap;
-                    AndroidUtilities.cancelRunOnUIThread(invalidateUiRunnable);
-                    AndroidUtilities.runOnUIThread(invalidateUiRunnable);
-                }
-                loadingEmoji[page][page2] = false;
             });
         }
     }
@@ -295,6 +300,8 @@ public class Emoji {
         private static Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         private static Rect rect = new Rect();
         private boolean invert;
+        // Per-instance: paint is shared; ImageReceiver.setAlpha on one emoji was making ALL standard emoji invisible.
+        private int alpha = 255;
 
         public SimpleEmojiDrawable(DrawableInfo i, boolean invert) {
             info = i;
@@ -337,7 +344,10 @@ public class Emoji {
                     canvas.save();
                     canvas.scale(-1, 1, b.centerX(), b.centerY());
                 }
+                final int wasAlpha = paint.getAlpha();
+                paint.setAlpha(alpha);
                 canvas.drawBitmap(emojiBmp[info.page][info.page2], null, b, paint);
+                paint.setAlpha(wasAlpha);
                 if (invert) {
                     canvas.restore();
                 }
@@ -351,7 +361,7 @@ public class Emoji {
 
         @Override
         public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
+            this.alpha = alpha;
         }
 
         @Override

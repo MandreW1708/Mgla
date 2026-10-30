@@ -185,6 +185,7 @@ import org.telegram.ui.Cells.UnconfirmedAuthHintCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
+import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.AnimationProperties;
 import org.telegram.ui.Components.ArchiveHelp;
 import org.telegram.ui.Components.AvatarDrawable;
@@ -460,6 +461,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     if (viewPages[0] == this) {
                         float scrollProgress = Math.abs(viewPages[0].getTranslationX()) / (float) viewPages[0].getMeasuredWidth();
                         filterTabsView.selectTabWithId(viewPages[1].selectedType, scrollProgress);
+                        if (MglaGlassConfig.isFolderNameInHeaderEnabled()
+                                && filterTabsView.getResolvedTabId() != lastMglaBrandTabId) {
+                            updateMglaActionBarTitle();
+                        }
                     }
                 }
                 blur3_InvalidateBlur();
@@ -1473,6 +1478,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                             return false;
                         } else {
                             filterTabsView.selectTabWithId(viewPages[1].selectedType, scrollProgress);
+                            if (MglaGlassConfig.isFolderNameInHeaderEnabled()
+                                    && filterTabsView.getResolvedTabId() != lastMglaBrandTabId) {
+                                updateMglaActionBarTitle();
+                            }
                         }
                     }
                 } else if (ev == null || ev.getPointerId(0) == startedTrackingPointerId && (ev.getAction() == MotionEvent.ACTION_CANCEL || ev.getAction() == MotionEvent.ACTION_UP || ev.getAction() == MotionEvent.ACTION_POINTER_UP)) {
@@ -3764,6 +3773,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     showScrollbars(false);
                     switchToCurrentSelectedMode(true);
                     animatingForward = forward;
+                    updateMglaActionBarTitle();
                 }
 
                 @Override
@@ -3783,6 +3793,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                         viewPages[0].setTranslationX(progress * viewPages[0].getMeasuredWidth());
                         viewPages[1].setTranslationX(progress * viewPages[0].getMeasuredWidth() - viewPages[0].getMeasuredWidth());
                     }
+                    if (MglaGlassConfig.isFolderNameInHeaderEnabled()
+                            && filterTabsView.getResolvedTabId() != lastMglaBrandTabId) {
+                        updateMglaActionBarTitle();
+                    }
                     if (progress == 1) {
                         ViewPage tempPage = viewPages[0];
                         viewPages[0] = viewPages[1];
@@ -3794,6 +3808,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                         checkListLoad(viewPages[0]);
                         viewPages[0].dialogsAdapter.resume();
                         viewPages[1].dialogsAdapter.pause();
+                        updateMglaActionBarTitle();
                     }
                 }
 
@@ -7180,6 +7195,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 }
             }
         }
+        invalidateMglaBrandTitleCache();
+        updateMglaActionBarTitle();
     }
 
     @Override
@@ -10574,15 +10591,86 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         dialogStoriesCell.invalidate();
     }
 
+    private CharSequence lastMglaBrandTitle;
+    private int lastMglaBrandTabId = Integer.MIN_VALUE;
+    private CharSequence cachedMglaBrandTitle;
+
+    private void invalidateMglaBrandTitleCache() {
+        lastMglaBrandTabId = Integer.MIN_VALUE;
+        cachedMglaBrandTitle = null;
+    }
+
+    /**
+     * Header title once per folder tab. Clone tab title spans (tabs already ran
+     * replaceEmoji) — do not rebuild emoji every swipe; shared emoji paint/drawables
+     * were getting alpha poisoned and blanking standard emoji app-wide.
+     */
+    private CharSequence getMglaHeaderBrandTitle() {
+        if (!MglaGlassConfig.isFolderNameInHeaderEnabled()
+                || filterTabsView == null
+                || filterTabsView.getVisibility() != View.VISIBLE) {
+            invalidateMglaBrandTitleCache();
+            return "Mgla";
+        }
+        final int tabId = filterTabsView.getResolvedTabId();
+        if (tabId == lastMglaBrandTabId && cachedMglaBrandTitle != null) {
+            return cachedMglaBrandTitle;
+        }
+        lastMglaBrandTabId = tabId;
+
+        ArrayList<MessagesController.DialogFilter> filters = getMessagesController().getDialogFilters();
+        if (tabId >= 0 && tabId < filters.size()) {
+            MessagesController.DialogFilter filter = filters.get(tabId);
+            if (filter == null) {
+                cachedMglaBrandTitle = "Mgla";
+                return cachedMglaBrandTitle;
+            }
+            if (filter.isDefault()) {
+                cachedMglaBrandTitle = LocaleController.getString(R.string.FilterAllChats);
+                return cachedMglaBrandTitle;
+            }
+        }
+        CharSequence tabTitle = filterTabsView.getCurrentTabTitle();
+        cachedMglaBrandTitle = TextUtils.isEmpty(tabTitle) ? "Mgla" : AnimatedEmojiSpan.cloneSpans(tabTitle);
+        return cachedMglaBrandTitle;
+    }
+
     private void updateMglaActionBarTitle() {
         if (actionBar == null || folderId != 0 || statusDrawable == null) {
             return;
         }
+        CharSequence title = getMglaHeaderBrandTitle();
+        final boolean changed = lastMglaBrandTitle == null || !TextUtils.equals(lastMglaBrandTitle, title);
+        final boolean animate = changed && lastMglaBrandTitle != null;
+        lastMglaBrandTitle = title;
+
         if (MglaSideMenuConfig.isEnabled()) {
             actionBar.setTitleColor(getThemedColor(Theme.key_telegram_color_dialogsLogo));
-            actionBar.setTitle("Mgla", statusDrawable);
-        } else {
-            actionBar.setTitle("Mgla", statusDrawable);
+        }
+
+        if (changed) {
+            final boolean noAnimateEmoji = filterTabsView != null && filterTabsView.isResolvedTabNoAnimate();
+            final int emojiCache = noAnimateEmoji
+                    ? AnimatedEmojiDrawable.CACHE_TYPE_NOANIMATE_FOLDER
+                    : AnimatedEmojiDrawable.CACHE_TYPE_MESSAGES;
+
+            // Avoid setTitleAnimated here: dual title views + emoji thumbs go through
+            // ImageReceiver.setAlpha and used to poison the shared standard-emoji paint.
+            actionBar.setTitle(title, statusDrawable);
+            SimpleTextView tv = actionBar.getTitleTextView();
+            if (tv != null) {
+                tv.setEmojiCacheType(emojiCache);
+                tv.setRightDrawable(statusDrawable);
+                statusDrawable.setParentView(tv);
+            }
+
+            if (dialogStoriesCell != null) {
+                dialogStoriesCell.setBrandTitle(title, animate);
+                dialogStoriesCell.setBrandEmojiCacheType(emojiCache);
+                if (!animate) {
+                    dialogStoriesCell.updateItems(false, false);
+                }
+            }
         }
         updateMglaActionBarTitleOffset();
     }
@@ -11015,6 +11103,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         } else if (id == NotificationCenter.mglaHeaderSettingsChanged) {
             checkUi_mglaHeaderIcons();
             updateProxyButton(false, true);
+            updateMglaActionBarTitle();
         } else if (id == NotificationCenter.ghostModeChanged) {
             updateGhostHeaderIcon();
         } else if (id == NotificationCenter.updateInterfaces) {

@@ -1365,6 +1365,40 @@ public class FilterTabsView extends FrameLayout {
         return selectedTabId;
     }
 
+    /** Active/target tab id (destination while swiping). */
+    public int getResolvedTabId() {
+        return manualScrollingToId != -1 ? manualScrollingToId : selectedTabId;
+    }
+
+    /**
+     * Title of the active/target folder tab (emoji entities already applied).
+     * During a swipe uses {@code manualScrollingToId} so the title tracks the destination early.
+     */
+    public CharSequence getCurrentTabTitle() {
+        return getTabTitle(getResolvedTabId());
+    }
+
+    public CharSequence getTabTitle(int id) {
+        for (int i = 0, N = tabs.size(); i < N; i++) {
+            Tab tab = tabs.get(i);
+            if (tab.id == id) {
+                return tab.title;
+            }
+        }
+        return null;
+    }
+
+    public boolean isResolvedTabNoAnimate() {
+        int id = getResolvedTabId();
+        for (int i = 0, N = tabs.size(); i < N; i++) {
+            Tab tab = tabs.get(i);
+            if (tab.id == id) {
+                return tab.noanimate;
+            }
+        }
+        return false;
+    }
+
     public int getFirstTabId() {
         return positionToId.get(0, 0);
     }

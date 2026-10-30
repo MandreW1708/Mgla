@@ -26,10 +26,13 @@ import java.util.Base64;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Polls for a newer build: with auto-bypass on — {@code /mgla-ai/v1/update-*} on the
- * current relay host (mglabot or Ultra mglahub, same stack as AI); WEB route on bot
- * may use the mgla-upd tunnel; bypass off — native hub {@code /mgla-updates/*}.
- * Hub decides by app versionName and/or versionCode; Mgla version is display-only.
+ * In-app update check against the hub release the admin publishes.
+ * <p>
+ * Routing matches AI / remote-config:
+ * auto-bypass on (not VPN-paused) → current relay {@code /mgla-ai/v1/update-*};
+ * if Telegram is on the WEB fallback route → mgla-upd WEB tunnel;
+ * bypass off / VPN pause → native hub {@code /mgla-updates/v1/*}.
+ * Hub compares published app_version / version_code to the installed build.
  */
 public final class MglaUpdateChecker {
 
@@ -39,12 +42,24 @@ public final class MglaUpdateChecker {
     private static final String KEY_DISMISSED = "dismissed_update_key";
     private static final String KEY_PENDING_JSON = "pending_json";
     private static final long POLL_INTERVAL_MS = 6L * 60 * 60 * 1000;
-    /** Min gap for force checks (app resume / settings). */
+    /** Min gap for background force checks (app resume). Manual ignores this. */
     private static final long FORCE_MIN_INTERVAL_MS = 45_000;
 
     private static final Object lock = new Object();
     private static boolean checking;
     private static boolean sheetShowing;
+
+    /** Result of a user-initiated check from Mgla settings. */
+    public enum ManualResult {
+        UPDATE_AVAILABLE,
+        UP_TO_DATE,
+        ERROR,
+        BUSY
+    }
+
+    public interface ManualCheckCallback {
+        void onResult(ManualResult result, @androidx.annotation.Nullable MglaUpdateInfo info);
+    }
 
     private MglaUpdateChecker() {
     }
@@ -61,12 +76,7 @@ public final class MglaUpdateChecker {
     }
 
     public static void maybeCheck(boolean force) {
-        boolean viaRelay = MglaRemoteConfig.shouldFetchViaRelay();
-        if (viaRelay) {
-            if (!MglaWsConfig.isRelayConfigured()) {
-                return;
-            }
-        } else if (!MglaWsConfig.isHubConfigured()) {
+        if (!canCheck()) {
             return;
         }
         long now = System.currentTimeMillis();
@@ -84,7 +94,7 @@ public final class MglaUpdateChecker {
         }
         Utilities.globalQueue.postRunnable(() -> {
             try {
-                MglaUpdateInfo info = fetchOnce(viaRelay);
+                MglaUpdateInfo info = fetchOnce();
                 if (prefs != null) {
                     prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply();
                 }
@@ -106,6 +116,67 @@ public final class MglaUpdateChecker {
                 }
             }
         });
+    }
+
+    /**
+     * Same fetch as {@link #maybeCheck}, but always runs, ignores dismiss, and reports a result
+     * for the settings button.
+     */
+    public static void checkManual(ManualCheckCallback callback) {
+        ManualCheckCallback cb = callback != null ? callback : (r, i) -> {};
+        if (!canCheck()) {
+            AndroidUtilities.runOnUIThread(() -> cb.onResult(ManualResult.ERROR, null));
+            return;
+        }
+        synchronized (lock) {
+            if (checking) {
+                AndroidUtilities.runOnUIThread(() -> cb.onResult(ManualResult.BUSY, null));
+                return;
+            }
+            checking = true;
+        }
+        Utilities.globalQueue.postRunnable(() -> {
+            ManualResult result = ManualResult.ERROR;
+            MglaUpdateInfo info = null;
+            try {
+                info = fetchOnce();
+                SharedPreferences prefs = prefs();
+                if (prefs != null) {
+                    prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply();
+                }
+                if (info == null || !isStillNewerThanInstalled(info)) {
+                    clearPending();
+                    result = ManualResult.UP_TO_DATE;
+                    info = null;
+                } else {
+                    persistPending(info);
+                    result = ManualResult.UPDATE_AVAILABLE;
+                }
+            } catch (Throwable e) {
+                FileLog.e("MglaUpdateChecker manual failed", e);
+                result = ManualResult.ERROR;
+                info = null;
+            } finally {
+                synchronized (lock) {
+                    checking = false;
+                }
+            }
+            final ManualResult finalResult = result;
+            final MglaUpdateInfo finalInfo = info;
+            AndroidUtilities.runOnUIThread(() -> {
+                if (finalResult == ManualResult.UPDATE_AVAILABLE && finalInfo != null) {
+                    showIfPossible(finalInfo);
+                }
+                cb.onResult(finalResult, finalInfo);
+            });
+        });
+    }
+
+    private static boolean canCheck() {
+        if (MglaRemoteConfig.shouldFetchViaRelay()) {
+            return MglaWsConfig.isRelayConfigured() || canUseWebUpdateTunnel();
+        }
+        return MglaWsConfig.isHubConfigured();
     }
 
     public static void dismiss(MglaUpdateInfo info) {
@@ -200,7 +271,7 @@ public final class MglaUpdateChecker {
         }
     }
 
-    private static MglaUpdateInfo fetchOnce(boolean viaRelay) throws Exception {
+    private static MglaUpdateInfo fetchOnce() throws Exception {
         JSONObject body = new JSONObject();
         body.put("mgla_version", BuildVars.MGLA_VERSION_STRING);
         body.put("app_version", BuildVars.BUILD_VERSION_STRING);
@@ -214,32 +285,50 @@ public final class MglaUpdateChecker {
             body.put("telegram_ids", arr);
             body.put("telegram_id", tgIds[0]);
         }
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
 
-        Channel channel = viaRelay ? (isWebRouteActive() ? Channel.WEB : Channel.RELAY) : Channel.HUB;
-        String path = channel == Channel.HUB ? "/mgla-updates/v1/check" : "/mgla-ai/v1/update-check";
-        UpdateConnection uc = UpdateConnection.open(channel, path);
+        Channel channel = currentChannel();
+        if (channel == Channel.WEB) {
+            return fetchViaWeb(payload, telegramIdsHeader(tgIds));
+        }
+
+        // Bypass on → current region host (DE1 mglabot / DE2 mglahub / Ultra Finland).
+        // Germany2 is already the hub — hit /mgla-updates directly (no ai_proxy hop).
+        // DE1/FI → /mgla-ai/v1/update-check on that relay (proxies to hub).
+        // Bypass off / VPN pause → hub /mgla-updates.
+        final String path;
+        if (channel == Channel.HUB || isRelayHostTheHub()) {
+            path = "/mgla-updates/v1/check";
+        } else {
+            path = "/mgla-ai/v1/update-check";
+        }
+        MglaHubHttp.Response resp = MglaHubHttp.post(path, payload, 8_000, 10_000);
+        if (resp.code != 200) {
+            throw new IOException("update check HTTP " + resp.code + " via=" + channel + ": " + resp.body);
+        }
+        return MglaUpdateInfo.fromJson(resp.body);
+    }
+
+    private static MglaUpdateInfo fetchViaWeb(byte[] payload, String tgHeader) throws Exception {
+        UpdateConnection uc = UpdateConnection.open(Channel.WEB, "/mgla-ai/v1/update-check");
         try {
             HttpURLConnection conn = uc.conn;
-            conn.setConnectTimeout(12_000);
-            conn.setReadTimeout(channel == Channel.WEB ? 30_000 : 12_000);
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(12_000);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            String tgHeader = telegramIdsHeader(tgIds);
             if (!TextUtils.isEmpty(tgHeader)) {
                 conn.setRequestProperty("X-Mgla-Tg-Id", tgHeader);
             }
-            byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
-                uc.verifyPin();
                 os.write(payload);
             }
             int code = conn.getResponseCode();
             InputStream is = code < 400 ? conn.getInputStream() : conn.getErrorStream();
             String response = readUtf8(is, 64 * 1024);
             if (code != 200) {
-                FileLog.e("MglaUpdateChecker HTTP " + code + " via=" + channel + ": " + response);
-                return null;
+                throw new IOException("update check HTTP " + code + " via=WEB: " + response);
             }
             return MglaUpdateInfo.fromJson(response);
         } finally {
@@ -247,27 +336,31 @@ public final class MglaUpdateChecker {
         }
     }
 
-    /** HUB: напрямую на хаб; RELAY: HTTPS на релей; WEB: через туннель WEB proxy к релею. */
+    /** HUB: прямой хаб; RELAY: HTTPS на хост обхода; WEB: туннель mgla-upd. */
     public enum Channel { HUB, RELAY, WEB }
 
     /**
-     * Авто-обход на резервном WEB proxy mglabot (туннель mgla-upd).
-     * Ultra WEB на mglahub сюда не входит — update-tunnel только на боте;
-     * при Ultra используется Channel.RELAY → {@code /mgla-ai/v1/update-*} на хабе.
+     * WEB update tunnel only when Telegram already rides the WEB proxy (same host as mgla-upd).
      */
     private static boolean isWebRouteActive() {
         try {
             MglaWsBypass bypass = MglaWsBypass.getInstance();
             if (!bypass.isProxyApplied()
                 || bypass.getRoute() != MglaWsBypass.Route.WEB
-                || !MglaWsConfig.isWebUpdateTunnelConfigured()
-                || !WebProxyTransport.isSupported()) {
+                || !canUseWebUpdateTunnel()) {
                 return false;
             }
             String webHost = MglaWsConfig.getWebProxyHost();
             String updateHost = MglaWsConfig.getWebUpdateProxyHost();
-            return !TextUtils.isEmpty(webHost)
-                && webHost.equalsIgnoreCase(updateHost);
+            return !TextUtils.isEmpty(webHost) && webHost.equalsIgnoreCase(updateHost);
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    private static boolean canUseWebUpdateTunnel() {
+        try {
+            return MglaWsConfig.isWebUpdateTunnelConfigured() && WebProxyTransport.isSupported();
         } catch (Throwable e) {
             return false;
         }
@@ -280,9 +373,26 @@ public final class MglaUpdateChecker {
         return isWebRouteActive() ? Channel.WEB : Channel.RELAY;
     }
 
-    /** APK download on the channel matching the current auto-bypass state. */
+    /** Germany2 / Ultra-on-hub: relay host is mglahub itself. */
+    private static boolean isRelayHostTheHub() {
+        try {
+            String relay = MglaWsConfig.getRelayHost();
+            String hub = MglaWsConfig.getHubHost();
+            return !TextUtils.isEmpty(relay)
+                && (relay.equalsIgnoreCase(hub)
+                    || MglaWsConfig.DEFAULT_HUB_HOST.equalsIgnoreCase(relay));
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    /** APK download on the same channel / path rules as {@link #fetchOnce()}. */
     public static UpdateConnection openApkConnection(MglaUpdateInfo info) throws Exception {
         Channel channel = currentChannel();
+        // Germany2: talk to hub paths even though bypass region is "relay".
+        if (channel == Channel.RELAY && isRelayHostTheHub()) {
+            channel = Channel.HUB;
+        }
         String path;
         if (channel == Channel.HUB) {
             path = TextUtils.isEmpty(info.apkPath) ? "/mgla-updates/v1/apk" : info.apkPath;
@@ -308,6 +418,10 @@ public final class MglaUpdateChecker {
 
         static UpdateConnection open(Channel channel, String path) throws Exception {
             if (channel == Channel.WEB) {
+                String webToken = MglaWsConfig.getBotRelayToken();
+                if (TextUtils.isEmpty(webToken)) {
+                    throw new IOException("WEB update token empty");
+                }
                 int port = WebProxyTransport.acquireUpdateTunnel(
                     MglaWsConfig.getWebUpdateProxyHost(), MglaWsConfig.getWebUpdateSecret());
                 if (port <= 0) {
@@ -318,7 +432,7 @@ public final class MglaUpdateChecker {
                         throw new IOException("WEB proxy не подключился");
                     }
                     HttpURLConnection conn = MglaDirectHttp.open("http://127.0.0.1:" + port + path);
-                    conn.setRequestProperty("X-Mgla-Token", MglaWsConfig.getRelayToken());
+                    conn.setRequestProperty("X-Mgla-Token", webToken);
                     conn.setRequestProperty("X-Mgla-Client", "mgla");
                     attachTelegramIds(conn);
                     return new UpdateConnection(conn, channel, true);
@@ -329,8 +443,9 @@ public final class MglaUpdateChecker {
             }
             boolean relay = channel == Channel.RELAY;
             String host = relay ? MglaWsConfig.getRelayHost() : MglaWsConfig.getHubHost();
+            String token = relay ? MglaWsConfig.getRelayToken() : MglaWsConfig.getHubToken();
             HttpsURLConnection conn = MglaDirectHttp.openHttps("https://" + host + path);
-            conn.setRequestProperty("X-Mgla-Token", relay ? MglaWsConfig.getRelayToken() : MglaWsConfig.getHubToken());
+            conn.setRequestProperty("X-Mgla-Token", token);
             conn.setRequestProperty("X-Mgla-Client", "mgla");
             attachTelegramIds(conn);
             return new UpdateConnection(conn, channel, false);
@@ -343,7 +458,7 @@ public final class MglaUpdateChecker {
             }
         }
 
-        /** Call after the connection is established. WEB rides the WebView's TLS to the relay host. */
+        /** Call after the connection is established. WEB rides the WebView's TLS. */
         public void verifyPin() throws Exception {
             if (!(conn instanceof HttpsURLConnection)) {
                 return;

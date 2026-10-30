@@ -106,6 +106,7 @@ public class MglaGlassConfig {
     public static final String PREF_PROFILE_MEDIA_GROW = "profile_media_grow";
     public static final String PREF_SETTINGS_PRESS_SPRING = "settings_press_spring";
     public static final String PREF_FOLDER_ACTIVE_OUTLINE = "folder_active_outline";
+    public static final String PREF_FOLDER_NAME_IN_HEADER = "folder_name_in_header";
     /** false = Telegram plane, true = custom status-bar notification icon. */
     public static final String PREF_CUSTOM_NOTIFICATION_ICON = "custom_notification_icon";
 
@@ -135,6 +136,7 @@ public class MglaGlassConfig {
     private static boolean profileMediaGrow = true;
     private static boolean settingsPressSpring = true;
     private static boolean folderActiveOutline;
+    private static boolean folderNameInHeader;
 
     private static void ensureCache() {
         if (cacheLoaded) {
@@ -167,6 +169,7 @@ public class MglaGlassConfig {
         profileMediaGrow = p.getBoolean(PREF_PROFILE_MEDIA_GROW, true);
         settingsPressSpring = p.getBoolean(PREF_SETTINGS_PRESS_SPRING, true);
         folderActiveOutline = p.getBoolean(PREF_FOLDER_ACTIVE_OUTLINE, false);
+        folderNameInHeader = p.getBoolean(PREF_FOLDER_NAME_IN_HEADER, false);
         customNotificationIcon = p.getBoolean(PREF_CUSTOM_NOTIFICATION_ICON, true);
         cacheLoaded = true;
     }
@@ -735,6 +738,23 @@ public class MglaGlassConfig {
         folderActiveOutline = enabled;
         getPrefs().edit().putBoolean(PREF_FOLDER_ACTIVE_OUTLINE, enabled).apply();
         notifyGlassAppearanceChanged();
+    }
+
+    public static boolean isFolderNameInHeaderEnabled() {
+        ensureCache();
+        return folderNameInHeader;
+    }
+
+    public static void setFolderNameInHeaderEnabled(boolean enabled) {
+        ensureCache();
+        if (folderNameInHeader == enabled) {
+            return;
+        }
+        folderNameInHeader = enabled;
+        getPrefs().edit().putBoolean(PREF_FOLDER_NAME_IN_HEADER, enabled).apply();
+        AndroidUtilities.runOnUIThread(() ->
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mglaHeaderSettingsChanged)
+        );
     }
 
     public static void notifyGlassAppearanceChanged() {

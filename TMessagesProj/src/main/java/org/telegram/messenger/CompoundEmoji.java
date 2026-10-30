@@ -166,6 +166,7 @@ public class CompoundEmoji {
         private DrawableInfo left, right;
         private static Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         private static Rect rect = new Rect();
+        private int alpha = 255;
 
         private View parent;
         private AnimatedFloat leftUpdateT, rightUpdateT;
@@ -269,19 +270,14 @@ public class CompoundEmoji {
             invalidate();
         }
 
-        private void drawDrawableInfo(Canvas canvas, DrawableInfo info, Rect bounds, float alpha) {
+        private void drawDrawableInfo(Canvas canvas, DrawableInfo info, Rect bounds, float drawAlpha) {
             final Bitmap leftBitmap = info.getBitmap();
             if (leftBitmap != null) {
                 Paint currentPaint = info.placeholder ? placeholderPaint : paint;
-                int wasAlpha = 0xFF;
-                if (alpha < 1) {
-                    wasAlpha = currentPaint.getAlpha();
-                    currentPaint.setAlpha((int) (wasAlpha * alpha));
-                }
+                final int wasAlpha = currentPaint.getAlpha();
+                currentPaint.setAlpha((int) (alpha * drawAlpha));
                 canvas.drawBitmap(leftBitmap, null, bounds, currentPaint);
-                if (alpha < 1) {
-                    currentPaint.setAlpha(wasAlpha);
-                }
+                currentPaint.setAlpha(wasAlpha);
             }
         }
 
@@ -292,7 +288,7 @@ public class CompoundEmoji {
 
         @Override
         public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
+            this.alpha = alpha;
         }
 
         @Override

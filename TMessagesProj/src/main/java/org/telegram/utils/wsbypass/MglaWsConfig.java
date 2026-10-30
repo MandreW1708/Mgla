@@ -313,8 +313,9 @@ public final class MglaWsConfig {
     }
 
     public static boolean isWebUpdateTunnelConfigured() {
+        // Tunnel terminates on mglabot/fin — needs bot token, not the Germany2 hub token.
         return !TextUtils.isEmpty(getWebUpdateProxyHost()) && !TextUtils.isEmpty(getWebUpdateSecret())
-            && !TextUtils.isEmpty(getRelayToken());
+            && !TextUtils.isEmpty(getBotRelayToken());
     }
 
     /** Хост хаба статистики / панели ({@code mglahub.mooo.com}). */
