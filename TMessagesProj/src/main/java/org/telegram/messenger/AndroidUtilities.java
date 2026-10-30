@@ -4204,6 +4204,13 @@ public class AndroidUtilities {
             f = FileLoader.getInstance(UserConfig.selectedAccount).getPathToMessage(message.messageOwner);
         }
         if (f != null && f.exists()) {
+            String openName = message.getDocumentName();
+            if (TextUtils.isEmpty(openName)) {
+                openName = f.getName();
+            }
+            if (MglaDocumentHelper.open(f, openName, document.mime_type, activity, parentFragment)) {
+                return;
+            }
             if (parentFragment != null && f.getName().toLowerCase().endsWith("attheme")) {
                 Theme.ThemeInfo themeInfo = Theme.applyThemeFile(f, message.getDocumentName(), null, true);
                 if (themeInfo != null) {
@@ -4278,6 +4285,10 @@ public class AndroidUtilities {
     }
 
     public static boolean openForView(File f, String fileName, String mimeType, final Activity activity, Theme.ResourcesProvider resourcesProvider, boolean restrict) {
+        return openForView(f, fileName, mimeType, activity, resourcesProvider, restrict, true);
+    }
+
+    public static boolean openForView(File f, String fileName, String mimeType, final Activity activity, Theme.ResourcesProvider resourcesProvider, boolean restrict, boolean allowInternalViewer) {
         if (f != null && f.exists()) {
             String realMimeType = null;
             Intent intent = new Intent(Intent.ACTION_VIEW);
@@ -4296,6 +4307,9 @@ public class AndroidUtilities {
                         realMimeType = null;
                     }
                 }
+            }
+            if (allowInternalViewer && !restrict && MglaDocumentHelper.open(f, fileName, realMimeType != null ? realMimeType : mimeType, activity, LaunchActivity.getLastFragment())) {
+                return true;
             }
             if (realMimeType != null && realMimeType.equals("application/vnd.android.package-archive")) {
                 if (restrict) return true;
