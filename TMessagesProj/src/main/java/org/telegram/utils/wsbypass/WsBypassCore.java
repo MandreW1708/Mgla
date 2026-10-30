@@ -465,47 +465,131 @@ public final class WsBypassCore {
     }
 
     private RawWebSocket connectRelay(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
-        String host = MglaWsConfig.getRelayHost();
         String token = MglaWsConfig.getRelayToken();
-        if (host == null || host.isEmpty() || token == null || token.isEmpty()) {
+        if (token == null || token.isEmpty()) {
             throw new IOException("релей не сконфигурирован");
         }
+        String[] hosts = MglaWsConfig.getRelayHostCandidates();
+        if (hosts == null || hosts.length == 0) {
+            String single = MglaWsConfig.getRelayHost();
+            if (single == null || single.isEmpty()) {
+                throw new IOException("релей не сконфигурирован");
+            }
+            hosts = new String[]{single};
+        }
+        // Prefer sticky host first, then remaining aliases.
+        String preferred = MglaWsConfig.getRelayHost();
+        if (preferred != null && !preferred.isEmpty() && hosts.length > 1) {
+            java.util.LinkedHashSet<String> ordered = new java.util.LinkedHashSet<>();
+            ordered.add(preferred);
+            for (String h : hosts) {
+                ordered.add(h);
+            }
+            hosts = ordered.toArray(new String[0]);
+        }
+
         int effective = dc == 203 ? 2 : dc;
-        String path = "/apiws?dc=" + effective + (isMedia ? "&media=1" : "");
-        Map<String, String> headers = new HashMap<>();
-        headers.put("X-Mgla-Token", token);
-        // Stock Telegram и чужие клиенты этот заголовок не шлют — релей их отвергнет.
-        headers.put("X-Mgla-Client", "mgla");
-        // Account ids — hub verifies paid plan against subscriptions (not client claim).
-        String tgIds = collectActivatedTgIdsCsv();
-        if (tgIds != null && !tgIds.isEmpty()) {
-            headers.put("X-Mgla-Tg-Ids", tgIds);
-        }
-        // Device-wide plan hint (relay clamps to hub entitlements).
-        String bypassPlan = MglaSubscription.getDeviceBypassPlan();
-        if (bypassPlan != null && !bypassPlan.isEmpty()) {
-            headers.put("X-Mgla-Plan", bypassPlan);
-        }
+        String wsPath = MglaWsConfig.getRelayWsPath();
+        String path = wsPath + "?dc=" + effective + (isMedia ? "&media=1" : "");
         boolean ultraPath = MglaWsConfig.isUltraBypassEnabled();
         boolean priority = ultraPath || MglaSubscription.hasBypassPriority();
-        if (priority) {
-            headers.put("X-Mgla-Priority", "1");
-        }
+        String bypassPlan = MglaSubscription.getDeviceBypassPlan();
         if (ultraPath) {
-            headers.put("X-Mgla-Plan", MglaSubscription.PLAN_PREMIUM_ULTRA);
+            bypassPlan = MglaSubscription.PLAN_PREMIUM_ULTRA;
         }
-        dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : "")
-            + " plan=" + bypassPlan + (ultraPath ? " ultra-path" : (priority ? " prio" : "")));
-        // Ultra (shared QoS or dedicated hub path): longer budget for stable media bridges.
+        String tgIds = collectActivatedTgIdsCsv();
+
+        // Camouflage: Upgrade looks like a normal browser WS (Bearer only).
+        // Plan / client / tg ids go in the first text frame after 101.
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer " + token);
+
+        StringBuilder meta = new StringBuilder(128);
+        meta.append("{\"v\":1,\"c\":\"mgla\",\"t\":\"").append(jsonEscape(token)).append('"');
+        if (bypassPlan != null && !bypassPlan.isEmpty()) {
+            meta.append(",\"p\":\"").append(jsonEscape(bypassPlan)).append('"');
+        }
+        if (priority) {
+            meta.append(",\"u\":1");
+        }
+        if (tgIds != null && !tgIds.isEmpty()) {
+            meta.append(",\"tg\":\"").append(jsonEscape(tgIds)).append('"');
+        }
+        meta.append('}');
+        String metaJson = meta.toString();
+
         long attemptMs = priority ? RELAY_ATTEMPT_ULTRA_MS : RELAY_ATTEMPT_MS;
-        long attemptDeadline = Math.min(deadlineNanos,
-            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(attemptMs));
-        // Pin known relay/hub hosts; custom hosts rely on system CAs + hostname verify.
-        String[] pins = MglaWsConfig.getRelaySpkiPins(host);
-        RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
-            () -> isBridgeGenerationCurrent(generation), pins);
-        dbg("101 OK via relay " + host);
-        return ws;
+        IOException last = null;
+        for (String host : hosts) {
+            if (!isBridgeGenerationCurrent(generation) || System.nanoTime() >= deadlineNanos) {
+                break;
+            }
+            if (host == null || host.isEmpty()) {
+                continue;
+            }
+            dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : "")
+                + " plan=" + bypassPlan + (ultraPath ? " ultra-path" : (priority ? " prio" : "")));
+            long attemptDeadline = Math.min(deadlineNanos,
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(attemptMs));
+            String[] pins = MglaWsConfig.getRelaySpkiPins(host);
+            boolean pinOnly = MglaWsConfig.isPinOnlyRelayHost(host);
+            try {
+                RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
+                    () -> isBridgeGenerationCurrent(generation), pins, pinOnly);
+                try {
+                    ws.sendText(metaJson);
+                } catch (IOException e) {
+                    try {
+                        ws.close();
+                    } catch (Throwable ignored) {
+                    }
+                    throw e;
+                }
+                MglaWsConfig.markRelayHostOk(host);
+                dbg("101 OK via relay " + host);
+                return ws;
+            } catch (IOException e) {
+                last = e;
+                MglaWsConfig.markRelayHostFailed(host);
+                dbg(host + " relay fail: " + e.getMessage());
+            }
+        }
+        if (last != null) {
+            throw last;
+        }
+        throw new IOException("релей недоступен");
+    }
+
+    private static String jsonEscape(String s) {
+        if (s == null || s.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\':
+                case '"':
+                    sb.append('\\').append(c);
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
     }
 
     /** Blocking check that the relay accepts a WebSocket upgrade; does not touch running bridges. */

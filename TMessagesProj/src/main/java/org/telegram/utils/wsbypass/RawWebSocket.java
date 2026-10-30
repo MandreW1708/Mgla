@@ -125,10 +125,20 @@ public final class RawWebSocket {
     /**
      * @param pinnedSpkiSha256Base64 optional SPKI SHA-256 pins (base64). If non-null/non-empty,
      *                               the leaf certificate public key must match one of them.
+     * @param pinOnlyTrust when true with non-empty pins, skip hostname verify and trust the pin
+     *                     (alias SNI served with the primary leaf cert when LE SAN expand is unavailable).
      */
     static RawWebSocket connectUntil(String connectHost, String sniHost, String path,
                                      Map<String, String> extraHeaders, long deadlineNanos,
                                      ConnectPermit permit, String[] pinnedSpkiSha256Base64) throws IOException {
+        return connectUntil(connectHost, sniHost, path, extraHeaders, deadlineNanos, permit,
+            pinnedSpkiSha256Base64, false);
+    }
+
+    static RawWebSocket connectUntil(String connectHost, String sniHost, String path,
+                                     Map<String, String> extraHeaders, long deadlineNanos,
+                                     ConnectPermit permit, String[] pinnedSpkiSha256Base64,
+                                     boolean pinOnlyTrust) throws IOException {
         checkPermit(permit);
         String sni = sniHost == null ? "" : sniHost.trim();
         if (connectHost == null || connectHost.trim().isEmpty() || sni.isEmpty()) {
@@ -146,7 +156,7 @@ public final class RawWebSocket {
         try {
             raw = openSocket(connectHost.trim(), deadlineNanos, permit);
             checkPermit(permit);
-            wrapped = wrapTls(raw, sni, deadlineNanos, permit, pinnedSpkiSha256Base64);
+            wrapped = wrapTls(raw, sni, deadlineNanos, permit, pinnedSpkiSha256Base64, pinOnlyTrust);
             raw = null;
             checkPermit(permit);
             wrapped.setSoTimeout(remainingMillis(deadlineNanos));
@@ -263,7 +273,8 @@ public final class RawWebSocket {
     }
 
     private static SSLSocket wrapTls(Socket raw, String sni, long deadlineNanos,
-                                     ConnectPermit permit, String[] pinnedSpkiSha256Base64) throws IOException {
+                                     ConnectPermit permit, String[] pinnedSpkiSha256Base64,
+                                     boolean pinOnlyTrust) throws IOException {
         checkPermit(permit);
         SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
         SSLSocket ssl;
@@ -283,19 +294,26 @@ public final class RawWebSocket {
             closeQuietly(ssl);
             throw e;
         }
-        HostnameVerifier hv = javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier();
         SSLSession session = ssl.getSession();
-        if (!hv.verify(sni, session)) {
-            closeQuietly(ssl);
-            throw new SSLPeerUnverifiedException("hostname verification failed for " + sni);
+        boolean hasPins = pinnedSpkiSha256Base64 != null && pinnedSpkiSha256Base64.length > 0;
+        boolean pinOnly = pinOnlyTrust && hasPins;
+        if (!pinOnly) {
+            HostnameVerifier hv = javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier();
+            if (!hv.verify(sni, session)) {
+                closeQuietly(ssl);
+                throw new SSLPeerUnverifiedException("hostname verification failed for " + sni);
+            }
         }
-        if (pinnedSpkiSha256Base64 != null && pinnedSpkiSha256Base64.length > 0) {
+        if (hasPins) {
             try {
                 verifySpkiPin(session, pinnedSpkiSha256Base64);
             } catch (IOException e) {
                 closeQuietly(ssl);
                 throw e;
             }
+        } else if (pinOnlyTrust) {
+            closeQuietly(ssl);
+            throw new SSLPeerUnverifiedException("pin-only trust requires SPKI pins for " + sni);
         }
         return ssl;
     }
@@ -343,6 +361,22 @@ public final class RawWebSocket {
 
     public void send(byte[] payload) throws IOException {
         send(payload, false);
+    }
+
+    /** Send a WebSocket text frame (camouflage session meta before binary MTProto). */
+    public void sendText(String text) throws IOException {
+        if (text == null) {
+            text = "";
+        }
+        byte[] payload = text.getBytes(StandardCharsets.UTF_8);
+        synchronized (lock) {
+            if (closed.get()) throw new IOException("websocket closed");
+            byte[] frame = buildFrame(OPCODE_TEXT, payload, true);
+            writer.write(frame);
+            writer.flush();
+            unflushedBytes = 0;
+            lastIoMs = System.currentTimeMillis();
+        }
     }
 
     /**

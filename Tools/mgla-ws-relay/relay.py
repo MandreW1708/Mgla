@@ -130,9 +130,18 @@ class AesCtr:
         return self._e.update(data)
 
 
+# Primary camouflage path + legacy /apiws (old APKs).
+_WS_PATH_MARKERS = ("/ws/v1/live", "/apiws")
+
+
+def _is_ws_relay_path(path: str) -> bool:
+    p = urlparse(path).path or ""
+    return any(m in p for m in _WS_PATH_MARKERS)
+
+
 def resolve_dc(path: str) -> Optional[int]:
     parsed = urlparse(path)
-    if "/apiws" not in parsed.path:
+    if not _is_ws_relay_path(parsed.path or ""):
         return None
     raw = parse_qs(parsed.query).get("dc", [None])[0]
     if raw is None:
@@ -221,8 +230,16 @@ def _header_get(headers, *names):
     return ""
 
 
+def extract_token(headers) -> str:
+    """Bearer Authorization (camouflage) or legacy X-Mgla-Token."""
+    auth = _header_get(headers, "Authorization", "authorization").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return _header_get(headers, "X-Mgla-Token", "x-mgla-token").strip()
+
+
 def token_ok(headers) -> bool:
-    got = _header_get(headers, "X-Mgla-Token", "x-mgla-token")
+    got = extract_token(headers)
     try:
         import mgla_token
         if mgla_token.token_ok(got):
@@ -235,9 +252,96 @@ def token_ok(headers) -> bool:
 
 
 def client_ok(headers) -> bool:
-    """Marker header from Mgla APK. Optional when token already validates."""
+    """Marker from APK. Optional when token already validates."""
     got = _header_get(headers, "X-Mgla-Client", "x-mgla-client").strip().lower()
-    return got == "mgla" or got.startswith("mgla/")
+    if got == "mgla" or got.startswith("mgla/"):
+        return True
+    # Camouflage session meta may set a synthetic client marker.
+    meta = _header_get(headers, "X-Mgla-Session-Client", "x-mgla-session-client").strip().lower()
+    return meta == "mgla" or meta.startswith("mgla/")
+
+
+def _headers_as_dict(headers) -> dict:
+    out = {}
+    try:
+        items = headers.items() if hasattr(headers, "items") else []
+        for k, v in items:
+            if k is None or v is None:
+                continue
+            out[str(k)] = v if isinstance(v, str) else str(v)
+    except Exception:
+        pass
+    return out
+
+
+def _apply_session_meta(headers: dict, meta: dict) -> None:
+    """Merge first-frame camouflage JSON into a mutable header map."""
+    if not isinstance(meta, dict):
+        return
+    tok = meta.get("t") or meta.get("token") or ""
+    if isinstance(tok, str) and tok.strip():
+        headers["Authorization"] = "Bearer " + tok.strip()
+        headers["X-Mgla-Token"] = tok.strip()
+    client = meta.get("c") or meta.get("client") or ""
+    if isinstance(client, str) and client.strip():
+        headers["X-Mgla-Client"] = client.strip()
+        headers["X-Mgla-Session-Client"] = client.strip()
+    plan = meta.get("p") or meta.get("plan") or ""
+    if isinstance(plan, str) and plan.strip():
+        headers["X-Mgla-Plan"] = plan.strip()
+    if meta.get("u") in (1, True, "1", "true", "yes") or meta.get("prio") in (1, True, "1"):
+        headers["X-Mgla-Priority"] = "1"
+    tg = meta.get("tg") or meta.get("tg_ids") or meta.get("ids") or ""
+    if tg is not None and str(tg).strip():
+        headers["X-Mgla-Tg-Ids"] = str(tg).strip()
+
+
+async def read_session_meta_and_init(ws, headers: dict, path: str):
+    """
+    Camouflage path may send a JSON text frame with auth/meta before MTProto init.
+    Legacy /apiws keeps auth in Upgrade headers; first frame is binary init.
+    Returns (init_bytes, headers).
+    """
+    try:
+        first = await asyncio.wait_for(ws.recv(), timeout=10)
+    except Exception as e:
+        raise OSError(f"no init: {e}") from e
+
+    is_camouflage = any(m in (urlparse(path).path or "") for m in ("/ws/v1/live",))
+    text = None
+    if isinstance(first, str):
+        text = first
+    elif isinstance(first, (bytes, bytearray)) and first[:1] == b"{":
+        try:
+            text = bytes(first).decode("utf-8", "ignore")
+        except Exception:
+            text = None
+
+    if text and text.lstrip().startswith("{"):
+        try:
+            import json as _json
+            meta = _json.loads(text)
+            if isinstance(meta, dict) and (meta.get("v") == 1 or "t" in meta or "token" in meta):
+                _apply_session_meta(headers, meta)
+                try:
+                    first = await asyncio.wait_for(ws.recv(), timeout=10)
+                except Exception as e:
+                    raise OSError(f"no init after meta: {e}") from e
+            elif not is_camouflage:
+                # Unexpected text on legacy path — treat as opaque init.
+                first = text.encode("utf-8", "ignore")
+        except OSError:
+            raise
+        except Exception as e:
+            LOG.debug("session meta parse ignored: %s", e)
+            if isinstance(first, str):
+                first = first.encode("utf-8", "ignore")
+    elif isinstance(first, str):
+        first = first.encode("utf-8", "ignore")
+
+    if not isinstance(first, (bytes, bytearray)):
+        first = bytes(first) if first is not None else b""
+    return bytes(first), headers
 
 
 def parse_priority(headers) -> tuple:
@@ -386,7 +490,7 @@ async def resolve_verified_plan(headers) -> tuple:
         if wants_ultra or claimed_plan != "free":
             LOG.info("paid claim without tg ids (claimed=%s)", claimed_plan)
         return "free", False
-    client_token = _header_get(headers, "X-Mgla-Token", "x-mgla-token")
+    client_token = extract_token(headers)
     hub_plan = await fetch_hub_plan(tg_ids, client_token=client_token)
     ultra = hub_plan == "premium_ultra"
     if wants_ultra and not ultra:
@@ -806,48 +910,56 @@ async def pipe_ws(src, dst, received: Optional[list] = None) -> None:
 async def handler(ws):
     path = ws_path(ws)
     peer = str(getattr(ws, "remote_address", "?"))
-    headers = ws_headers(ws)
+    headers = _headers_as_dict(ws_headers(ws))
+    is_camouflage = "/ws/v1/live" in (urlparse(path).path or "")
 
-    if not token_ok(headers):
+    # Camouflage path may defer token/plan into the first WS text frame.
+    if not is_camouflage and not token_ok(headers):
         LOG.info("%s reject auth path=%s", peer, path)
         await ws.close(code=1008, reason="unauthorized")
-        return
-    if not client_ok(headers):
-        # Token already proved access; do not drop the call if a proxy stripped the marker.
-        LOG.warning("%s missing X-Mgla-Client path=%s (allowing valid token)", peer, path)
-
-    plan, ultra = await resolve_verified_plan(headers)
-    if ULTRA_ONLY and not ultra:
-        LOG.info("%s reject ultra-only plan=%s path=%s", peer, plan, path)
-        await ws.close(code=1008, reason="ultra only")
-        return
-    if not parse_tg_ids_from_headers(headers) and (ultra or ULTRA_ONLY):
-        LOG.info("%s reject missing X-Mgla-Tg-Id for premium path", peer)
-        await ws.close(code=1008, reason="tg id required")
         return
 
     dc = resolve_dc(path)
     if dc is None:
-        LOG.info("%s bad path=%s (need /apiws?dc=1..5)", peer, path)
-        await ws.close(code=1008, reason="need /apiws?dc=N")
+        LOG.info("%s bad path=%s (need /ws/v1/live|/apiws?dc=1..5)", peer, path)
+        await ws.close(code=1008, reason="need /ws/v1/live?dc=N")
         return
 
-    if not await acquire_slot(ultra):
-        LOG.info("%s reject busy plan=%s path=%s (std=%s ultra=%s)",
-                 peer, plan, path, _active_standard, _active_ultra)
-        await ws.close(code=1013, reason="busy")
-        return
-
+    ultra = False
+    slot_held = False
     try:
         media = want_media(path)
         try:
-            first = await asyncio.wait_for(ws.recv(), timeout=10)
+            first, headers = await read_session_meta_and_init(ws, headers, path)
         except Exception as e:
             LOG.info("%s no init: %s", peer, e)
             await ws.close(code=1000)
             return
-        if isinstance(first, str):
-            first = first.encode("utf-8", "ignore")
+
+        if not token_ok(headers):
+            LOG.info("%s reject auth path=%s (after meta)", peer, path)
+            await ws.close(code=1008, reason="unauthorized")
+            return
+        if not client_ok(headers):
+            LOG.warning("%s missing client marker path=%s (allowing valid token)", peer, path)
+
+        plan, ultra = await resolve_verified_plan(headers)
+        if ULTRA_ONLY and not ultra:
+            LOG.info("%s reject ultra-only plan=%s path=%s", peer, plan, path)
+            await ws.close(code=1008, reason="ultra only")
+            return
+        if not parse_tg_ids_from_headers(headers) and (ultra or ULTRA_ONLY):
+            LOG.info("%s reject missing X-Mgla-Tg-Id for premium path", peer)
+            await ws.close(code=1008, reason="tg id required")
+            return
+
+        if not await acquire_slot(ultra):
+            LOG.info("%s reject busy plan=%s path=%s (std=%s ultra=%s)",
+                     peer, plan, path, _active_standard, _active_ultra)
+            await ws.close(code=1013, reason="busy")
+            return
+        slot_held = True
+
         sniffed = dc_index_from_init(first)
         if sniffed is not None:
             media = sniffed < 0
@@ -924,7 +1036,8 @@ async def handler(ws):
             mark_silent(dc, media, ip)
         LOG.info("%s closed dc=%s media=%s bytes=%s plan=%s", peer, dc, int(media), received[0], plan)
     finally:
-        await release_slot(ultra)
+        if slot_held:
+            await release_slot(ultra)
 
 
 async def main() -> None:

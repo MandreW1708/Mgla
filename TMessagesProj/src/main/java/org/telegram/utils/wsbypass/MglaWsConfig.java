@@ -11,11 +11,13 @@ import org.telegram.messenger.BuildConfig;
  * Настройки WS-обхода и хаба (статистика).
  * <p>
  * Обычный обход (всем): {@link #REGION_DE} «Германия1» ({@code mglabot}) или
- * {@link #REGION_HUB} «Германия2» ({@code mglahub}), path {@code /apiws}.
+ * {@link #REGION_HUB} «Германия2» ({@code mglahub}), path {@link #DEFAULT_RELAY_WS_PATH}
+ * (legacy {@code /apiws} ещё принимается сервером).
  * Ultra-обход: {@link #FINLAND_RELAY_HOST} ({@code fin.mgla.mooo.com}), только для Ultra;
  * выбор региона при Ultra не используется.
  * Статистика: напрямую хаб ({@code /mgla-stats/}), либо через релей {@code /mgla-ai/v1/stats-batch}.
  * Хосты/токены — из {@code BuildConfig} / {@code local.properties}, prefs могут переопределить.
+ * Для DE1/DE2 клиент пробует список alias-хостов (SNI failover) без смены региона в UI.
  */
 public final class MglaWsConfig {
 
@@ -33,11 +35,20 @@ public final class MglaWsConfig {
     public static final String FINLAND_RELAY_HOST = "fin.mgla.mooo.com";
     public static final String DEFAULT_HUB_HOST = "mglahub.mooo.com";
 
+    /** Camouflage WS path (server still accepts legacy {@code /apiws}). */
+    public static final String DEFAULT_RELAY_WS_PATH = "/ws/v1/live";
+    public static final String LEGACY_RELAY_WS_PATH = "/apiws";
+
+    /** DE1 alias without {@code mgla*} in the SNI (sslip.io → same IP). */
+    public static final String DEFAULT_RELAY_HOST_ALIAS = "31-77-218-160.sslip.io";
+    /** DE2 alias without {@code mgla*} in the SNI. */
+    public static final String DEFAULT_HUB_HOST_ALIAS = "194-58-33-22.sslip.io";
+
     /**
      * SPKI SHA-256 (base64) сертификата WS-релея (mglabot) — pinning при TLS.
      * При смене ключа на сервере нужно обновить константу.
      */
-    public static final String RELAY_SPKI_SHA256_BASE64 = "Ae0rI3yMlnvtv5bwOy5r9fqcniG46yrElv0ox6x5g60=";
+    public static final String RELAY_SPKI_SHA256_BASE64 = "R+FPCkeJ/GAQPWYcX7SZeDQnZYQdrq/MYzTCgYkieOY=";
 
     /**
      * SPKI SHA-256 (base64) сертификата хаба статистики (mglahub).
@@ -50,6 +61,7 @@ public final class MglaWsConfig {
     private static final String PREF_PORT = "ws_port";
     private static final String PREF_SECRET = "ws_secret";
     private static final String PREF_RELAY_HOST = "ws_relay_host";
+    private static final String PREF_RELAY_HOST_INDEX = "ws_relay_host_index";
     private static final String PREF_RELAY_TOKEN = "ws_relay_token";
     private static final String PREF_HUB_HOST = "hub_host";
     private static final String PREF_HUB_TOKEN = "hub_token";
@@ -132,11 +144,73 @@ public final class MglaWsConfig {
 
     /** Host for the selected normal-bypass region (never Ultra Finland). */
     public static String getRegionRelayHost() {
+        String[] hosts = getNormalRegionRelayHosts();
+        if (hosts.length > 0) {
+            return hosts[0];
+        }
         if (REGION_HUB.equals(getBypassRegion())) {
             return getHubHost();
         }
         String fromBuild = BuildConfig.MGLA_WS_RELAY_HOST;
         return TextUtils.isEmpty(fromBuild) ? DEFAULT_RELAY_HOST : fromBuild.trim();
+    }
+
+    /** Ordered SNI candidates for the selected DE1/DE2 region (primary + aliases). */
+    public static String[] getNormalRegionRelayHosts() {
+        if (REGION_HUB.equals(getBypassRegion())) {
+            return parseHostList(BuildConfig.MGLA_HUB_RELAY_HOSTS,
+                getHubHost(), DEFAULT_HUB_HOST_ALIAS);
+        }
+        return parseHostList(BuildConfig.MGLA_WS_RELAY_HOSTS,
+            TextUtils.isEmpty(BuildConfig.MGLA_WS_RELAY_HOST)
+                ? DEFAULT_RELAY_HOST : BuildConfig.MGLA_WS_RELAY_HOST.trim(),
+            DEFAULT_RELAY_HOST_ALIAS);
+    }
+
+    /**
+     * Ordered SNI candidates for the active bypass path.
+     * Ultra returns only Finland; otherwise DE1/DE2 primary + aliases.
+     */
+    public static String[] getRelayHostCandidates() {
+        if (isUltraBypassEnabled()) {
+            return new String[]{FINLAND_RELAY_HOST};
+        }
+        return getNormalRegionRelayHosts();
+    }
+
+    /** Camouflage WS path used by new clients ({@link #DEFAULT_RELAY_WS_PATH}). */
+    public static String getRelayWsPath() {
+        String fromBuild = BuildConfig.MGLA_WS_PATH;
+        if (!TextUtils.isEmpty(fromBuild)) {
+            String p = fromBuild.trim();
+            if (!p.startsWith("/")) {
+                p = "/" + p;
+            }
+            return p;
+        }
+        return DEFAULT_RELAY_WS_PATH;
+    }
+
+    private static String[] parseHostList(String csv, String primaryFallback, String aliasFallback) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (!TextUtils.isEmpty(csv)) {
+            for (String part : csv.split("[,;\\s]+")) {
+                if (part == null) {
+                    continue;
+                }
+                String h = part.trim();
+                if (!h.isEmpty()) {
+                    out.add(h);
+                }
+            }
+        }
+        if (out.isEmpty() && !TextUtils.isEmpty(primaryFallback)) {
+            out.add(primaryFallback.trim());
+        }
+        if (!TextUtils.isEmpty(aliasFallback)) {
+            out.add(aliasFallback.trim());
+        }
+        return out.toArray(new String[0]);
     }
 
     public static int getPort() {
@@ -172,7 +246,62 @@ public final class MglaWsConfig {
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
         }
-        return getRegionRelayHost();
+        String[] hosts = getRelayHostCandidates();
+        if (hosts.length == 0) {
+            return getRegionRelayHost();
+        }
+        int idx = getPrefs().getInt(PREF_RELAY_HOST_INDEX, 0);
+        if (idx < 0 || idx >= hosts.length) {
+            idx = 0;
+        }
+        return hosts[idx];
+    }
+
+    /** Sticky preferred host after a successful TLS/WS handshake. */
+    public static void markRelayHostOk(String host) {
+        if (TextUtils.isEmpty(host) || isUltraBypassEnabled()) {
+            return;
+        }
+        String[] hosts = getNormalRegionRelayHosts();
+        for (int i = 0; i < hosts.length; i++) {
+            if (host.equalsIgnoreCase(hosts[i])) {
+                getPrefs().edit().putInt(PREF_RELAY_HOST_INDEX, i).apply();
+                return;
+            }
+        }
+    }
+
+    /** Rotate to the next alias when TLS/handshake fails for the current host. */
+    public static void markRelayHostFailed(String host) {
+        if (TextUtils.isEmpty(host) || isUltraBypassEnabled()) {
+            return;
+        }
+        String[] hosts = getNormalRegionRelayHosts();
+        if (hosts.length <= 1) {
+            return;
+        }
+        int cur = getPrefs().getInt(PREF_RELAY_HOST_INDEX, 0);
+        for (int i = 0; i < hosts.length; i++) {
+            if (host.equalsIgnoreCase(hosts[i])) {
+                cur = i;
+                break;
+            }
+        }
+        getPrefs().edit().putInt(PREF_RELAY_HOST_INDEX, (cur + 1) % hosts.length).apply();
+    }
+
+    /**
+     * Alias SNIs (sslip.io) are served with the primary leaf cert when LE SAN expand
+     * is blocked (port 80). Client skips hostname verify and trusts {@link #getRelaySpkiPins}.
+     */
+    public static boolean isPinOnlyRelayHost(String host) {
+        if (TextUtils.isEmpty(host)) {
+            return false;
+        }
+        return DEFAULT_RELAY_HOST_ALIAS.equalsIgnoreCase(host)
+            || DEFAULT_HUB_HOST_ALIAS.equalsIgnoreCase(host)
+            || host.toLowerCase(java.util.Locale.US).endsWith(".sslip.io")
+            || host.toLowerCase(java.util.Locale.US).endsWith(".nip.io");
     }
 
     /** TLS pin for the host returned by {@link #getRelayHost()}, or null for system CAs. */
@@ -180,19 +309,51 @@ public final class MglaWsConfig {
         if (TextUtils.isEmpty(host)) {
             return null;
         }
-        if (DEFAULT_RELAY_HOST.equalsIgnoreCase(host)) {
-            return new String[]{RELAY_SPKI_SHA256_BASE64};
-        }
         // Finland (Ultra) uses Let's Encrypt — system CAs until a dedicated pin is published.
         if (FINLAND_RELAY_HOST.equalsIgnoreCase(host)) {
             return null;
         }
-        String hub = getHubHost();
-        if (DEFAULT_HUB_HOST.equalsIgnoreCase(host)
-                || (!TextUtils.isEmpty(hub) && hub.equalsIgnoreCase(host))) {
+        if (isDe1RelayHost(host)) {
+            return new String[]{RELAY_SPKI_SHA256_BASE64};
+        }
+        if (isDe2RelayHost(host)) {
             return new String[]{HUB_SPKI_SHA256_BASE64};
         }
         return null;
+    }
+
+    private static boolean isDe1RelayHost(String host) {
+        if (DEFAULT_RELAY_HOST.equalsIgnoreCase(host)
+                || DEFAULT_RELAY_HOST_ALIAS.equalsIgnoreCase(host)) {
+            return true;
+        }
+        String primary = BuildConfig.MGLA_WS_RELAY_HOST;
+        if (!TextUtils.isEmpty(primary) && primary.trim().equalsIgnoreCase(host)) {
+            return true;
+        }
+        for (String h : parseHostList(BuildConfig.MGLA_WS_RELAY_HOSTS, primary, DEFAULT_RELAY_HOST_ALIAS)) {
+            if (host.equalsIgnoreCase(h)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDe2RelayHost(String host) {
+        if (DEFAULT_HUB_HOST.equalsIgnoreCase(host)
+                || DEFAULT_HUB_HOST_ALIAS.equalsIgnoreCase(host)) {
+            return true;
+        }
+        String hub = getHubHost();
+        if (!TextUtils.isEmpty(hub) && hub.equalsIgnoreCase(host)) {
+            return true;
+        }
+        for (String h : parseHostList(BuildConfig.MGLA_HUB_RELAY_HOSTS, hub, DEFAULT_HUB_HOST_ALIAS)) {
+            if (host.equalsIgnoreCase(h)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static void setRelayHost(String host) {
@@ -263,6 +424,7 @@ public final class MglaWsConfig {
         if (isUltraBypassEnabled()) {
             return FINLAND_RELAY_HOST + "/tgweb";
         }
+        // WebView requires a hostname-matching LE cert — do not use sslip aliases here.
         if (REGION_HUB.equals(getBypassRegion())) {
             String hubProxy = BuildConfig.MGLA_ULTRA_WEB_PROXY_HOST;
             if (!TextUtils.isEmpty(hubProxy)) {

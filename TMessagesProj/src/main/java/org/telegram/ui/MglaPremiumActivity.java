@@ -8,21 +8,20 @@ import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.os.Bundle;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
-import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Shader;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
@@ -33,46 +32,37 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.core.graphics.ColorUtils;
-import androidx.recyclerview.widget.RecyclerView;
+import androidx.core.widget.NestedScrollView;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.browser.Browser;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MglaMainTabsConfig;
 import org.telegram.messenger.MglaPremiumController;
 import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
-import org.telegram.messenger.Utilities;
+import org.telegram.messenger.browser.Browser;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
-import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CubicBezierInterpolator;
-import org.telegram.ui.Components.FillLastLinearLayoutManager;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.ui.Components.MglaPremiumStarHelper;
 import org.telegram.ui.Components.Premium.PremiumButtonView;
-import org.telegram.ui.Components.Premium.StarParticlesView;
-import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.ScaleStateListAnimator;
-import org.telegram.ui.Stories.recorder.HintView2;
 
 import java.util.ArrayList;
 
 /**
- * Экран подписки Mgla Premium — чёрно-золотое оформление,
- * три плана: Premium / Premium+ / Premium Ultra.
+ * Mgla Premium — hub-style screen (gradient header + dark sheet) for all plan tiers.
  */
 public class MglaPremiumActivity extends MglaBaseSettingsActivity {
 
     public static final int PLAN_PREMIUM = 0;
     public static final int PLAN_PLUS = 1;
     public static final int PLAN_ULTRA = 2;
-    /** Bundle: open on a specific plan tab ({@link #PLAN_PREMIUM}..{@link #PLAN_ULTRA}). */
     public static final String ARG_INITIAL_PLAN = "initial_plan";
 
     public static final int FEATURE_ANIMATIONS = 0;
@@ -86,62 +76,43 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     public static final int FEATURE_PRIORITY_BYPASS = 8;
     public static final int FEATURE_TASKS_SYNC = 9;
 
-    private static final int COLOR_BG = 0xFF000000;
-    private static final int COLOR_CARD = 0xFF121212;
-    private static final int COLOR_TAB_IDLE = 0xFF1A1A1A;
-    private static final int COLOR_TEXT = 0xFFF5F5F5;
+    private static final int COLOR_SHEET = 0xFF121417;
+    private static final int COLOR_CARD = 0xFF1E1F24;
+    private static final int COLOR_TEXT = 0xFFF2F3F5;
+    private static final int COLOR_HANDLE = 0xFF3A3D45;
+    private static final int COLOR_DIVIDER = 0x14FFFFFF;
+
+    private static final String ADMIN_USERNAME = "mgla_admin";
 
     private final ArrayList<PlanData> plans = new ArrayList<>();
-    private final ArrayList<PremiumPreviewFragment.PremiumFeatureData> premiumFeatures = new ArrayList<>();
+    private final ArrayList<FeatureItem> features = new ArrayList<>();
 
     private int selectedPlanIndex = PLAN_PREMIUM;
     private PlanPalette accent = PlanPalette.forPlan(PLAN_PREMIUM);
 
-    private FrameLayout contentView;
-    private BackgroundView backgroundView;
-    private StarParticlesView particlesView;
-    private Paint[] particlePaints;
-    private RecyclerListView listView;
-    private FillLastLinearLayoutManager layoutManager;
-    private FrameLayout buttonContainer;
+    private PremiumHubLayout hubLayout;
+    private FrameLayout headerBrand;
+    private ImageView logoView;
+    private TextView titleView;
+    private TextView subtitleView;
+    private LinearLayout planCardsRow;
+    private final ArrayList<PlanCardView> planCards = new ArrayList<>();
+    private LinearLayout featuresCard;
+    private TextView featuresHeader;
+    private TextView hintView;
     private PremiumButtonView premiumButtonView;
-    private PremiumFeatureCell dummyCell;
-
-    private int rowCount;
-    private int paddingRow;
-    private int featuresStartRow;
-    private int featuresEndRow;
-    private int statusRow;
-    private int lastPaddingRow;
-
-    private int firstViewHeight;
-    private int statusBarHeight;
-    private int totalGradientHeight;
-    private float progress;
-    private boolean inc = true;
-    private float totalProgress;
-    private float progressToFull;
-    private int currentYOffset;
-    private boolean isLandscapeMode;
-
-    private final Paint accentIconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint accentStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint accentButtonPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private Shader iconShader;
-    private Shader buttonShader;
-    private final Matrix matrix = new Matrix();
-    private int buttonWidth;
+    private FrameLayout buttonContainer;
+    private GradientDrawable rootGradient;
     private ValueAnimator planSwitchAnimator;
 
     public MglaPremiumActivity() {
         this(null);
     }
 
-    public MglaPremiumActivity(android.os.Bundle args) {
+    public MglaPremiumActivity(Bundle args) {
         super(args);
     }
 
-    @SuppressLint("NotifyDataSetChanged")
     @Override
     public View createView(Context context) {
         hasOwnBackground = true;
@@ -162,222 +133,15 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 selectedPlanIndex = initial;
             }
         }
-
-        accentStrokePaint.setStyle(Paint.Style.STROKE);
-        accentStrokePaint.setStrokeWidth(dp(1));
-        applyAccentForPlan(selectedPlanIndex);
-
-        dummyCell = new PremiumFeatureCell(context);
+        accent = PlanPalette.forPlan(selectedPlanIndex);
         fillFeaturesForPlan(selectedPlanIndex);
-        statusBarHeight = AndroidUtilities.statusBarHeight;
-
-        contentView = new FrameLayout(context) {
-            boolean tabsInterceptedTouch;
-
-            @Override
-            public boolean dispatchTouchEvent(MotionEvent ev) {
-                float tabsX = backgroundView.getX() + backgroundView.tabsRow.getX();
-                float tabsY = backgroundView.getY() + backgroundView.tabsRow.getY();
-                AndroidUtilities.rectTmp.set(tabsX, tabsY, tabsX + backgroundView.tabsRow.getWidth(), tabsY + backgroundView.tabsRow.getHeight());
-                if (progressToFull < 1.0f && (AndroidUtilities.rectTmp.contains(ev.getX(), ev.getY()) || tabsInterceptedTouch) && !listView.scrollingByUser) {
-                    ev.offsetLocation(-tabsX, -tabsY);
-                    if (ev.getAction() == MotionEvent.ACTION_DOWN) {
-                        tabsInterceptedTouch = true;
-                    } else if (ev.getAction() == MotionEvent.ACTION_UP || ev.getAction() == MotionEvent.ACTION_CANCEL) {
-                        tabsInterceptedTouch = false;
-                    }
-                    backgroundView.tabsRow.dispatchTouchEvent(ev);
-                    if (tabsInterceptedTouch) {
-                        return true;
-                    }
-                }
-                return super.dispatchTouchEvent(ev);
-            }
-
-            @Override
-            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                isLandscapeMode = MeasureSpec.getSize(widthMeasureSpec) > MeasureSpec.getSize(heightMeasureSpec);
-                statusBarHeight = AndroidUtilities.statusBarHeight;
-                backgroundView.measure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-                particlesView.getLayoutParams().height = backgroundView.getMeasuredHeight();
-                int buttonHeight = buttonContainer.getVisibility() == View.GONE ? 0 : dp(68);
-                layoutManager.setAdditionalHeight(buttonHeight + statusBarHeight - dp(16));
-                layoutManager.setMinimumLastViewHeight(buttonHeight);
-                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-            }
-
-            @Override
-            protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-                super.onSizeChanged(w, h, oldw, oldh);
-                measureGradient(w, h);
-                buttonWidth = w;
-                rebuildButtonShader();
-            }
-
-            @Override
-            protected void dispatchDraw(@NonNull Canvas canvas) {
-                if (inc) {
-                    progress += 16f / 1000f;
-                    if (progress > 3) {
-                        inc = false;
-                    }
-                } else {
-                    progress -= 16f / 1000f;
-                    if (progress < 1) {
-                        inc = true;
-                    }
-                }
-
-                View firstView = null;
-                if (listView.getLayoutManager() != null) {
-                    firstView = listView.getLayoutManager().findViewByPosition(0);
-                }
-                currentYOffset = firstView == null ? 0 : firstView.getBottom();
-                int h = actionBar.getBottom() + dp(16);
-                totalProgress = Utilities.clamp(1f - (currentYOffset - h) / (float) Math.max(1, firstViewHeight - h), 1f, 0f);
-
-                int maxTop = actionBar.getBottom() + dp(16);
-                if (currentYOffset < maxTop) {
-                    currentYOffset = maxTop;
-                }
-
-                float oldProgress = progressToFull;
-                progressToFull = 0;
-                if (currentYOffset < maxTop + dp(30)) {
-                    progressToFull = (maxTop + dp(30) - currentYOffset) / (float) dp(30);
-                }
-                if (isLandscapeMode) {
-                    progressToFull = 1f;
-                    totalProgress = 1f;
-                }
-                if (oldProgress != progressToFull) {
-                    listView.invalidate();
-                }
-
-                float fromTranslation = currentYOffset
-                        - (actionBar.getMeasuredHeight() + backgroundView.getMeasuredHeight() - statusBarHeight)
-                        + dp(48);
-                float toTranslation = ((actionBar.getMeasuredHeight() - statusBarHeight - backgroundView.titleView.getMeasuredHeight()) / 2f)
-                        + statusBarHeight - backgroundView.getTop() - backgroundView.titleView.getTop();
-                float translationsY = Math.max(toTranslation, fromTranslation);
-                float iconTranslationsY = -translationsY / 4f + dp(12);
-                backgroundView.setTranslationY(translationsY);
-
-                backgroundView.logoContainer.setTranslationY(iconTranslationsY + dp(8));
-                float s = 0.62f + (1f - totalProgress) * 0.38f;
-                float alpha = 1f - (totalProgress > 0.5f ? (totalProgress - 0.5f) / 0.5f : 0f);
-                backgroundView.logoContainer.setScaleX(s);
-                backgroundView.logoContainer.setScaleY(s);
-                backgroundView.logoContainer.setAlpha(alpha);
-                backgroundView.subtitleView.setAlpha(alpha);
-                backgroundView.tabsRow.setAlpha(alpha);
-                particlesView.setAlpha(1f - totalProgress);
-                particlesView.setTranslationY(-(particlesView.getMeasuredHeight() - backgroundView.logoContainer.getMeasuredWidth()) / 2f
-                        + backgroundView.getY() + backgroundView.logoContainer.getY());
-
-                float toX = dp(72) - backgroundView.titleView.getLeft();
-                float f = totalProgress > 0.3f ? (totalProgress - 0.3f) / 0.7f : 0f;
-                backgroundView.titleView.setTranslationX(toX * (1f - CubicBezierInterpolator.EASE_OUT_QUINT.getInterpolation(1 - f)));
-
-                invalidate();
-                buttonContainer.invalidate();
-
-                canvas.drawColor(COLOR_BG);
-                super.dispatchDraw(canvas);
-            }
-        };
-
-        listView = new RecyclerListView(context);
-        listView.setClipToOutline(true);
-        listView.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, Outline outline) {
-                outline.setRoundRect(dp(12), actionBar.getBottom() + dp(12), view.getWidth() - dp(12), view.getMeasuredHeight() + dp(16), dp(16));
-            }
-        });
-        listView.setClipToPadding(false);
-        listView.setLayoutManager(layoutManager = new FillLastLinearLayoutManager(context, dp(68) + statusBarHeight - dp(16), listView));
-        layoutManager.setFixedLastItemHeight();
-        listView.setAdapter(new Adapter());
-        listView.setOnItemClickListener((view, position) -> {
-            if (position < featuresStartRow || position >= featuresEndRow) {
-                return;
-            }
-            int index = position - featuresStartRow;
-            if (index < 0 || index >= premiumFeatures.size()) {
-                return;
-            }
-            openFeature(premiumFeatures.get(index).type);
-        });
-        listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
-                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    int maxTop = actionBar.getBottom() + dp(16);
-                    if (totalProgress > 0.5f) {
-                        listView.smoothScrollBy(0, currentYOffset - maxTop);
-                    } else {
-                        View firstView = listView.getLayoutManager() != null ? listView.getLayoutManager().findViewByPosition(0) : null;
-                        if (firstView != null && firstView.getTop() < 0) {
-                            listView.smoothScrollBy(0, firstView.getTop());
-                        }
-                    }
-                }
-            }
-
-            @Override
-            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                contentView.invalidate();
-            }
-        });
-
-        backgroundView = new BackgroundView(context);
-        particlePaints = MglaPremiumStarHelper.createPaints();
-        particlesView = MglaPremiumStarHelper.create(context, 80, selectedPlanIndex, particlePaints);
-        particlesView.setClipWithGradient();
-
-        contentView.addView(particlesView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        contentView.addView(backgroundView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        contentView.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL, 0, 0, 0, -48));
-
-        premiumButtonView = new PremiumButtonView(context, dp(14), false, getResourceProvider()) {
-            @Override
-            protected void dispatchDraw(Canvas canvas) {
-                // Flat solid fill — no gradient rim / highlight frames on the edges.
-                AndroidUtilities.rectTmp.set(0, 0, getMeasuredWidth(), getMeasuredHeight());
-                accentButtonPaint.setShader(null);
-                accentButtonPaint.setColor(accent.mid);
-                canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(14), dp(14), accentButtonPaint);
-
-                drawGradient = false;
-                for (int i = 0; i < getChildCount(); i++) {
-                    drawChild(canvas, getChildAt(i), getDrawingTime());
-                }
-            }
-        };
-        premiumButtonView.buttonTextView.setTextColor(accent.onAccent);
-        buttonContainer = new FrameLayout(context) {
-            @Override
-            protected void dispatchDraw(@NonNull Canvas canvas) {
-                Paint fade = new Paint(Paint.ANTI_ALIAS_FLAG);
-                fade.setShader(new LinearGradient(0, 0, 0, getMeasuredHeight(),
-                        new int[]{0x00000000, 0xE6000000, 0xFF000000},
-                        new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
-                canvas.drawRect(0, 0, getWidth(), getHeight(), fade);
-                super.dispatchDraw(canvas);
-            }
-        };
-        buttonContainer.setPadding(dp(16), dp(20), dp(16), dp(16));
-        buttonContainer.setWillNotDraw(false);
-        buttonContainer.addView(premiumButtonView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 50));
-        ScaleStateListAnimator.apply(premiumButtonView, 0.02f, 1.5f);
-        contentView.addView(buttonContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
 
         actionBar.setBackground(null);
         actionBar.setCastShadows(false);
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAddToContainer(false);
-        actionBar.setForceSkipTouches(true);
+        actionBar.setItemsColor(COLOR_TEXT, false);
+        actionBar.setItemsBackgroundColor(0x33FFFFFF, false);
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -386,13 +150,12 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 }
             }
         });
-        contentView.addView(actionBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-        updateColors();
-        updateRows();
+        hubLayout = new PremiumHubLayout(context);
+        fragmentView = hubLayout;
+        updateAccentSurfaces(false);
         updateButtonText(false);
-
-        fragmentView = contentView;
+        AndroidUtilities.runOnUIThread(this::playEntrance, 40);
         return fragmentView;
     }
 
@@ -413,25 +176,17 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     @Override
     public void onResume() {
         super.onResume();
-        if (premiumButtonView != null) {
-            updateButtonText(false);
-        }
-        if (listView != null && listView.getAdapter() != null) {
-            listView.getAdapter().notifyDataSetChanged();
-        }
-        if (backgroundView != null && backgroundView.subtitleView != null) {
-            int active = activePlan();
-            if (active >= PLAN_PREMIUM) {
-                String until = MglaPremiumController.formatExpiresLabel(currentUserId());
-                backgroundView.subtitleView.setText(TextUtils.isEmpty(until)
-                        ? "На этом аккаунте активен " + MglaPremiumController.planTitle(active) + "."
-                        : "На этом аккаунте активен " + MglaPremiumController.planTitle(active)
-                                + " · " + until + ".");
-            }
+        updateSubtitle();
+        updateButtonText(false);
+        refreshPlanCards();
+    }
+
+    private void playEntrance() {
+        if (hubLayout != null) {
+            hubLayout.playEntrance();
         }
     }
 
-    /** Подписка текущего аккаунта (по user id), не всего клиента. */
     private long currentUserId() {
         return getUserConfig().getClientUserId();
     }
@@ -440,63 +195,303 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         return MglaPremiumController.getPlanForAccount(currentAccount);
     }
 
-    private void applyAccentForPlan(int plan) {
-        accent = PlanPalette.forPlan(plan);
-        iconShader = new LinearGradient(
-                0, 0, 0, 100,
-                new int[]{accent.light, accent.mid, accent.deep, accent.dark},
-                new float[]{0f, 0.35f, 0.7f, 1f},
-                Shader.TileMode.CLAMP
-        );
-        accentIconPaint.setShader(iconShader);
-        accentStrokePaint.setColor(ColorUtils.setAlphaComponent(accent.light, 90));
-        rebuildButtonShader();
-        if (premiumButtonView != null && premiumButtonView.buttonTextView != null) {
-            premiumButtonView.buttonTextView.setTextColor(accent.onAccent);
+    private static int logoResForPlan(int plan) {
+        if (plan == PLAN_PLUS) {
+            return R.drawable.mgla_premium_logo_red;
         }
-        MglaPremiumStarHelper.applyPlan(particlesView, particlePaints, plan);
-        updateColors();
+        if (plan == PLAN_PREMIUM) {
+            return R.drawable.mgla_premium_logo_blue;
+        }
+        return R.drawable.mgla_premium_logo;
+    }
+
+    private void fillFeaturesForPlan(int plan) {
+        features.clear();
+        features.add(new FeatureItem(FEATURE_ANIMATIONS, R.drawable.menu_premium_effects,
+                "Новые анимации", "Очень много крутых новых анимаций интерфейса"));
+        features.add(new FeatureItem(FEATURE_TASKS, R.drawable.msg_premium_liststar,
+                "Планировщик задач", "Удобный список задач прямо в приложении"));
+        features.add(new FeatureItem(FEATURE_TASKS_SYNC, R.drawable.msg_retry,
+                "Синхронизация задач", "Задачи этого аккаунта синхронизируются между устройствами"));
+        features.add(new FeatureItem(FEATURE_LOCAL_MODELS, R.drawable.premium_ai_editor,
+                "Локальные модели", "Используйте локальные ИИ-модели на устройстве"));
+        features.add(new FeatureItem(FEATURE_MEMORY, R.drawable.msg_premium_voice,
+                "Живая память", "Персональная память ассистента"));
+        features.add(new FeatureItem(FEATURE_ICON_THEMES, R.drawable.msg_premium_icons,
+                "Темы для иконок", "Специальные темы под новый тип иконок"));
+        features.add(new FeatureItem(FEATURE_AUTO_TRANSLATE, R.drawable.msg_premium_translate,
+                "Автоперевод", "Автоматический перевод сообщений и чатов"));
+        if (plan >= PLAN_PLUS) {
+            features.add(new FeatureItem(FEATURE_CLOUD_AI, R.drawable.premium_ai_editor,
+                    "Облачные ИИ-модели", "Более умные облачные модели"));
+        }
+        if (plan >= PLAN_ULTRA) {
+            features.add(new FeatureItem(FEATURE_ULTRA_AI, R.drawable.premium_ai_editor,
+                    "Продвинутые ИИ-модели", "Ещё более умные и дорогие облачные модели"));
+            features.add(new FeatureItem(FEATURE_PRIORITY_BYPASS, R.drawable.msg_premium_speed,
+                    "Приоритет подключения", "Приоритет и увеличенная скорость скачивания"));
+        }
+    }
+
+    private void updateSubtitle() {
+        if (subtitleView == null) {
+            return;
+        }
+        int active = activePlan();
+        if (active >= PLAN_PREMIUM) {
+            String until = MglaPremiumController.formatExpiresLabel(currentUserId());
+            subtitleView.setText(TextUtils.isEmpty(until)
+                    ? "На этом аккаунте активен " + MglaPremiumController.planTitle(active)
+                    : "Активен " + MglaPremiumController.planTitle(active) + " · " + until);
+        } else {
+            subtitleView.setText("Эксклюзивные возможности. Выберите свой уровень.");
+        }
+    }
+
+    private void updateHint() {
+        if (hintView == null || selectedPlanIndex < 0 || selectedPlanIndex >= plans.size()) {
+            return;
+        }
+        PlanData plan = plans.get(selectedPlanIndex);
+        int active = activePlan();
+        if (active == selectedPlanIndex) {
+            String until = MglaPremiumController.formatExpiresLabel(currentUserId());
+            hintView.setText(TextUtils.isEmpty(until)
+                    ? "На этом аккаунте активен " + plan.title + ". На других аккаунтах подписка не действует."
+                    : "На этом аккаунте активен " + plan.title + " " + until
+                            + ". На других аккаунтах подписка не действует.");
+        } else if (plan.id == PLAN_PREMIUM) {
+            hintView.setText("Premium: анимации, задачи с синхронизацией, локальные модели, живая память, темы иконок и автоперевод.");
+        } else if (plan.id == PLAN_PLUS) {
+            hintView.setText("Premium+ включает всё из Premium и добавляет умные облачные ИИ-модели.");
+        } else {
+            hintView.setText("Ultra включает всё из Premium и Premium+, плюс продвинутые модели и приоритет подключения.");
+        }
+    }
+
+    private void selectPlan(int index, boolean animated) {
+        if (index < 0 || index >= plans.size() || selectedPlanIndex == index) {
+            return;
+        }
+        final int from = selectedPlanIndex;
+        final int to = index;
+        selectedPlanIndex = to;
+        fillFeaturesForPlan(to);
+
+        if (!animated) {
+            accent = PlanPalette.forPlan(to);
+            updateAccentSurfaces(false);
+            rebuildFeatures();
+            refreshPlanCards();
+            updateButtonText(false);
+            updateHint();
+            return;
+        }
+
+        if (planSwitchAnimator != null) {
+            planSwitchAnimator.cancel();
+        }
+        final PlanPalette fromPal = PlanPalette.forPlan(from);
+        final PlanPalette toPal = PlanPalette.forPlan(to);
+        final ArgbEvaluator eval = new ArgbEvaluator();
+        final boolean[] mid = {false};
+
+        planSwitchAnimator = ValueAnimator.ofFloat(0f, 1f);
+        planSwitchAnimator.setDuration(340);
+        planSwitchAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        planSwitchAnimator.addUpdateListener(a -> {
+            float t = (float) a.getAnimatedValue();
+            accent = new PlanPalette(
+                    (int) eval.evaluate(t, fromPal.light, toPal.light),
+                    (int) eval.evaluate(t, fromPal.mid, toPal.mid),
+                    (int) eval.evaluate(t, fromPal.deep, toPal.deep),
+                    (int) eval.evaluate(t, fromPal.dark, toPal.dark),
+                    (int) eval.evaluate(t, fromPal.onAccent, toPal.onAccent)
+            );
+            updateAccentSurfaces(true);
+            if (featuresCard != null) {
+                float alpha = t < 0.45f ? 1f - t / 0.45f : (t - 0.45f) / 0.55f;
+                featuresCard.setAlpha(Math.max(0f, Math.min(1f, alpha)));
+            }
+            if (!mid[0] && t >= 0.45f) {
+                mid[0] = true;
+                if (logoView != null) {
+                    logoView.setImageResource(logoResForPlan(to));
+                }
+                rebuildFeatures();
+                refreshPlanCards();
+                updateButtonText(true);
+                updateHint();
+            }
+        });
+        planSwitchAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                accent = PlanPalette.forPlan(to);
+                updateAccentSurfaces(false);
+                if (!mid[0]) {
+                    if (logoView != null) {
+                        logoView.setImageResource(logoResForPlan(to));
+                    }
+                    rebuildFeatures();
+                    refreshPlanCards();
+                    updateButtonText(true);
+                    updateHint();
+                }
+                if (featuresCard != null) {
+                    featuresCard.setAlpha(1f);
+                }
+                planSwitchAnimator = null;
+            }
+        });
+        planSwitchAnimator.start();
+        refreshPlanCards();
+    }
+
+    private void updateAccentSurfaces(boolean duringAnim) {
+        if (rootGradient != null) {
+            rootGradient.setColors(new int[]{accent.dark, accent.deep, accent.mid});
+        }
+        if (hubLayout != null) {
+            hubLayout.invalidate();
+        }
+        if (titleView != null) {
+            titleView.setTextColor(COLOR_TEXT);
+        }
+        if (subtitleView != null) {
+            subtitleView.setTextColor(ColorUtils.setAlphaComponent(COLOR_TEXT, 200));
+        }
         if (premiumButtonView != null) {
+            premiumButtonView.buttonTextView.setTextColor(accent.onAccent);
             premiumButtonView.invalidate();
         }
+        actionBar.setItemsColor(COLOR_TEXT, false);
+        if (!duringAnim) {
+            for (PlanCardView card : planCards) {
+                card.invalidate();
+            }
+        }
     }
 
-    private void rebuildButtonShader() {
-        int w = Math.max(buttonWidth, AndroidUtilities.displaySize.x);
-        buttonShader = new LinearGradient(0, 0, w, 0,
-                new int[]{accent.dark, accent.mid, accent.light, accent.mid},
-                new float[]{0f, 0.35f, 0.65f, 1f},
-                Shader.TileMode.CLAMP);
-        accentButtonPaint.setShader(buttonShader);
+    private void refreshPlanCards() {
+        for (int i = 0; i < planCards.size(); i++) {
+            planCards.get(i).setSelected(i == selectedPlanIndex, true);
+        }
     }
 
-    /** Open the settings / tab that corresponds to a premium feature row. */
+    private void rebuildFeatures() {
+        if (featuresCard == null) {
+            return;
+        }
+        featuresCard.removeAllViews();
+        Context context = featuresCard.getContext();
+        for (int i = 0; i < features.size(); i++) {
+            FeatureItem item = features.get(i);
+            if (i > 0) {
+                View div = new View(context);
+                div.setBackgroundColor(COLOR_DIVIDER);
+                featuresCard.addView(div, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 56, 0, 0, 0));
+            }
+            featuresCard.addView(createFeatureRow(context, item),
+                    LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        }
+        MglaUi.attachPressSpringRecursive(featuresCard);
+    }
+
+    private View createFeatureRow(Context context, FeatureItem item) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setOnClickListener(v -> openFeature(item.type));
+        ScaleStateListAnimator.apply(row, 0.02f, 1.5f);
+
+        FrameLayout iconWrap = new FrameLayout(context);
+        GradientDrawable iconBg = new GradientDrawable();
+        iconBg.setCornerRadius(dp(12));
+        iconBg.setColor(ColorUtils.setAlphaComponent(accent.mid, 55));
+        iconWrap.setBackground(iconBg);
+
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(item.icon);
+        icon.setColorFilter(new PorterDuffColorFilter(accent.light, PorterDuff.Mode.SRC_IN));
+        iconWrap.addView(icon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
+        row.addView(iconWrap, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL, 0, 0, 12, 0));
+
+        LinearLayout texts = new LinearLayout(context);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(context);
+        title.setText(item.title);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        title.setTypeface(AndroidUtilities.bold());
+        title.setTextColor(COLOR_TEXT);
+        texts.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        TextView desc = new TextView(context);
+        desc.setText(item.description);
+        desc.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        desc.setTextColor(0xFF9AA0A6);
+        desc.setPadding(0, dp(2), 0, 0);
+        texts.addView(desc, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        row.addView(texts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.CENTER_VERTICAL));
+
+        ImageView arrow = new ImageView(context);
+        arrow.setImageResource(R.drawable.msg_arrowright);
+        arrow.setColorFilter(new PorterDuffColorFilter(0xFF6B7078, PorterDuff.Mode.SRC_IN));
+        row.addView(arrow, LayoutHelper.createLinear(18, 18, Gravity.CENTER_VERTICAL, 8, 0, 0, 0));
+        return row;
+    }
+
+    private void updateButtonText(boolean animated) {
+        if (premiumButtonView == null || selectedPlanIndex < 0 || selectedPlanIndex >= plans.size()) {
+            return;
+        }
+        final int active = activePlan();
+        final long userId = currentUserId();
+        final PlanData plan = plans.get(selectedPlanIndex);
+
+        if (active == selectedPlanIndex) {
+            String until = MglaPremiumController.formatExpiresLabel(userId);
+            String text = TextUtils.isEmpty(until) ? "Ваш текущий план" : plan.title + " · " + until;
+            premiumButtonView.setButton(text, v -> {
+                String msg = TextUtils.isEmpty(until)
+                        ? "Подписка активна на этом аккаунте"
+                        : "Активен до " + MglaSubscription.formatExpiresAt(
+                        MglaPremiumController.getExpiresAt(userId));
+                BulletinFactory.of(this).createSimpleBulletin(R.raw.contact_check, msg).show();
+            }, animated);
+            return;
+        }
+        if (active > selectedPlanIndex) {
+            premiumButtonView.setButton("У вас " + MglaPremiumController.planTitle(active),
+                    v -> selectPlan(active, true), animated);
+            return;
+        }
+        premiumButtonView.setButton("Оплатить · " + plan.priceRub + " ₽/мес",
+                v -> openAdminChatForPlan(plan), animated);
+    }
+
     private void openFeature(int type) {
         switch (type) {
             case FEATURE_ANIMATIONS:
                 presentFragment(MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON));
                 break;
             case FEATURE_TASKS:
+            case FEATURE_TASKS_SYNC:
                 openMainTab(MglaMainTabsConfig.TabId.TASKS);
                 break;
             case FEATURE_LOCAL_MODELS:
-                presentFragment(new MglaLocalModelsActivity());
+            case FEATURE_CLOUD_AI:
+            case FEATURE_ULTRA_AI:
+                presentFragment(new MglaAiSettingsActivity());
                 break;
             case FEATURE_MEMORY:
                 presentFragment(new MglaMemoryActivity());
                 break;
             case FEATURE_ICON_THEMES:
-                presentFragment(new ThemeActivity(ThemeActivity.THEME_TYPE_BASIC));
+                presentFragment(new MglaAppearanceSettingsActivity());
                 break;
             case FEATURE_AUTO_TRANSLATE:
                 presentFragment(new MglaChatsSettingsActivity());
-                break;
-            case FEATURE_CLOUD_AI:
-            case FEATURE_ULTRA_AI:
-                openMainTab(MglaMainTabsConfig.TabId.AI);
-                break;
-            case FEATURE_TASKS_SYNC:
-                openMainTab(MglaMainTabsConfig.TabId.TASKS);
                 break;
             case FEATURE_PRIORITY_BYPASS:
                 presentFragment(new MglaDpiBypassActivity());
@@ -516,268 +511,14 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         });
     }
 
-    private void fillFeaturesForPlan(int plan) {
-        premiumFeatures.clear();
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_ANIMATIONS, R.drawable.menu_premium_effects,
-                "Новые анимации",
-                "Очень много крутых новых анимаций интерфейса"
-        ));
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_TASKS, R.drawable.msg_premium_liststar,
-                "Планировщик задач",
-                "Удобный список задач прямо в приложении"
-        ));
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_TASKS_SYNC, R.drawable.msg_retry,
-                "Синхронизация задач на разных устройствах",
-                "Задачи этого аккаунта синхронизируются через сервер между устройствами"
-        ));
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_LOCAL_MODELS, R.drawable.premium_ai_editor,
-                "Локальные модели",
-                "Используйте локальные ИИ-модели на устройстве"
-        ));
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_MEMORY, R.drawable.msg_premium_voice,
-                "Живая память",
-                "Персональная память ассистента, которая растёт вместе с вами"
-        ));
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_ICON_THEMES, R.drawable.msg_premium_icons,
-                "Темы для новых иконок",
-                "Специально созданные темы под все иконки нового типа"
-        ));
-        premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                FEATURE_AUTO_TRANSLATE, R.drawable.msg_premium_translate,
-                "Автоперевод",
-                "Автоматический перевод сообщений и чатов"
-        ));
-
-        if (plan >= PLAN_PLUS) {
-            premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                    FEATURE_CLOUD_AI, R.drawable.premium_ai_editor,
-                    "Облачные ИИ-модели",
-                    "Более умные облачные модели в дополнение к локальным"
-            ));
-        }
-        if (plan >= PLAN_ULTRA) {
-            premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                    FEATURE_ULTRA_AI, R.drawable.premium_ai_editor,
-                    "Продвинутые ИИ-модели",
-                    "Ещё более умные и дорогие облачные модели"
-            ));
-            premiumFeatures.add(new PremiumPreviewFragment.PremiumFeatureData(
-                    FEATURE_PRIORITY_BYPASS, R.drawable.msg_premium_speed,
-                    "Приоритет подключения и увеличенная скорость скачивания",
-                    "Приоритет подключения и увеличенная скорость скачивания"
-            ));
-        }
-    }
-
-    private void updateRows() {
-        rowCount = 0;
-        paddingRow = rowCount++;
-        featuresStartRow = rowCount;
-        rowCount += premiumFeatures.size();
-        featuresEndRow = rowCount;
-        statusRow = rowCount++;
-        lastPaddingRow = rowCount++;
-    }
-
-    private void measureGradient(int w, int h) {
-        int yOffset = 0;
-        for (int i = 0; i < premiumFeatures.size(); i++) {
-            dummyCell.setData(premiumFeatures.get(i), false);
-            dummyCell.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.AT_MOST));
-            premiumFeatures.get(i).yOffset = yOffset;
-            yOffset += dummyCell.getMeasuredHeight();
-        }
-        totalGradientHeight = Math.max(1, yOffset);
-    }
-
-    private static int logoResForPlan(int plan) {
-        if (plan == PLAN_PLUS) {
-            return R.drawable.mgla_premium_logo_red;
-        }
-        if (plan == PLAN_PREMIUM) {
-            return R.drawable.mgla_premium_logo_blue;
-        }
-        return R.drawable.mgla_premium_logo;
-    }
-
-    @SuppressLint("NotifyDataSetChanged")
-    private void selectPlan(int index, boolean animated) {
-        if (index < 0 || index >= plans.size() || selectedPlanIndex == index) {
-            return;
-        }
-        final int fromPlan = selectedPlanIndex;
-        final int toPlan = index;
-        selectedPlanIndex = toPlan;
-
-        if (!animated || backgroundView == null) {
-            applyAccentForPlan(toPlan);
-            fillFeaturesForPlan(toPlan);
-            updateRows();
-            updateButtonText(false);
-            if (backgroundView != null) {
-                backgroundView.setLogo(toPlan, false);
-                backgroundView.updateTabs(false);
-            }
-            if (listView != null && listView.getAdapter() != null) {
-                listView.getAdapter().notifyDataSetChanged();
-            }
-            if (contentView != null) {
-                contentView.requestLayout();
-            }
-            return;
-        }
-
-        if (planSwitchAnimator != null) {
-            planSwitchAnimator.cancel();
-        }
-
-        final PlanPalette from = PlanPalette.forPlan(fromPlan);
-        final PlanPalette to = PlanPalette.forPlan(toPlan);
-        final ArgbEvaluator eval = new ArgbEvaluator();
-
-        // Mid-switch: swap feature list + logo while content is faded.
-        final boolean[] midApplied = {false};
-
-        backgroundView.updateTabs(true);
-        backgroundView.setLogo(toPlan, true);
-
-        planSwitchAnimator = ValueAnimator.ofFloat(0f, 1f);
-        planSwitchAnimator.setDuration(320);
-        planSwitchAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-        planSwitchAnimator.addUpdateListener(a -> {
-            float t = (float) a.getAnimatedValue();
-            // Blend accent paints live so icon chips / button / action bar morph.
-            accent = new PlanPalette(
-                    (int) eval.evaluate(t, from.light, to.light),
-                    (int) eval.evaluate(t, from.mid, to.mid),
-                    (int) eval.evaluate(t, from.deep, to.deep),
-                    (int) eval.evaluate(t, from.dark, to.dark),
-                    (int) eval.evaluate(t, from.onAccent, to.onAccent),
-                    (int) eval.evaluate(t, from.textSecondary, to.textSecondary)
-            );
-            iconShader = new LinearGradient(
-                    0, 0, 0, 100,
-                    new int[]{accent.light, accent.mid, accent.deep, accent.dark},
-                    new float[]{0f, 0.35f, 0.7f, 1f},
-                    Shader.TileMode.CLAMP
-            );
-            accentIconPaint.setShader(iconShader);
-            accentStrokePaint.setColor(ColorUtils.setAlphaComponent(accent.light, 90));
-            rebuildButtonShader();
-            if (premiumButtonView != null && premiumButtonView.buttonTextView != null) {
-                premiumButtonView.buttonTextView.setTextColor(accent.onAccent);
-            }
-            updateColors();
-            if (listView != null) {
-                // Fade list out then in around the data swap.
-                float listAlpha = t < 0.45f ? 1f - t / 0.45f : (t - 0.45f) / 0.55f;
-                listView.setAlpha(Utilities.clamp(listAlpha, 1f, 0f));
-                listView.invalidate();
-            }
-            if (premiumButtonView != null) {
-                premiumButtonView.invalidate();
-            }
-            if (contentView != null) {
-                contentView.invalidate();
-            }
-
-            if (!midApplied[0] && t >= 0.45f) {
-                midApplied[0] = true;
-                applyAccentForPlan(toPlan);
-                fillFeaturesForPlan(toPlan);
-                updateRows();
-                updateButtonText(true);
-                if (listView != null && listView.getAdapter() != null) {
-                    listView.getAdapter().notifyDataSetChanged();
-                }
-                if (contentView != null) {
-                    contentView.requestLayout();
-                }
-            }
-        });
-        planSwitchAnimator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                if (!midApplied[0]) {
-                    applyAccentForPlan(toPlan);
-                    fillFeaturesForPlan(toPlan);
-                    updateRows();
-                    updateButtonText(true);
-                    if (listView != null && listView.getAdapter() != null) {
-                        listView.getAdapter().notifyDataSetChanged();
-                    }
-                }
-                if (listView != null) {
-                    listView.setAlpha(1f);
-                }
-                planSwitchAnimator = null;
-            }
-
-            @Override
-            public void onAnimationCancel(Animator animation) {
-                if (listView != null) {
-                    listView.setAlpha(1f);
-                }
-                planSwitchAnimator = null;
-            }
-        });
-        planSwitchAnimator.start();
-    }
-
-    private void updateButtonText(boolean animated) {
-        if (premiumButtonView == null || selectedPlanIndex < 0 || selectedPlanIndex >= plans.size()) {
-            return;
-        }
-        final int active = activePlan();
-        final long userId = currentUserId();
-        final PlanData plan = plans.get(selectedPlanIndex);
-
-        if (active == selectedPlanIndex) {
-            String until = MglaPremiumController.formatExpiresLabel(userId);
-            String text = TextUtils.isEmpty(until)
-                    ? "Ваш текущий план"
-                    : plan.title + " · " + until;
-            premiumButtonView.setButton(text, v -> {
-                String msg = TextUtils.isEmpty(until)
-                        ? "Подписка активна на этом аккаунте"
-                        : "Активен до " + MglaSubscription.formatExpiresAt(
-                                MglaPremiumController.getExpiresAt(userId));
-                BulletinFactory.of(this)
-                        .createSimpleBulletin(R.raw.contact_check, msg)
-                        .show();
-            }, animated);
-            return;
-        }
-
-        if (active > selectedPlanIndex) {
-            premiumButtonView.setButton("У вас " + MglaPremiumController.planTitle(active), v -> {
-                selectPlan(active, true);
-            }, animated);
-            return;
-        }
-
-        String text = "Оплатить · " + plan.priceRub + " ₽/мес";
-        premiumButtonView.setButton(text, v -> openAdminChatForPlan(plan), animated);
-    }
-
-    private static final String ADMIN_USERNAME = "mgla_admin";
-
-    /** Opens chat with @mgla_admin and pre-fills the purchase request for the selected plan tab. */
     private void openAdminChatForPlan(PlanData plan) {
         if (getParentActivity() == null || plan == null) {
             return;
         }
         final String draft = "Привет! Хочу купить подписку тарифа " + plan.tabTitle;
-        final String username = ADMIN_USERNAME;
         try {
             TLRPC.User cached = null;
-            TLObject obj = getMessagesController().getUserOrChat(username);
+            TLObject obj = getMessagesController().getUserOrChat(ADMIN_USERNAME);
             if (obj instanceof TLRPC.User && !((TLRPC.User) obj).min) {
                 cached = (TLRPC.User) obj;
             }
@@ -789,7 +530,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                     new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER)
             };
             boolean[] canceled = new boolean[]{false};
-            getMessagesController().getUserNameResolver().resolve(username, peerId -> {
+            getMessagesController().getUserNameResolver().resolve(ADMIN_USERNAME, peerId -> {
                 try {
                     if (progressDialog[0] != null) {
                         progressDialog[0].dismiss();
@@ -808,7 +549,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                         return;
                     }
                 }
-                Browser.openUrl(getParentActivity(), "https://t.me/" + username);
+                Browser.openUrl(getParentActivity(), "https://t.me/" + ADMIN_USERNAME);
             });
             AndroidUtilities.runOnUIThread(() -> {
                 if (progressDialog[0] == null || getParentActivity() == null) {
@@ -819,7 +560,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             }, 400);
         } catch (Throwable e) {
             FileLog.e(e);
-            Browser.openUrl(getParentActivity(), "https://t.me/" + username);
+            Browser.openUrl(getParentActivity(), "https://t.me/" + ADMIN_USERNAME);
         }
     }
 
@@ -836,363 +577,342 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         presentFragment(new ChatActivity(args));
     }
 
-    private void updateColors() {
-        if (backgroundView == null || actionBar == null) {
-            return;
-        }
-        actionBar.setItemsColor(accent.light, true);
-        actionBar.setItemsColor(accent.light, false);
-        actionBar.setItemsBackgroundColor(ColorUtils.setAlphaComponent(accent.mid, 40), false);
-        backgroundView.titleView.setTextColor(accent.light);
-        backgroundView.subtitleView.setTextColor(accent.textSecondary);
-    }
+    // ── Hub shell ──────────────────────────────────────────────────────────
 
-    private class Adapter extends RecyclerListView.SelectionAdapter {
-        private static final int TYPE_PADDING = 0;
-        private static final int TYPE_FEATURE = 1;
-        private static final int TYPE_SHADOW = 2;
-        private static final int TYPE_BOTTOM_PADDING = 3;
+    @SuppressLint("ClickableViewAccessibility")
+    private class PremiumHubLayout extends FrameLayout {
 
-        @NonNull
-        @Override
-        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            View view;
-            Context context = parent.getContext();
-            switch (viewType) {
-                default:
-                case TYPE_PADDING:
-                    view = new View(context) {
-                        @Override
-                        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                            if (isLandscapeMode) {
-                                firstViewHeight = 0;
-                            } else {
-                                int h = dp(80 - 16);
-                                if (backgroundView.getMeasuredHeight() + dp(24 - 16) > h) {
-                                    h = backgroundView.getMeasuredHeight() + dp(24 - 16);
-                                }
-                                firstViewHeight = h;
-                            }
-                            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(firstViewHeight, MeasureSpec.EXACTLY));
-                        }
-                    };
-                    break;
-                case TYPE_FEATURE:
-                    view = new PremiumFeatureCell(context) {
-                        private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                        private final Paint framePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final FrameLayout sheet;
+        private final NestedScrollView scrollView;
+        private final LinearLayout content;
+        private final View[] stagger = new View[20];
+        private int staggerCount;
+        private boolean entrancePlaying;
 
-                        {
-                            cardPaint.setColor(COLOR_CARD);
-                            framePaint.setStyle(Paint.Style.STROKE);
-                            framePaint.setStrokeWidth(dp(1));
-                            // Icon vertically centered; more inset from the left card edge.
-                            FrameLayout.LayoutParams iconLp = (FrameLayout.LayoutParams) imageView.getLayoutParams();
-                            iconLp.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
-                            iconLp.leftMargin = dp(30);
-                            iconLp.topMargin = 0;
-                            iconLp.bottomMargin = 0;
-                            imageView.setLayoutParams(iconLp);
-                            View textCol = getChildAt(0);
-                            if (textCol != null) {
-                                FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) textCol.getLayoutParams();
-                                textLp.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
-                                textLp.leftMargin = dp(78);
-                                textLp.topMargin = dp(10);
-                                textLp.bottomMargin = dp(10);
-                                textLp.rightMargin = dp(44);
-                                textCol.setLayoutParams(textLp);
-                            }
-                            FrameLayout.LayoutParams arrowLp = (FrameLayout.LayoutParams) nextIcon.getLayoutParams();
-                            arrowLp.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
-                            arrowLp.rightMargin = dp(28);
-                            nextIcon.setLayoutParams(arrowLp);
-                        }
-
-                        @Override
-                        protected void dispatchDraw(Canvas canvas) {
-                            // Every feature is its own framed card (no first/last-only border).
-                            final float cardR = dp(16);
-                            Path path = new Path();
-                            AndroidUtilities.rectTmp.set(dp(16), dp(4), getWidth() - dp(16), getHeight() - dp(4));
-                            path.addRoundRect(AndroidUtilities.rectTmp, cardR, cardR, Path.Direction.CW);
-                            canvas.drawPath(path, cardPaint);
-                            framePaint.setColor(accent.stroke);
-                            canvas.drawPath(path, framePaint);
-
-                            final float r = dp(10);
-                            AndroidUtilities.rectTmp.set(imageView.getLeft(), imageView.getTop(), imageView.getRight(), imageView.getBottom());
-                            matrix.reset();
-                            matrix.postScale(1f, totalGradientHeight / 100f, 0, 0);
-                            matrix.postTranslate(0, -data.yOffset);
-                            if (iconShader instanceof LinearGradient) {
-                                iconShader.setLocalMatrix(matrix);
-                            }
-                            canvas.drawRoundRect(AndroidUtilities.rectTmp, r, r, accentIconPaint);
-                            canvas.drawRoundRect(AndroidUtilities.rectTmp, r, r, accentStrokePaint);
-
-                            super.dispatchDraw(canvas);
-                        }
-                    };
-                    break;
-                case TYPE_SHADOW:
-                    view = new TextInfoPrivacyCell(context);
-                    break;
-                case TYPE_BOTTOM_PADDING:
-                    view = new View(context);
-                    break;
-            }
-            view.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            return new RecyclerListView.Holder(view);
-        }
-
-        @Override
-        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            if (position >= featuresStartRow && position < featuresEndRow) {
-                PremiumFeatureCell cell = (PremiumFeatureCell) holder.itemView;
-                cell.setData(premiumFeatures.get(position - featuresStartRow), false);
-                cell.nextIcon.setVisibility(View.VISIBLE);
-                cell.nextIcon.setColorFilter(new PorterDuffColorFilter(accent.textSecondary, PorterDuff.Mode.SRC_IN));
-                cell.setBackgroundColor(Color.TRANSPARENT);
-                cell.title.setTextColor(COLOR_TEXT);
-                cell.description.setTextColor(accent.textSecondary);
-            } else if (position == statusRow) {
-                TextInfoPrivacyCell privacyCell = (TextInfoPrivacyCell) holder.itemView;
-                privacyCell.setTextColor(accent.textSecondary);
-                privacyCell.setFixedSize(0);
-                privacyCell.setBackground(null);
-                PlanData plan = plans.get(selectedPlanIndex);
-                int active = activePlan();
-                String hint;
-                if (active == selectedPlanIndex) {
-                    String until = MglaPremiumController.formatExpiresLabel(currentUserId());
-                    hint = TextUtils.isEmpty(until)
-                            ? "На этом аккаунте активен " + plan.title + ". На других аккаунтах подписка не действует."
-                            : "На этом аккаунте активен " + plan.title + " " + until
-                                    + ". На других аккаунтах подписка не действует.";
-                } else if (plan.id == PLAN_PREMIUM) {
-                    hint = "Premium: анимации, задачи с синхронизацией между устройствами, локальные модели, живая память, темы иконок и автоперевод.";
-                } else if (plan.id == PLAN_PLUS) {
-                    hint = "Premium+ включает всё из Premium и добавляет умные облачные ИИ-модели.";
-                } else {
-                    hint = "Premium Ultra включает всё из Premium и Premium+, плюс продвинутые модели, приоритет подключения и увеличенную скорость скачивания.";
-                }
-                privacyCell.setText(hint);
-            }
-        }
-
-        @Override
-        public int getItemCount() {
-            return rowCount;
-        }
-
-        @Override
-        public int getItemViewType(int position) {
-            if (position == paddingRow) {
-                return TYPE_PADDING;
-            } else if (position >= featuresStartRow && position < featuresEndRow) {
-                return TYPE_FEATURE;
-            } else if (position == statusRow) {
-                return TYPE_SHADOW;
-            } else if (position == lastPaddingRow) {
-                return TYPE_BOTTOM_PADDING;
-            }
-            return TYPE_PADDING;
-        }
-
-        @Override
-        public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == TYPE_FEATURE;
-        }
-    }
-
-    private class BackgroundView extends LinearLayout {
-
-        final TextView titleView;
-        final TextView subtitleView;
-        final FrameLayout logoContainer;
-        final ImageView logoView;
-        final ImageView logoNextView;
-        final LinearLayout tabsRow;
-        final ArrayList<PlanTabView> tabViews = new ArrayList<>();
-
-        public BackgroundView(Context context) {
+        PremiumHubLayout(Context context) {
             super(context);
-            setOrientation(VERTICAL);
-            setClipChildren(false);
+            setWillNotDraw(false);
 
-            logoContainer = new FrameLayout(context);
-            logoContainer.setClipChildren(false);
-            addView(logoContainer, LayoutHelper.createLinear(168, 168, Gravity.CENTER_HORIZONTAL));
+            rootGradient = new GradientDrawable(
+                    GradientDrawable.Orientation.TL_BR,
+                    new int[]{accent.dark, accent.deep, accent.mid}
+            );
+            setBackground(rootGradient);
+
+            headerBrand = buildHeader(context);
+            addView(headerBrand, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+            addView(actionBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+
+            sheet = new FrameLayout(context) {
+                private final Path clipPath = new Path();
+                private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+                {
+                    paint.setColor(COLOR_SHEET);
+                    setOutlineProvider(new ViewOutlineProvider() {
+                        @Override
+                        public void getOutline(View view, Outline outline) {
+                            outline.setRoundRect(0, 0, view.getWidth(), view.getHeight() + dp(28), dp(28));
+                        }
+                    });
+                    setClipToOutline(true);
+                }
+
+                @Override
+                protected void dispatchDraw(Canvas canvas) {
+                    float r = dp(28);
+                    clipPath.rewind();
+                    AndroidUtilities.rectTmp.set(0, 0, getWidth(), getHeight());
+                    clipPath.addRoundRect(AndroidUtilities.rectTmp, r, r, Path.Direction.CW);
+                    canvas.drawPath(clipPath, paint);
+                    super.dispatchDraw(canvas);
+                }
+            };
+
+            View handle = new View(context);
+            GradientDrawable handleBg = new GradientDrawable();
+            handleBg.setColor(COLOR_HANDLE);
+            handleBg.setCornerRadius(dp(2));
+            handle.setBackground(handleBg);
+            sheet.addView(handle, LayoutHelper.createFrame(40, 4, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 10, 0, 0));
+
+            scrollView = new NestedScrollView(context);
+            scrollView.setFillViewport(true);
+            scrollView.setOverScrollMode(OVER_SCROLL_NEVER);
+            content = new LinearLayout(context);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(16), dp(22), dp(16), dp(100));
+            buildSheet(context, content);
+            scrollView.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+            sheet.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL, 0, 18, 0, 0));
+
+            addView(sheet, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.BOTTOM));
+
+            premiumButtonView = new PremiumButtonView(context, dp(14), false, getResourceProvider()) {
+                @Override
+                protected void dispatchDraw(Canvas canvas) {
+                    AndroidUtilities.rectTmp.set(0, 0, getMeasuredWidth(), getMeasuredHeight());
+                    Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    p.setColor(accent.mid);
+                    canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(14), dp(14), p);
+                    drawGradient = false;
+                    for (int i = 0; i < getChildCount(); i++) {
+                        drawChild(canvas, getChildAt(i), getDrawingTime());
+                    }
+                }
+            };
+            premiumButtonView.buttonTextView.setTextColor(accent.onAccent);
+            buttonContainer = new FrameLayout(context) {
+                @Override
+                protected void dispatchDraw(@NonNull Canvas canvas) {
+                    Paint fade = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    fade.setShader(new LinearGradient(0, 0, 0, getMeasuredHeight(),
+                            new int[]{0x00121417, 0xE6121417, COLOR_SHEET},
+                            new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
+                    canvas.drawRect(0, 0, getWidth(), getHeight(), fade);
+                    super.dispatchDraw(canvas);
+                }
+            };
+            buttonContainer.setWillNotDraw(false);
+            buttonContainer.setPadding(dp(16), dp(16), dp(16), dp(16) + AndroidUtilities.navigationBarHeight / 3);
+            buttonContainer.addView(premiumButtonView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 50));
+            ScaleStateListAnimator.apply(premiumButtonView, 0.02f, 1.5f);
+            addView(buttonContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
+        }
+
+        private FrameLayout buildHeader(Context context) {
+            FrameLayout brand = new FrameLayout(context);
+            brand.setPadding(dp(20), AndroidUtilities.statusBarHeight + dp(52), dp(20), dp(20));
+
+            LinearLayout col = new LinearLayout(context);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setGravity(Gravity.CENTER_HORIZONTAL);
 
             logoView = new ImageView(context);
             logoView.setImageResource(logoResForPlan(selectedPlanIndex));
             logoView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            logoView.setAdjustViewBounds(true);
-            logoContainer.addView(logoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            // Second layer for cross-fade when switching Premium / Premium+ / Ultra icons.
-            logoNextView = new ImageView(context);
-            logoNextView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            logoNextView.setAdjustViewBounds(true);
-            logoNextView.setAlpha(0f);
-            logoNextView.setVisibility(View.GONE);
-            logoContainer.addView(logoNextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+            col.addView(logoView, LayoutHelper.createLinear(96, 96, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
 
             titleView = new TextView(context);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24);
-            titleView.setTypeface(AndroidUtilities.bold());
-            titleView.setGravity(Gravity.CENTER_HORIZONTAL);
             titleView.setText("Mgla Premium");
-            titleView.setLetterSpacing(0.04f);
-            addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, Gravity.CENTER_HORIZONTAL, 16, 14, 16, 0));
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
+            titleView.setTypeface(AndroidUtilities.bold());
+            titleView.setTextColor(COLOR_TEXT);
+            titleView.setGravity(Gravity.CENTER);
+            col.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
 
             subtitleView = new TextView(context);
             subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            subtitleView.setGravity(Gravity.CENTER);
             subtitleView.setLineSpacing(dp(2), 1f);
-            subtitleView.setGravity(Gravity.CENTER_HORIZONTAL);
-            int active = activePlan();
-            if (active >= PLAN_PREMIUM) {
-                String until = MglaPremiumController.formatExpiresLabel(currentUserId());
-                subtitleView.setText(TextUtils.isEmpty(until)
-                        ? "На этом аккаунте активен " + MglaPremiumController.planTitle(active) + "."
-                        : "На этом аккаунте активен " + MglaPremiumController.planTitle(active)
-                                + " · " + until + ".");
-            } else {
-                subtitleView.setText("Эксклюзивные возможности Mgla. Выберите свой уровень.");
-            }
-            addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, Gravity.CENTER_HORIZONTAL, 16, 8, 16, 0));
-            subtitleView.getLayoutParams().width = Math.min(
-                    AndroidUtilities.displaySize.x - dp(42),
-                    HintView2.cutInFancyHalf(subtitleView.getText(), subtitleView.getPaint())
-            );
+            updateSubtitle();
+            col.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
-            tabsRow = new LinearLayout(context);
-            tabsRow.setOrientation(LinearLayout.HORIZONTAL);
-            tabsRow.setPadding(dp(12), 0, dp(12), 0);
-            addView(tabsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 52, 0, Gravity.CENTER_HORIZONTAL, 0, 18, 0, 4));
+            brand.addView(col, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+            return brand;
+        }
 
+        private void buildSheet(Context context, LinearLayout root) {
+            TextView plansTitle = sectionTitle(context, "Тарифы");
+            root.addView(plansTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 4, 0, 0, 10));
+            track(plansTitle);
+
+            planCardsRow = new LinearLayout(context);
+            planCardsRow.setOrientation(LinearLayout.HORIZONTAL);
+            planCards.clear();
             for (int i = 0; i < plans.size(); i++) {
                 final int index = i;
-                PlanTabView tab = new PlanTabView(context);
-                tab.bind(plans.get(i));
-                tab.setOnClickListener(v -> selectPlan(index, true));
-                ScaleStateListAnimator.apply(tab, 0.03f, 1.5f);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LayoutHelper.MATCH_PARENT, 1f);
+                PlanCardView card = new PlanCardView(context);
+                card.bind(plans.get(i));
+                card.setSelected(i == selectedPlanIndex, false);
+                card.setOnClickListener(v -> selectPlan(index, true));
+                ScaleStateListAnimator.apply(card, 0.03f, 1.5f);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LayoutHelper.WRAP_CONTENT, 1f);
                 if (i > 0) {
                     lp.leftMargin = dp(8);
                 }
-                tabsRow.addView(tab, lp);
-                tabViews.add(tab);
+                planCardsRow.addView(card, lp);
+                planCards.add(card);
             }
-            updateTabs(false);
+            root.addView(planCardsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 20));
+            track(planCardsRow);
+
+            featuresHeader = sectionTitle(context, "Что входит");
+            root.addView(featuresHeader, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 4, 0, 0, 10));
+            track(featuresHeader);
+
+            featuresCard = createCard(context);
+            rebuildFeatures();
+            root.addView(featuresCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 16));
+            track(featuresCard);
+
+            hintView = new TextView(context);
+            hintView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            hintView.setTextColor(0xFF9AA0A6);
+            hintView.setLineSpacing(dp(2), 1f);
+            updateHint();
+            root.addView(hintView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 0, 8, 8));
+            track(hintView);
         }
 
-        void setLogo(int plan, boolean animated) {
-            final int res = logoResForPlan(plan);
-            if (!animated) {
-                logoView.animate().cancel();
-                logoNextView.animate().cancel();
-                logoView.setImageResource(res);
-                logoView.setAlpha(1f);
-                logoView.setScaleX(1f);
-                logoView.setScaleY(1f);
-                logoNextView.setVisibility(View.GONE);
-                logoNextView.setAlpha(0f);
-                return;
-            }
-            logoNextView.setImageResource(res);
-            logoNextView.setVisibility(View.VISIBLE);
-            logoNextView.setAlpha(0f);
-            logoNextView.setScaleX(0.82f);
-            logoNextView.setScaleY(0.82f);
-            logoView.animate().cancel();
-            logoNextView.animate().cancel();
-            logoView.animate()
-                    .alpha(0f)
-                    .scaleX(0.82f)
-                    .scaleY(0.82f)
-                    .setDuration(180)
-                    .setInterpolator(CubicBezierInterpolator.EASE_OUT)
-                    .start();
-            logoNextView.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(280)
-                    .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
-                    .setListener(new AnimatorListenerAdapter() {
-                        @Override
-                        public void onAnimationEnd(Animator animation) {
-                            logoView.setImageResource(res);
-                            logoView.setAlpha(1f);
-                            logoView.setScaleX(1f);
-                            logoView.setScaleY(1f);
-                            logoNextView.setAlpha(0f);
-                            logoNextView.setVisibility(View.GONE);
-                            logoNextView.animate().setListener(null);
-                        }
-                    })
-                    .start();
+        private TextView sectionTitle(Context context, String text) {
+            TextView t = new TextView(context);
+            t.setText(text);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            t.setTypeface(AndroidUtilities.bold());
+            t.setTextColor(0xFF9AA0A6);
+            t.setAllCaps(true);
+            t.setLetterSpacing(0.06f);
+            return t;
         }
 
-        void updateTabs(boolean animated) {
-            for (int i = 0; i < tabViews.size(); i++) {
-                tabViews.get(i).setSelected(i == selectedPlanIndex, animated);
+        private LinearLayout createCard(Context context) {
+            LinearLayout card = new LinearLayout(context);
+            card.setOrientation(LinearLayout.VERTICAL);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(COLOR_CARD);
+            bg.setCornerRadius(dp(18));
+            card.setBackground(bg);
+            card.setClipToOutline(true);
+            card.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(18));
+                }
+            });
+            return card;
+        }
+
+        private void track(View v) {
+            if (v != null && staggerCount < stagger.length) {
+                stagger[staggerCount++] = v;
+                v.setAlpha(0f);
+                v.setTranslationY(dp(14));
+            }
+        }
+
+        void playEntrance() {
+            entrancePlaying = true;
+            if (headerBrand != null) {
+                headerBrand.setAlpha(0f);
+                headerBrand.setScaleX(0.94f);
+                headerBrand.setScaleY(0.94f);
+                headerBrand.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                        .setDuration(480).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
+            }
+            sheet.setAlpha(0f);
+            sheet.setTranslationY(dp(64));
+            sheet.animate().alpha(1f).translationY(0)
+                    .setDuration(520).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                    .withEndAction(() -> entrancePlaying = false).start();
+            for (int i = 0; i < staggerCount; i++) {
+                View v = stagger[i];
+                if (v == null) continue;
+                v.animate().alpha(1f).translationY(0)
+                        .setStartDelay(90L + i * 40L).setDuration(360)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
+            }
+            if (buttonContainer != null) {
+                buttonContainer.setAlpha(0f);
+                buttonContainer.setTranslationY(dp(24));
+                buttonContainer.animate().alpha(1f).translationY(0)
+                        .setStartDelay(220).setDuration(400)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
             }
         }
 
         @Override
-        public boolean onInterceptTouchEvent(MotionEvent ev) {
-            return true;
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            int headerH = headerBrand.getMeasuredHeight();
+            int peekTop = Math.max(dp(160), (int) (headerH * 0.72f));
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sheet.getLayoutParams();
+            lp.topMargin = peekTop;
+            // Measure sheet with remaining height.
+            int sheetH = getMeasuredHeight() - peekTop;
+            sheet.measure(
+                    MeasureSpec.makeMeasureSpec(getMeasuredWidth(), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(Math.max(dp(200), sheetH), MeasureSpec.EXACTLY)
+            );
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            int w = right - left;
+            int h = bottom - top;
+            actionBar.layout(0, 0, w, actionBar.getMeasuredHeight());
+            headerBrand.layout(0, 0, w, headerBrand.getMeasuredHeight());
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sheet.getLayoutParams();
+            int sheetTop = lp.topMargin;
+            sheet.layout(0, sheetTop, w, h);
+            int btnH = buttonContainer.getMeasuredHeight();
+            buttonContainer.layout(0, h - btnH, w, h);
         }
     }
 
-    private class PlanTabView extends FrameLayout {
-        private final TextView titleView;
+    private class PlanCardView extends FrameLayout {
+        private final TextView nameView;
         private final TextView priceView;
+        private final TextView badgeView;
         private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path path = new Path();
-        private boolean selected;
-        private Shader selectedShader;
         private PlanPalette palette = PlanPalette.forPlan(PLAN_PREMIUM);
-        private int planId = PLAN_PREMIUM;
+        private boolean selected;
+        private int planId;
 
-        public PlanTabView(Context context) {
+        PlanCardView(Context context) {
             super(context);
             setWillNotDraw(false);
-            setPadding(dp(6), dp(6), dp(6), dp(6));
-
+            setPadding(dp(10), dp(14), dp(10), dp(14));
             strokePaint.setStyle(Paint.Style.STROKE);
-            strokePaint.setStrokeWidth(dp(1));
+            strokePaint.setStrokeWidth(dp(1.2f));
 
-            LinearLayout column = new LinearLayout(context);
-            column.setOrientation(LinearLayout.VERTICAL);
-            column.setGravity(Gravity.CENTER);
+            LinearLayout col = new LinearLayout(context);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setGravity(Gravity.CENTER_HORIZONTAL);
 
-            titleView = new TextView(context);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            titleView.setTypeface(AndroidUtilities.bold());
-            titleView.setGravity(Gravity.CENTER);
-            titleView.setSingleLine();
-            column.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+            badgeView = new TextView(context);
+            badgeView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 10);
+            badgeView.setTypeface(AndroidUtilities.bold());
+            badgeView.setPadding(dp(6), dp(2), dp(6), dp(2));
+            badgeView.setVisibility(GONE);
+            col.addView(badgeView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
+
+            nameView = new TextView(context);
+            nameView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            nameView.setTypeface(AndroidUtilities.bold());
+            nameView.setGravity(Gravity.CENTER);
+            nameView.setSingleLine();
+            col.addView(nameView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
             priceView = new TextView(context);
-            priceView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+            priceView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
             priceView.setGravity(Gravity.CENTER);
             priceView.setSingleLine();
-            column.addView(priceView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 1, 0, 0));
+            col.addView(priceView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 4, 0, 0));
 
-            addView(column, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+            addView(col, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
         }
 
         void bind(PlanData plan) {
             planId = plan.id;
             palette = PlanPalette.forPlan(plan.id);
-            titleView.setText(plan.tabTitle);
-            priceView.setText(plan.priceRub + " ₽/мес");
-            rebuildShader(getWidth());
+            nameView.setText(plan.tabTitle);
+            priceView.setText(plan.priceRub + " ₽");
+            int active = activePlan();
+            if (active == plan.id) {
+                badgeView.setVisibility(VISIBLE);
+                badgeView.setText("активен");
+                GradientDrawable bg = new GradientDrawable();
+                bg.setCornerRadius(dp(8));
+                bg.setColor(ColorUtils.setAlphaComponent(palette.mid, 200));
+                badgeView.setBackground(bg);
+                badgeView.setTextColor(palette.onAccent);
+            } else {
+                badgeView.setVisibility(GONE);
+            }
+            invalidate();
         }
 
         @Override
@@ -1203,58 +923,42 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         void setSelected(boolean selected, boolean animated) {
             boolean changed = this.selected != selected;
             this.selected = selected;
-            int titleColor = selected ? palette.onAccent : 0x99FFFFFF;
-            int priceColor = selected ? ColorUtils.setAlphaComponent(palette.onAccent, 0xCC) : palette.mid;
-            titleView.setTextColor(titleColor);
-            priceView.setTextColor(priceColor);
+            nameView.setTextColor(selected ? palette.onAccent : COLOR_TEXT);
+            priceView.setTextColor(selected ? ColorUtils.setAlphaComponent(palette.onAccent, 0xCC) : 0xFF9AA0A6);
             if (animated && changed) {
                 animate().cancel();
                 setScaleX(selected ? 0.94f : 1.04f);
                 setScaleY(selected ? 0.94f : 1.04f);
-                animate()
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .setDuration(220)
-                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
-                        .start();
+                animate().scaleX(1f).scaleY(1f).setDuration(220)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
             }
             invalidate();
         }
 
-        private void rebuildShader(int w) {
-            if (w <= 0) {
-                w = AndroidUtilities.displaySize.x / 3;
-            }
-            selectedShader = new LinearGradient(0, 0, w, 0,
-                    new int[]{palette.dark, palette.mid, palette.light},
-                    new float[]{0f, 0.45f, 1f},
-                    Shader.TileMode.CLAMP);
-        }
-
-        @Override
-        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-            super.onSizeChanged(w, h, oldw, oldh);
-            rebuildShader(w);
-        }
-
         @Override
         protected void onDraw(@NonNull Canvas canvas) {
-            float r = dp(14);
+            float r = dp(16);
             AndroidUtilities.rectTmp.set(dp(0.5f), dp(0.5f), getWidth() - dp(0.5f), getHeight() - dp(0.5f));
             path.rewind();
             path.addRoundRect(AndroidUtilities.rectTmp, r, r, Path.Direction.CW);
             if (selected) {
-                fillPaint.setShader(selectedShader);
-                fillPaint.setColor(palette.mid);
+                fillPaint.setShader(new LinearGradient(0, 0, getWidth(), getHeight(),
+                        new int[]{palette.dark, palette.mid, palette.light},
+                        new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawPath(path, fillPaint);
             } else {
                 fillPaint.setShader(null);
-                fillPaint.setColor(COLOR_TAB_IDLE);
+                fillPaint.setColor(COLOR_CARD);
                 canvas.drawPath(path, fillPaint);
-                strokePaint.setColor(palette.stroke);
+                strokePaint.setColor(ColorUtils.setAlphaComponent(palette.mid, 0x55));
                 canvas.drawPath(path, strokePaint);
             }
             super.onDraw(canvas);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(96), MeasureSpec.EXACTLY));
         }
     }
 
@@ -1264,19 +968,13 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         final int deep;
         final int dark;
         final int onAccent;
-        final int textSecondary;
-        final int stroke;
-        final int divider;
 
-        private PlanPalette(int light, int mid, int deep, int dark, int onAccent, int textSecondary) {
+        PlanPalette(int light, int mid, int deep, int dark, int onAccent) {
             this.light = light;
             this.mid = mid;
             this.deep = deep;
             this.dark = dark;
             this.onAccent = onAccent;
-            this.textSecondary = textSecondary;
-            this.stroke = ColorUtils.setAlphaComponent(mid, 0x44);
-            this.divider = ColorUtils.setAlphaComponent(mid, 0x28);
         }
 
         static PlanPalette forPlan(int plan) {
@@ -1284,16 +982,27 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             if (p < PLAN_PREMIUM || p > PLAN_ULTRA) {
                 p = PLAN_ULTRA;
             }
-            int mid = MglaPremiumController.colorMid(p);
-            int secondary = ColorUtils.setAlphaComponent(MglaPremiumController.colorLight(p), 0xB3);
             return new PlanPalette(
                     MglaPremiumController.colorLight(p),
-                    mid,
+                    MglaPremiumController.colorMid(p),
                     MglaPremiumController.colorDeep(p),
                     MglaPremiumController.colorDark(p),
-                    MglaPremiumController.colorOnAccent(p),
-                    secondary
+                    MglaPremiumController.colorOnAccent(p)
             );
+        }
+    }
+
+    private static final class FeatureItem {
+        final int type;
+        final int icon;
+        final String title;
+        final String description;
+
+        FeatureItem(int type, int icon, String title, String description) {
+            this.type = type;
+            this.icon = icon;
+            this.title = title;
+            this.description = description;
         }
     }
 

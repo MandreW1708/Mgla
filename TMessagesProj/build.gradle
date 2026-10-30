@@ -146,6 +146,9 @@ android {
         def mapsKey = getProps("MAPS_API_KEY")
         def mglaWsRelayToken = getProps("MGLA_WS_RELAY_TOKEN")
         def mglaWsRelayHost = getProps("MGLA_WS_RELAY_HOST")
+        def mglaWsRelayHosts = getProps("MGLA_WS_RELAY_HOSTS")
+        def mglaHubRelayHosts = getProps("MGLA_HUB_RELAY_HOSTS")
+        def mglaWsPath = getProps("MGLA_WS_PATH")
         def mglaHubToken = getProps("MGLA_HUB_TOKEN")
         def mglaHubHost = getProps("MGLA_HUB_HOST")
         def mglaWebProxyHost = getProps("MGLA_WEB_PROXY_HOST")
@@ -160,6 +163,9 @@ android {
         buildConfigField "String", "SAFETYNET_API_KEY", "\"" + ((safetyNetKey != null && !safetyNetKey.isEmpty()) ? safetyNetKey : "") + "\""
         buildConfigField "String", "MGLA_WS_RELAY_TOKEN", "\"" + ((mglaWsRelayToken != null && !mglaWsRelayToken.isEmpty()) ? mglaWsRelayToken : "") + "\""
         buildConfigField "String", "MGLA_WS_RELAY_HOST", "\"" + ((mglaWsRelayHost != null && !mglaWsRelayHost.isEmpty()) ? mglaWsRelayHost : "mglabot.mooo.com") + "\""
+        buildConfigField "String", "MGLA_WS_RELAY_HOSTS", "\"" + ((mglaWsRelayHosts != null && !mglaWsRelayHosts.isEmpty()) ? mglaWsRelayHosts : "mglabot.mooo.com,31-77-218-160.sslip.io") + "\""
+        buildConfigField "String", "MGLA_HUB_RELAY_HOSTS", "\"" + ((mglaHubRelayHosts != null && !mglaHubRelayHosts.isEmpty()) ? mglaHubRelayHosts : "mglahub.mooo.com,194-58-33-22.sslip.io") + "\""
+        buildConfigField "String", "MGLA_WS_PATH", "\"" + ((mglaWsPath != null && !mglaWsPath.isEmpty()) ? mglaWsPath : "/ws/v1/live") + "\""
         buildConfigField "String", "MGLA_HUB_TOKEN", "\"" + ((mglaHubToken != null && !mglaHubToken.isEmpty()) ? mglaHubToken : "") + "\""
         buildConfigField "String", "MGLA_HUB_HOST", "\"" + ((mglaHubHost != null && !mglaHubHost.isEmpty()) ? mglaHubHost : "mglahub.mooo.com") + "\""
         buildConfigField "String", "MGLA_WEB_PROXY_HOST", "\"" + ((mglaWebProxyHost != null && !mglaWebProxyHost.isEmpty()) ? mglaWebProxyHost : "mglabot.mooo.com/tgweb") + "\""

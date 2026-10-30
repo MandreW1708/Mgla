@@ -42,8 +42,11 @@ public final class MglaWsBypass {
     private static final long MONITOR_INTERVAL_BACKGROUND_MS = 20_000L;
     /** Same as background, but slower under Telegram power-saver battery threshold. */
     private static final long MONITOR_INTERVAL_POWER_SAVE_MS = 45_000L;
-    /** Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB. */
-    private static final long WS_STALL_MS = 90_000L;
+    /**
+     * Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB.
+     * Shorter for normal DE path: regional DPI often kills WS entirely — fall to WEB faster.
+     */
+    private static final long WS_STALL_MS = 35_000L;
     /** Ultra (любой аккаунт): дольше держимся за WS — приоритетный маршрут. */
     private static final long WS_STALL_ULTRA_MS = 150_000L;
     /** Сколько WEB может висеть в Connecting, прежде чем вернуться на WS. */
@@ -57,12 +60,12 @@ public final class MglaWsBypass {
     private static final long WEB_RETRY_WS_ULTRA_MS = 75_000L;
     private static final long WS_PROBE_TIMEOUT_MS = 8_000L;
     private static final long WS_PROBE_TIMEOUT_ULTRA_MS = 10_000L;
-    /** Минимальная пауза между любыми сменами маршрута. */
-    private static final long ROUTE_SWITCH_COOLDOWN_MS = 2 * 60_000L;
+    /** Минимальная пауза между любыми сменами маршрута (non-Ultra). */
+    private static final long ROUTE_SWITCH_COOLDOWN_MS = 45_000L;
     /** Ultra host is dedicated — allow quicker WS↔WEB recovery than shared bot. */
     private static final long ROUTE_SWITCH_COOLDOWN_ULTRA_MS = 40_000L;
-    /** Сколько подряд тиков монитора должны видеть stall после порога. */
-    private static final int STALL_CONFIRM_TICKS = 2;
+    /** Non-Ultra: one monitor tick past stall is enough to flip to WEB. */
+    private static final int STALL_CONFIRM_TICKS = 1;
     private static final int STALL_CONFIRM_TICKS_ULTRA = 2;
     /**
      * How often to measure relay handshake RTT while auto-bypass is on.
