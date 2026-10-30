@@ -109,6 +109,10 @@ HUB_TASKS_SYNC_URL = os.environ.get(
     "MGLA_HUB_TASKS_SYNC_URL",
     "https://mglahub.mooo.com/mgla-tasks/v1/sync",
 ).strip()
+HUB_SETTINGS_SYNC_URL = os.environ.get(
+    "MGLA_HUB_SETTINGS_SYNC_URL",
+    "https://mglahub.mooo.com/mgla-settings/v1/sync",
+).strip()
 HUB_AUTH_REGISTER_URL = os.environ.get(
     "MGLA_HUB_AUTH_REGISTER_URL",
     "https://mglahub.mooo.com/mgla-auth/v1/register",
@@ -962,6 +966,29 @@ def proxy_hub_tasks_sync(body_bytes: bytes, client_token: str | None = None) -> 
         return int(e.code), e.read()
 
 
+def proxy_hub_settings_sync(body_bytes: bytes, client_token: str | None = None) -> tuple[int, bytes]:
+    """Forward paid-plan settings sync to mglahub (prefer caller JWT)."""
+    if not HUB_SETTINGS_SYNC_URL or not HUB_FEATURES_TOKEN:
+        raise RuntimeError("hub settings sync proxy not configured")
+    token = (client_token or "").strip() or HUB_FEATURES_TOKEN
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Mgla-Token": token,
+        "X-Mgla-Client": "mgla",
+    }
+    req = urllib.request.Request(
+        HUB_SETTINGS_SYNC_URL,
+        data=body_bytes,
+        method="POST",
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            return int(resp.status), resp.read()
+    except urllib.error.HTTPError as e:
+        return int(e.code), e.read()
+
+
 def proxy_hub_stats_batch(body_bytes: bytes) -> tuple[int, bytes]:
     url = HUB_STATS_BATCH_URL
     if not url:
@@ -1321,6 +1348,8 @@ class Handler(BaseHTTPRequestHandler):
             self._post_stats_batch()
         elif path == "/mgla-ai/v1/tasks-sync":
             self._post_tasks_sync()
+        elif path == "/mgla-ai/v1/settings-sync":
+            self._post_settings_sync()
         elif path == "/mgla-ai/v1/chat":
             self._post_chat()
         elif path in ("/mgla-ai/v1/models/report", "/mgla-ai/v1/model-report"):
@@ -1410,6 +1439,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             log.warning("tasks-sync proxy failed: %s", e)
+            self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        self._reply(code, body)
+
+    def _post_settings_sync(self):
+        if not self._check_token():
+            return
+        raw = self._read_raw_body(512 * 1024)
+        if raw is None:
+            return
+        client_token = self.headers.get("X-Mgla-Token", "")
+        try:
+            code, body = proxy_hub_settings_sync(raw, client_token=client_token)
+        except RuntimeError as e:
+            self._reply(503, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            log.warning("settings-sync proxy failed: %s", e)
             self._reply(502, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
         self._reply(code, body)

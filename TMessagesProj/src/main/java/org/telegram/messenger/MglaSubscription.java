@@ -469,6 +469,16 @@ public final class MglaSubscription {
         return !PLAN_FREE.equals(getPlanId());
     }
 
+    /**
+     * Manual cloud sync of client settings — same gate as {@link #canSyncTasks()}:
+     * selected account must have any paid plan. Synced prefs are install-local after pull;
+     * premium feature usage on other (free) accounts in the same client stays blocked by
+     * per-account checks ({@link #canAccessAiSection()}, etc.).
+     */
+    public static boolean canSyncSettings() {
+        return canSyncTasks();
+    }
+
     /** Media attachments in AI chat are disabled for all plans. */
     public static boolean canAttachMedia() {
         return false;

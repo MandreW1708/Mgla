@@ -8,6 +8,10 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.drawable.Drawable;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ImageSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -21,7 +25,10 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MglaAudioConfig;
 import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.MglaHeaderConfig;
+import org.telegram.messenger.MglaSettingsSnapshot;
+import org.telegram.messenger.MglaSettingsSync;
 import org.telegram.messenger.MglaSpyConfig;
+import org.telegram.messenger.MglaSubscription;
 import org.telegram.messenger.MglaTransferConfig;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
@@ -283,6 +290,51 @@ public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implement
 
         rootLayout.addView(transferBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
+        LinearLayout cloudBlock = createBlock(context, "Облако");
+        final boolean canSync = MglaSubscription.canSyncSettings();
+
+        TextSettingsCell syncSettingsCell = new TextSettingsCell(context);
+        syncSettingsCell.setBackground(null);
+        syncSettingsCell.setTextAndValue(premiumStarLabel(context, "Синхронизировать настройки"),
+                syncCooldownValue(), true);
+        syncSettingsCell.setEnabled(canSync);
+        syncSettingsCell.setAlpha(canSync ? 1f : 0.4f);
+        syncSettingsCell.setOnClickListener(v -> {
+            if (!MglaSubscription.canSyncSettings()) {
+                showSettingsSyncUpsell();
+                return;
+            }
+            syncSettingsNow(syncSettingsCell);
+        });
+        cloudBlock.addView(syncSettingsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        cloudBlock.addView(createDivider(context));
+
+        TextSettingsCell applySettingsCell = new TextSettingsCell(context);
+        applySettingsCell.setBackground(null);
+        applySettingsCell.setTextAndValue(premiumStarLabel(context, "Применить настройки"), "", true);
+        applySettingsCell.setEnabled(canSync);
+        applySettingsCell.setAlpha(canSync ? 1f : 0.4f);
+        applySettingsCell.setOnClickListener(v -> {
+            if (!MglaSubscription.canSyncSettings()) {
+                showSettingsSyncUpsell();
+                return;
+            }
+            applySettingsNow();
+        });
+        cloudBlock.addView(applySettingsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView syncHint = new TextView(context);
+        syncHint.setText(canSync
+                ? "Синхронизация отправляет настройки в облако (раз в 5 мин). На другом устройстве нажмите «Применить настройки»."
+                : "Доступно с Premium, Premium+ и Ultra на текущем аккаунте.");
+        syncHint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        syncHint.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        syncHint.setPadding(dp(21), dp(4), dp(21), dp(12));
+        syncHint.setAlpha(canSync ? 1f : 0.4f);
+        cloudBlock.addView(syncHint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        rootLayout.addView(cloudBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+
         LinearLayout soundBlock = createBlock(context, "Звук");
 
         TextCheckCell autoPauseCell = new TextCheckCell(context);
@@ -304,6 +356,128 @@ public class MglaMainSettingsActivity extends MglaBaseSettingsActivity implement
 
         fragmentView = scrollView;
         return fragmentView;
+    }
+
+    private static CharSequence premiumStarLabel(Context context, String title) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("  " + title);
+        Drawable star = context.getResources().getDrawable(R.drawable.msg_premium_liststar).mutate();
+        int size = dp(16);
+        star.setBounds(0, 0, size, size);
+        star.setColorFilter(new PorterDuffColorFilter(
+                Theme.getColor(Theme.key_starsGradient1), PorterDuff.Mode.SRC_IN));
+        sb.setSpan(new ImageSpan(star, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
+    }
+
+    private static String syncCooldownValue() {
+        long left = MglaSettingsSnapshot.getSyncCooldownRemainingMs();
+        if (left <= 0L) {
+            return "";
+        }
+        long totalSec = Math.max(1L, (left + 999L) / 1000L);
+        long min = totalSec / 60L;
+        long sec = totalSec % 60L;
+        if (min <= 0L) {
+            return sec + " с";
+        }
+        if (sec <= 0L) {
+            return min + " мин";
+        }
+        return min + ":" + (sec < 10 ? "0" : "") + sec;
+    }
+
+    private void showSettingsSyncUpsell() {
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.star_premium_2,
+                "Синхронизация настроек доступна с любой подпиской Mgla Premium",
+                "Оформить",
+                () -> presentFragment(new MglaPremiumActivity())
+        ).show();
+    }
+
+    private void syncSettingsNow(TextSettingsCell syncCell) {
+        if (!MglaSubscription.canSyncSettings()) {
+            return;
+        }
+        if (MglaSettingsSync.isBusy()) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Операция уже выполняется…").show();
+            return;
+        }
+        long cooldown = MglaSettingsSnapshot.getSyncCooldownRemainingMs();
+        if (cooldown > 0L) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error,
+                    "Подождите ещё " + syncCooldownValue()).show();
+            return;
+        }
+        final AlertDialog progress = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+        progress.setCanCancel(false);
+        showDialog(progress);
+        MglaSettingsSync.syncNow(true, new MglaSettingsSync.Callback() {
+            @Override
+            public void onSuccess(String message) {
+                try {
+                    progress.dismiss();
+                } catch (Throwable ignore) {
+                }
+                if (syncCell != null) {
+                    syncCell.setTextAndValue(premiumStarLabel(getContext(), "Синхронизировать настройки"),
+                            syncCooldownValue(), true);
+                }
+                BulletinFactory.of(MglaMainSettingsActivity.this)
+                        .createSimpleBulletin(R.raw.contact_check, message == null ? "Готово" : message)
+                        .show();
+            }
+
+            @Override
+            public void onError(String message) {
+                try {
+                    progress.dismiss();
+                } catch (Throwable ignore) {
+                }
+                BulletinFactory.of(MglaMainSettingsActivity.this)
+                        .createSimpleBulletin(R.raw.error, message == null ? "Ошибка" : message)
+                        .show();
+            }
+        });
+    }
+
+    private void applySettingsNow() {
+        if (!MglaSubscription.canSyncSettings()) {
+            return;
+        }
+        if (MglaSettingsSync.isBusy()) {
+            BulletinFactory.of(this).createSimpleBulletin(R.raw.error, "Операция уже выполняется…").show();
+            return;
+        }
+        final AlertDialog progress = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+        progress.setCanCancel(false);
+        showDialog(progress);
+        MglaSettingsSync.applyNow(true, new MglaSettingsSync.Callback() {
+            @Override
+            public void onSuccess(String message) {
+                try {
+                    progress.dismiss();
+                } catch (Throwable ignore) {
+                }
+                BulletinFactory.of(MglaMainSettingsActivity.this)
+                        .createSimpleBulletin(R.raw.contact_check, message == null ? "Готово" : message)
+                        .show();
+                if (getParentLayout() != null) {
+                    getParentLayout().rebuildAllFragmentViews(false, false);
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                try {
+                    progress.dismiss();
+                } catch (Throwable ignore) {
+                }
+                BulletinFactory.of(MglaMainSettingsActivity.this)
+                        .createSimpleBulletin(R.raw.error, message == null ? "Ошибка" : message)
+                        .show();
+            }
+        });
     }
 
     private LinearLayout createBlock(Context context, String title) {

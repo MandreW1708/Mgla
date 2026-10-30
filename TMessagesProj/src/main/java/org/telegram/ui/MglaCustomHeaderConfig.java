@@ -95,6 +95,12 @@ public final class MglaCustomHeaderConfig {
         return ApplicationLoader.applicationContext.getSharedPreferences(MglaGlassConfig.PREFS, Context.MODE_PRIVATE);
     }
 
+    /** After cloud settings apply — drop in-memory cache and reload from prefs. */
+    public static void reloadCacheForSync() {
+        cacheLoaded = false;
+        ensureCache();
+    }
+
     private static void ensureCache() {
         if (cacheLoaded) {
             return;

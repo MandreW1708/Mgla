@@ -140,6 +140,12 @@ public class MglaGlassConfig {
     private static boolean folderActiveOutline;
     private static boolean folderNameInHeader;
 
+    /** After cloud settings apply — drop in-memory cache and reload from prefs. */
+    public static void reloadCacheForSync() {
+        cacheLoaded = false;
+        ensureCache();
+    }
+
     private static void ensureCache() {
         if (cacheLoaded) {
             return;

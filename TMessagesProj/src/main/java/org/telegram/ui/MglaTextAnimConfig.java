@@ -76,6 +76,12 @@ public final class MglaTextAnimConfig {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    /** After cloud settings apply — drop in-memory cache and reload from prefs. */
+    public static void reloadCacheForSync() {
+        loaded = false;
+        ensureLoaded();
+    }
+
     private static void ensureLoaded() {
         if (loaded) {
             return;

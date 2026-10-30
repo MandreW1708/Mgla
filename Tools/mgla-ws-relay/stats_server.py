@@ -4,6 +4,7 @@
 - POST /mgla-stats/v1/batch ??? anonymous client analytics (SQLite; no client IPs)
 - POST /mgla-config/v1/features ??? feature flags for a Telegram user id
 - POST /mgla-tasks/v1/sync ??? Premium+/Ultra cross-device task sync
+- POST /mgla-settings/v1/sync ??? paid-plan manual settings sync
 - POST /mgla-updates/v1/check ??? in-app update check
 - GET  /mgla-updates/v1/apk ??? download published APK
 - GET/POST /admin ??? feature flags + OpenRouter model list (Basic Auth)
@@ -35,6 +36,7 @@ import hub_admin
 import hub_updates
 import mgla_entitlements
 import mgla_tasks_sync
+import mgla_settings_sync
 import mgla_token
 import stats_report
 
@@ -1467,6 +1469,8 @@ class Handler(BaseHTTPRequestHandler):
             self._post_entitlements()
         elif path == "/mgla-tasks/v1/sync":
             self._post_tasks_sync()
+        elif path == "/mgla-settings/v1/sync":
+            self._post_settings_sync()
         elif path == "/mgla-updates/v1/check":
             self._post_update_check()
         elif path == "/mgla-ai/v1/chat":
@@ -1878,6 +1882,53 @@ class Handler(BaseHTTPRequestHandler):
             return
         except sqlite3.Error:
             log.exception("tasks sync failed")
+            self._reply(500, b'{"error":"sync failed"}')
+            return
+        self._reply(200, json.dumps(result, ensure_ascii=False).encode("utf-8"))
+
+    def _post_settings_sync(self):
+        """Paid-plan cloud settings sync — one document per tg_id (whole-doc LWW)."""
+        if not self._check_token():
+            return
+        raw = self._read_json_body(max(MAX_BODY, 512 * 1024))
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._reply(400, b'{"error":"bad body"}')
+            return
+        uniq = self._parse_tg_ids_body(raw)
+        if not uniq:
+            self._reply(400, b'{"error":"tg_id required"}')
+            return
+        tg_id = int(uniq[0])
+        kind, iid = self._request_identity()
+        try:
+            if kind == "jwt" and iid:
+                with self.store._lock:
+                    mgla_entitlements.ensure_accounts_schema(self.store._db)
+                    mgla_entitlements.touch_install_accounts(self.store._db, iid, [tg_id])
+                    owned = set(
+                        mgla_entitlements.filter_owned_tg_ids(self.store._db, iid, [tg_id])
+                    )
+                if tg_id not in owned:
+                    self._reply(403, b'{"error":"account not bound to this install"}')
+                    return
+            by_user, _, _ = self.store.subscription_entitlements([tg_id])
+            plan = mgla_entitlements.normalize_plan(by_user.get(tg_id))
+            if plan not in mgla_settings_sync.ALLOWED_PLANS:
+                self._reply(403, b'{"error":"Premium, Premium+ or Ultra required"}')
+                return
+            with self.store._lock:
+                result = mgla_settings_sync.sync(self.store._db, tg_id, raw, plan)
+                self.store._db.commit()
+        except PermissionError as e:
+            self._reply(403, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        except (ValueError, TypeError) as e:
+            self._reply(400, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        except sqlite3.Error:
+            log.exception("settings sync failed")
             self._reply(500, b'{"error":"sync failed"}')
             return
         self._reply(200, json.dumps(result, ensure_ascii=False).encode("utf-8"))

@@ -8,23 +8,33 @@ import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
-import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.view.ViewOutlineProvider;
+import android.view.animation.Interpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -32,6 +42,9 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.core.graphics.ColorUtils;
+import androidx.core.view.NestedScrollingParent3;
+import androidx.core.view.NestedScrollingParentHelper;
+import androidx.core.view.ViewCompat;
 import androidx.core.widget.NestedScrollView;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -56,7 +69,7 @@ import org.telegram.ui.Components.ScaleStateListAnimator;
 import java.util.ArrayList;
 
 /**
- * Mgla Premium — hub-style screen (gradient header + dark sheet) for all plan tiers.
+ * Mgla Premium — hub-style screen for all plan tiers.
  */
 public class MglaPremiumActivity extends MglaBaseSettingsActivity {
 
@@ -75,7 +88,9 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     public static final int FEATURE_ULTRA_AI = 7;
     public static final int FEATURE_PRIORITY_BYPASS = 8;
     public static final int FEATURE_TASKS_SYNC = 9;
+    public static final int FEATURE_SETTINGS_SYNC = 10;
 
+    private static final int COLOR_BG = 0xFF000000;
     private static final int COLOR_SHEET = 0xFF121417;
     private static final int COLOR_CARD = 0xFF1E1F24;
     private static final int COLOR_TEXT = 0xFFF2F3F5;
@@ -91,8 +106,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     private PlanPalette accent = PlanPalette.forPlan(PLAN_PREMIUM);
 
     private PremiumHubLayout hubLayout;
-    private FrameLayout headerBrand;
-    private ImageView logoView;
+    private View headerBrand;
+    private GlowLogoView logoView;
     private TextView titleView;
     private TextView subtitleView;
     private LinearLayout planCardsRow;
@@ -102,7 +117,6 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     private TextView hintView;
     private PremiumButtonView premiumButtonView;
     private FrameLayout buttonContainer;
-    private GradientDrawable rootGradient;
     private ValueAnimator planSwitchAnimator;
 
     public MglaPremiumActivity() {
@@ -170,6 +184,9 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             planSwitchAnimator.cancel();
             planSwitchAnimator = null;
         }
+        if (hubLayout != null) {
+            hubLayout.stopAmbientGlow();
+        }
         super.onFragmentDestroy();
     }
 
@@ -179,6 +196,17 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         updateSubtitle();
         updateButtonText(false);
         refreshPlanCards();
+        if (hubLayout != null) {
+            hubLayout.startAmbientGlow();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (hubLayout != null) {
+            hubLayout.stopAmbientGlow();
+        }
     }
 
     private void playEntrance() {
@@ -213,6 +241,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                 "Планировщик задач", "Удобный список задач прямо в приложении"));
         features.add(new FeatureItem(FEATURE_TASKS_SYNC, R.drawable.msg_retry,
                 "Синхронизация задач", "Задачи этого аккаунта синхронизируются между устройствами"));
+        features.add(new FeatureItem(FEATURE_SETTINGS_SYNC, R.drawable.msg_premium_liststar,
+                "Синхронизация настроек", "Отправка в облако и ручное применение на другом устройстве"));
         features.add(new FeatureItem(FEATURE_LOCAL_MODELS, R.drawable.premium_ai_editor,
                 "Локальные модели", "Используйте локальные ИИ-модели на устройстве"));
         features.add(new FeatureItem(FEATURE_MEMORY, R.drawable.msg_premium_voice,
@@ -261,7 +291,7 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                     : "На этом аккаунте активен " + plan.title + " " + until
                             + ". На других аккаунтах подписка не действует.");
         } else if (plan.id == PLAN_PREMIUM) {
-            hintView.setText("Premium: анимации, задачи с синхронизацией, локальные модели, живая память, темы иконок и автоперевод.");
+            hintView.setText("Premium: анимации, задачи и настройки с синхронизацией, локальные модели, живая память, темы иконок и автоперевод.");
         } else if (plan.id == PLAN_PLUS) {
             hintView.setText("Premium+ включает всё из Premium и добавляет умные облачные ИИ-модели.");
         } else {
@@ -281,6 +311,9 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         if (!animated) {
             accent = PlanPalette.forPlan(to);
             updateAccentSurfaces(false);
+            if (logoView != null) {
+                logoView.setLogo(logoResForPlan(to));
+            }
             rebuildFeatures();
             refreshPlanCards();
             updateButtonText(false);
@@ -316,9 +349,13 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             if (!mid[0] && t >= 0.45f) {
                 mid[0] = true;
                 if (logoView != null) {
-                    logoView.setImageResource(logoResForPlan(to));
+                    logoView.setLogo(logoResForPlan(to));
                 }
+                // Build feature icons with target palette, not the blended mid color.
+                PlanPalette blended = accent;
+                accent = toPal;
                 rebuildFeatures();
+                accent = blended;
                 refreshPlanCards();
                 updateButtonText(true);
                 updateHint();
@@ -327,21 +364,22 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         planSwitchAnimator.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
+                // Always rebind with final palette — mid-switch rebuild used blended colors.
                 accent = PlanPalette.forPlan(to);
                 updateAccentSurfaces(false);
-                if (!mid[0]) {
-                    if (logoView != null) {
-                        logoView.setImageResource(logoResForPlan(to));
-                    }
-                    rebuildFeatures();
-                    refreshPlanCards();
-                    updateButtonText(true);
-                    updateHint();
+                if (logoView != null) {
+                    logoView.setLogo(logoResForPlan(to));
                 }
+                rebuildFeatures();
+                refreshPlanCards();
+                updateButtonText(true);
+                updateHint();
                 if (featuresCard != null) {
                     featuresCard.setAlpha(1f);
                 }
-                planSwitchAnimator = null;
+                if (planSwitchAnimator == animation) {
+                    planSwitchAnimator = null;
+                }
             }
         });
         planSwitchAnimator.start();
@@ -349,11 +387,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
     }
 
     private void updateAccentSurfaces(boolean duringAnim) {
-        if (rootGradient != null) {
-            rootGradient.setColors(new int[]{accent.dark, accent.deep, accent.mid});
-        }
         if (hubLayout != null) {
-            hubLayout.invalidate();
+            hubLayout.setAmbientGlowColors(accent.mid, accent.light, accent.deep);
         }
         if (titleView != null) {
             titleView.setTextColor(COLOR_TEXT);
@@ -406,16 +441,8 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         row.setOnClickListener(v -> openFeature(item.type));
         ScaleStateListAnimator.apply(row, 0.02f, 1.5f);
 
-        FrameLayout iconWrap = new FrameLayout(context);
-        GradientDrawable iconBg = new GradientDrawable();
-        iconBg.setCornerRadius(dp(12));
-        iconBg.setColor(ColorUtils.setAlphaComponent(accent.mid, 55));
-        iconWrap.setBackground(iconBg);
-
-        ImageView icon = new ImageView(context);
-        icon.setImageResource(item.icon);
-        icon.setColorFilter(new PorterDuffColorFilter(accent.light, PorterDuff.Mode.SRC_IN));
-        iconWrap.addView(icon, LayoutHelper.createFrame(22, 22, Gravity.CENTER));
+        GlowFeatureIcon iconWrap = new GlowFeatureIcon(context);
+        iconWrap.setIcon(item.icon, accent.light, accent.mid, accent.deep, accent.onAccent);
         row.addView(iconWrap, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL, 0, 0, 12, 0));
 
         LinearLayout texts = new LinearLayout(context);
@@ -478,6 +505,9 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             case FEATURE_TASKS:
             case FEATURE_TASKS_SYNC:
                 openMainTab(MglaMainTabsConfig.TabId.TASKS);
+                break;
+            case FEATURE_SETTINGS_SYNC:
+                presentFragment(new MglaMainSettingsActivity());
                 break;
             case FEATURE_LOCAL_MODELS:
             case FEATURE_CLOUD_AI:
@@ -577,27 +607,154 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
         presentFragment(new ChatActivity(args));
     }
 
-    // ── Hub shell ──────────────────────────────────────────────────────────
+    // ── Rounded logo (ambient glow lives on the whole hub background) ──────
+
+    private class GlowLogoView extends View {
+        private final Paint logoPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint roundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path clipPath = new Path();
+        private final RectF rect = new RectF();
+        private final Matrix shaderMatrix = new Matrix();
+        private Bitmap logoBitmap;
+        private BitmapShader logoShader;
+
+        GlowLogoView(Context context) {
+            super(context);
+            setWillNotDraw(false);
+            roundPaint.setColor(0xFF0A0A0C);
+        }
+
+        void setLogo(int resId) {
+            Drawable d = getResources().getDrawable(resId).mutate();
+            int size = Math.max(dp(96), 1);
+            Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            d.setBounds(0, 0, size, size);
+            d.draw(c);
+            logoBitmap = bmp;
+            logoShader = new BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            logoPaint.setShader(logoShader);
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) {
+                return;
+            }
+            float cx = w / 2f;
+            float cy = h / 2f;
+            float icon = Math.min(w, h) * 0.78f;
+            float r = icon * 0.22f;
+            rect.set(cx - icon / 2f, cy - icon / 2f, cx + icon / 2f, cy + icon / 2f);
+            clipPath.rewind();
+            clipPath.addRoundRect(rect, r, r, Path.Direction.CW);
+            canvas.drawPath(clipPath, roundPaint);
+            if (logoBitmap != null && logoShader != null) {
+                shaderMatrix.reset();
+                float scale = icon / logoBitmap.getWidth();
+                shaderMatrix.setScale(scale, scale);
+                shaderMatrix.postTranslate(rect.left, rect.top);
+                logoShader.setLocalMatrix(shaderMatrix);
+                canvas.save();
+                canvas.clipPath(clipPath);
+                canvas.drawRoundRect(rect, r, r, logoPaint);
+                canvas.restore();
+            }
+        }
+    }
+
+    private class GlowFeatureIcon extends View {
+        private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private Drawable icon;
+        private int colorTop;
+        private int colorBottom;
+
+        GlowFeatureIcon(Context context) {
+            super(context);
+            setWillNotDraw(false);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(1));
+            strokePaint.setColor(0x33FFFFFF);
+        }
+
+        void setIcon(int resId, int light, int mid, int deep, int onAccent) {
+            colorTop = light;
+            colorBottom = deep != 0 ? deep : mid;
+            icon = getResources().getDrawable(resId).mutate();
+            icon.setColorFilter(new PorterDuffColorFilter(onAccent, PorterDuff.Mode.SRC_IN));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            float corner = dp(10);
+            rect.set(0, 0, w, h);
+            LinearGradient gradient = new LinearGradient(0, 0, 0, h,
+                    new int[]{colorTop, colorBottom},
+                    new float[]{0f, 1f},
+                    Shader.TileMode.CLAMP);
+            bgPaint.setShader(gradient);
+            canvas.drawRoundRect(rect, corner, corner, bgPaint);
+            canvas.drawRoundRect(rect, corner, corner, strokePaint);
+            if (icon != null) {
+                int s = dp(22);
+                int l = (int) ((w - s) / 2f);
+                int top = (int) ((h - s) / 2f);
+                icon.setBounds(l, top, l + s, top + s);
+                icon.draw(canvas);
+            }
+        }
+    }
+
+    // ── Hub shell with draggable sheet ─────────────────────────────────────
 
     @SuppressLint("ClickableViewAccessibility")
-    private class PremiumHubLayout extends FrameLayout {
+    private class PremiumHubLayout extends FrameLayout implements NestedScrollingParent3 {
 
+        private final NestedScrollingParentHelper nestedHelper = new NestedScrollingParentHelper(this);
         private final FrameLayout sheet;
         private final NestedScrollView scrollView;
         private final LinearLayout content;
         private final View[] stagger = new View[20];
         private int staggerCount;
+
+        private float progress; // 0 = peek (header visible), 1 = expanded
+        private ValueAnimator settleAnimator;
+        private float dragStartProgress;
+        private float dragStartY;
+        private boolean draggingHandle;
         private boolean entrancePlaying;
+        private VelocityTracker velocityTracker;
+        private final int touchSlop;
+        private final int maxFling;
+        private float nestedVelocityY;
+        private long nestedVelocityTime;
+        private int measuredHeaderH;
+
+        private final Paint ambientPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private int ambientMid = 0xFF4A90D9;
+        private int ambientLight = 0xFF8EC5FF;
+        private int ambientDeep = 0xFF1A3A66;
+        private boolean ambientRunning;
+        private long ambientStartMs;
 
         PremiumHubLayout(Context context) {
             super(context);
             setWillNotDraw(false);
-
-            rootGradient = new GradientDrawable(
-                    GradientDrawable.Orientation.TL_BR,
-                    new int[]{accent.dark, accent.deep, accent.mid}
-            );
-            setBackground(rootGradient);
+            setBackgroundColor(COLOR_BG);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+            maxFling = ViewConfiguration.get(context).getScaledMaximumFlingVelocity();
+            ambientMid = accent.mid;
+            ambientLight = accent.light;
+            ambientDeep = accent.deep;
+            startAmbientGlow();
 
             headerBrand = buildHeader(context);
             addView(headerBrand, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
@@ -636,17 +793,41 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             handle.setBackground(handleBg);
             sheet.addView(handle, LayoutHelper.createFrame(40, 4, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 10, 0, 0));
 
-            scrollView = new NestedScrollView(context);
-            scrollView.setFillViewport(true);
+            scrollView = new NestedScrollView(context) {
+                @Override
+                public boolean dispatchTouchEvent(MotionEvent ev) {
+                    if (ev.getY() <= dp(28) || draggingHandle) {
+                        return false;
+                    }
+                    return super.dispatchTouchEvent(ev);
+                }
+
+                @Override
+                public void fling(int velocityY) {
+                    if (progress < 0.999f) {
+                        settleFromSheetVelocity(-velocityY);
+                        return;
+                    }
+                    if (getScrollY() == 0 && velocityY < 0 && progress > 0.001f) {
+                        settleFromSheetVelocity(-velocityY);
+                        return;
+                    }
+                    super.fling(velocityY);
+                }
+            };
             scrollView.setOverScrollMode(OVER_SCROLL_NEVER);
+            scrollView.setFillViewport(true);
+            scrollView.setClipToPadding(false);
+            scrollView.setNestedScrollingEnabled(true);
+            scrollView.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight + dp(88));
+
             content = new LinearLayout(context);
             content.setOrientation(LinearLayout.VERTICAL);
-            content.setPadding(dp(16), dp(22), dp(16), dp(100));
+            content.setPadding(dp(16), dp(22), dp(16), dp(8));
             buildSheet(context, content);
-            scrollView.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
-            sheet.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL, 0, 18, 0, 0));
-
-            addView(sheet, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.BOTTOM));
+            scrollView.addView(content, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            sheet.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP, 0, 18, 0, 0));
+            addView(sheet, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP));
 
             premiumButtonView = new PremiumButtonView(context, dp(14), false, getResourceProvider()) {
                 @Override
@@ -678,20 +859,83 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             buttonContainer.addView(premiumButtonView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 50));
             ScaleStateListAnimator.apply(premiumButtonView, 0.02f, 1.5f);
             addView(buttonContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
+
+            sheet.setOnTouchListener((v, event) -> {
+                final float localY = event.getY();
+                final float rawY = event.getRawY();
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN: {
+                        if (localY > dp(36)) {
+                            draggingHandle = false;
+                            return false;
+                        }
+                        draggingHandle = true;
+                        dragStartY = rawY;
+                        dragStartProgress = progress;
+                        obtainVelocityTracker().addMovement(event);
+                        cancelSettle();
+                        return true;
+                    }
+                    case MotionEvent.ACTION_MOVE: {
+                        if (!draggingHandle) {
+                            return false;
+                        }
+                        velocityTracker.addMovement(event);
+                        float dy = dragStartY - rawY;
+                        setProgress(dragStartProgress + dy / sheetRange(), false);
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        if (!draggingHandle) {
+                            return false;
+                        }
+                        draggingHandle = false;
+                        float vY = 0;
+                        if (velocityTracker != null) {
+                            velocityTracker.addMovement(event);
+                            velocityTracker.computeCurrentVelocity(1000, maxFling);
+                            vY = velocityTracker.getYVelocity();
+                            recycleVelocityTracker();
+                        }
+                        settleFromSheetVelocity(vY);
+                        return true;
+                    }
+                }
+                return false;
+            });
         }
 
-        private FrameLayout buildHeader(Context context) {
-            FrameLayout brand = new FrameLayout(context);
-            brand.setPadding(dp(20), AndroidUtilities.statusBarHeight + dp(52), dp(20), dp(20));
+        private VelocityTracker obtainVelocityTracker() {
+            if (velocityTracker != null) {
+                velocityTracker.clear();
+            } else {
+                velocityTracker = VelocityTracker.obtain();
+            }
+            return velocityTracker;
+        }
 
-            LinearLayout col = new LinearLayout(context);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setGravity(Gravity.CENTER_HORIZONTAL);
+        private void recycleVelocityTracker() {
+            if (velocityTracker != null) {
+                velocityTracker.recycle();
+                velocityTracker = null;
+            }
+        }
 
-            logoView = new ImageView(context);
-            logoView.setImageResource(logoResForPlan(selectedPlanIndex));
-            logoView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            col.addView(logoView, LayoutHelper.createLinear(96, 96, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+        private float sheetRange() {
+            return Math.max(1f, peekTop() - expandedTop());
+        }
+
+        private View buildHeader(Context context) {
+            LinearLayout brand = new LinearLayout(context);
+            brand.setOrientation(LinearLayout.VERTICAL);
+            brand.setGravity(Gravity.CENTER_HORIZONTAL);
+            int topPad = AndroidUtilities.statusBarHeight + ActionBar.getCurrentActionBarHeight() + dp(8);
+            brand.setPadding(dp(24), topPad, dp(24), dp(24));
+
+            logoView = new GlowLogoView(context);
+            logoView.setLogo(logoResForPlan(selectedPlanIndex));
+            brand.addView(logoView, LayoutHelper.createLinear(112, 112, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 10));
 
             titleView = new TextView(context);
             titleView.setText("Mgla Premium");
@@ -699,16 +943,14 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             titleView.setTypeface(AndroidUtilities.bold());
             titleView.setTextColor(COLOR_TEXT);
             titleView.setGravity(Gravity.CENTER);
-            col.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
+            brand.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
 
             subtitleView = new TextView(context);
             subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             subtitleView.setGravity(Gravity.CENTER);
             subtitleView.setLineSpacing(dp(2), 1f);
             updateSubtitle();
-            col.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
-
-            brand.addView(col, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+            brand.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
             return brand;
         }
 
@@ -791,6 +1033,99 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             }
         }
 
+        void setAmbientGlowColors(int mid, int light, int deep) {
+            ambientMid = mid;
+            ambientLight = light;
+            ambientDeep = deep;
+            invalidate();
+        }
+
+        void startAmbientGlow() {
+            if (ambientRunning) {
+                return;
+            }
+            ambientRunning = true;
+            ambientStartMs = SystemClock.uptimeMillis();
+            invalidate();
+        }
+
+        void stopAmbientGlow() {
+            ambientRunning = false;
+        }
+
+        private void drawAmbientGlow(Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) {
+                return;
+            }
+            float t = ((SystemClock.uptimeMillis() - ambientStartMs) % 4200L) / 4200f;
+            float pulseA = (float) (0.45 + 0.55 * Math.sin(t * Math.PI * 2));
+            float pulseB = (float) (0.35 + 0.65 * Math.sin((t + 0.33f) * Math.PI * 2));
+            float pulseC = (float) (0.40 + 0.60 * Math.sin((t + 0.66f) * Math.PI * 2));
+
+            // Soft wash across the whole section (black area behind sheet).
+            float r1 = Math.max(w, h) * (0.72f + 0.12f * pulseA);
+            ambientPaint.setShader(new RadialGradient(
+                    w * 0.5f, h * 0.18f, r1,
+                    new int[]{
+                            ColorUtils.setAlphaComponent(ambientLight, (int) (70 + 55 * pulseA)),
+                            ColorUtils.setAlphaComponent(ambientMid, (int) (45 + 40 * pulseB)),
+                            ColorUtils.setAlphaComponent(ambientDeep, (int) (18 + 18 * pulseA)),
+                            Color.TRANSPARENT
+                    },
+                    new float[]{0f, 0.35f, 0.7f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, ambientPaint);
+
+            float r2 = Math.max(w, h) * (0.55f + 0.14f * pulseB);
+            ambientPaint.setShader(new RadialGradient(
+                    w * 0.12f, h * 0.42f, r2,
+                    new int[]{
+                            ColorUtils.setAlphaComponent(ambientMid, (int) (50 + 45 * pulseB)),
+                            ColorUtils.setAlphaComponent(ambientDeep, (int) (22 + 20 * pulseC)),
+                            Color.TRANSPARENT
+                    },
+                    new float[]{0f, 0.5f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, ambientPaint);
+
+            float r3 = Math.max(w, h) * (0.5f + 0.16f * pulseC);
+            ambientPaint.setShader(new RadialGradient(
+                    w * 0.88f, h * 0.32f, r3,
+                    new int[]{
+                            ColorUtils.setAlphaComponent(ambientLight, (int) (40 + 50 * pulseC)),
+                            ColorUtils.setAlphaComponent(ambientMid, (int) (20 + 25 * pulseA)),
+                            Color.TRANSPARENT
+                    },
+                    new float[]{0f, 0.45f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, ambientPaint);
+
+            // Center bloom under logo / title.
+            float r4 = Math.max(w, h) * (0.38f + 0.1f * pulseA);
+            ambientPaint.setShader(new RadialGradient(
+                    w * 0.5f, Math.max(dp(120), measuredHeaderH * 0.45f), r4,
+                    new int[]{
+                            ColorUtils.setAlphaComponent(ambientLight, (int) (55 + 45 * pulseA)),
+                            ColorUtils.setAlphaComponent(ambientMid, (int) (28 + 25 * pulseB)),
+                            Color.TRANSPARENT
+                    },
+                    new float[]{0f, 0.55f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, ambientPaint);
+        }
+
+        @Override
+        protected void dispatchDraw(@NonNull Canvas canvas) {
+            canvas.drawColor(COLOR_BG);
+            drawAmbientGlow(canvas);
+            super.dispatchDraw(canvas);
+            if (ambientRunning) {
+                invalidate();
+            }
+        }
+
         void playEntrance() {
             entrancePlaying = true;
             if (headerBrand != null) {
@@ -801,10 +1136,25 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
                         .setDuration(480).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
             }
             sheet.setAlpha(0f);
-            sheet.setTranslationY(dp(64));
-            sheet.animate().alpha(1f).translationY(0)
-                    .setDuration(520).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
-                    .withEndAction(() -> entrancePlaying = false).start();
+            final float from = currentSheetTop() + dp(72);
+            final float to = currentSheetTop();
+            sheet.setTranslationY(from);
+            ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+            anim.setDuration(520);
+            anim.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            anim.addUpdateListener(a -> {
+                float f = (float) a.getAnimatedValue();
+                sheet.setAlpha(f);
+                sheet.setTranslationY(AndroidUtilities.lerp(from, to, f));
+            });
+            anim.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    entrancePlaying = false;
+                    applyVisuals();
+                }
+            });
+            anim.start();
             for (int i = 0; i < staggerCount; i++) {
                 View v = stagger[i];
                 if (v == null) continue;
@@ -821,32 +1171,219 @@ public class MglaPremiumActivity extends MglaBaseSettingsActivity {
             }
         }
 
+        private int peekTop() {
+            // Keep full brand (logo + title + subtitle) visible above the sheet.
+            int byHeader = measuredHeaderH > 0
+                    ? measuredHeaderH - dp(10)
+                    : (int) (getHeight() * 0.52f);
+            return Math.max(expandedTop() + dp(160), Math.min(byHeader, getHeight() - dp(220)));
+        }
+
+        private int expandedTop() {
+            return AndroidUtilities.statusBarHeight + dp(6);
+        }
+
+        float currentSheetTop() {
+            return AndroidUtilities.lerp(peekTop(), expandedTop(), progress);
+        }
+
+        void setProgress(float p, boolean layoutOnly) {
+            progress = Math.max(0f, Math.min(1f, p));
+            applyVisuals();
+            if (!layoutOnly) {
+                invalidate();
+            }
+        }
+
+        private void applyVisuals() {
+            if (getHeight() <= 0 || entrancePlaying) {
+                return;
+            }
+            float top = currentSheetTop();
+            sheet.setTranslationY(top);
+            float fade = 1f - progress * 0.85f;
+            headerBrand.setAlpha(Math.max(0f, fade));
+            float scale = 1f - progress * 0.08f;
+            headerBrand.setScaleX(scale);
+            headerBrand.setScaleY(scale);
+            headerBrand.setTranslationY(-progress * dp(24));
+            actionBar.setAlpha(1f - progress * 0.12f);
+        }
+
+        private void cancelSettle() {
+            if (settleAnimator != null) {
+                settleAnimator.cancel();
+                settleAnimator = null;
+            }
+        }
+
+        private void settleFromSheetVelocity(float velocityYPx) {
+            if (entrancePlaying) {
+                return;
+            }
+            float target;
+            if (Math.abs(velocityYPx) > 600) {
+                target = velocityYPx > 0 ? 0f : 1f;
+            } else {
+                target = progress >= 0.34f ? 1f : 0f;
+            }
+            if (Math.abs(progress - target) < 0.002f) {
+                setProgress(target, false);
+                return;
+            }
+            cancelSettle();
+            final float start = progress;
+            final float range = sheetRange();
+            final float distancePx = Math.abs(target - start) * range;
+            final float speed = Math.max(Math.abs(velocityYPx), 1f);
+            long duration;
+            if (Math.abs(velocityYPx) > 80) {
+                duration = (long) Math.max(140, Math.min(360, distancePx / speed * 1000f));
+            } else {
+                duration = (long) Math.max(200, Math.min(380, 180 + distancePx * 0.35f));
+            }
+            final Interpolator interpolator = Math.abs(velocityYPx) > 80
+                    ? CubicBezierInterpolator.EASE_OUT
+                    : CubicBezierInterpolator.DEFAULT;
+            settleAnimator = ValueAnimator.ofFloat(0f, 1f);
+            settleAnimator.setDuration(duration);
+            settleAnimator.setInterpolator(interpolator);
+            settleAnimator.addUpdateListener(a -> {
+                float f = (float) a.getAnimatedValue();
+                setProgress(start + (target - start) * f, false);
+            });
+            settleAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    settleAnimator = null;
+                    setProgress(target, false);
+                }
+            });
+            settleAnimator.start();
+        }
+
+        private void trackNestedVelocity(int dy) {
+            long now = SystemClock.uptimeMillis();
+            if (nestedVelocityTime != 0) {
+                float dt = (now - nestedVelocityTime) / 1000f;
+                if (dt > 0.001f && dt < 0.08f) {
+                    float instant = dy / dt;
+                    nestedVelocityY = nestedVelocityY * 0.35f + instant * 0.65f;
+                }
+            }
+            nestedVelocityTime = now;
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            applyVisuals();
+        }
+
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-            int headerH = headerBrand.getMeasuredHeight();
-            int peekTop = Math.max(dp(160), (int) (headerH * 0.72f));
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sheet.getLayoutParams();
-            lp.topMargin = peekTop;
-            // Measure sheet with remaining height.
-            int sheetH = getMeasuredHeight() - peekTop;
-            sheet.measure(
-                    MeasureSpec.makeMeasureSpec(getMeasuredWidth(), MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(Math.max(dp(200), sheetH), MeasureSpec.EXACTLY)
-            );
+            measuredHeaderH = headerBrand.getMeasuredHeight();
         }
 
         @Override
         protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-            int w = right - left;
-            int h = bottom - top;
-            actionBar.layout(0, 0, w, actionBar.getMeasuredHeight());
-            headerBrand.layout(0, 0, w, headerBrand.getMeasuredHeight());
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sheet.getLayoutParams();
-            int sheetTop = lp.topMargin;
-            sheet.layout(0, sheetTop, w, h);
+            super.onLayout(changed, left, top, right, bottom);
+            measuredHeaderH = headerBrand.getHeight();
+            int sheetH = getHeight() - expandedTop() + dp(28);
+            sheet.layout(0, 0, getWidth(), Math.max(sheetH, getHeight()));
             int btnH = buttonContainer.getMeasuredHeight();
-            buttonContainer.layout(0, h - btnH, w, h);
+            buttonContainer.layout(0, getHeight() - btnH, getWidth(), getHeight());
+            applyVisuals();
+        }
+
+        @Override
+        public boolean onStartNestedScroll(@NonNull View child, @NonNull View target, int axes, int type) {
+            return (axes & ViewCompat.SCROLL_AXIS_VERTICAL) != 0;
+        }
+
+        @Override
+        public void onNestedScrollAccepted(@NonNull View child, @NonNull View target, int axes, int type) {
+            nestedHelper.onNestedScrollAccepted(child, target, axes, type);
+            nestedVelocityY = 0;
+            nestedVelocityTime = 0;
+            cancelSettle();
+        }
+
+        @Override
+        public void onStopNestedScroll(@NonNull View target, int type) {
+            nestedHelper.onStopNestedScroll(target, type);
+            if (type != ViewCompat.TYPE_TOUCH) {
+                return;
+            }
+            float sheetVel = -nestedVelocityY;
+            nestedVelocityY = 0;
+            nestedVelocityTime = 0;
+            if (settleAnimator == null && progress > 0.002f && progress < 0.998f) {
+                settleFromSheetVelocity(sheetVel);
+            }
+        }
+
+        @Override
+        public void onNestedPreScroll(@NonNull View target, int dx, int dy, @NonNull int[] consumed, int type) {
+            final float range = sheetRange();
+            if (dy > 0 && progress < 1f) {
+                trackNestedVelocity(dy);
+                float next = Math.min(1f, progress + dy / range);
+                float appliedPx = (next - progress) * range;
+                setProgress(next, false);
+                consumed[1] = Math.round(appliedPx);
+            } else if (dy < 0 && scrollView.getScrollY() <= 0 && progress > 0f) {
+                trackNestedVelocity(dy);
+                float next = Math.max(0f, progress + dy / range);
+                float appliedPx = (next - progress) * range;
+                setProgress(next, false);
+                consumed[1] = Math.round(appliedPx);
+            }
+        }
+
+        @Override
+        public void onNestedScroll(@NonNull View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type, @NonNull int[] consumed) {
+            if (dyUnconsumed < 0 && scrollView.getScrollY() <= 0 && progress > 0f) {
+                trackNestedVelocity(dyUnconsumed);
+                float range = sheetRange();
+                float next = Math.max(0f, progress + dyUnconsumed / range);
+                float appliedPx = (next - progress) * range;
+                setProgress(next, false);
+                consumed[1] += Math.round(appliedPx);
+            }
+        }
+
+        @Override
+        public void onNestedScroll(@NonNull View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type) {
+            onNestedScroll(target, dxConsumed, dyConsumed, dxUnconsumed, dyUnconsumed, type, new int[2]);
+        }
+
+        @Override
+        public boolean onNestedPreFling(@NonNull View target, float velocityX, float velocityY) {
+            if (progress < 0.999f && velocityY > 0) {
+                settleFromSheetVelocity(-velocityY);
+                return true;
+            }
+            if (scrollView.getScrollY() <= 0 && progress > 0.001f && velocityY < 0) {
+                settleFromSheetVelocity(-velocityY);
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean onNestedFling(@NonNull View target, float velocityX, float velocityY, boolean consumed) {
+            if (!consumed && progress > 0.001f && progress < 0.998f) {
+                settleFromSheetVelocity(-velocityY);
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public int getNestedScrollAxes() {
+            return nestedHelper.getNestedScrollAxes();
         }
     }
 
