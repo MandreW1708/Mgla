@@ -142,6 +142,7 @@ public final class MglaSettingsSearch {
         final String notif = "Уведомления";
         final String appearance = "Внешний вид";
         final String cleanHeader = "Настройки чистой шапки";
+        final String customHeader = "Своя шапка";
         final String sideMenu = "Боковое меню";
         final String player = "Плеер";
         final String camera = "Камера";
@@ -156,6 +157,7 @@ public final class MglaSettingsSearch {
         final Utilities.Callback0Return<BaseFragment> notifScreen = MglaNotificationsSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> appearanceScreen = MglaAppearanceSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> cleanHeaderScreen = MglaCleanHeaderSettingsActivity::new;
+        final Utilities.Callback0Return<BaseFragment> customHeaderScreen = MglaCustomHeaderSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> sideMenuScreen = MglaSideMenuSettingsActivity::new;
         final Utilities.Callback0Return<BaseFragment> animCommonScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_COMMON);
         final Utilities.Callback0Return<BaseFragment> animChatsScreen = () -> MglaAnimationSettingsActivity.of(MglaAnimationSettingsActivity.TYPE_CHATS);
@@ -236,6 +238,12 @@ public final class MglaSettingsSearch {
         l.add(new Entry(1063, "Блок с ником", hub, cleanHeader, appearanceIcon, cleanHeaderScreen, "Блок с ником", "appearance/clean-header/title"));
         l.add(new Entry(1064, "Блок с закрепом", hub, cleanHeader, appearanceIcon, cleanHeaderScreen, "Блок с закрепом", "appearance/clean-header/pinned"));
         l.add(new Entry(1065, "Панель перевода", hub, cleanHeader, appearanceIcon, cleanHeaderScreen, "Панель перевода", "appearance/clean-header/translation"));
+        l.add(new Entry(1173, "Своя шапка", hub, appearance, appearanceIcon, appearanceScreen, "Своя", "appearance/custom-header"));
+        l.add(new Entry(1174, customHeader, hub, appearance, appearanceIcon, customHeaderScreen, null, "appearance/custom-header/configure"));
+        l.add(new Entry(1175, "Пресет шапки", hub, customHeader, appearanceIcon, customHeaderScreen, "Пресет", "appearance/custom-header/preset"));
+        l.add(new Entry(1176, "Элементы шапки", hub, customHeader, appearanceIcon, customHeaderScreen, "Элементы", "appearance/custom-header/elements"));
+        l.add(new Entry(1177, "Стекло шапки", hub, customHeader, appearanceIcon, customHeaderScreen, "Стекло", "appearance/custom-header/glass"));
+        l.add(new Entry(1178, "Компоновка шапки", hub, customHeader, appearanceIcon, customHeaderScreen, "Компоновка", "appearance/custom-header/layout"));
         l.add(new Entry(1066, "Затемнение стекла", hub, appearance, appearanceIcon, appearanceScreen, "Затемнение стекла", "appearance/glass-darkening"));
         l.add(new Entry(1067, "Переключатели MD3", hub, appearance, appearanceIcon, appearanceScreen, "Переключатели MD3", "appearance/md3-switches"));
         l.add(new Entry(1068, "Значок вместо \"изменено\"", hub, appearance, appearanceIcon, appearanceScreen, "Значок вместо \"изменено\"", "appearance/edited-icon"));

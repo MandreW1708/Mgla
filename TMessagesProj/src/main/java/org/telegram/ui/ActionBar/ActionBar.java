@@ -238,25 +238,28 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         setClipChildren(false);
         glassMode = true;
 
+        final org.telegram.ui.Components.MglaChatHeaderLayout headerLayout =
+                org.telegram.ui.Components.MglaChatHeaderLayout.resolve();
+        final float glassR = headerLayout.glassRadiusPx();
         glassDrawable = factory.create(this)
             .setColorProvider(colorProvider)
             .setPadding(dp(6));
-        if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled() && isForum) {
+        if (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled() && isForum
+                && headerLayout.style != org.telegram.ui.MglaGlassConfig.HEADER_STYLE_CUSTOM) {
             // Stock Telegram forum glass: slightly flatter left edge next to the back circle.
-            glassDrawable.setRadius(dp(18.33f), dp(23), dp(23), dp(18.33f));
+            glassDrawable.setRadius(dp(18.33f), glassR, glassR, dp(18.33f));
         } else {
-            // Mgla nick/topic pill: full capsule on all corners.
-            glassDrawable.setRadius(dp(23));
+            glassDrawable.setRadius(glassR);
         }
 
         glassDrawableBack = factory.create(this)
             .setColorProvider(colorProvider)
-            .setRadius(dp(23))
+            .setRadius(glassR)
             .setPadding(dp(6));
 
         glassDrawableMenu = factory.create(this)
             .setColorProvider(colorProvider)
-            .setRadius(dp(23))
+            .setRadius(glassR)
             .setPadding(dp(6));
 
         if (menu != null) {
@@ -2242,18 +2245,24 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
 
         final boolean hasAvatar = chatAvatarContainer.hasVisibleAvatar();
+        final org.telegram.ui.Components.MglaChatHeaderLayout headerLayout =
+                org.telegram.ui.Components.MglaChatHeaderLayout.resolve();
+        final int sidePad = dp(Math.max(6, headerLayout.padDp));
+        final int backSlot = headerLayout.showBack ? dp(46) + sidePad : sidePad;
+        final int menuSlot = headerLayout.showMenu || headerLayout.avatarAtEnd ? dp(46) + sidePad : sidePad;
         final int maxAvailable = previewGlassMode
-            ? getMeasuredWidth() - dp(6) * 2
-            : getMeasuredWidth() - dp(6 + 46 + 6 + 6 + 46 + 6);
+            ? Math.max(0, getMeasuredWidth() - sidePad * 2)
+            : Math.max(0, getMeasuredWidth() - backSlot - menuSlot);
         final int targetWidth;
         if (chatAvatarContainer.isStockTelegramGlass()) {
-            // Telegram header: keep the nick pill as wide as the slot between back and menu.
-            targetWidth = Math.max(0, maxAvailable);
-        } else {
-            // Ceiling stays the previous full-width budget; floor keeps short nicks from looking tiny.
+            // Telegram / custom start-avatar: content width, clamped so long nicks ellipsize
+            // inside the slot and short nicks stay a compact pill (visualWidth already floored).
             final int visualWidth = Math.max(0, chatAvatarContainer.getVisualWidth());
-            final int minWidth = hasAvatar ? 0 : Math.min(maxAvailable, dp(132));
-            targetWidth = Math.min(maxAvailable, Math.max(minWidth, visualWidth));
+            targetWidth = Math.min(maxAvailable, Math.max(visualWidth, Math.min(maxAvailable, dp(56))));
+        } else {
+            // Ceiling = free space between neighbors; floor from visualWidth (short-nick min inside).
+            final int visualWidth = Math.max(0, chatAvatarContainer.getVisualWidth());
+            targetWidth = Math.min(maxAvailable, visualWidth);
         }
         if (animated) {
             if (animatorAvatarContainerWidth.getToFactor() != targetWidth) {
@@ -2372,7 +2381,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
                 final int right = getWidth() - p;
                 chatAvatarContainer.setTranslationX(0);
                 glassDrawable.setBounds(left, t, right, b);
-                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || !org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled()) {
+                if (org.telegram.ui.Components.MglaChatHeaderLayout.resolve().drawGlassTitle) {
                     glassDrawable.draw(canvas);
                 }
             } else {
@@ -2481,26 +2490,25 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
 
             glassDrawable.setBounds(left, t, right, b);
-            if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || !org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTitleBlockEnabled()) {
+            if (org.telegram.ui.Components.MglaChatHeaderLayout.resolve().drawGlassTitle) {
                 glassDrawable.draw(canvas);
             }
             }
         }
         if (glassDrawableBack != null && hasBackButton) {
             glassDrawableBack.setBounds(0, t, s + p * 2, b);
-            final boolean cleanHeader = org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled();
-            if (cleanHeader) {
-                // Clean header: no back glass while action mode shows the close (X) control.
-                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHideBackBtnEnabled() && actionModeFactor < 1f) {
+            final org.telegram.ui.Components.MglaChatHeaderLayout headerLayout = org.telegram.ui.Components.MglaChatHeaderLayout.resolve();
+            if (headerLayout.drawGlassBack) {
+                if (actionModeFactor > 0f && (org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled() || org.telegram.ui.MglaGlassConfig.isCustomHeaderEnabled())) {
                     final int backAlpha = Math.round(255 * (1f - actionModeFactor));
                     if (backAlpha > 0) {
                         glassDrawableBack.setAlpha(backAlpha);
                         glassDrawableBack.draw(canvas);
                         glassDrawableBack.setAlpha(255);
                     }
+                } else {
+                    glassDrawableBack.draw(canvas);
                 }
-            } else {
-                glassDrawableBack.draw(canvas);
             }
         }
         if (glassDrawableMenu != null && menuWidth > 0 && !glassOnlyBack && !doNotDrawGlassMenu) {
@@ -2544,7 +2552,7 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
             }
             glassDrawableMenu.setBounds(menuGlassLeft, t, menuGlassRight, b);
             glassDrawableMenu.setAlpha(hasForcedMenuWidth ? 255 : (int) (255 * animatorHasMenuItems.getFloatValue()));
-            if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()) {
+            if (org.telegram.ui.Components.MglaChatHeaderLayout.resolve().drawGlassMenu) {
                 glassDrawableMenu.draw(canvas);
             }
         }
@@ -2600,6 +2608,24 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         return titlesContainer;
     }
 
+    /** Apply custom header glass corner radii (round / soft / square). */
+    public void applyMglaGlassRadii(org.telegram.ui.Components.MglaChatHeaderLayout layout) {
+        if (layout == null || !glassMode) {
+            return;
+        }
+        final float r = layout.glassRadiusPx();
+        if (glassDrawable != null) {
+            glassDrawable.setRadius(r);
+        }
+        if (glassDrawableBack != null) {
+            glassDrawableBack.setRadius(r);
+        }
+        if (glassDrawableMenu != null) {
+            glassDrawableMenu.setRadius(r);
+        }
+        invalidate();
+    }
+
     @Override
     public void updateColors() {
         adaptive_updateColor();
@@ -2611,6 +2637,9 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
         }
         if (glassDrawableBack != null) {
             glassDrawableBack.updateColors();
+        }
+        if (glassMode) {
+            applyMglaGlassRadii(org.telegram.ui.Components.MglaChatHeaderLayout.resolve());
         }
         if (additionalSubTitleOverlayContainer != null) {
             additionalSubTitleOverlayContainer.updateColors();

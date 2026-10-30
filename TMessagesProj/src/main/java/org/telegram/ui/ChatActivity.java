@@ -4348,9 +4348,12 @@ public class ChatActivity extends BaseFragment implements
         updateTopicTitleIcon();
         final boolean glassChatHeader = org.telegram.ui.MglaGlassConfig.isGlassChatHeaderEnabled();
         final boolean telegramHeader = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled();
+        final boolean customHeader = org.telegram.ui.MglaGlassConfig.isCustomHeaderEnabled();
         final boolean floatingGlassHeader = glassChatHeader || telegramHeader;
         if (floatingGlassHeader) {
-            if (telegramHeader) {
+            final org.telegram.ui.Components.MglaChatHeaderLayout headerLayout =
+                    org.telegram.ui.Components.MglaChatHeaderLayout.resolve();
+            if (telegramHeader || (customHeader && headerLayout.telegramLike)) {
                 // Literal upstream Telegram glass header: avatar stays in the title pill.
                 avatarContainer.setStockTelegramGlass(true);
             } else {
@@ -4359,6 +4362,11 @@ public class ChatActivity extends BaseFragment implements
                     avatarContainer.getAvatarImageView().setVisibility(View.GONE);
                     avatarContainer.updateGlassLayout();
                 }
+            }
+            avatarContainer.applyMglaHeaderLayout(headerLayout);
+            if (customHeader && actionBar.getBackButton() != null) {
+                // Visibility only — ActionBar.drawBackButton=true skips drawing the ImageView icon.
+                actionBar.getBackButton().setVisibility(headerLayout.showBack ? View.VISIBLE : View.GONE);
             }
         }
 
@@ -4465,9 +4473,9 @@ public class ChatActivity extends BaseFragment implements
                 audioCallIconItem = menu.lazilyAddItem(call, R.drawable.call, themeDelegate);
                 audioCallIconItem.setContentDescription(LocaleController.getString(R.string.Call));
                 userFull = getMessagesController().getUserFull(currentUser.id);
-                // Call icon in the action bar only for Telegram header (next to ⋮).
-                // Standard/Clean keep call in the overflow menu when available.
-                final boolean telegramCallIcon = telegramHeader && !currentUser.self && !UserObject.isDeleted(currentUser);
+                // Call icon in the action bar for Telegram / Custom telegram-like headers.
+                final boolean telegramCallIcon = (telegramHeader || (customHeader && org.telegram.ui.Components.MglaChatHeaderLayout.resolve().telegramLike))
+                        && !currentUser.self && !UserObject.isDeleted(currentUser);
                 if (telegramCallIcon) {
                     showAudioCallAsIcon = !inPreviewMode;
                     audioCallIconItem.setVisibility(View.VISIBLE);
@@ -4838,6 +4846,8 @@ public class ChatActivity extends BaseFragment implements
                 glassBackgroundDrawableFactory,
                 BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate),
                 ChatObject.isForum(currentChat));
+            // After setupGlass (it resets radii to capsule) apply custom round/soft/square.
+            actionBar.applyMglaGlassRadii(org.telegram.ui.Components.MglaChatHeaderLayout.resolve());
         }
         if (chatMode == MODE_PINNED) {
             actionBar.setChatAvatarContainer(avatarContainer);
@@ -24868,9 +24878,11 @@ public class ChatActivity extends BaseFragment implements
                     }
                 }
                 if (headerItem != null) {
-                    final boolean telegramCallIcon = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+                    final boolean telegramCallIcon = (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+                            || (org.telegram.ui.MglaGlassConfig.isCustomHeaderEnabled()
+                                && org.telegram.ui.Components.MglaChatHeaderLayout.resolve().telegramLike))
                             && currentUser != null && !currentUser.self && !UserObject.isDeleted(currentUser);
-                    // Header call button only for Telegram style; Standard/Clean use the menu.
+                    // Header call button for Telegram / Custom telegram-like; Standard/Clean use the menu.
                     showAudioCallAsIcon = telegramCallIcon && !inPreviewMode;
                     if (telegramCallIcon) {
                         if (audioCallIconItem != null) {
@@ -29442,7 +29454,8 @@ public class ChatActivity extends BaseFragment implements
                     changed = true;
 
                     if (topPanelLayout != null && pinnedMessageView != null) {
-                        topPanelLayout.setViewVisible(pinnedMessageView, true, animated);
+                        final boolean allowPinned = org.telegram.ui.Components.MglaChatHeaderLayout.resolve().showPinned;
+                        topPanelLayout.setViewVisible(pinnedMessageView, allowPinned, animated);
                     }
                 }
                 for (int a = 0; a < pinnedNextAnimation.length; a++) {
@@ -30371,8 +30384,9 @@ public class ChatActivity extends BaseFragment implements
             closeReportSpam.setVisibility(showRestartTopic1 || (showTranslate || showBizBot) && !(showReport || showBlock || showGeo) ? View.GONE : View.VISIBLE);
         }
         if (topPanelLayout != null) {
+            final boolean allowTranslate = org.telegram.ui.Components.MglaChatHeaderLayout.resolve().showTranslation;
             topPanelLayout.setViewVisible(restartTopicButton, showRestartTopic1, animated);
-            topPanelLayout.setViewVisible(translateButton, showTranslate, animated);
+            topPanelLayout.setViewVisible(translateButton, showTranslate && allowTranslate, animated);
             topPanelLayout.setViewVisible(bizBotButton, showBizBot, animated);
             topPanelLayout.setViewVisible(botAdView, showBotAd, animated);
             topPanelLayout.setViewVisible(addProfilePictureButton, showAddProfilePicture, animated);
@@ -30745,7 +30759,9 @@ public class ChatActivity extends BaseFragment implements
     public void setInPreviewMode(boolean value) {
         super.setInPreviewMode(value);
         if (currentUser != null && audioCallIconItem != null) {
-            final boolean telegramCallIcon = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+            final boolean telegramCallIcon = (org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled()
+                    || (org.telegram.ui.MglaGlassConfig.isCustomHeaderEnabled()
+                        && org.telegram.ui.Components.MglaChatHeaderLayout.resolve().telegramLike))
                     && !currentUser.self && !UserObject.isDeleted(currentUser);
             if (telegramCallIcon && !inPreviewMode) {
                 showAudioCallAsIcon = true;
@@ -48338,8 +48354,12 @@ public class ChatActivity extends BaseFragment implements
 
     private void updateTopPanelBackgrounds() {
         if (topPanelLayout == null || glassBackgroundDrawableFactory == null) return;
-        final boolean hideTopPanelBackground = org.telegram.ui.MglaGlassConfig.isCleanHeaderEnabled()
-            && org.telegram.ui.MglaGlassConfig.isCleanHeaderHidePinnedBlockEnabled();
+        final org.telegram.ui.Components.MglaChatHeaderLayout headerLayout =
+                org.telegram.ui.Components.MglaChatHeaderLayout.resolve();
+        final boolean hidePinnedGlass = !headerLayout.drawGlassPinned;
+        final boolean hideTranslationGlass = !headerLayout.drawGlassTranslation;
+        // Shared top-panel blur covers pinned+context; hide when pinned glass is off.
+        final boolean hideTopPanelBackground = hidePinnedGlass;
         if (!hideTopPanelBackground) {
             if (mglaTopPanelBlurBackground == null) {
                 mglaTopPanelBlurBackground = glassBackgroundDrawableFactory.create(topPanelLayout)
@@ -48360,7 +48380,7 @@ public class ChatActivity extends BaseFragment implements
                 pinnedMessageView.setBackground(null);
             }
             if (translateButton != null) {
-                if (!org.telegram.ui.MglaGlassConfig.isCleanHeaderHideTranslationPanelEnabled()) {
+                if (!hideTranslationGlass) {
                     if (!(translateButton.getBackground() instanceof org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable)) {
                          translateButton.setBackground(glassBackgroundDrawableFactory.create(translateButton)
                              .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(themeDelegate))

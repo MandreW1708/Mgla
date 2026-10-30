@@ -87,6 +87,8 @@ public class MglaGlassConfig {
     public static final int HEADER_STYLE_CLEAN = 1;
     /** Stock Telegram liquid-glass header: back circle + avatar/title pill + menu pill. */
     public static final int HEADER_STYLE_TELEGRAM = 2;
+    /** Fully customizable floating glass header (constructor). */
+    public static final int HEADER_STYLE_CUSTOM = 3;
     /** Chat input panel style: Mgla iOS-like / stock Telegram. */
     public static final String PREF_CHAT_BOTTOM_PANEL_STYLE = "chat_bottom_panel_style";
     /** Current Mgla input: attach + send as separate glass circles outside the field pill. */
@@ -212,7 +214,7 @@ public class MglaGlassConfig {
     }
 
     private static int clampHeaderStyle(int style) {
-        if (style < HEADER_STYLE_STANDARD || style > HEADER_STYLE_TELEGRAM) {
+        if (style < HEADER_STYLE_STANDARD || style > HEADER_STYLE_CUSTOM) {
             return HEADER_STYLE_STANDARD;
         }
         return style;
@@ -238,10 +240,10 @@ public class MglaGlassConfig {
         notifyGlassAppearanceChanged();
     }
 
-    /** Mgla floating liquid-glass header (Standard / Clean) — custom nick-pill layout. */
+    /** Mgla floating liquid-glass header (Standard / Clean / Custom) — nick-pill layout. */
     public static boolean isGlassChatHeaderEnabled() {
         final int style = getChatHeaderStyle();
-        return style == HEADER_STYLE_STANDARD || style == HEADER_STYLE_CLEAN;
+        return style == HEADER_STYLE_STANDARD || style == HEADER_STYLE_CLEAN || style == HEADER_STYLE_CUSTOM;
     }
 
     /** Stock Telegram chat header (avatar + left title inside the glass pill). */
@@ -249,7 +251,12 @@ public class MglaGlassConfig {
         return getChatHeaderStyle() == HEADER_STYLE_TELEGRAM;
     }
 
-    /** Any floating glass header (Standard, Clean, or stock Telegram). */
+    /** Fully customizable header constructor. */
+    public static boolean isCustomHeaderEnabled() {
+        return getChatHeaderStyle() == HEADER_STYLE_CUSTOM;
+    }
+
+    /** Any floating glass header (Standard, Clean, Custom, or stock Telegram). */
     public static boolean isFloatingGlassHeaderEnabled() {
         return isGlassChatHeaderEnabled() || isTelegramHeaderEnabled();
     }

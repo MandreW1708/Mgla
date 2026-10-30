@@ -3,16 +3,22 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.content.Context;
+import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.core.graphics.ColorUtils;
+
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MglaFeatureFlags;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.RadioCell;
@@ -83,11 +89,57 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
         telegramCell.setBackground(null);
         telegramCell.setText("Telegram", headerStyle == MglaGlassConfig.HEADER_STYLE_TELEGRAM, false);
 
+        // Keep default RadioCell padding (21) so the radio stays on the right edge.
+        // Indent only the title for the clock; overlays handle clock + beta.
+        RadioCell customCell = new RadioCell(context);
+        customCell.setBackground(null);
+        customCell.setText("\u2003\u2003Своя", headerStyle == MglaGlassConfig.HEADER_STYLE_CUSTOM, false);
+
+        FrameLayout customRow = new FrameLayout(context);
+        customRow.addView(customCell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        TextView customClockHint = new TextView(context);
+        customClockHint.setText("🕐");
+        customClockHint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        customClockHint.setGravity(Gravity.CENTER);
+        customClockHint.setPadding(dp(4), dp(4), dp(4), dp(4));
+        customClockHint.setOnClickListener(v -> {
+            if (getParentActivity() == null) {
+                return;
+            }
+            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+            builder.setTitle("Своя шапка");
+            builder.setMessage("Функция временно доступна всем, чтобы собрать обратную связь и баги.");
+            builder.setPositiveButton(LocaleController.getString(R.string.OK), null);
+            showDialog(builder.create());
+        });
+        customRow.addView(customClockHint, LayoutHelper.createFrame(
+                LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.LEFT | Gravity.CENTER_VERTICAL, 14, 0, 0, 0));
+
+        TextView customBetaBadge = new TextView(context);
+        customBetaBadge.setText("beta");
+        customBetaBadge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
+        customBetaBadge.setTypeface(AndroidUtilities.bold());
+        customBetaBadge.setTextColor(0xFFFFFFFF);
+        customBetaBadge.setGravity(Gravity.CENTER);
+        customBetaBadge.setPadding(dp(6), dp(1), dp(6), dp(2));
+        GradientDrawable customBetaBg = new GradientDrawable();
+        customBetaBg.setCornerRadius(dp(6));
+        customBetaBg.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton), 200));
+        customBetaBadge.setBackground(customBetaBg);
+        // After default pad (21) + clock indent (~28) + «Своя» (~40).
+        customRow.addView(customBetaBadge, LayoutHelper.createFrame(
+                LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.LEFT | Gravity.CENTER_VERTICAL, 21 + 28 + 44, 0, 0, 0));
+
         headerStyleBlock.addView(standardCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         headerStyleBlock.addView(MglaUi.createDivider(context));
         headerStyleBlock.addView(cleanCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         headerStyleBlock.addView(MglaUi.createDivider(context));
         headerStyleBlock.addView(telegramCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        headerStyleBlock.addView(MglaUi.createDivider(context));
+        headerStyleBlock.addView(customRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         LinearLayout cleanSettingsBlock = MglaUi.createBlock(context, null);
 
@@ -98,6 +150,15 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
         cleanConfigureCell.setOnClickListener(v -> presentFragment(new MglaCleanHeaderSettingsActivity()));
         cleanSettingsBlock.addView(cleanConfigureCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
+        LinearLayout customSettingsBlock = MglaUi.createBlock(context, null);
+
+        TextSettingsCell customConfigureCell = new TextSettingsCell(context);
+        customConfigureCell.setBackground(null);
+        customConfigureCell.setText("Настроить", false);
+        customConfigureCell.setCanDisable(false);
+        customConfigureCell.setOnClickListener(v -> presentFragment(new MglaCustomHeaderSettingsActivity()));
+        customSettingsBlock.addView(customConfigureCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
         this.headerPreview = headerPreview;
 
         final Runnable applyHeaderRadios = () -> {
@@ -105,7 +166,9 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
             standardCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_STANDARD, true);
             cleanCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_CLEAN, true);
             telegramCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_TELEGRAM, true);
+            customCell.setChecked(style == MglaGlassConfig.HEADER_STYLE_CUSTOM, true);
             cleanSettingsBlock.setVisibility(style == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+            customSettingsBlock.setVisibility(style == MglaGlassConfig.HEADER_STYLE_CUSTOM ? android.view.View.VISIBLE : android.view.View.GONE);
             if (this.headerPreview != null) {
                 this.headerPreview.setStyleAnimated(style);
             }
@@ -123,6 +186,11 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
 
         telegramCell.setOnClickListener(v -> {
             MglaGlassConfig.setChatHeaderStyle(MglaGlassConfig.HEADER_STYLE_TELEGRAM);
+            applyHeaderRadios.run();
+        });
+
+        customCell.setOnClickListener(v -> {
+            MglaGlassConfig.setChatHeaderStyle(MglaGlassConfig.HEADER_STYLE_CUSTOM);
             applyHeaderRadios.run();
         });
 
@@ -166,10 +234,12 @@ public class MglaAppearanceSettingsActivity extends MglaBaseSettingsActivity {
             applyBottomPanelRadios.run();
         });
 
-        // Order: header → clean (if any) → bottom panel → glass.
+        // Order: header → clean/custom configure → bottom panel → glass.
         rootLayout.addView(headerStyleBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
         rootLayout.addView(cleanSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
         cleanSettingsBlock.setVisibility(headerStyle == MglaGlassConfig.HEADER_STYLE_CLEAN ? android.view.View.VISIBLE : android.view.View.GONE);
+        rootLayout.addView(customSettingsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
+        customSettingsBlock.setVisibility(headerStyle == MglaGlassConfig.HEADER_STYLE_CUSTOM ? android.view.View.VISIBLE : android.view.View.GONE);
         rootLayout.addView(bottomPanelBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 0));
 
         LinearLayout glassBlock = createBlock(context, "Внешний вид");

@@ -769,25 +769,23 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         }
         if (glassCentered) {
             updateGlassTextGravity();
-            if (isGlassAtMaxWidth()) {
-                // Max pill: nick left-aligned + ellipsize. Status keeps its natural width and is
-                // centered via layout — measuring it to the full column with LEFT gravity
-                // shoved "в сети" to the left edge.
-                final int titleCol = getGlassTitleTextWidth();
-                titleTextView.measure(MeasureSpec.makeMeasureSpec(titleCol, MeasureSpec.EXACTLY), titleHSpec);
-            } else {
-                // Non-max: full nick/channel — measure wide enough that createLayout won't ellipsize
-                // (it subtracts side drawables from the EXACTLY width before laying out text).
-                final int titleNat = Math.max(1, getTitleNaturalWidth());
-                titleTextView.measure(MeasureSpec.makeMeasureSpec(titleNat, MeasureSpec.EXACTLY), titleHSpec);
+            if (titleTextView.getVisibility() != GONE) {
+                if (isGlassAtMaxWidth()) {
+                    // Long nick: left-aligned + ellipsize inside the clamped pill.
+                    final int titleCol = getGlassTitleTextWidth();
+                    titleTextView.measure(MeasureSpec.makeMeasureSpec(titleCol, MeasureSpec.EXACTLY), titleHSpec);
+                } else {
+                    // Short/medium nick: natural width so createLayout does not ellipsize early.
+                    final int titleNat = Math.max(1, getTitleNaturalWidth());
+                    titleTextView.measure(MeasureSpec.makeMeasureSpec(titleNat, MeasureSpec.EXACTLY), titleHSpec);
+                }
             }
-            // Status always: natural width (capped at max so long "Connecting…" can ellipsize),
-            // then centered in the pill by getGlassSubtitleLeft().
+            // Status: natural width (capped at max so long "Connecting…" ellipsizes), then centered.
             final int subCap = isGlassAtMaxWidth() ? getGlassCenteredTextWidth() : Integer.MAX_VALUE;
-            final int subNat = Math.max(1, Math.min(subCap, getSubtitleNaturalWidth()));
-            if (subtitleTextView != null) {
+            final int subNat = Math.max(1, Math.min(subCap, Math.max(1, getSubtitleNaturalWidth())));
+            if (subtitleTextView != null && subtitleTextView.getVisibility() != GONE) {
                 subtitleTextView.measure(MeasureSpec.makeMeasureSpec(subNat, MeasureSpec.EXACTLY), subtitleHSpec);
-            } else if (animatedSubtitleTextView != null) {
+            } else if (animatedSubtitleTextView != null && animatedSubtitleTextView.getVisibility() != GONE) {
                 animatedSubtitleTextView.measure(MeasureSpec.makeMeasureSpec(subNat, MeasureSpec.EXACTLY), subtitleHSpec);
             }
         }
@@ -876,6 +874,8 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     private boolean glassMode;
     /** Upstream Telegram glass: avatar + left title inside the pill (not Mgla centered nick). */
     private boolean stockTelegramGlass;
+    /** When >= 0, overrides avatar round radius (custom header glass shape). */
+    private int mglaForcedAvatarRadiusDp = -1;
 
     public void setGlassMode() {
         setGlassModeInternal(false);
@@ -911,7 +911,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             }
             addView(avatarImageView, 0);
         }
-        avatarImageView.setRoundRadius(dp(21));
+        applyMglaAvatarRoundRadius();
         avatarImageView.setSize(dp(avatarSizeInDp), dp(avatarSizeInDp));
         avatarImageView.setClickable(true);
         avatarImageView.setFocusable(true);
@@ -920,6 +920,18 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         avatarImageView.bringToFront();
         requestLayout();
         checkActionBar(false);
+    }
+
+    private void applyMglaAvatarRoundRadius() {
+        if (avatarImageView == null) {
+            return;
+        }
+        if (mglaForcedAvatarRadiusDp >= 0) {
+            final int maxR = avatarSizeInDp / 2;
+            avatarImageView.setRoundRadius(dp(Math.min(maxR, mglaForcedAvatarRadiusDp)));
+        } else {
+            avatarImageView.setRoundRadius(dp(avatarSizeInDp / 2));
+        }
     }
 
     public boolean isStockTelegramGlass() {
@@ -974,6 +986,52 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         checkActionBar(true);
     }
 
+    /**
+     * Apply resolved custom/standard header layout (avatar size, title/subtitle, community).
+     * Safe to call for any floating glass style.
+     */
+    public void applyMglaHeaderLayout(MglaChatHeaderLayout layout) {
+        if (layout == null) {
+            return;
+        }
+        avatarSizeInDp = layout.avatarSizeDp;
+        // Match avatar corners to glass radius (square glass → square avatar).
+        if (layout.style == org.telegram.ui.MglaGlassConfig.HEADER_STYLE_CUSTOM) {
+            mglaForcedAvatarRadiusDp = layout.glassRadiusDp;
+        } else {
+            mglaForcedAvatarRadiusDp = -1;
+        }
+        if (avatarImageView != null && !avatarImageIsHidden) {
+            applyMglaAvatarRoundRadius();
+            avatarImageView.setSize(dp(avatarSizeInDp), dp(avatarSizeInDp));
+            if (layout.showAvatar && (layout.avatarAtStart || layout.telegramLike)) {
+                ensureAvatarInsideTitlePill();
+            } else if (!layout.showAvatar) {
+                avatarImageView.setVisibility(GONE);
+            }
+        }
+        if (titleTextView != null) {
+            titleTextView.setTextSizePx(dp(layout.titleTextSizeSp + (layout.titleTextSizeSp >= 19 ? 0.5f : 0.5f)));
+            titleTextView.setVisibility(layout.showTitle ? VISIBLE : GONE);
+            if (!layout.telegramLike) {
+                titleTextView.setGravity(layout.titleCentered ? Gravity.LEFT : Gravity.LEFT);
+            }
+        }
+        if (subtitleTextView != null) {
+            subtitleTextView.setTextSizePx(dp(layout.subtitleTextSizeSp + 0.5f));
+            subtitleTextView.setVisibility(layout.showSubtitle ? VISIBLE : GONE);
+        }
+        if (animatedSubtitleTextView != null) {
+            animatedSubtitleTextView.setTextSize(dp(layout.subtitleTextSizeSp));
+            animatedSubtitleTextView.setVisibility(layout.showSubtitle ? VISIBLE : GONE);
+        }
+        if (!layout.showTimer) {
+            hideTimeItem(false);
+            setStars(false, false);
+        }
+        updateGlassLayout();
+    }
+
     private void updateGlassTextGravity() {
         if (!glassMode || stockTelegramGlass) {
             return;
@@ -999,7 +1057,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     }
 
     private int getTitleNaturalWidth() {
-        if (titleTextView == null) {
+        if (titleTextView == null || titleTextView.getVisibility() == GONE) {
             return 0;
         }
         // Must be text + side drawables: onMeasure/createLayout subtract drawables from the
@@ -1012,7 +1070,7 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             final CharSequence t = titleTextView.getText();
             textW = t == null || t.length() == 0 ? 0 : (int) Math.ceil(titleTextView.getPaint().measureText(t.toString()));
         }
-        return Math.max(1, textW + side);
+        return Math.max(0, textW + side);
     }
 
     private int getSubtitleNaturalWidth() {
@@ -1025,21 +1083,28 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
                 final CharSequence t = subtitleTextView.getText();
                 textW = t == null || t.length() == 0 ? 0 : (int) Math.ceil(subtitleTextView.getPaint().measureText(t.toString()));
             }
-            return Math.max(1, textW + side);
+            return Math.max(0, textW + side);
         }
         if (animatedSubtitleTextView != null && animatedSubtitleTextView.getVisibility() != GONE) {
             final int w = Math.max(animatedSubtitleTextView.finalWidth(), animatedSubtitleTextView.width());
-            return Math.max(1, w);
+            return Math.max(0, w);
         }
         return 0;
     }
 
-    /** Same ceiling as ActionBar.checkAvatarContainerWidth — glass must not grow past the old full title budget. */
+    /**
+     * Ceiling for the nick glass pill: expands when back/menu are hidden (custom header),
+     * so long names get more room before ellipsize.
+     */
     private int getMaxGlassWidth() {
         final int barW = actionBar != null && actionBar.getMeasuredWidth() > 0
                 ? actionBar.getMeasuredWidth()
                 : AndroidUtilities.displaySize.x;
-        return Math.max(dp(48), barW - dp(6 + 46 + 6 + 6 + 46 + 6));
+        final MglaChatHeaderLayout layout = MglaChatHeaderLayout.resolve();
+        final int sidePad = dp(Math.max(6, layout.padDp));
+        final int backSlot = layout.showBack ? dp(46) + sidePad : sidePad;
+        final int menuSlot = layout.showMenu || layout.avatarAtEnd ? dp(46) + sidePad : sidePad;
+        return Math.max(dp(48), barW - backSlot - menuSlot);
     }
 
     private int getGlassLayoutWidth() {
@@ -1246,10 +1311,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     public void setCommunityItemVisible(boolean visible) {
         if (communityItem != null) {
-            // Standard / Clean: never show the community arrow.
-            // Telegram: show it next to the avatar so it can open CommunitySheet.
-            final boolean telegramHeader = org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled();
-            communityItem.setVisibility(visible && telegramHeader && !avatarImageIsHidden ? VISIBLE : GONE);
+            // Telegram / Custom-with-community: show next to avatar for CommunitySheet.
+            final MglaChatHeaderLayout layout = MglaChatHeaderLayout.resolve();
+            final boolean allow = layout.telegramLike || layout.showCommunity
+                    || org.telegram.ui.MglaGlassConfig.isTelegramHeaderEnabled();
+            communityItem.setVisibility(visible && allow && layout.showCommunity && !avatarImageIsHidden ? VISIBLE : GONE);
         }
     }
 
@@ -1802,7 +1868,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         avatarDrawable.setInfo(currentAccount, chat);
         if (avatarImageView != null) {
             avatarImageView.setForUserOrChat(chat, avatarDrawable);
-            avatarImageView.setRoundRadius(ChatObject.isForum(chat) ? dp(ChatObject.hasStories(chat) ? 11 : 16) : dp(21));
+            if (mglaForcedAvatarRadiusDp >= 0) {
+                applyMglaAvatarRoundRadius();
+            } else {
+                avatarImageView.setRoundRadius(ChatObject.isForum(chat) ? dp(ChatObject.hasStories(chat) ? 11 : 16) : dp(21));
+            }
         }
     }
 
@@ -1910,7 +1980,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
                 avatarImageView.setAnimatedEmojiDrawable(null);
                 ForumUtilities.setMonoForumAvatar(currentAccount, chat, avatarDrawable, avatarImageView);
             }
-            avatarImageView.setRoundRadius(dp(21));
+            if (mglaForcedAvatarRadiusDp >= 0) {
+                applyMglaAvatarRoundRadius();
+            } else {
+                avatarImageView.setRoundRadius(dp(21));
+            }
         } else if (chat != null) {
             avatarDrawable.setScaleSize(1f);
             avatarDrawable.setInfo(currentAccount, chat);
@@ -1918,7 +1992,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             if (avatarImageView != null) {
                 avatarImageView.setAnimatedEmojiDrawable(null);
                 avatarImageView.setForUserOrChat(chat, avatarDrawable);
-                avatarImageView.setRoundRadius(chat.forum ? dp(ChatObject.hasStories(chat) ? 11 : 16) : dp(21));
+                if (mglaForcedAvatarRadiusDp >= 0) {
+                    applyMglaAvatarRoundRadius();
+                } else {
+                    avatarImageView.setRoundRadius(chat.forum ? dp(ChatObject.hasStories(chat) ? 11 : 16) : dp(21));
+                }
             }
         }
     }
@@ -2152,43 +2230,68 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
                (menuDotsImageView != null && menuDotsImageView.getVisibility() == VISIBLE && menuDotsImageView.getParent() == this);
     }
 
-    /** Floor for the glass nick pill — short names like "Pisun" look too tight without it. */
-    private static final int GLASS_MIN_WIDTH_DP = 132;
     /**
-     * Horizontal padding inside the pill (symmetric). Glass radius is ~23dp and ActionBar adds
-     * only ~6dp outside visualWidth — need ≥~20dp/side here or letters sit under the oval.
+     * Horizontal padding inside the pill. Scales with glass corner radius so square
+     * radius does not over-pad short nicks, while round capsules still clear the oval.
      */
-    private static final int GLASS_SIDE_INSET_DP = 48;
-    /** Left inset for long nick at max width — clears the rounded edge. */
-    private static final int GLASS_MAX_LEFT_INSET_DP = 22;
-    /** Right fade room when nick is left-aligned at max width. */
-    private static final int GLASS_MAX_RIGHT_INSET_DP = 22;
+    private int getGlassSideInsetDp() {
+        final int radius = MglaChatHeaderLayout.resolve().glassRadiusDp;
+        return Math.max(18, Math.min(48, radius + 14));
+    }
+
+    /** Floor for short nicks — grows with side inset, shrinks for square glass. */
+    private int getGlassMinWidthDp() {
+        final int inset = getGlassSideInsetDp();
+        final boolean hasText = getTitleNaturalWidth() > 0 || getSubtitleNaturalWidth() > 0;
+        if (!hasText) {
+            return Math.max(46, inset);
+        }
+        return Math.max(96, inset + 52);
+    }
+
+    /** Edge clear for long nick at max width — tied to radius so text never sits under the corner. */
+    private int getGlassMaxEdgeInsetDp() {
+        final int radius = MglaChatHeaderLayout.resolve().glassRadiusDp;
+        return Math.max(12, Math.min(24, radius));
+    }
 
     public int getVisualWidth() {
         if (stockTelegramGlass) {
-            // Literal upstream ChatAvatarContainer.getVisualWidth.
+            // Content-sized pill: short names stay compact, long names grow until ActionBar clamps.
             float width = 0;
-            if (titleTextView != null) {
+            if (titleTextView != null && titleTextView.getVisibility() != GONE) {
                 width = Math.max(width, titleTextView.getExactWidthIncludeDrawables());
             }
-            if (subtitleTextView != null) {
+            if (subtitleTextView != null && subtitleTextView.getVisibility() != GONE) {
                 width = Math.max(width, subtitleTextView.getExactWidthIncludeDrawables());
+            } else if (animatedSubtitleTextView != null && animatedSubtitleTextView.getVisibility() != GONE) {
+                width = Math.max(width, Math.max(animatedSubtitleTextView.finalWidth(), animatedSubtitleTextView.width()));
             }
             if (hasVisibleAvatar()) {
-                width += dp(52 + 18);
+                width += dp(avatarSizeInDp + 18);
             } else {
-                width += dp(34);
+                width += dp(28);
             }
-            return (int) width;
+            // Comfortable floor for 1–3 character names without looking like a tiny chip.
+            width = Math.max(width, dp(hasVisibleAvatar() ? 72 : 56));
+            return (int) Math.ceil(width);
         }
-        float width = Math.max(getTitleNaturalWidth(), getSubtitleNaturalWidth());
+        float titleW = getTitleNaturalWidth();
+        float subtitleW = getSubtitleNaturalWidth();
+        float width = Math.max(titleW, subtitleW);
         if (hasVisibleAvatar()) {
-            width += dp(52 + 12);
+            width += dp(avatarSizeInDp + 12);
+            // Short nick beside avatar still needs room past the circle.
+            width = Math.max(width, dp(avatarSizeInDp + getGlassSideInsetDp()));
         } else if (!glassMode) {
             width += dp(30);
         } else {
-            width += dp(GLASS_SIDE_INSET_DP);
-            width = Math.max(width, dp(GLASS_MIN_WIDTH_DP));
+            final int inset = getGlassSideInsetDp();
+            width += dp(inset);
+            // Short names: keep a stable pill. Long names: natural width (ActionBar clamps to max).
+            if (width < dp(getGlassMinWidthDp())) {
+                width = dp(getGlassMinWidthDp());
+            }
         }
         return (int) Math.ceil(width);
     }
@@ -2200,20 +2303,21 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     /** Centered text column (status always; nick when not at max). */
     private int getGlassCenteredTextWidth() {
-        return Math.max(dp(24), getGlassLayoutWidth() - dp(GLASS_SIDE_INSET_DP));
+        return Math.max(dp(24), getGlassLayoutWidth() - dp(getGlassSideInsetDp()));
     }
 
     /** Nick text column — at max width left-aligned with side insets so start isn't clipped. */
     private int getGlassTitleTextWidth() {
         if (isGlassAtMaxWidth()) {
-            return Math.max(dp(24), getGlassLayoutWidth() - dp(GLASS_MAX_LEFT_INSET_DP) - dp(GLASS_MAX_RIGHT_INSET_DP));
+            final int edge = getGlassMaxEdgeInsetDp();
+            return Math.max(dp(24), getGlassLayoutWidth() - dp(edge) * 2);
         }
         return getGlassCenteredTextWidth();
     }
 
     private int getGlassTitleLeft() {
         if (isGlassAtMaxWidth()) {
-            return dp(GLASS_MAX_LEFT_INSET_DP);
+            return dp(getGlassMaxEdgeInsetDp());
         }
         // Center the real measured nick — not a shrunk column that would clip sides.
         final int titleW = titleTextView != null ? titleTextView.getMeasuredWidth() : getGlassCenteredTextWidth();

@@ -155,7 +155,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         }
         if (!MglaMemoryConfig.isEnabled()) {
             BulletinFactory.of(this).createSimpleBulletin(R.raw.info,
-                    "Сначала включите живую память в разделе «Искусственный интеллект»").show();
+                "Сначала включите живую память в разделе «Искусственный интеллект»").show();
             MglaAiSettingsActivity ai = new MglaAiSettingsActivity();
             presentFragment(ai);
             ai.highlightMemoryToggle();
@@ -516,7 +516,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         private VelocityTracker obtainVelocityTracker() {
             if (velocityTracker != null) {
                 velocityTracker.clear();
-            } else {
+        } else {
                 velocityTracker = VelocityTracker.obtain();
             }
             return velocityTracker;
@@ -901,8 +901,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
         private void applyVisuals() {
             if (getHeight() <= 0 || entrancePlaying) {
-                return;
-            }
+            return;
+        }
             float top = currentSheetTop();
             sheet.setTranslationY(top);
             float fade = 1f - progress * 0.92f;
@@ -926,8 +926,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
          */
         private void settleFromSheetVelocity(float velocityYPx) {
             if (entrancePlaying) {
-                return;
-            }
+            return;
+        }
             float target;
             if (Math.abs(velocityYPx) > 600) {
                 target = velocityYPx > 0 ? 0f : 1f;
@@ -1021,8 +1021,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         public void onStopNestedScroll(@NonNull View target, int type) {
             nestedHelper.onStopNestedScroll(target, type);
             if (type != ViewCompat.TYPE_TOUCH) {
-                return;
-            }
+            return;
+        }
             nestedScrolling = false;
             // Finger-up velocity = nestedVelocityY (positive) → expand; invert to sheet space.
             float sheetVel = -nestedVelocityY;
@@ -1232,8 +1232,8 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             super.onMeasure(
-                    MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(dp(twoLines ? 60 : 50), MeasureSpec.EXACTLY)
+                MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(dp(twoLines ? 60 : 50), MeasureSpec.EXACTLY)
             );
         }
 
@@ -1305,11 +1305,11 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
                 SettingCell cell = (SettingCell) view;
                 cell.object = item.object;
                 cell.set(
-                        iconColorTop, iconColorBottom, item.iconResId,
-                        item.text,
-                        item.subtext,
-                        item.textValue,
-                        item.checked
+                    iconColorTop, iconColorBottom, item.iconResId,
+                    item.text,
+                    item.subtext,
+                    item.textValue,
+                    item.checked
                 );
             }
 

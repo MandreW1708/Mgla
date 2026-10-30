@@ -22,8 +22,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.MglaGlassConfig;
 
 /**
- * Live mini preview of the chat header styles (Standard / Clean / Telegram).
- * For Clean, glass backgrounds follow the «Убрать фон» toggles.
+ * Live mini preview of chat header styles (Standard / Clean / Telegram / Custom).
  */
 public class MglaChatHeaderPreview extends View {
 
@@ -45,6 +44,8 @@ public class MglaChatHeaderPreview extends View {
     private boolean hideTitleGlass = true;
     private boolean hidePinnedGlass = true;
     private boolean hideTranslationGlass = true;
+    private MglaChatHeaderLayout customLayout;
+    private boolean forceCustomLayout;
 
     private float animProgress = 1f;
     private int fromStyle = style;
@@ -71,6 +72,8 @@ public class MglaChatHeaderPreview extends View {
     }
 
     public void applyFromConfig() {
+        forceCustomLayout = MglaGlassConfig.isCustomHeaderEnabled();
+        customLayout = forceCustomLayout ? MglaChatHeaderLayout.resolve() : null;
         setPreviewState(
                 MglaGlassConfig.getChatHeaderStyle(),
                 MglaGlassConfig.isCleanHeaderHideBackBtnEnabled(),
@@ -81,7 +84,20 @@ public class MglaChatHeaderPreview extends View {
         );
     }
 
+    /** Force Custom preview from live constructor config. */
+    public void setCustomPreviewFromConfig() {
+        forceCustomLayout = true;
+        customLayout = MglaChatHeaderLayout.resolveCustom();
+        style = MglaGlassConfig.HEADER_STYLE_CUSTOM;
+        fromStyle = style;
+        animProgress = 1f;
+        requestLayout();
+        invalidate();
+    }
+
     public void setStyleAnimated(int newStyle) {
+        forceCustomLayout = newStyle == MglaGlassConfig.HEADER_STYLE_CUSTOM;
+        customLayout = forceCustomLayout ? MglaChatHeaderLayout.resolve() : null;
         setPreviewState(
                 newStyle,
                 MglaGlassConfig.isCleanHeaderHideBackBtnEnabled(),
@@ -121,11 +137,15 @@ public class MglaChatHeaderPreview extends View {
         }
     }
 
-    private static final int PREVIEW_HEIGHT_DP = 148;
+    private static final int PREVIEW_HEIGHT_DP = 158;
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(PREVIEW_HEIGHT_DP) + getPaddingTop() + getPaddingBottom());
+        int extra = 0;
+        if (forceCustomLayout && customLayout != null) {
+            extra = Math.max(0, customLayout.headerExtraHeightDp);
+        }
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(PREVIEW_HEIGHT_DP + extra) + getPaddingTop() + getPaddingBottom());
     }
 
     @Override
@@ -133,7 +153,8 @@ public class MglaChatHeaderPreview extends View {
         final int pl = getPaddingLeft();
         final int pt = getPaddingTop();
         final int w = getWidth() - pl - getPaddingRight();
-        final int h = dp(PREVIEW_HEIGHT_DP);
+        int extra = (forceCustomLayout && customLayout != null) ? Math.max(0, customLayout.headerExtraHeightDp) : 0;
+        final int h = dp(PREVIEW_HEIGHT_DP + extra);
         if (w <= 0 || h <= 0) {
             return;
         }
@@ -191,6 +212,12 @@ public class MglaChatHeaderPreview extends View {
     }
 
     private void drawStyle(Canvas canvas, int drawStyle, int w, float pad, float rowTop, float pillH, float gap) {
+        if (drawStyle == MglaGlassConfig.HEADER_STYLE_CUSTOM || (forceCustomLayout && drawStyle == style)) {
+            MglaChatHeaderLayout layout = customLayout != null ? customLayout : MglaChatHeaderLayout.resolve();
+            drawCustom(canvas, layout, w, rowTop);
+            return;
+        }
+
         final boolean clean = drawStyle == MglaGlassConfig.HEADER_STYLE_CLEAN;
         final boolean telegram = drawStyle == MglaGlassConfig.HEADER_STYLE_TELEGRAM;
         final boolean showBackGlass = !clean || !hideBackGlass;
@@ -226,39 +253,119 @@ public class MglaChatHeaderPreview extends View {
             drawGlass(canvas, rect, pillH / 2f);
             drawCallAndMore(canvas, rect);
         } else {
-            // Standard / Clean: peer avatar in the right slot (not ⋮).
-            drawRightAvatar(canvas, rect);
+            drawRightAvatar(canvas, rect, Math.min(rect.width(), rect.height()) - dp(2));
         }
 
-        final float secondaryTop = rowTop + pillH + dp(10);
-        final float pinnedH = dp(36);
-        final float translationH = dp(22);
-
-        rect.set(pad, secondaryTop, w - pad, secondaryTop + pinnedH);
-        if (showPinnedGlass) {
-            drawGlass(canvas, rect, dp(12));
-        }
-        captionPaint.setTextAlign(Paint.Align.LEFT);
-        canvas.drawText("Закреплённое сообщение", rect.left + dp(10), rect.centerY() + dp(3.5f), captionPaint);
-
-        rect.set(pad, secondaryTop + pinnedH + dp(5), w - pad, secondaryTop + pinnedH + dp(5) + translationH);
-        if (showTranslationGlass) {
-            drawGlass(canvas, rect, dp(11));
-        }
-        canvas.drawText("Панель перевода", rect.left + dp(10), rect.centerY() + dp(3.5f), captionPaint);
+        drawSecondaryPanels(canvas, w, pad, rowTop + pillH + dp(10), showPinnedGlass, showTranslationGlass, true, true, 23);
     }
 
-    private void drawRightAvatar(Canvas canvas, RectF slot) {
-        final float size = Math.min(slot.width(), slot.height()) - dp(2);
+    private void drawCustom(Canvas canvas, MglaChatHeaderLayout layout, int w, float rowTop) {
+        final float pad = dp(layout.padDp);
+        final float gap = dp(layout.gapDp);
+        final float pillH = dp(34 + Math.max(0, layout.headerExtraHeightDp > 10 ? 6 : 0));
+        final float corner = Math.min(pillH / 2f, dp(layout.glassRadiusDp));
+
+        float cursor = pad;
+        float backRight = cursor;
+        if (layout.showBack) {
+            rect.set(cursor, rowTop, cursor + pillH, rowTop + pillH);
+            if (layout.drawGlassBack) {
+                drawGlass(canvas, rect, corner);
+            }
+            drawBackArrow(canvas, rect.centerX(), rect.centerY());
+            backRight = cursor + pillH;
+            cursor = backRight + gap;
+        }
+
+        float menuLeft = w - pad;
+        if (layout.showMenu) {
+            final float menuW = layout.telegramLike ? dp(64) : pillH;
+            menuLeft = w - pad - menuW;
+            rect.set(menuLeft, rowTop, w - pad, rowTop + pillH);
+            if (layout.drawGlassMenu) {
+                drawGlass(canvas, rect, corner);
+            }
+            if (layout.telegramLike) {
+                drawCallAndMore(canvas, rect);
+            } else if (!(layout.showAvatar && layout.avatarAtEnd)) {
+                drawMoreDots(canvas, rect.centerX(), rect.centerY());
+            } else {
+                drawRightAvatar(canvas, rect, Math.min(layout.avatarSizeDp, pillH - dp(2)), layout);
+            }
+        } else if (layout.showAvatar && layout.avatarAtEnd) {
+            final float av = Math.min(layout.avatarSizeDp, pillH);
+            menuLeft = w - pad - av;
+            rect.set(menuLeft, rowTop, w - pad, rowTop + pillH);
+            drawRightAvatar(canvas, rect, av - dp(2), layout);
+        }
+
+        float titleLeft = cursor;
+        float titleRight = menuLeft - (layout.showMenu || (layout.showAvatar && layout.avatarAtEnd) ? gap : 0);
+        if (titleRight > titleLeft + dp(8) && (layout.showTitle || (layout.showAvatar && layout.avatarAtStart))) {
+            rect.set(titleLeft, rowTop, titleRight, rowTop + pillH);
+            if (layout.drawGlassTitle) {
+                drawGlass(canvas, rect, corner);
+            }
+            if (layout.telegramLike || (layout.showAvatar && layout.avatarAtStart)) {
+                drawTelegramTitle(canvas, rect, layout);
+            } else if (layout.showTitle) {
+                drawStandardTitle(canvas, rect, layout);
+            }
+        }
+
+        float secondaryTop = rowTop + pillH + dp(10);
+        drawSecondaryPanels(canvas, w, pad, secondaryTop,
+                layout.drawGlassPinned, layout.drawGlassTranslation,
+                layout.showPinned, layout.showTranslation,
+                layout.glassRadiusDp);
+    }
+
+    private void drawSecondaryPanels(Canvas canvas, int w, float pad, float top,
+                                     boolean glassPinned, boolean glassTranslation,
+                                     boolean showPinned, boolean showTranslation,
+                                     int radiusDp) {
+        float y = top;
+        final float pinnedH = dp(36);
+        final float translationH = dp(22);
+        final float r = Math.min(pinnedH / 2f, dp(radiusDp));
+        if (showPinned) {
+            rect.set(pad, y, w - pad, y + pinnedH);
+            if (glassPinned) {
+                drawGlass(canvas, rect, r);
+            }
+            captionPaint.setTextAlign(Paint.Align.LEFT);
+            canvas.drawText("Закреплённое сообщение", rect.left + dp(10), rect.centerY() + dp(3.5f), captionPaint);
+            y += pinnedH + dp(5);
+        }
+        if (showTranslation) {
+            rect.set(pad, y, w - pad, y + translationH);
+            if (glassTranslation) {
+                drawGlass(canvas, rect, Math.min(translationH / 2f, dp(radiusDp)));
+            }
+            captionPaint.setTextAlign(Paint.Align.LEFT);
+            canvas.drawText("Панель перевода", rect.left + dp(10), rect.centerY() + dp(3.5f), captionPaint);
+        }
+    }
+
+    private void drawRightAvatar(Canvas canvas, RectF slot, float size) {
+        drawRightAvatar(canvas, slot, size, null);
+    }
+
+    private void drawRightAvatar(Canvas canvas, RectF slot, float size, MglaChatHeaderLayout layout) {
+        size = Math.max(dp(18), Math.min(size, Math.min(slot.width(), slot.height()) - dp(2)));
         final float cx = slot.centerX();
         final float cy = slot.centerY();
-        canvas.drawCircle(cx, cy, size / 2f, avatarPaint);
+        final float corner = layout != null
+                ? Math.min(size / 2f, dp(layout.glassRadiusDp))
+                : size / 2f;
+        rect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f);
+        canvas.drawRoundRect(rect, corner, corner, avatarPaint);
 
         final int saved = titlePaint.getColor();
         final float savedSize = titlePaint.getTextSize();
         titlePaint.setColor(0xFFFFFFFF);
         titlePaint.setTextAlign(Paint.Align.CENTER);
-        titlePaint.setTextSize(dpf2(12));
+        titlePaint.setTextSize(dpf2(Math.max(10, size * 0.35f / AndroidUtilities.density)));
         canvas.drawText("M", cx, cy + dp(4), titlePaint);
         titlePaint.setTextSize(savedSize);
         titlePaint.setColor(saved);
@@ -298,29 +405,63 @@ public class MglaChatHeaderPreview extends View {
     }
 
     private void drawStandardTitle(Canvas canvas, RectF r) {
-        titlePaint.setTextAlign(Paint.Align.CENTER);
-        subtitlePaint.setTextAlign(Paint.Align.CENTER);
-        canvas.drawText("Имя чата", r.centerX(), r.top + dp(14), titlePaint);
-        canvas.drawText("в сети", r.centerX(), r.top + dp(26), subtitlePaint);
+        drawStandardTitle(canvas, r, null);
+    }
+
+    private void drawStandardTitle(Canvas canvas, RectF r, MglaChatHeaderLayout layout) {
+        final boolean center = layout == null || layout.titleCentered;
+        titlePaint.setTextAlign(center ? Paint.Align.CENTER : Paint.Align.LEFT);
+        subtitlePaint.setTextAlign(center ? Paint.Align.CENTER : Paint.Align.LEFT);
+        if (layout != null) {
+            titlePaint.setTextSize(dpf2(layout.titleTextSizeSp - 4));
+            subtitlePaint.setTextSize(dpf2(layout.subtitleTextSizeSp - 2));
+        } else {
+            titlePaint.setTextSize(dpf2(13));
+            subtitlePaint.setTextSize(dpf2(11));
+        }
+        final float tx = center ? r.centerX() : r.left + dp(12);
+        if (layout == null || layout.showTitle) {
+            canvas.drawText("Имя чата", tx, r.top + dp(14), titlePaint);
+        }
+        if (layout == null || layout.showSubtitle) {
+            canvas.drawText("в сети", tx, r.top + dp(26), subtitlePaint);
+        }
     }
 
     private void drawTelegramTitle(Canvas canvas, RectF r) {
-        final float avatar = dp(24);
-        final float ax = r.left + dp(5);
-        canvas.drawCircle(ax + avatar / 2f, r.centerY(), avatar / 2f, avatarPaint);
+        drawTelegramTitle(canvas, r, null);
+    }
 
-        final int savedTitleColor = titlePaint.getColor();
-        titlePaint.setColor(0xFFFFFFFF);
-        titlePaint.setTextAlign(Paint.Align.CENTER);
-        titlePaint.setTextSize(dpf2(11));
-        canvas.drawText("M", ax + avatar / 2f, r.centerY() + dp(4), titlePaint);
-        titlePaint.setTextSize(dpf2(13));
-        titlePaint.setColor(savedTitleColor);
+    private void drawTelegramTitle(Canvas canvas, RectF r, MglaChatHeaderLayout layout) {
+        final float avatar = layout != null ? Math.min(dp(layout.avatarSizeDp - 8), r.height() - dp(8)) : dp(24);
+        final float ax = r.left + dp(5);
+        if (layout == null || layout.showAvatar) {
+            final float corner = layout != null
+                    ? Math.min(avatar / 2f, dp(layout.glassRadiusDp))
+                    : avatar / 2f;
+            rect.set(ax, r.centerY() - avatar / 2f, ax + avatar, r.centerY() + avatar / 2f);
+            canvas.drawRoundRect(rect, corner, corner, avatarPaint);
+            final int savedTitleColor = titlePaint.getColor();
+            titlePaint.setColor(0xFFFFFFFF);
+            titlePaint.setTextAlign(Paint.Align.CENTER);
+            titlePaint.setTextSize(dpf2(11));
+            canvas.drawText("M", ax + avatar / 2f, r.centerY() + dp(4), titlePaint);
+            titlePaint.setTextSize(dpf2(13));
+            titlePaint.setColor(savedTitleColor);
+        }
 
         titlePaint.setTextAlign(Paint.Align.LEFT);
         subtitlePaint.setTextAlign(Paint.Align.LEFT);
-        final float tx = ax + avatar + dp(6);
-        canvas.drawText("MandreW", tx, r.top + dp(14), titlePaint);
-        canvas.drawText("был(а) недавно", tx, r.top + dp(26), subtitlePaint);
+        if (layout != null) {
+            titlePaint.setTextSize(dpf2(layout.titleTextSizeSp - 4));
+            subtitlePaint.setTextSize(dpf2(layout.subtitleTextSizeSp - 2));
+        }
+        final float tx = ax + ((layout == null || layout.showAvatar) ? avatar + dp(6) : dp(6));
+        if (layout == null || layout.showTitle) {
+            canvas.drawText("MandreW", tx, r.top + dp(14), titlePaint);
+        }
+        if (layout == null || layout.showSubtitle) {
+            canvas.drawText("был(а) недавно", tx, r.top + dp(26), subtitlePaint);
+        }
     }
 }
