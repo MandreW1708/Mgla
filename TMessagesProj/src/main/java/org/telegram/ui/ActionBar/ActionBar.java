@@ -1750,8 +1750,11 @@ public class ActionBar extends FrameLayout implements FactorAnimator.Target, The
 
         if (additionalSubTitleOverlayContainer != null) {
             final CharSequence textToSet;
-            if (titleId == R.string.ConnectingToProxyWithDots) {
-                textToSet = AndroidUtilities.replaceArrows(getString(R.string.TitleSetupProxy), true, dp(8f / 3f), dp(2));
+            if (titleId == R.string.ConnectingToProxyWithDots || titleId == R.string.MglaConnectingAutoBypass) {
+                String setup = titleId == R.string.MglaConnectingAutoBypass
+                    ? getString(R.string.MglaSetupAutoBypass)
+                    : getString(R.string.TitleSetupProxy);
+                textToSet = AndroidUtilities.replaceArrows(setup, true, dp(8f / 3f), dp(2));
             } else {
                 textToSet = null;
             }

@@ -434,6 +434,9 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             MglaWsBypass mgr = MglaWsBypass.getInstance();
             if (mgr.isEnabled()) {
                 mgr.onRelayHostChanged();
+            } else {
+                NotificationCenter.getGlobalInstance()
+                    .postNotificationName(NotificationCenter.proxySettingsChanged);
             }
             refreshDynamic();
         });

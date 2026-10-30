@@ -22,6 +22,9 @@ public class VpnMonitor {
     private ConnectivityManager.NetworkCallback vpnCallback;
     private ConnectivityManager.NetworkCallback defaultCallback;
     private boolean registered;
+    /** Last VPN flag reported to bypass/proxy logic — skip no-op churn. */
+    private volatile Boolean lastReportedVpn;
+    private final Runnable[] recheckRunnables = new Runnable[3];
 
     public static VpnMonitor getInstance() {
         VpnMonitor localInstance = instance;
@@ -48,17 +51,17 @@ public class VpnMonitor {
         ConnectivityManager.NetworkCallback listener = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(@NonNull Network network) {
-                onVpnStateChanged();
+                onVpnStateChanged(true);
             }
 
             @Override
             public void onLost(@NonNull Network network) {
-                onVpnStateChanged();
+                onVpnStateChanged(true);
             }
 
             @Override
             public void onCapabilitiesChanged(@NonNull Network network, @NonNull NetworkCapabilities networkCapabilities) {
-                onVpnStateChanged();
+                onVpnStateChanged(true);
             }
         };
 
@@ -73,17 +76,17 @@ public class VpnMonitor {
             defaultCallback = new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onAvailable(@NonNull Network network) {
-                    onVpnStateChanged();
+                    onVpnStateChanged(true);
                 }
 
                 @Override
                 public void onLost(@NonNull Network network) {
-                    onVpnStateChanged();
+                    onVpnStateChanged(true);
                 }
 
                 @Override
                 public void onCapabilitiesChanged(@NonNull Network network, @NonNull NetworkCapabilities networkCapabilities) {
-                    onVpnStateChanged();
+                    onVpnStateChanged(true);
                 }
             };
             cm.registerDefaultNetworkCallback(defaultCallback);
@@ -93,13 +96,14 @@ public class VpnMonitor {
 
         registered = true;
         // Сразу сверить текущее состояние (VPN мог быть включён до старта монитора)
-        onVpnStateChanged();
+        onVpnStateChanged(true);
     }
 
     public void stop() {
         if (!registered) return;
         if (android.os.Build.VERSION.SDK_INT < 23) return;
 
+        cancelVpnRechecks();
         ConnectivityManager cm = (ConnectivityManager) ApplicationLoader.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) {
             if (vpnCallback != null) {
@@ -117,6 +121,7 @@ public class VpnMonitor {
         }
         vpnCallback = null;
         defaultCallback = null;
+        lastReportedVpn = null;
         registered = false;
     }
 
@@ -178,9 +183,52 @@ public class VpnMonitor {
         return false;
     }
 
-    private void onVpnStateChanged() {
+    /**
+     * @param scheduleRechecks VPN callbacks often fire before TRANSPORT_VPN is visible on the
+     *                         active network — re-read after short delays so bypass still pauses.
+     */
+    private void onVpnStateChanged(boolean scheduleRechecks) {
         boolean vpnActive = isVpnActive();
+        Boolean prev = lastReportedVpn;
+        if (prev == null || prev != vpnActive) {
+            lastReportedVpn = vpnActive;
+            applyVpnSideEffects(vpnActive);
+        } else if (vpnActive) {
+            // Same "on" reading can still mean bypass never got suspend (race with engine start).
+            try {
+                org.telegram.utils.bypass.MglaBypassVpnGuard.onVpnStateChanged(true);
+            } catch (Throwable ignored) {
+            }
+        }
 
+        if (scheduleRechecks) {
+            scheduleVpnRechecks();
+        }
+    }
+
+    private void scheduleVpnRechecks() {
+        cancelVpnRechecks();
+        int[] delays = {350, 900, 2200};
+        for (int i = 0; i < delays.length; i++) {
+            final int idx = i;
+            recheckRunnables[idx] = () -> {
+                recheckRunnables[idx] = null;
+                onVpnStateChanged(false);
+            };
+            AndroidUtilities.runOnUIThread(recheckRunnables[idx], delays[i]);
+        }
+    }
+
+    private void cancelVpnRechecks() {
+        for (int i = 0; i < recheckRunnables.length; i++) {
+            if (recheckRunnables[i] != null) {
+                AndroidUtilities.cancelRunOnUIThread(recheckRunnables[i]);
+                recheckRunnables[i] = null;
+            }
+        }
+    }
+
+    private void applyVpnSideEffects(boolean vpnActive) {
         // Обход блокировок всегда уступает системному VPN
         try {
             org.telegram.utils.bypass.MglaBypassVpnGuard.onVpnStateChanged(vpnActive);

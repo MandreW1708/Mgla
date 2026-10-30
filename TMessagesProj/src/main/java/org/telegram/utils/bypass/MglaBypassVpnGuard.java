@@ -113,15 +113,13 @@ public final class MglaBypassVpnGuard {
 
         if (ws.isEnabled()) {
             noteUserEnabled(MODE_WS);
-            if (ws.isProxyApplied() || ws.isServerRunning()) {
-                ws.suspendForVpn();
-            }
+            // Always tear down: VPN may appear before proxyApplied flips true, or engine
+            // may still be starting — leaving it running races with "pause".
+            ws.suspendForVpn();
             managing = true;
         } else if (dpi.isEnabled()) {
             noteUserEnabled(MODE_DPI);
-            if (dpi.isProxyApplied() || dpi.isServerRunning()) {
-                dpi.suspendForVpn();
-            }
+            dpi.suspendForVpn();
             managing = true;
         }
 

@@ -8486,13 +8486,20 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             title = "Updating";
             titleId = R.string.Updating;
         } else if (currentConnectionState == ConnectionsManager.ConnectionStateConnectingToProxy) {
-            title = "ConnectingToProxyWithDots";
-            titleId = R.string.ConnectingToProxyWithDots;
+            if (isMglaAutoBypassActive()) {
+                title = "MglaConnectingAutoBypass";
+                titleId = R.string.MglaConnectingAutoBypass;
+            } else {
+                title = "ConnectingToProxyWithDots";
+                titleId = R.string.ConnectingToProxyWithDots;
+            }
         } else if (currentConnectionState == ConnectionsManager.ConnectionStateConnecting) {
             title = "Connecting";
             titleId = R.string.Connecting;
         }
         if (currentConnectionState == ConnectionsManager.ConnectionStateConnecting || currentConnectionState == ConnectionsManager.ConnectionStateConnectingToProxy) {
+            final boolean openMglaBypass = currentConnectionState == ConnectionsManager.ConnectionStateConnectingToProxy
+                && isMglaAutoBypassActive();
             action = () -> {
                 BaseFragment lastFragment = null;
                 if (AndroidUtilities.isTablet()) {
@@ -8504,6 +8511,13 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         lastFragment = mainFragmentsStack.get(mainFragmentsStack.size() - 1);
                     }
                 }
+                if (openMglaBypass) {
+                    if (lastFragment instanceof MglaDpiBypassActivity) {
+                        return;
+                    }
+                    presentFragment(new MglaDpiBypassActivity());
+                    return;
+                }
                 if (lastFragment instanceof ProxyListActivity || lastFragment instanceof ProxySettingsActivity) {
                     return;
                 }
@@ -8511,6 +8525,16 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             };
         }
         actionBarLayout.setTitleOverlayText(title, titleId, action);
+    }
+
+    /** Авто-обход (WS) или ByeDPI включены — шапка ведёт в «Подключение без VPN». */
+    private static boolean isMglaAutoBypassActive() {
+        try {
+            return org.telegram.utils.wsbypass.MglaWsConfig.isEnabled()
+                || org.telegram.utils.dpi.MglaDpiConfig.isEnabled();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public void hideVisibleActionMode() {

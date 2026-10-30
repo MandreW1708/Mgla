@@ -2,6 +2,8 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -18,6 +20,7 @@ import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.os.SystemClock;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -29,6 +32,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewOutlineProvider;
+import android.view.animation.Interpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -332,11 +336,15 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         private ValueAnimator settleAnimator;
         private float dragStartProgress;
         private float dragStartY;
-        private boolean draggingSheet;
+        private boolean draggingHandle;
         private boolean entrancePlaying;
         private VelocityTracker velocityTracker;
         private final int touchSlop;
         private final int maxFling;
+        /** Nested-scroll dy/sec (finger up = positive), for seamless settle. */
+        private float nestedVelocityY;
+        private long nestedVelocityTime;
+        private boolean nestedScrolling;
 
         HubLayout(Context context) {
             super(context);
@@ -390,16 +398,32 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
             scrollView = new NestedScrollView(context) {
                 @Override
-                public boolean onInterceptTouchEvent(MotionEvent ev) {
-                    if (progress < 0.98f && ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                        // Let parent expand sheet before content scroll when not expanded.
+                public boolean dispatchTouchEvent(MotionEvent ev) {
+                    // Handle strip: drag sheet without fighting content scroll.
+                    if (ev.getY() <= dp(28) || draggingHandle) {
+                        return false;
                     }
-                    return super.onInterceptTouchEvent(ev);
+                    return super.dispatchTouchEvent(ev);
+                }
+
+                @Override
+                public void fling(int velocityY) {
+                    // While sheet is mid-expand, keep fling on the sheet — not content.
+                    if (progress < 0.999f) {
+                        settleFromSheetVelocity(-velocityY);
+                        return;
+                    }
+                    if (getScrollY() == 0 && velocityY < 0 && progress > 0.001f) {
+                        settleFromSheetVelocity(-velocityY);
+                        return;
+                    }
+                    super.fling(velocityY);
                 }
             };
             scrollView.setOverScrollMode(OVER_SCROLL_NEVER);
             scrollView.setFillViewport(true);
             scrollView.setClipToPadding(false);
+            scrollView.setNestedScrollingEnabled(true);
             scrollView.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight + dp(16));
 
             content = new LinearLayout(context);
@@ -411,54 +435,73 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
             addView(sheet, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP));
 
+            // Only the handle zone drives direct drag; content uses nested scroll.
             sheet.setOnTouchListener((v, event) -> {
-                float y = event.getRawY();
+                final float localY = event.getY();
+                final float rawY = event.getRawY();
                 switch (event.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN: {
-                        if (event.getY() <= dp(36) || (progress < 0.99f && scrollView.getScrollY() == 0)) {
-                            draggingSheet = true;
-                            dragStartY = y;
-                            dragStartProgress = progress;
-                            if (velocityTracker != null) {
-                                velocityTracker.recycle();
-                            }
-                            velocityTracker = VelocityTracker.obtain();
-                            velocityTracker.addMovement(event);
-                            cancelSettle();
-                            return true;
+                        if (localY > dp(36)) {
+                            draggingHandle = false;
+                            return false;
                         }
-                        break;
+                        draggingHandle = true;
+                        dragStartY = rawY;
+                        dragStartProgress = progress;
+                        obtainVelocityTracker().addMovement(event);
+                        cancelSettle();
+                        return true;
                     }
                     case MotionEvent.ACTION_MOVE: {
-                        if (!draggingSheet) {
-                            break;
+                        if (!draggingHandle) {
+                            return false;
                         }
                         velocityTracker.addMovement(event);
-                        float dy = dragStartY - y;
-                        float range = Math.max(1, peekTop() - expandedTop());
+                        float dy = dragStartY - rawY;
+                        float range = sheetRange();
                         setProgress(dragStartProgress + dy / range, false);
                         return true;
                     }
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL: {
-                        if (!draggingSheet) {
-                            break;
+                        if (!draggingHandle) {
+                            return false;
                         }
-                        draggingSheet = false;
+                        draggingHandle = false;
                         float vY = 0;
                         if (velocityTracker != null) {
                             velocityTracker.addMovement(event);
                             velocityTracker.computeCurrentVelocity(1000, maxFling);
                             vY = velocityTracker.getYVelocity();
-                            velocityTracker.recycle();
-                            velocityTracker = null;
+                            recycleVelocityTracker();
                         }
-                        settle(vY);
+                        // Finger-down velocity > 0 → collapse
+                        settleFromSheetVelocity(vY);
                         return true;
                     }
                 }
                 return false;
             });
+        }
+
+        private VelocityTracker obtainVelocityTracker() {
+            if (velocityTracker != null) {
+                velocityTracker.clear();
+            } else {
+                velocityTracker = VelocityTracker.obtain();
+            }
+            return velocityTracker;
+        }
+
+        private void recycleVelocityTracker() {
+            if (velocityTracker != null) {
+                velocityTracker.recycle();
+                velocityTracker = null;
+            }
+        }
+
+        private float sheetRange() {
+            return Math.max(1f, peekTop() - expandedTop());
         }
 
         private View buildHeaderBrand(Context context) {
@@ -858,20 +901,70 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             }
         }
 
-        private void settle(float velocityY) {
-            // velocityY > 0 means finger moving down → collapse
-            float target;
-            if (Math.abs(velocityY) > 1200) {
-                target = velocityY > 0 ? 0f : 1f;
-            } else {
-                target = progress >= 0.45f ? 1f : 0f;
+        /**
+         * @param velocityYPx finger-space px/s: positive = finger down = collapse
+         */
+        private void settleFromSheetVelocity(float velocityYPx) {
+            if (entrancePlaying) {
+                return;
             }
+            float target;
+            if (Math.abs(velocityYPx) > 600) {
+                target = velocityYPx > 0 ? 0f : 1f;
+            } else {
+                target = progress >= 0.34f ? 1f : 0f;
+            }
+            if (Math.abs(progress - target) < 0.002f) {
+                setProgress(target, false);
+                return;
+            }
+
             cancelSettle();
-            settleAnimator = ValueAnimator.ofFloat(progress, target);
-            settleAnimator.setDuration(320);
-            settleAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-            settleAnimator.addUpdateListener(a -> setProgress((float) a.getAnimatedValue(), false));
+            final float start = progress;
+            final float range = sheetRange();
+            final float distancePx = Math.abs(target - start) * range;
+            final float speed = Math.max(Math.abs(velocityYPx), 1f);
+
+            // Continue motion instead of restarting from rest: duration from remaining distance / speed.
+            long duration;
+            if (Math.abs(velocityYPx) > 80) {
+                duration = (long) Math.max(140, Math.min(360, distancePx / speed * 1000f));
+            } else {
+                duration = (long) Math.max(200, Math.min(380, 180 + distancePx * 0.35f));
+            }
+
+            // Decelerate from current speed — avoid EaseOutQuint "pause then move".
+            final Interpolator interpolator = Math.abs(velocityYPx) > 80
+                    ? CubicBezierInterpolator.EASE_OUT
+                    : CubicBezierInterpolator.DEFAULT;
+
+            settleAnimator = ValueAnimator.ofFloat(0f, 1f);
+            settleAnimator.setDuration(duration);
+            settleAnimator.setInterpolator(interpolator);
+            settleAnimator.addUpdateListener(a -> {
+                float f = (float) a.getAnimatedValue();
+                setProgress(start + (target - start) * f, false);
+            });
+            settleAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    settleAnimator = null;
+                    setProgress(target, false);
+                }
+            });
             settleAnimator.start();
+        }
+
+        private void trackNestedVelocity(int dy) {
+            long now = SystemClock.uptimeMillis();
+            if (nestedVelocityTime != 0) {
+                float dt = (now - nestedVelocityTime) / 1000f;
+                if (dt > 0.001f && dt < 0.08f) {
+                    float instant = dy / dt;
+                    nestedVelocityY = nestedVelocityY * 0.35f + instant * 0.65f;
+                }
+            }
+            nestedVelocityTime = now;
         }
 
         @Override
@@ -889,7 +982,7 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             applyVisuals();
         }
 
-        // Nested scroll: expand sheet before content scrolls up; collapse when pulling down at top.
+        // Nested scroll drives expand/collapse continuously with content.
         @Override
         public boolean onStartNestedScroll(@NonNull View child, @NonNull View target, int axes, int type) {
             return (axes & ViewCompat.SCROLL_AXIS_VERTICAL) != 0;
@@ -898,38 +991,56 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
         @Override
         public void onNestedScrollAccepted(@NonNull View child, @NonNull View target, int axes, int type) {
             nestedHelper.onNestedScrollAccepted(child, target, axes, type);
+            nestedScrolling = true;
+            nestedVelocityY = 0;
+            nestedVelocityTime = 0;
             cancelSettle();
         }
 
         @Override
         public void onStopNestedScroll(@NonNull View target, int type) {
             nestedHelper.onStopNestedScroll(target, type);
-            if (type == ViewCompat.TYPE_TOUCH) {
-                settle(0);
+            if (type != ViewCompat.TYPE_TOUCH) {
+                return;
+            }
+            nestedScrolling = false;
+            // Finger-up velocity = nestedVelocityY (positive) → expand; invert to sheet space.
+            float sheetVel = -nestedVelocityY;
+            nestedVelocityY = 0;
+            nestedVelocityTime = 0;
+            if (settleAnimator == null && progress > 0.002f && progress < 0.998f) {
+                settleFromSheetVelocity(sheetVel);
             }
         }
 
         @Override
         public void onNestedPreScroll(@NonNull View target, int dx, int dy, @NonNull int[] consumed, int type) {
-            // dy > 0 = scrolling content up (finger up) → expand sheet first
+            // dy > 0: finger up → expand first; dy < 0 at top: collapse before content.
+            final float range = sheetRange();
             if (dy > 0 && progress < 1f) {
-                float range = Math.max(1, peekTop() - expandedTop());
-                float next = progress + dy / range;
-                float applied = Math.min(1f, next) - progress;
-                setProgress(progress + applied, false);
-                consumed[1] = Math.round(applied * range);
+                trackNestedVelocity(dy);
+                float next = Math.min(1f, progress + dy / range);
+                float appliedPx = (next - progress) * range;
+                setProgress(next, false);
+                consumed[1] = Math.round(appliedPx);
+            } else if (dy < 0 && scrollView.getScrollY() <= 0 && progress > 0f) {
+                trackNestedVelocity(dy);
+                float next = Math.max(0f, progress + dy / range);
+                float appliedPx = (next - progress) * range;
+                setProgress(next, false);
+                consumed[1] = Math.round(appliedPx);
             }
         }
 
         @Override
         public void onNestedScroll(@NonNull View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type, @NonNull int[] consumed) {
-            // dyUnconsumed < 0 = overscroll top (finger down) → collapse
-            if (dyUnconsumed < 0 && scrollView.getScrollY() == 0 && progress > 0f) {
-                float range = Math.max(1, peekTop() - expandedTop());
-                float next = progress + dyUnconsumed / range;
-                float applied = Math.max(0f, next) - progress;
-                setProgress(progress + applied, false);
-                consumed[1] += Math.round(applied * range);
+            if (dyUnconsumed < 0 && scrollView.getScrollY() <= 0 && progress > 0f) {
+                trackNestedVelocity(dyUnconsumed);
+                float range = sheetRange();
+                float next = Math.max(0f, progress + dyUnconsumed / range);
+                float appliedPx = (next - progress) * range;
+                setProgress(next, false);
+                consumed[1] += Math.round(appliedPx);
             }
         }
 
@@ -940,11 +1051,24 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
 
         @Override
         public boolean onNestedPreFling(@NonNull View target, float velocityX, float velocityY) {
+            // NestedScrollView: positive velocityY = fling content down (finger flicked up).
+            if (progress < 0.999f && velocityY > 0) {
+                settleFromSheetVelocity(-velocityY);
+                return true;
+            }
+            if (scrollView.getScrollY() <= 0 && progress > 0.001f && velocityY < 0) {
+                settleFromSheetVelocity(-velocityY);
+                return true;
+            }
             return false;
         }
 
         @Override
         public boolean onNestedFling(@NonNull View target, float velocityX, float velocityY, boolean consumed) {
+            if (!consumed && progress > 0.001f && progress < 0.999f) {
+                settleFromSheetVelocity(-velocityY);
+                return true;
+            }
             return false;
         }
 

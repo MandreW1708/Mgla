@@ -1306,8 +1306,11 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
 
     public void setTitleOverlayText(String titleOverlayText, int textId) {
         final CharSequence subtitleToSet;
-        if (textId == R.string.ConnectingToProxyWithDots) {
-            subtitleToSet = AndroidUtilities.replaceArrows(getString(R.string.TitleSetupProxy), true, dp(8f / 3f), dp(2));
+        if (textId == R.string.ConnectingToProxyWithDots || textId == R.string.MglaConnectingAutoBypass) {
+            String setup = textId == R.string.MglaConnectingAutoBypass
+                ? getString(R.string.MglaSetupAutoBypass)
+                : getString(R.string.TitleSetupProxy);
+            subtitleToSet = AndroidUtilities.replaceArrows(setup, true, dp(8f / 3f), dp(2));
         } else {
             subtitleToSet = null;
         }

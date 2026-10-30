@@ -188,6 +188,8 @@
     <string name="Unavailable">Unavailable</string>
     <string name="ConnectingToProxy">Connecting to proxy</string>
     <string name="ConnectingToProxyWithDots">Connecting to proxy...</string>
+    <string name="MglaConnectingAutoBypass">Подключение авто-обхода...</string>
+    <string name="MglaSetupAutoBypass">Подключение без VPN ></string>
     <string name="MenuProxyTitle">Proxy</string>
     <string name="MenuProxyDisabled">Disabled</string>
     <string name="MenuProxyConnecting">Connecting</string>

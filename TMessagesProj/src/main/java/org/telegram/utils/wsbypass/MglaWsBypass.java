@@ -1059,7 +1059,10 @@ public final class MglaWsBypass {
     }
 
     private void notifyChanged() {
-        AndroidUtilities.runOnUIThread(() ->
-            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.dpiBypassChanged));
+        AndroidUtilities.runOnUIThread(() -> {
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.dpiBypassChanged);
+            // Refresh chats-header shield badge (DE1 / DE2 / FI).
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
+        });
     }
 }

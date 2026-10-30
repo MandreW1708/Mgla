@@ -2014,7 +2014,16 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
         } else if (currentConnectionState == ConnectionsManager.ConnectionStateUpdating) {
             title = getString(R.string.Updating);
         } else if (currentConnectionState == ConnectionsManager.ConnectionStateConnectingToProxy) {
-            title = getString(R.string.ConnectingToProxy);
+            try {
+                if (org.telegram.utils.wsbypass.MglaWsConfig.isEnabled()
+                    || org.telegram.utils.dpi.MglaDpiConfig.isEnabled()) {
+                    title = getString(R.string.MglaConnectingAutoBypass);
+                } else {
+                    title = getString(R.string.ConnectingToProxy);
+                }
+            } catch (Throwable ignored) {
+                title = getString(R.string.ConnectingToProxy);
+            }
         }
         if (title == null) {
             if (lastSubtitle != null) {

@@ -520,6 +520,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     public static boolean switchingTheme;
     private ActionBarMenuItem doneItem;
     private ProxyDrawable proxyDrawable;
+    private ProxyDrawable proxyHeaderDrawable;
     private ActionBarMenuSubItem proxyMenuSubItem;
     private ActionBarMenuItem proxyHeaderItem;
     private ActionBarMenuItem ghostHeaderItem;
@@ -3343,6 +3344,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             doneItem.setAlpha(0.0f);
             doneItem.setVisibility(View.GONE);
             proxyDrawable = new ProxyDrawable(context);
+            proxyHeaderDrawable = new ProxyDrawable(context);
             proxyMenuSubItem = new ActionBarMenuSubItem(context, false, true, resourceProvider);
             proxyMenuSubItem.setItemHeight(56);
             proxyMenuSubItem.setTextAndIcon(getString(R.string.MenuProxyTitle), 0, proxyDrawable);
@@ -3364,9 +3366,16 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
             updateProxyButton(false, false);
 
-            proxyHeaderItem = menu.addItem(100, R.drawable.outline_shield_plain_24);
-            proxyHeaderItem.setContentDescription("Proxy");
-            proxyHeaderItem.setOnClickListener(v -> presentFragment(new ProxyListActivity()));
+            proxyHeaderItem = menu.addItem(100, proxyHeaderDrawable);
+            proxyHeaderItem.setContentDescription("Авто-обход");
+            proxyHeaderItem.setOnClickListener(v -> {
+                if (org.telegram.utils.wsbypass.MglaWsConfig.isEnabled()
+                    || org.telegram.utils.dpi.MglaDpiConfig.isEnabled()) {
+                    presentFragment(new MglaDpiBypassActivity());
+                } else {
+                    presentFragment(new ProxyListActivity());
+                }
+            });
             proxyHeaderItem.setVisibility(View.GONE);
             updateProxyHeaderIcon();
 
@@ -10479,7 +10488,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         boolean proxyEnabled = preferences.getBoolean("proxy_enabled", false);
         final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
         proxyMenuSubItem.setSubtext(getString(proxyEnabled ? (connected ? R.string.MenuProxyConnected : R.string.MenuProxyConnecting) : R.string.MenuProxyDisabled));
+        int region = ProxyDrawable.resolveMglaRegion();
+        proxyDrawable.setRegion(region);
         proxyDrawable.setConnected(proxyEnabled, connected, animated);
+        if (proxyHeaderDrawable != null) {
+            proxyHeaderDrawable.setRegion(region);
+            proxyHeaderDrawable.setConnected(proxyEnabled, connected, animated);
+        }
 
         updateProxyHeaderIcon();
         checkUi_mglaHeaderIcons();
@@ -10642,12 +10657,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     }
 
     private void updateProxyHeaderIcon() {
-        if (proxyHeaderItem == null) return;
-        final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
-        boolean proxyEnabled = preferences.getBoolean("proxy_enabled", false);
-        final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
-        final int icon = proxyEnabled && connected ? R.drawable.outline_shield_check : R.drawable.outline_shield_plain_24;
-        proxyHeaderItem.setIcon(icon);
+        if (proxyHeaderItem == null || proxyHeaderDrawable == null) {
+            return;
+        }
+        proxyHeaderDrawable.setRegion(ProxyDrawable.resolveMglaRegion());
+        proxyHeaderItem.setIcon(proxyHeaderDrawable);
     }
 
     private AnimatorSet doneItemAnimator;
