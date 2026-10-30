@@ -562,18 +562,6 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             version.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             version.setTextColor(ColorUtils.setAlphaComponent(COLOR_TEXT, 200));
             versionRow.addView(version, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
-
-            TextView beta = new TextView(context);
-            beta.setText("beta");
-            beta.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
-            beta.setTypeface(AndroidUtilities.bold());
-            beta.setTextColor(0xFFFFFFFF);
-            beta.setPadding(dp(6), dp(2), dp(6), dp(3));
-            GradientDrawable betaBg = new GradientDrawable();
-            betaBg.setCornerRadius(dp(6));
-            betaBg.setColor(ColorUtils.setAlphaComponent(COLOR_ACCENT, 180));
-            beta.setBackground(betaBg);
-            versionRow.addView(beta, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 8, 0, 0, 0));
             brand.addView(versionRow, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
 
             LinearLayout updateBtn = new LinearLayout(context);

@@ -26,7 +26,7 @@ public class BuildVars {
     public static boolean NO_SCOPED_STORAGE = Build.VERSION.SDK_INT <= 29;
     public static String BUILD_VERSION_STRING = BuildConfig.BUILD_VERSION_STRING;
 
-    public static String MGLA_VERSION_STRING = "v2.0.1";
+    public static String MGLA_VERSION_STRING = "v2.0.5";
     public static String MGLA_DEV_CHANNEL_USERNAME = "mgla_fork";
     public static String MGLA_SUPPORT_USERNAME = "mgla_admin";
     public static String MGLA_SITE_URL = "https://mgla.home.mooo.com";
