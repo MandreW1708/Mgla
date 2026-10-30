@@ -240,6 +240,7 @@ public class MglaTasksActivity extends BaseFragment implements MglaTasksStorage.
                     listAdapter.notifyDataSetChanged();
                     updateEmptyState();
                     updateDayTasks();
+                    MglaTasksWidgetProvider.updateAll();
                 } else if (id == MENU_CLEAR_DONE) {
                     confirmClearDone();
                 } else if (id == MENU_EXPORT) {

@@ -263,6 +263,17 @@ public final class MglaWsConfig {
             return;
         }
         String[] hosts = getNormalRegionRelayHosts();
+        // Don't sticky to sslip/nip aliases: LE cert often lacks their SAN, so some
+        // devices fail hostname verify even when SPKI pin matches. Prefer primary.
+        if (isPinOnlyRelayHost(host)) {
+            for (int i = 0; i < hosts.length; i++) {
+                if (!isPinOnlyRelayHost(hosts[i])) {
+                    getPrefs().edit().putInt(PREF_RELAY_HOST_INDEX, i).apply();
+                    return;
+                }
+            }
+            return;
+        }
         for (int i = 0; i < hosts.length; i++) {
             if (host.equalsIgnoreCase(hosts[i])) {
                 getPrefs().edit().putInt(PREF_RELAY_HOST_INDEX, i).apply();

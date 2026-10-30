@@ -9,10 +9,11 @@
     <color name="widget_action_text">#75ADE5</color>
     <color name="widget_edit_text">#8D949B</color>
 
-    <!-- MD3 Tasks Widget (Dark) -->
+    <!-- MD3 widget palette dark (pre-31 fallback; API 31+ uses system_* in values-night-v31) -->
     <color name="mgla_widget_bg">#FF1D1E24</color>
     <color name="mgla_widget_primary">#AEC6FF</color>
     <color name="mgla_widget_primary_container">#1B3F73</color>
+    <color name="mgla_widget_on_primary">#00315E</color>
     <color name="mgla_widget_on_primary_container">#D8E2FF</color>
     <color name="mgla_widget_text_primary">#E3E2E6</color>
     <color name="mgla_widget_text_secondary">#8E9099</color>

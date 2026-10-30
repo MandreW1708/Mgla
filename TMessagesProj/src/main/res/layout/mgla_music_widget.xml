@@ -26,6 +26,7 @@
             android:padding="5dp"
             android:background="@drawable/mgla_widget_icon_container"
             android:src="@drawable/msg_filled_data_music"
+            android:tint="@color/mgla_widget_primary"
             android:contentDescription="@null" />
 
         <!-- Title -->
@@ -169,6 +170,7 @@
                 android:padding="7dp"
                 android:background="@drawable/mgla_music_widget_control_bg"
                 android:src="@drawable/media_like"
+                android:tint="@color/mgla_widget_primary"
                 android:scaleType="centerInside"
                 android:contentDescription="@null" />
 
@@ -181,6 +183,7 @@
                 android:padding="6dp"
                 android:background="@drawable/mgla_music_widget_control_bg"
                 android:src="@drawable/mgla_music_widget_ic_prev"
+                android:tint="@color/mgla_widget_text_primary"
                 android:scaleType="centerInside"
                 android:contentDescription="@null" />
 
@@ -193,6 +196,7 @@
                 android:padding="11dp"
                 android:background="@drawable/mgla_music_widget_play_bg"
                 android:src="@drawable/ic_action_play"
+                android:tint="@color/mgla_widget_on_primary"
                 android:scaleType="centerInside"
                 android:contentDescription="@null" />
 
@@ -204,6 +208,7 @@
                 android:padding="6dp"
                 android:background="@drawable/mgla_music_widget_control_bg"
                 android:src="@drawable/mgla_music_widget_ic_next"
+                android:tint="@color/mgla_widget_text_primary"
                 android:scaleType="centerInside"
                 android:contentDescription="@null" />
 

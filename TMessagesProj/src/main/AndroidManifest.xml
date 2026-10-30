@@ -815,6 +815,12 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".MglaTasksWidgetService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <receiver android:name=".MglaMusicWidgetProvider" android:exported="true" android:label="Музыка">
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/mgla_music_widget_info" />
