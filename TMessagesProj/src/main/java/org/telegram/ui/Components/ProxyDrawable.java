@@ -53,6 +53,8 @@ public class ProxyDrawable extends Drawable {
 
     private boolean connected;
     private boolean isEnabled;
+    /** Auto-bypass suspended because system VPN is on. */
+    private boolean paused;
     private int region = REGION_NONE;
     private int shieldColor = Color.WHITE;
 
@@ -100,6 +102,18 @@ public class ProxyDrawable extends Drawable {
         return region;
     }
 
+    public void setPaused(boolean value) {
+        if (paused == value) {
+            return;
+        }
+        paused = value;
+        invalidateSelf();
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
     @Override
     public void draw(@NonNull Canvas canvas) {
         long newTime = SystemClock.elapsedRealtime();
@@ -113,8 +127,8 @@ public class ProxyDrawable extends Drawable {
             return;
         }
 
-        // Shield outline (themed).
-        emptyDrawable.setAlpha(255);
+        // Shield outline (themed); dim slightly while paused.
+        emptyDrawable.setAlpha(paused ? 180 : 255);
         setBounds(emptyDrawable);
         emptyDrawable.draw(canvas);
 
@@ -129,10 +143,21 @@ public class ProxyDrawable extends Drawable {
         int save = canvas.save();
         buildShieldInnerClip(shieldClip, b);
         canvas.clipPath(shieldClip);
+        int flagAlphaSave = flagPaint.getAlpha();
+        if (paused) {
+            flagPaint.setAlpha(160);
+            badgeBgPaint.setAlpha(160);
+            textPaint.setAlpha(160);
+        }
         drawFlag(canvas, flagRect, region);
+        flagPaint.setAlpha(flagAlphaSave);
+        badgeBgPaint.setAlpha(255);
+        textPaint.setAlpha(255);
         canvas.restoreToCount(save);
 
-        if (isEnabled && (!connected || connectedAnimationProgress != 1.0f)) {
+        if (paused) {
+            drawPauseGlyph(canvas, cx, cy);
+        } else if (isEnabled && (!connected || connectedAnimationProgress != 1.0f)) {
             outerPaint.setColor(shieldColor);
             outerPaint.setAlpha((int) (255 * (1.0f - connectedAnimationProgress)));
             radOffset += (int) (360 * dt / 1000.0f);
@@ -142,28 +167,39 @@ public class ProxyDrawable extends Drawable {
             invalidateSelf();
         }
 
-        animateConnectedProgress(dt);
+        if (!paused) {
+            animateConnectedProgress(dt);
+        }
     }
 
     private void drawLegacy(@NonNull Canvas canvas, long dt) {
-        if (!isEnabled) {
+        if (!isEnabled && !paused) {
             setBounds(emptyDrawable);
             emptyDrawable.draw(canvas);
-        } else if (!connected || connectedAnimationProgress != 1.0f) {
-            setBounds(emptyDrawable);
-            emptyDrawable.draw(canvas);
+            return;
+        }
+
+        setBounds(emptyDrawable);
+        emptyDrawable.setAlpha(paused ? 180 : 255);
+        emptyDrawable.draw(canvas);
+
+        Rect b = getBounds();
+        float cx = b.exactCenterX();
+        float cy = b.exactCenterY();
+
+        if (paused) {
+            drawPauseGlyph(canvas, cx, cy);
+            return;
+        }
+
+        if (!connected || connectedAnimationProgress != 1.0f) {
             outerPaint.setColor(shieldColor);
             outerPaint.setAlpha((int) (255 * (1.0f - connectedAnimationProgress)));
 
             radOffset += (int) (360 * dt / 1000.0f);
 
-            int width = getBounds().width();
-            int height = getBounds().height();
-
             int r = AndroidUtilities.dp(4);
-            int x = width / 2 - r;
-            int y = height / 2 - r;
-            circleRect.set(x, y, x + r + r, y + r + r);
+            circleRect.set(cx - r, cy - r, cx + r, cy + r);
             canvas.drawArc(circleRect, -90 + radOffset, 90, false, outerPaint);
             invalidateSelf();
         }
@@ -175,6 +211,29 @@ public class ProxyDrawable extends Drawable {
         }
 
         animateConnectedProgress(dt);
+    }
+
+    /** Classic pause glyph: two vertical bars in a dark disc. */
+    private void drawPauseGlyph(Canvas canvas, float cx, float cy) {
+        float discR = AndroidUtilities.dpf2(5.8f);
+        badgeBgPaint.setColor(0xE6000000);
+        badgeBgPaint.setAlpha(230);
+        canvas.drawCircle(cx, cy, discR, badgeBgPaint);
+
+        flagPaint.setColor(0xFFFFFFFF);
+        flagPaint.setAlpha(255);
+        float barW = AndroidUtilities.dpf2(1.7f);
+        float barH = AndroidUtilities.dpf2(7.2f);
+        float gap = AndroidUtilities.dpf2(1.5f);
+        float top = cy - barH / 2f;
+        float bottom = cy + barH / 2f;
+        float left1 = cx - gap / 2f - barW;
+        float left2 = cx + gap / 2f;
+        float rad = AndroidUtilities.dpf2(0.6f);
+        stripeRect.set(left1, top, left1 + barW, bottom);
+        canvas.drawRoundRect(stripeRect, rad, rad, flagPaint);
+        stripeRect.set(left2, top, left2 + barW, bottom);
+        canvas.drawRoundRect(stripeRect, rad, rad, flagPaint);
     }
 
     private void animateConnectedProgress(long dt) {

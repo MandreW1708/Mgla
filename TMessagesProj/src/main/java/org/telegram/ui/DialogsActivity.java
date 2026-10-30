@@ -10489,11 +10489,18 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
         proxyMenuSubItem.setSubtext(getString(proxyEnabled ? (connected ? R.string.MenuProxyConnected : R.string.MenuProxyConnecting) : R.string.MenuProxyDisabled));
         int region = ProxyDrawable.resolveMglaRegion();
+        boolean paused = false;
+        try {
+            paused = org.telegram.utils.bypass.MglaBypassVpnGuard.shouldShowVpnPaused();
+        } catch (Throwable ignored) {
+        }
         proxyDrawable.setRegion(region);
-        proxyDrawable.setConnected(proxyEnabled, connected, animated);
+        proxyDrawable.setPaused(paused);
+        proxyDrawable.setConnected(proxyEnabled && !paused, connected && !paused, animated);
         if (proxyHeaderDrawable != null) {
             proxyHeaderDrawable.setRegion(region);
-            proxyHeaderDrawable.setConnected(proxyEnabled, connected, animated);
+            proxyHeaderDrawable.setPaused(paused);
+            proxyHeaderDrawable.setConnected(proxyEnabled && !paused, connected && !paused, animated);
         }
 
         updateProxyHeaderIcon();

@@ -75,9 +75,9 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     private static final int MENU_PRIVACY = 1;
     private static final int MENU_TERMS = 2;
 
-    private static final int COLOR_HEADER_TOP = 0xFF2A1530;
-    private static final int COLOR_HEADER_MID = 0xFF1A3A52;
-    private static final int COLOR_HEADER_BOTTOM = 0xFF1E4F5C;
+    private static final int COLOR_HEADER_TOP = 0xFF0B1A2E;
+    private static final int COLOR_HEADER_MID = 0xFF0F2742;
+    private static final int COLOR_HEADER_BOTTOM = 0xFF123A56;
     private static final int COLOR_SHEET = 0xFF121417;
     private static final int COLOR_CARD = 0xFF1E1F24;
     private static final int COLOR_TEXT = 0xFFF2F3F5;
@@ -302,10 +302,14 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
     private static Bitmap hubIconBitmap;
 
     private static Bitmap getHubIconBitmap(Context context) {
-        if (hubIconBitmap != null && !hubIconBitmap.isRecycled()) {
+        final int size = dp(120);
+        if (hubIconBitmap != null && !hubIconBitmap.isRecycled() && hubIconBitmap.getWidth() == size) {
             return hubIconBitmap;
         }
-        final int size = dp(96);
+        if (hubIconBitmap != null && !hubIconBitmap.isRecycled()) {
+            hubIconBitmap.recycle();
+            hubIconBitmap = null;
+        }
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         try {
@@ -511,19 +515,10 @@ public class MglaSettingsActivity extends MglaBaseSettingsActivity implements No
             int topPad = AndroidUtilities.statusBarHeight + ActionBar.getCurrentActionBarHeight() + dp(8);
             brand.setPadding(dp(24), topPad, dp(24), dp(28));
 
-            FrameLayout iconWrap = new FrameLayout(context);
-            GradientDrawable petal = new GradientDrawable();
-            petal.setShape(GradientDrawable.RECTANGLE);
-            petal.setCornerRadius(dp(36));
-            petal.setColor(0xEEFFFFFF);
-            iconWrap.setBackground(petal);
-            iconWrap.setElevation(dp(6));
-
             headerIconView = new ImageView(context);
             headerIconView.setScaleType(ImageView.ScaleType.CENTER_CROP);
             headerIconView.setImageDrawable(new BitmapDrawable(context.getResources(), getHubIconBitmap(context)));
-            iconWrap.addView(headerIconView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER, 6, 6, 6, 6));
-            brand.addView(iconWrap, LayoutHelper.createLinear(88, 88, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
+            brand.addView(headerIconView, LayoutHelper.createLinear(112, 112, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
 
             TextView title = new TextView(context);
             title.setText("Mgla");
