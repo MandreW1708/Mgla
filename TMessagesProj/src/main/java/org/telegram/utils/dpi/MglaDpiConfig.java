@@ -50,6 +50,8 @@ public final class MglaDpiConfig {
 
     // Итог последнего подбора (для главного экрана)
     private static final String PREF_TEST_SUMMARY = "dpi_test_summary";
+    // Index into {@link MglaDpiStrategies#UNDERLAY_BEELINE} for WS-over-ByeDPI
+    private static final String PREF_UNDERLAY_INDEX = "dpi_underlay_strategy_index";
 
     public static final int TEST_REQUESTS_MIN = 1;
     public static final int TEST_REQUESTS_MAX = 5;
@@ -123,6 +125,25 @@ public final class MglaDpiConfig {
     public static String getSocksPass() {
         ensureSocksAuth();
         return getPrefs().getString(PREF_SOCKS_PASS, "");
+    }
+
+    public static int getUnderlayStrategyIndex() {
+        return getPrefs().getInt(PREF_UNDERLAY_INDEX, 0);
+    }
+
+    public static void setUnderlayStrategyIndex(int index) {
+        getPrefs().edit().putInt(PREF_UNDERLAY_INDEX, Math.max(0, index)).apply();
+    }
+
+    /** Advance to the next Beeline underlay strategy; returns the new index. */
+    public static int bumpUnderlayStrategyIndex() {
+        int n = MglaDpiStrategies.UNDERLAY_BEELINE.length;
+        if (n <= 0) {
+            return 0;
+        }
+        int next = (getUnderlayStrategyIndex() + 1) % n;
+        setUnderlayStrategyIndex(next);
+        return next;
     }
 
     private static String randomHex(int bytes) {

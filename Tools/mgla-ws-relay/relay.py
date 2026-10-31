@@ -130,13 +130,32 @@ class AesCtr:
         return self._e.update(data)
 
 
-# Primary camouflage path + legacy /apiws (old APKs).
-_WS_PATH_MARKERS = ("/ws/v1/live", "/apiws")
+# Camouflage path pool (CDN/SPA-looking) + legacy /apiws (old APKs).
+_WS_PATH_MARKERS = (
+    "/ws/v1/live",
+    "/cdn/v3/stream",
+    "/api/realtime",
+    "/_next/webpack-hmr",
+    "/socket/websocket",
+    "/apiws",
+)
+_WS_PATH_SET = frozenset(_WS_PATH_MARKERS)
+_WS_CAMOUFLAGE_SET = frozenset(m for m in _WS_PATH_MARKERS if m != "/apiws")
+
+
+def _norm_ws_path(path: str) -> str:
+    p = urlparse(path).path or ""
+    if len(p) > 1 and p.endswith("/"):
+        p = p[:-1]
+    return p
 
 
 def _is_ws_relay_path(path: str) -> bool:
-    p = urlparse(path).path or ""
-    return any(m in p for m in _WS_PATH_MARKERS)
+    return _norm_ws_path(path) in _WS_PATH_SET
+
+
+def _is_camouflage_path(path: str) -> bool:
+    return _norm_ws_path(path) in _WS_CAMOUFLAGE_SET
 
 
 def resolve_dc(path: str) -> Optional[int]:
@@ -254,11 +273,11 @@ def token_ok(headers) -> bool:
 def client_ok(headers) -> bool:
     """Marker from APK. Optional when token already validates."""
     got = _header_get(headers, "X-Mgla-Client", "x-mgla-client").strip().lower()
-    if got == "mgla" or got.startswith("mgla/"):
+    if got in ("mgla", "app") or got.startswith("mgla/") or got.startswith("app/"):
         return True
     # Camouflage session meta may set a synthetic client marker.
     meta = _header_get(headers, "X-Mgla-Session-Client", "x-mgla-session-client").strip().lower()
-    return meta == "mgla" or meta.startswith("mgla/")
+    return meta in ("mgla", "app") or meta.startswith("mgla/") or meta.startswith("app/")
 
 
 def _headers_as_dict(headers) -> dict:
@@ -307,7 +326,7 @@ async def read_session_meta_and_init(ws, headers: dict, path: str):
     except Exception as e:
         raise OSError(f"no init: {e}") from e
 
-    is_camouflage = any(m in (urlparse(path).path or "") for m in ("/ws/v1/live",))
+    is_camouflage = _is_camouflage_path(path)
     text = None
     if isinstance(first, str):
         text = first
@@ -911,18 +930,18 @@ async def handler(ws):
     path = ws_path(ws)
     peer = str(getattr(ws, "remote_address", "?"))
     headers = _headers_as_dict(ws_headers(ws))
-    is_camouflage = "/ws/v1/live" in (urlparse(path).path or "")
-
-    # Camouflage path may defer token/plan into the first WS text frame.
-    if not is_camouflage and not token_ok(headers):
-        LOG.info("%s reject auth path=%s", peer, path)
-        await ws.close(code=1008, reason="unauthorized")
-        return
 
     dc = resolve_dc(path)
     if dc is None:
-        LOG.info("%s bad path=%s (need /ws/v1/live|/apiws?dc=1..5)", peer, path)
-        await ws.close(code=1008, reason="need /ws/v1/live?dc=N")
+        LOG.info("%s bad path=%s (need camouflage pool|/apiws?dc=1..5)", peer, path)
+        await ws.close(code=1008, reason="need ws path?dc=N")
+        return
+
+    # Require Bearer on Upgrade for all paths (cuts unauthenticated DoS before meta).
+    # First text frame may still enrich plan / tg ids / client marker.
+    if not token_ok(headers):
+        LOG.info("%s reject auth path=%s", peer, path)
+        await ws.close(code=1008, reason="unauthorized")
         return
 
     ultra = False

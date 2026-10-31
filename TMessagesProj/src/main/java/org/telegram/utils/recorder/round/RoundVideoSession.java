@@ -219,6 +219,7 @@ public final class RoundVideoSession {
         private int videoBitrate;
         private long maximumDurationMs = DEFAULT_MAXIMUM_DURATION_MS;
         private boolean compositionEnabled = true;
+        private boolean useCameraX;
         private Listener listener;
         private OutputListener outputListener;
         private ScreenFlashController screenFlashController;
@@ -268,6 +269,12 @@ public final class RoundVideoSession {
         /** Enables the circular blur, dimming and Telegram overlays. */
         public @NonNull Builder setCompositionEnabled(boolean enabled) {
             compositionEnabled = enabled;
+            return this;
+        }
+
+        /** Selects CameraX Preview capture instead of the Camera2 controller. */
+        public @NonNull Builder setUseCameraX(boolean enabled) {
+            useCameraX = enabled;
             return this;
         }
 
@@ -491,7 +498,7 @@ public final class RoundVideoSession {
         public @NonNull FrameRate getFrameRate() { return frameRate; }
     }
 
-    // Stay under Telegram's 60s threshold: server demotes notes with duration >= 60s to regular videos.
+    // Keep under Telegram's 60s demotion threshold for video notes.
     private static final long DEFAULT_MAXIMUM_DURATION_MS = 59_500L;
     private static final long MINIMUM_TRIM_DURATION_MS = 800L;
     private static final long PREVIEW_PROGRESS_DELAY_MS = 33L;
@@ -511,7 +518,7 @@ public final class RoundVideoSession {
     private final ExecutorService outputExecutor = Executors.newSingleThreadExecutor(
             runnable -> new Thread(runnable, "RoundVideoOutput")
     );
-    private final RoundVideoCameraController cameraController;
+    private final RoundVideoCameraBackend cameraController;
     private final RoundVideoDiagnostics diagnostics;
     private final OutputResolution outputResolution;
     private final int videoBitrate;
@@ -600,18 +607,33 @@ public final class RoundVideoSession {
                 + ", fps=" + requestedFrameRate.getValue()
                 + ", composition=" + compositionEnabled
                 + ", facing=" + requestedFacing
-                + ", maxDurationMs=" + maximumDurationMs);
-        cameraController = new RoundVideoCameraController(
-                this.context,
-                previewView,
-                outputResolution,
-                videoBitrate,
-                requestedCameraResolution,
-                requestedFrameRate,
-                compositionEnabled,
-                diagnostics,
-                cameraCallback
-        );
+                + ", maxDurationMs=" + maximumDurationMs
+                + ", cameraX=" + builder.useCameraX);
+        if (builder.useCameraX) {
+            cameraController = new CameraXRoundVideoCameraController(
+                    this.context,
+                    previewView,
+                    outputResolution,
+                    videoBitrate,
+                    requestedCameraResolution,
+                    requestedFrameRate,
+                    compositionEnabled,
+                    diagnostics,
+                    cameraCallback
+            );
+        } else {
+            cameraController = new RoundVideoCameraController(
+                    this.context,
+                    previewView,
+                    outputResolution,
+                    videoBitrate,
+                    requestedCameraResolution,
+                    requestedFrameRate,
+                    compositionEnabled,
+                    diagnostics,
+                    cameraCallback
+            );
+        }
     }
 
     /** Opens the requested camera and starts recording after its first frame arrives. */
@@ -877,11 +899,11 @@ public final class RoundVideoSession {
         );
     }
 
-    private final RoundVideoCameraController.Callback cameraCallback =
-            new RoundVideoCameraController.Callback() {
+    private final RoundVideoCameraBackend.Callback cameraCallback =
+            new RoundVideoCameraBackend.Callback() {
                 @Override
                 public void onConfigured(
-                        @NonNull RoundVideoCameraController.CameraInfo info,
+                        @NonNull RoundVideoCameraBackend.CameraInfo info,
                         boolean cameraSwitch
                 ) {
                     mainHandler.post(() -> handleCameraConfigured(info, cameraSwitch));
@@ -920,7 +942,7 @@ public final class RoundVideoSession {
             };
 
     private void handleCameraConfigured(
-            @NonNull RoundVideoCameraController.CameraInfo info,
+            @NonNull RoundVideoCameraBackend.CameraInfo info,
             boolean cameraSwitch
     ) {
         if (isTerminalState()) return;

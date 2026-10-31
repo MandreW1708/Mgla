@@ -12,32 +12,48 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
-import org.telegram.messenger.UserConfig;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.InstantCameraViewBase;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.utils.recorder.round.RoundVideoSession;
+import org.telegram.utils.settings.SharedSettings;
 
 /**
- * Настройки камеры: выбор API «1 / 2» (стоковые Camera1 и Camera2 из Telegram).
- * Camera 2 — стоковый {@link InstantCameraViewBase} на Camera2, Camera 1 — классическая
- * реализация с принудительным старым API ({@link SharedConfig#setUseCamera2Force}).
+ * Настройки камеры для видеосообщений (кружков): Camera1 / Camera2 / CameraX.
  */
 public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
 
     private static final int API_1 = 0;
     private static final int API_2 = 1;
+    private static final int API_X = 2;
+
+    private static final int[] BITRATES = {
+            750_000,
+            1_000_000,
+            1_200_000,
+            2_000_000
+    };
 
     private int selectedApi;
     private LinearLayout descContainer;
     private TextView descTitle;
     private TextView descText;
+    private LinearLayout recordingBlock;
+    private TextSettingsCell outputResolutionCell;
+    private TextSettingsCell cameraResolutionCell;
+    private TextSettingsCell frameRateCell;
+    private TextSettingsCell bitrateCell;
 
     public MglaCameraSettingsActivity() {
         this(null);
@@ -61,8 +77,7 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
             }
         });
 
-        selectedApi = InstantCameraViewBase.isUsingCamera2Implementation()
-                || SharedConfig.isUsingCamera2(UserConfig.selectedAccount) ? API_2 : API_1;
+        selectedApi = resolveSelectedApi();
 
         int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText);
         int textColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText);
@@ -92,13 +107,13 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
         titleView.setGravity(Gravity.CENTER);
         buttonColumn.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
 
-        ApiButton[] buttons = new ApiButton[2];
-        String[] labels = {"1", "2"};
-        for (int i = 0; i < 2; i++) {
+        ApiButton[] buttons = new ApiButton[3];
+        String[] labels = {"1", "2", "X"};
+        for (int i = 0; i < 3; i++) {
             final int api = i;
             buttons[i] = new ApiButton(context, labels[i], accent);
             buttons[i].setOnClickListener(v -> select(api, buttons));
-            buttonColumn.addView(buttons[i], LayoutHelper.createLinear(56, 56, 0, 0, 0, i == 1 ? 0 : 12));
+            buttonColumn.addView(buttons[i], LayoutHelper.createLinear(56, 56, 0, 0, 0, i == 2 ? 0 : 12));
         }
 
         descContainer = new LinearLayout(context);
@@ -118,12 +133,189 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
         descContainer.addView(descText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 5, 0, 0));
 
         applyDescription(selectedApi, false);
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             buttons[i].setSelectedState(i == selectedApi, false);
         }
 
-        fragmentView = rootLayout;
+        recordingBlock = createBlock(context, "Запись кружка");
+        rootLayout.addView(recordingBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 16, 16, 16));
+
+        outputResolutionCell = new TextSettingsCell(context);
+        outputResolutionCell.setBackground(null);
+        recordingBlock.addView(outputResolutionCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        outputResolutionCell.setOnClickListener(v -> showChoice(
+                LocaleController.getString(R.string.RoundVideoOutputResolution),
+                new CharSequence[]{"480p", "360p"},
+                index -> {
+                    SharedSettings.roundVideoOutputResolution.set(index == 0
+                            ? RoundVideoSession.OutputResolution.P480
+                            : RoundVideoSession.OutputResolution.P360);
+                    refreshRecordingCells();
+                }
+        ));
+
+        recordingBlock.addView(MglaUi.createDivider(context));
+        cameraResolutionCell = new TextSettingsCell(context);
+        cameraResolutionCell.setBackground(null);
+        recordingBlock.addView(cameraResolutionCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        cameraResolutionCell.setOnClickListener(v -> showChoice(
+                LocaleController.getString(R.string.RoundVideoCameraResolution),
+                new CharSequence[]{
+                        LocaleController.getString(R.string.RoundVideoCameraResolutionHigh),
+                        LocaleController.getString(R.string.RoundVideoCameraResolutionMedium),
+                        LocaleController.getString(R.string.RoundVideoCameraResolutionLow)
+                },
+                index -> {
+                    SharedSettings.roundVideoCameraResolution.set(
+                            RoundVideoSession.CameraResolution.values()[index]
+                    );
+                    refreshRecordingCells();
+                }
+        ));
+
+        recordingBlock.addView(MglaUi.createDivider(context));
+        frameRateCell = new TextSettingsCell(context);
+        frameRateCell.setBackground(null);
+        recordingBlock.addView(frameRateCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        frameRateCell.setOnClickListener(v -> showChoice(
+                LocaleController.getString(R.string.RoundVideoFrameRate),
+                new CharSequence[]{"30 FPS", "60 FPS"},
+                index -> {
+                    SharedSettings.roundVideoFrameRate.set(index == 0
+                            ? RoundVideoSession.FrameRate.FPS_30
+                            : RoundVideoSession.FrameRate.FPS_60);
+                    refreshRecordingCells();
+                }
+        ));
+
+        recordingBlock.addView(MglaUi.createDivider(context));
+        bitrateCell = new TextSettingsCell(context);
+        bitrateCell.setBackground(null);
+        recordingBlock.addView(bitrateCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        bitrateCell.setOnClickListener(v -> {
+            CharSequence[] labelsBitrate = new CharSequence[BITRATES.length];
+            for (int i = 0; i < BITRATES.length; i++) {
+                labelsBitrate[i] = formatBitrate(BITRATES[i]);
+            }
+            showChoice(
+                    LocaleController.getString(R.string.RoundVideoBitrate),
+                    labelsBitrate,
+                    index -> {
+                        SharedSettings.roundVideoVideoBitrate.set(BITRATES[index]);
+                        refreshRecordingCells();
+                    }
+            );
+        });
+
+        refreshRecordingCells();
+        updateRecordingBlockVisibility(false);
+
+        ScrollView scrollView = new ScrollView(context);
+        scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        scrollView.addView(rootLayout, LayoutHelper.createScroll(
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP
+        ));
+        fragmentView = scrollView;
         return fragmentView;
+    }
+
+    private void refreshRecordingCells() {
+        if (outputResolutionCell == null) {
+            return;
+        }
+        outputResolutionCell.setTextAndValue(
+                LocaleController.getString(R.string.RoundVideoOutputResolution),
+                SharedSettings.roundVideoOutputResolution.get().getSize() + "p",
+                false
+        );
+        cameraResolutionCell.setTextAndValue(
+                LocaleController.getString(R.string.RoundVideoCameraResolution),
+                cameraResolutionLabel(SharedSettings.roundVideoCameraResolution.get()),
+                false
+        );
+        frameRateCell.setTextAndValue(
+                LocaleController.getString(R.string.RoundVideoFrameRate),
+                SharedSettings.roundVideoFrameRate.get().getValue() + " FPS",
+                false
+        );
+        bitrateCell.setTextAndValue(
+                LocaleController.getString(R.string.RoundVideoBitrate),
+                formatBitrate(SharedSettings.roundVideoVideoBitrate.get()),
+                false
+        );
+    }
+
+    private void updateRecordingBlockVisibility(boolean animated) {
+        if (recordingBlock == null) {
+            return;
+        }
+        boolean visible = selectedApi == API_2 || selectedApi == API_X;
+        if (!animated) {
+            recordingBlock.setVisibility(visible ? View.VISIBLE : View.GONE);
+            recordingBlock.setAlpha(1f);
+            return;
+        }
+        recordingBlock.animate().cancel();
+        if (visible) {
+            recordingBlock.setVisibility(View.VISIBLE);
+            recordingBlock.setAlpha(0f);
+            recordingBlock.animate()
+                    .alpha(1f)
+                    .setDuration(220)
+                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
+                    .start();
+        } else {
+            recordingBlock.animate()
+                    .alpha(0f)
+                    .setDuration(160)
+                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
+                    .withEndAction(() -> recordingBlock.setVisibility(View.GONE))
+                    .start();
+        }
+    }
+
+    private void showChoice(String title, CharSequence[] choices, ChoiceHandler handler) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(title);
+        builder.setItems(choices, (dialog, index) -> handler.onChoice(index));
+        showDialog(builder.create());
+    }
+
+    private static String formatBitrate(int bitrate) {
+        if (bitrate % 1_000_000 == 0) {
+            return (bitrate / 1_000_000) + " Mbps";
+        }
+        if (bitrate > 1_000_000) {
+            return String.format(java.util.Locale.US, "%.1f Mbps", bitrate / 1_000_000f);
+        }
+        return (bitrate / 1_000) + " kbps";
+    }
+
+    private static String cameraResolutionLabel(RoundVideoSession.CameraResolution resolution) {
+        if (resolution == RoundVideoSession.CameraResolution.HIGH) {
+            return LocaleController.getString(R.string.RoundVideoCameraResolutionHigh);
+        } else if (resolution == RoundVideoSession.CameraResolution.MEDIUM) {
+            return LocaleController.getString(R.string.RoundVideoCameraResolutionMedium);
+        }
+        return LocaleController.getString(R.string.RoundVideoCameraResolutionLow);
+    }
+
+    private interface ChoiceHandler {
+        void onChoice(int index);
+    }
+
+    private static int resolveSelectedApi() {
+        if (InstantCameraViewBase.isUsingCameraXImplementation()) {
+            return API_X;
+        }
+        if (InstantCameraViewBase.isUsingCamera2Implementation()) {
+            return API_2;
+        }
+        return API_1;
     }
 
     private void select(int api, ApiButton[] buttons) {
@@ -131,23 +323,32 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
             return;
         }
         selectedApi = api;
-        boolean camera2 = api == API_2;
-        // Camera 2 → стоковый InstantCameraView2; Camera 1 → классический InstantCameraView
-        // с принудительным старым API. Оба пишутся только здесь — никаких дублей.
-        InstantCameraViewBase.setUseCamera2Implementation(camera2);
-        SharedConfig.setUseCamera2Force(camera2 ? null : false);
+        if (api == API_X) {
+            InstantCameraViewBase.setUseCameraXImplementation(true);
+            SharedConfig.setUseCamera2Force(null);
+        } else if (api == API_2) {
+            InstantCameraViewBase.setUseCamera2Implementation(true);
+            SharedConfig.setUseCamera2Force(null);
+        } else {
+            InstantCameraViewBase.setUseCamera2Implementation(false);
+            SharedConfig.setUseCamera2Force(false);
+        }
         for (int i = 0; i < buttons.length; i++) {
             buttons[i].setSelectedState(i == api, true);
         }
         applyDescription(api, true);
+        updateRecordingBlockVisibility(true);
     }
 
     private void applyDescription(int api, boolean animated) {
         String title;
         String text;
-        if (api == API_2) {
+        if (api == API_X) {
+            title = "Camera X";
+            text = "Google CameraX для кружков. Качество, FPS и битрейт — в блоке «Запись кружка» ниже.";
+        } else if (api == API_2) {
             title = "Camera 2";
-            text = "Round Video Camera2 (InstantCameraView2): настройки 480p / битрейт / FPS в разделе «Видеосообщения».";
+            text = "Стоковый InstantCameraView2 (Camera2). Параметры записи — в блоке «Запись кружка» ниже.";
         } else {
             title = "Camera 1";
             text = "Классический InstantCameraView (Camera1 API) для видеосообщений.";
@@ -186,6 +387,10 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
 
     private LinearLayout createBlock(Context context) {
         return MglaUi.createBlock(context, null);
+    }
+
+    private LinearLayout createBlock(Context context, String title) {
+        return MglaUi.createBlock(context, title);
     }
 
     private static class ApiButton extends FrameLayout {

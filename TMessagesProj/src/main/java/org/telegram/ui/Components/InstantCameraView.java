@@ -176,7 +176,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
     private boolean recording;
     private long recordedTime;
     private boolean cancelled;
-    private boolean autoStoppedAtDurationLimit;
 
     private CameraGLThread cameraThread;
     private Size[] previewSize = new Size[2];
@@ -623,11 +622,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         if (recording) {
             recordedTime = System.currentTimeMillis() - recordStartTime + recordPlusTime;
             progress = Math.min(1f, recordedTime / 60000.0f);
-            // Stop under Telegram's 60s threshold: server demotes notes >= 60s to regular videos.
-            if (!autoStoppedAtDurationLimit && recordedTime >= 59_500) {
-                autoStoppedAtDurationLimit = true;
-                AndroidUtilities.runOnUIThread(this::autoStopAtDurationLimit);
-            }
             invalidate();
         }
 
@@ -673,12 +667,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         }
     }
 
-    private void autoStopAtDurationLimit() {
-        if (recording) {
-            togglePause();
-        }
-    }
-
     public void togglePause() {
         if (recording) {
             cancelled = recordedTime < 800;
@@ -698,10 +686,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 videoEncoder.pause();
             }
         } else if (videoEncoder != null) {
-            if (recordedTime >= 59_500) {
-                // At the round-video duration cap — stay in preview/send.
-                return;
-            }
             videoEncoder.resume();
             hideCamera(false);
             if (videoPlayer != null) {
@@ -758,7 +742,6 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             updateFlash();
             recordedTime = 0;
             progress = 0;
-            autoStoppedAtDurationLimit = false;
         }
         cancelled = false;
         file = null;
@@ -2884,6 +2867,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 videoEditedInfo.originalPath = previewFile.getAbsolutePath();
                 setupVideoPlayer(previewFile);
                 videoEditedInfo.estimatedDuration = recordedTime;
+                videoEditedInfo.enforceRoundVideoNote();
                 NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.audioDidSent, recordingGuid, videoEditedInfo, previewFile.getAbsolutePath(), keyframeThumbs);
             });
         }
@@ -2981,6 +2965,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                         videoEditedInfo.notReadyYet = true;
                         videoEditedInfo.thumb = firstFrameThumb;
                         videoEditedInfo.estimatedDuration = recordedTime;
+                        videoEditedInfo.enforceRoundVideoNote();
                         firstFrameThumb = null;
                         MediaController.PhotoEntry entry = new MediaController.PhotoEntry(0, 0, 0, videoFile.getAbsolutePath(), 0, true, 0, 0, 0);
                         if (sendOptions != null) {
@@ -3130,6 +3115,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                         videoEditedInfo.resultWidth = videoEditedInfo.originalWidth = 360;
                         videoEditedInfo.resultHeight = videoEditedInfo.originalHeight = 360;
                         videoEditedInfo.originalPath = videoFile.getAbsolutePath();
+                        videoEditedInfo.enforceRoundVideoNote();
                         final VideoEditedInfo info = videoEditedInfo;
                         if (send == ENCODER_SEND_SEND) {
                             if (delegate.isInScheduleMode()) {

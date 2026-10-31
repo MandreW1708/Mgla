@@ -42,6 +42,10 @@ public final class MglaDpiBypass {
     private volatile long sessionStartElapsed;
     private volatile String lastError;
     private long lastRestartAttemptElapsed;
+    /** WS-over-ByeDPI: engine kept alive without becoming Telegram's currentProxy. */
+    private int underlayRef;
+    private boolean underlayOnly;
+    private long lastUnderlayRotateElapsed;
 
     // Запись локального прокси в списке прокси Telegram на время работы обхода
     private SharedConfig.ProxyInfo bypassProxyInfo;
@@ -118,7 +122,12 @@ public final class MglaDpiBypass {
                 proxyApplied = false;
             }
             sessionStartElapsed = 0;
-            stopEngine();
+            // Keep engine if WS underlay still needs SOCKS.
+            if (underlayRef > 0 || underlayOnly) {
+                underlayOnly = true;
+            } else {
+                stopEngine();
+            }
             MglaDpiConfig.setEnabled(false);
             if (!MglaBypassVpnGuard.isManagingProxy()) {
                 MglaBypassVpnGuard.clearSuspended();
@@ -247,6 +256,107 @@ public final class MglaDpiBypass {
 
     public String getLastError() {
         return lastError;
+    }
+
+    /** True when local ByeDPI SOCKS can tunnel WS/TLS (user mode or WS underlay). */
+    public boolean isUnderlayAvailable() {
+        return isServerRunning() && getPort() > 0 && (proxyApplied || underlayRef > 0 || underlayOnly);
+    }
+
+    /**
+     * Ensure ByeDPI SOCKS is up for WS relay TLS (Билайн DPI). Does <b>not</b> steal
+     * Telegram's proxy when auto-обход owns ConnectionsManager.
+     */
+    public synchronized boolean ensureUnderlayRunning() {
+        if (VpnMonitor.getInstance().isVpnActive()) {
+            return false;
+        }
+        if (isServerRunning() && getPort() > 0) {
+            if (!proxyApplied) {
+                underlayOnly = true;
+                underlayRef = Math.max(1, underlayRef);
+            }
+            return true;
+        }
+        String strat = MglaDpiStrategies.underlayStrategy(MglaDpiConfig.getUnderlayStrategyIndex());
+        // Prefer a RU-looking fake SNI for underlay (vk.com) without clobbering user preference permanently.
+        String savedSni = MglaDpiConfig.getFakeSni();
+        boolean swapped = false;
+        if (!"vk.com".equalsIgnoreCase(savedSni) && !"ya.ru".equalsIgnoreCase(savedSni)) {
+            // temporary for this startArgs only via buildArgs parameter — use underlay SNI in start
+            swapped = true;
+        }
+        int port = startEngineUnderlay(strat, swapped ? "vk.com" : savedSni);
+        if (port <= 0) {
+            FileLog.e("MglaDpi: underlay start failed: " + lastError);
+            return false;
+        }
+        underlayOnly = !proxyApplied;
+        underlayRef = Math.max(1, underlayRef);
+        if (BuildVars.LOGS_ENABLED) {
+            FileLog.d("MglaDpi: WS underlay on :" + port + " strat#" + MglaDpiConfig.getUnderlayStrategyIndex());
+        }
+        return true;
+    }
+
+    public synchronized void releaseUnderlay() {
+        if (underlayRef > 0) {
+            underlayRef--;
+        }
+        if (underlayRef <= 0 && underlayOnly && !proxyApplied && !testing) {
+            underlayOnly = false;
+            stopEngine();
+        }
+    }
+
+    /**
+     * Rotate Beeline underlay strategy after TLS/WS timeouts. Rate-limited.
+     * @return true if engine restarted with a new strategy
+     */
+    public synchronized boolean rotateUnderlayStrategy() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastUnderlayRotateElapsed < 8_000L) {
+            return false;
+        }
+        lastUnderlayRotateElapsed = now;
+        int idx = MglaDpiConfig.bumpUnderlayStrategyIndex();
+        String strat = MglaDpiStrategies.underlayStrategy(idx);
+        if (!isServerRunning() && underlayRef <= 0 && !proxyApplied) {
+            return ensureUnderlayRunning();
+        }
+        int port = startEngineUnderlay(strat, "vk.com");
+        if (port <= 0) {
+            FileLog.e("MglaDpi: underlay rotate failed: " + lastError);
+            return false;
+        }
+        underlayOnly = !proxyApplied;
+        underlayRef = Math.max(1, underlayRef);
+        FileLog.d("MglaDpi: underlay rotated to #" + idx);
+        return true;
+    }
+
+    private int startEngineUnderlay(String command, String fakeSni) {
+        if (!MglaDpiNative.isAvailable()) {
+            lastError = "нативная библиотека движка не загружена";
+            return MglaDpiNative.ERR_INIT;
+        }
+        String[] args = MglaDpiStrategies.buildArgs(command, fakeSni);
+        MglaDpiConfig.ensureSocksAuth();
+        int port;
+        try {
+            port = MglaDpiNative.nativeStart(args, MglaDpiConfig.getPort(),
+                MglaDpiConfig.getSocksUser(), MglaDpiConfig.getSocksPass());
+        } catch (Throwable e) {
+            FileLog.e(e);
+            port = MglaDpiNative.ERR_INIT;
+        }
+        if (port > 0) {
+            lastError = null;
+            MglaDpiConfig.setPort(port);
+        } else {
+            lastError = MglaDpiNative.describeError(port);
+        }
+        return port;
     }
 
     // ---------------------------------------------------------------- tester support

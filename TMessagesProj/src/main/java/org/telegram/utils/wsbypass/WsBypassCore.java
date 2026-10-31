@@ -464,33 +464,44 @@ public final class WsBypassCore {
         }
     }
 
-    private RawWebSocket connectRelay(int dc, boolean isMedia, long deadlineNanos, long generation) throws IOException {
-        String token = MglaWsConfig.getRelayToken();
-        if (token == null || token.isEmpty()) {
+    private RawWebSocket connectRelay(int dc, boolean isMedia, long deadlineNanos, long generation)
+            throws IOException {
+        return connectRelay(dc, isMedia, deadlineNanos, generation, true);
+    }
+
+    /**
+     * @param mutateSticky when false (RTT probe), do not rotate preferred-host sticky state.
+     */
+    private RawWebSocket connectRelay(int dc, boolean isMedia, long deadlineNanos, long generation,
+                                      boolean mutateSticky) throws IOException {
+        // Билайн/DPI: tunnel TLS through local ByeDPI before touching foreign IPs.
+        try {
+            org.telegram.utils.dpi.MglaDpiBypass.getInstance().ensureUnderlayRunning();
+        } catch (Throwable ignored) {
+        }
+        java.util.List<MglaWsConfig.RelayEndpoint> endpoints = MglaWsConfig.getRelayConnectEndpoints();
+        if (endpoints == null || endpoints.isEmpty()) {
             throw new IOException("релей не сконфигурирован");
         }
-        String[] hosts = MglaWsConfig.getRelayHostCandidates();
-        if (hosts == null || hosts.length == 0) {
-            String single = MglaWsConfig.getRelayHost();
-            if (single == null || single.isEmpty()) {
-                throw new IOException("релей не сконфигурирован");
-            }
-            hosts = new String[]{single};
-        }
-        // Prefer sticky host first, then remaining aliases.
+        // Sticky preferred host first within the endpoint list.
         String preferred = MglaWsConfig.getRelayHost();
-        if (preferred != null && !preferred.isEmpty() && hosts.length > 1) {
-            java.util.LinkedHashSet<String> ordered = new java.util.LinkedHashSet<>();
-            ordered.add(preferred);
-            for (String h : hosts) {
-                ordered.add(h);
+        if (preferred != null && !preferred.isEmpty() && endpoints.size() > 1) {
+            java.util.ArrayList<MglaWsConfig.RelayEndpoint> ordered = new java.util.ArrayList<>(endpoints.size());
+            for (MglaWsConfig.RelayEndpoint ep : endpoints) {
+                if (preferred.equalsIgnoreCase(ep.host)) {
+                    ordered.add(ep);
+                }
             }
-            hosts = ordered.toArray(new String[0]);
+            for (MglaWsConfig.RelayEndpoint ep : endpoints) {
+                if (!preferred.equalsIgnoreCase(ep.host)) {
+                    ordered.add(ep);
+                }
+            }
+            endpoints = ordered;
         }
 
         int effective = dc == 203 ? 2 : dc;
-        String wsPath = MglaWsConfig.getRelayWsPath();
-        String path = wsPath + "?dc=" + effective + (isMedia ? "&media=1" : "");
+        String[] pathPool = MglaWsConfig.getRelayWsPathCandidates();
         boolean ultraPath = MglaWsConfig.isUltraBypassEnabled();
         boolean priority = ultraPath || MglaSubscription.hasBypassPriority();
         String bypassPlan = MglaSubscription.getDeviceBypassPlan();
@@ -499,65 +510,128 @@ public final class WsBypassCore {
         }
         String tgIds = collectActivatedTgIdsCsv();
 
-        // Camouflage: Upgrade looks like a normal browser WS (Bearer only).
-        // Plan / client / tg ids go in the first text frame after 101.
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Authorization", "Bearer " + token);
-
-        StringBuilder meta = new StringBuilder(128);
-        meta.append("{\"v\":1,\"c\":\"mgla\",\"t\":\"").append(jsonEscape(token)).append('"');
-        if (bypassPlan != null && !bypassPlan.isEmpty()) {
-            meta.append(",\"p\":\"").append(jsonEscape(bypassPlan)).append('"');
-        }
-        if (priority) {
-            meta.append(",\"u\":1");
-        }
-        if (tgIds != null && !tgIds.isEmpty()) {
-            meta.append(",\"tg\":\"").append(jsonEscape(tgIds)).append('"');
-        }
-        meta.append('}');
-        String metaJson = meta.toString();
-
         long attemptMs = priority ? RELAY_ATTEMPT_ULTRA_MS : RELAY_ATTEMPT_MS;
         IOException last = null;
-        for (String host : hosts) {
+        // Always try primary (index 0), then up to 2 rotated camouflage/legacy paths.
+        final int pathsPerHost = Math.min(3, Math.max(1, pathPool.length));
+        int rot = Math.floorMod((int) (System.currentTimeMillis() / 3_600_000L),
+                Math.max(1, pathPool.length - 1));
+        for (MglaWsConfig.RelayEndpoint ep : endpoints) {
             if (!isBridgeGenerationCurrent(generation) || System.nanoTime() >= deadlineNanos) {
                 break;
             }
-            if (host == null || host.isEmpty()) {
+            if (ep == null || ep.host == null || ep.host.isEmpty()
+                    || ep.token == null || ep.token.isEmpty()) {
                 continue;
             }
-            dbg("connect relay -> wss://" + host + path + (isMedia ? " (media)" : "")
-                + " plan=" + bypassPlan + (ultraPath ? " ultra-path" : (priority ? " prio" : "")));
-            long attemptDeadline = Math.min(deadlineNanos,
-                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(attemptMs));
-            String[] pins = MglaWsConfig.getRelaySpkiPins(host);
-            boolean pinOnly = MglaWsConfig.isPinOnlyRelayHost(host);
-            try {
-                RawWebSocket ws = RawWebSocket.connectUntil(host, host, path, headers, attemptDeadline,
-                    () -> isBridgeGenerationCurrent(generation), pins, pinOnly);
-                try {
-                    ws.sendText(metaJson);
-                } catch (IOException e) {
-                    try {
-                        ws.close();
-                    } catch (Throwable ignored) {
-                    }
-                    throw e;
+
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Authorization", "Bearer " + ep.token);
+            // Browser-like Origin matching the SNI host (not a fixed mgla brand).
+            headers.put("Origin", "https://" + ep.host);
+
+            // Camouflage meta: avoid the literal "mgla" client marker on the wire.
+            StringBuilder meta = new StringBuilder(128);
+            meta.append("{\"v\":1,\"c\":\"app\",\"t\":\"").append(jsonEscape(ep.token)).append('"');
+            if (bypassPlan != null && !bypassPlan.isEmpty()) {
+                meta.append(",\"p\":\"").append(jsonEscape(bypassPlan)).append('"');
+            }
+            if (priority) {
+                meta.append(",\"u\":1");
+            }
+            if (tgIds != null && !tgIds.isEmpty()) {
+                meta.append(",\"tg\":\"").append(jsonEscape(tgIds)).append('"');
+            }
+            meta.append('}');
+            String metaJson = meta.toString();
+
+            boolean transportDead = false;
+            for (int pi = 0; pi < pathsPerHost; pi++) {
+                if (!isBridgeGenerationCurrent(generation) || System.nanoTime() >= deadlineNanos) {
+                    break;
                 }
-                MglaWsConfig.markRelayHostOk(host);
-                dbg("101 OK via relay " + host);
-                return ws;
-            } catch (IOException e) {
-                last = e;
-                MglaWsConfig.markRelayHostFailed(host);
-                dbg(host + " relay fail: " + e.getMessage());
+                String wsPath;
+                if (pi == 0 || pathPool.length == 1) {
+                    wsPath = pathPool[0];
+                } else {
+                    // Skip index 0 (already tried); rotate among the rest.
+                    int idx = 1 + Math.floorMod(rot + pi - 1, pathPool.length - 1);
+                    wsPath = pathPool[idx];
+                }
+                String path = wsPath + "?dc=" + effective + (isMedia ? "&media=1" : "");
+
+                dbg("connect relay -> wss://" + ep.host + path + (isMedia ? " (media)" : "")
+                        + " plan=" + bypassPlan + (ultraPath || ep.ultra ? " ultra-path" : (priority ? " prio" : "")));
+                long attemptDeadline = Math.min(deadlineNanos,
+                        System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(attemptMs));
+                try {
+                    RawWebSocket ws = RawWebSocket.connectUntil(ep.host, ep.host, path, headers, attemptDeadline,
+                            () -> isBridgeGenerationCurrent(generation), ep.spkiPins, ep.pinOnly);
+                    try {
+                        ws.sendText(metaJson);
+                    } catch (IOException e) {
+                        try {
+                            ws.close();
+                        } catch (Throwable ignored) {
+                        }
+                        throw e;
+                    }
+                    if (mutateSticky) {
+                        MglaWsConfig.markRelayHostOk(ep.host);
+                    }
+                    dbg("101 OK via relay " + ep.host + path);
+                    return ws;
+                } catch (IOException e) {
+                    last = e;
+                    dbg(ep.host + path + " fail: " + e.getMessage());
+                    if (isTransportLevelFailure(e)) {
+                        transportDead = true;
+                        break;
+                    }
+                }
+            }
+            // Only rotate sticky host on transport death; path 404s keep preferred SNI.
+            if (mutateSticky && transportDead) {
+                MglaWsConfig.markRelayHostFailed(ep.host);
+            }
+            rot++;
+        }
+        // All hosts failed — rotate ByeDPI underlay strategy for the next attempt.
+        if (mutateSticky) {
+            try {
+                org.telegram.utils.dpi.MglaDpiBypass.getInstance().rotateUnderlayStrategy();
+            } catch (Throwable ignored) {
             }
         }
         if (last != null) {
             throw last;
         }
         throw new IOException("релей недоступен");
+    }
+
+    /** TLS/connect/timeout — skip remaining paths on this host. HTTP 404/403 — try next path. */
+    private static boolean isTransportLevelFailure(IOException e) {
+        if (e instanceof RawWebSocket.HandshakeException) {
+            int code = ((RawWebSocket.HandshakeException) e).statusCode;
+            // Auth/path issues → try another path; anything else unusual still path-retry.
+            if (code == 404 || code == 403 || code == 405 || code == 502 || code == 503) {
+                return false;
+            }
+            if (code == 401 || code == 400) {
+                return false;
+            }
+            // 101 never thrown; other HTTP → treat as path-ish unless 0 (parse fail / TLS).
+            if (code > 0) {
+                return false;
+            }
+        }
+        String msg = e.getMessage() != null ? e.getMessage() : "";
+        String lower = msg.toLowerCase(java.util.Locale.US);
+        return lower.contains("timeout") || lower.contains("timed out")
+                || lower.contains("tls") || lower.contains("ssl")
+                || lower.contains("connect") || lower.contains("pin")
+                || lower.contains("unreachable") || lower.contains("refused")
+                || lower.contains("reset") || lower.contains("network");
     }
 
     private static String jsonEscape(String s) {
@@ -605,8 +679,10 @@ public final class WsBypassCore {
         RawWebSocket ws = null;
         long t0 = System.nanoTime();
         try {
+            // Do not mutate sticky host on background RTT probes.
             ws = connectRelay(2, false,
-                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs), currentBridgeGeneration());
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs),
+                currentBridgeGeneration(), false);
             long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
             return Math.max(1L, ms);
         } catch (Throwable e) {

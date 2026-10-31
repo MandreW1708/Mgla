@@ -39,10 +39,24 @@ public final class MglaWsConfig {
     public static final String DEFAULT_RELAY_WS_PATH = "/ws/v1/live";
     public static final String LEGACY_RELAY_WS_PATH = "/apiws";
 
+    /**
+     * Rotating camouflage paths that look like CDN / SPA realtime channels.
+     * All must be accepted by relay + nginx on DE1/DE2/FI.
+     */
+    public static final String[] RELAY_WS_PATH_POOL = {
+            "/ws/v1/live",
+            "/cdn/v3/stream",
+            "/api/realtime",
+            "/_next/webpack-hmr",
+            "/socket/websocket",
+    };
+
     /** DE1 alias without {@code mgla*} in the SNI (sslip.io → same IP). */
     public static final String DEFAULT_RELAY_HOST_ALIAS = "31-77-218-160.sslip.io";
     /** DE2 alias without {@code mgla*} in the SNI. */
     public static final String DEFAULT_HUB_HOST_ALIAS = "194-58-33-22.sslip.io";
+    /** FI alias without {@code mgla*} in the SNI (same IP as fin.mgla). */
+    public static final String DEFAULT_FINLAND_HOST_ALIAS = "62-60-255-83.sslip.io";
 
     /**
      * SPKI SHA-256 (base64) сертификата WS-релея (mglabot) — pinning при TLS.
@@ -54,6 +68,12 @@ public final class MglaWsConfig {
      * SPKI SHA-256 (base64) сертификата хаба статистики (mglahub).
      */
     public static final String HUB_SPKI_SHA256_BASE64 = "whkC3sYvKrHQgAVj2Xx2/QfBEH9DHCEPyyOw5sqI/3E=";
+
+    /**
+     * SPKI SHA-256 (base64) сертификата Ultra Finland ({@code fin.mgla.mooo.com}).
+     * Обновлять при смене LE ключа на FI.
+     */
+    public static final String FINLAND_SPKI_SHA256_BASE64 = "Mcw5P+ibRDbDcihgQoaIb8TaqYDrgVMNKwpUoECeC/k=";
 
     private static final String PREF_ENABLED = "ws_enabled";
     private static final String PREF_ULTRA_BYPASS = "ws_ultra_bypass";
@@ -169,11 +189,11 @@ public final class MglaWsConfig {
 
     /**
      * Ordered SNI candidates for the active bypass path.
-     * Ultra returns only Finland; otherwise DE1/DE2 primary + aliases.
+     * Ultra: Finland + sslip alias (no {@code mgla} in SNI); otherwise DE1/DE2.
      */
     public static String[] getRelayHostCandidates() {
         if (isUltraBypassEnabled()) {
-            return new String[]{FINLAND_RELAY_HOST};
+            return new String[]{FINLAND_RELAY_HOST, DEFAULT_FINLAND_HOST_ALIAS};
         }
         return getNormalRegionRelayHosts();
     }
@@ -189,6 +209,125 @@ public final class MglaWsConfig {
             return p;
         }
         return DEFAULT_RELAY_WS_PATH;
+    }
+
+    /**
+     * Shuffled camouflage path pool for one connect round (primary build path first).
+     */
+    public static String[] getRelayWsPathCandidates() {
+        String primary = getRelayWsPath();
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (!TextUtils.isEmpty(primary)) {
+            out.add(primary);
+        }
+        // Rotate pool by day-of-year so fleets don't all stampede the same path.
+        int rot = Math.floorMod((int) (System.currentTimeMillis() / 86_400_000L), RELAY_WS_PATH_POOL.length);
+        for (int i = 0; i < RELAY_WS_PATH_POOL.length; i++) {
+            out.add(RELAY_WS_PATH_POOL[(rot + i) % RELAY_WS_PATH_POOL.length]);
+        }
+        out.add(LEGACY_RELAY_WS_PATH);
+        return out.toArray(new String[0]);
+    }
+
+    /**
+     * Ordered connect targets for the active bypass mode, then emergency cross-region
+     * hosts. Ultra prefers Finland, then DE1 (same bot token) when FI IP is DPI-killed.
+     */
+    public static java.util.List<RelayEndpoint> getRelayConnectEndpoints() {
+        java.util.ArrayList<RelayEndpoint> out = new java.util.ArrayList<>();
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+        if (isUltraBypassEnabled()) {
+            String botTok = getBotRelayToken();
+            // 1) Finland primary + sslip (no "mgla" SNI) — pin-only on alias.
+            addEndpoint(out, seen, FINLAND_RELAY_HOST, botTok, true);
+            addEndpoint(out, seen, DEFAULT_FINLAND_HOST_ALIAS, botTok, true);
+            // 2) Emergency: DE1 (works on Билайн when FI /24 is dropped).
+            for (String h : parseHostList(BuildConfig.MGLA_WS_RELAY_HOSTS,
+                    TextUtils.isEmpty(BuildConfig.MGLA_WS_RELAY_HOST)
+                            ? DEFAULT_RELAY_HOST : BuildConfig.MGLA_WS_RELAY_HOST.trim(),
+                    DEFAULT_RELAY_HOST_ALIAS)) {
+                addEndpoint(out, seen, h, botTok, true);
+            }
+            // 3) Last resort: DE2 if hub credential exists.
+            String hubTok = getHubTokenStrict();
+            if (!TextUtils.isEmpty(hubTok)) {
+                for (String h : parseHostList(BuildConfig.MGLA_HUB_RELAY_HOSTS,
+                        getHubHost(), DEFAULT_HUB_HOST_ALIAS)) {
+                    addEndpoint(out, seen, h, hubTok, true);
+                }
+            }
+            return out;
+        }
+        // Preferred region hosts first (sticky primary already applied in getRelayHostCandidates).
+        for (String h : getRelayHostCandidates()) {
+            addEndpoint(out, seen, h, tokenForRelayHost(h), false);
+        }
+        // Emergency: other DE region if the selected one is DPI-killed.
+        if (REGION_HUB.equals(getBypassRegion())) {
+            for (String h : parseHostList(BuildConfig.MGLA_WS_RELAY_HOSTS,
+                    TextUtils.isEmpty(BuildConfig.MGLA_WS_RELAY_HOST)
+                            ? DEFAULT_RELAY_HOST : BuildConfig.MGLA_WS_RELAY_HOST.trim(),
+                    DEFAULT_RELAY_HOST_ALIAS)) {
+                addEndpoint(out, seen, h, getRelayTokenForRegion(REGION_DE), false);
+            }
+        } else {
+            // Strict hub token only — never fall back to bot/DE1 token (would 401 on DE2).
+            String hubTok = getHubTokenStrict();
+            if (!TextUtils.isEmpty(hubTok)) {
+                for (String h : parseHostList(BuildConfig.MGLA_HUB_RELAY_HOSTS,
+                        getHubHost(), DEFAULT_HUB_HOST_ALIAS)) {
+                    addEndpoint(out, seen, h, hubTok, false);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void addEndpoint(java.util.List<RelayEndpoint> out,
+                                    java.util.Set<String> seen, String host, String token,
+                                    boolean ultra) {
+        if (TextUtils.isEmpty(host) || TextUtils.isEmpty(token)) {
+            return;
+        }
+        String key = host.trim().toLowerCase(java.util.Locale.US);
+        if (!seen.add(key)) {
+            return;
+        }
+        out.add(new RelayEndpoint(host.trim(), token, getRelaySpkiPins(host),
+                isPinOnlyRelayHost(host), ultra));
+    }
+
+    private static String tokenForRelayHost(String host) {
+        if (isDe2RelayHost(host)) {
+            String hub = getHubTokenStrict();
+            return TextUtils.isEmpty(hub) ? getHubToken() : hub;
+        }
+        return getBotRelayToken();
+    }
+
+    private static String getRelayTokenForRegion(String region) {
+        if (REGION_HUB.equals(region)) {
+            return getHubTokenStrict();
+        }
+        return getBotRelayToken();
+    }
+
+    /** One TLS/WS upstream candidate. */
+    public static final class RelayEndpoint {
+        public final String host;
+        public final String token;
+        public final String[] spkiPins;
+        public final boolean pinOnly;
+        public final boolean ultra;
+
+        public RelayEndpoint(String host, String token, String[] spkiPins,
+                             boolean pinOnly, boolean ultra) {
+            this.host = host;
+            this.token = token;
+            this.spkiPins = spkiPins;
+            this.pinOnly = pinOnly;
+            this.ultra = ultra;
+        }
     }
 
     private static String[] parseHostList(String csv, String primaryFallback, String aliasFallback) {
@@ -291,12 +430,16 @@ public final class MglaWsConfig {
         if (hosts.length <= 1) {
             return;
         }
-        int cur = getPrefs().getInt(PREF_RELAY_HOST_INDEX, 0);
+        // Ignore emergency cross-region hosts — do not corrupt preferred-region sticky index.
+        int cur = -1;
         for (int i = 0; i < hosts.length; i++) {
             if (host.equalsIgnoreCase(hosts[i])) {
                 cur = i;
                 break;
             }
+        }
+        if (cur < 0) {
+            return;
         }
         getPrefs().edit().putInt(PREF_RELAY_HOST_INDEX, (cur + 1) % hosts.length).apply();
     }
@@ -311,6 +454,7 @@ public final class MglaWsConfig {
         }
         return DEFAULT_RELAY_HOST_ALIAS.equalsIgnoreCase(host)
             || DEFAULT_HUB_HOST_ALIAS.equalsIgnoreCase(host)
+            || DEFAULT_FINLAND_HOST_ALIAS.equalsIgnoreCase(host)
             || host.toLowerCase(java.util.Locale.US).endsWith(".sslip.io")
             || host.toLowerCase(java.util.Locale.US).endsWith(".nip.io");
     }
@@ -320,9 +464,8 @@ public final class MglaWsConfig {
         if (TextUtils.isEmpty(host)) {
             return null;
         }
-        // Finland (Ultra) uses Let's Encrypt — system CAs until a dedicated pin is published.
-        if (FINLAND_RELAY_HOST.equalsIgnoreCase(host)) {
-            return null;
+        if (isFinlandRelayHost(host)) {
+            return new String[]{FINLAND_SPKI_SHA256_BASE64};
         }
         if (isDe1RelayHost(host)) {
             return new String[]{RELAY_SPKI_SHA256_BASE64};
@@ -331,6 +474,11 @@ public final class MglaWsConfig {
             return new String[]{HUB_SPKI_SHA256_BASE64};
         }
         return null;
+    }
+
+    private static boolean isFinlandRelayHost(String host) {
+        return FINLAND_RELAY_HOST.equalsIgnoreCase(host)
+                || DEFAULT_FINLAND_HOST_ALIAS.equalsIgnoreCase(host);
     }
 
     private static boolean isDe1RelayHost(String host) {
@@ -429,11 +577,17 @@ public final class MglaWsConfig {
 
     /**
      * Адрес запасного WEB proxy в форме {@code host/path} (без https://).
-     * Ultra → Finland; Германия2 → хаб; Германия1 → mglabot.
+     * Ultra → DE1 {@code /tgweb} (FI IP часто мёртв на Билайне; тот же WEB-secret);
+     * Германия2 → хаб; Германия1 → mglabot.
      */
     public static String getWebProxyHost() {
         if (isUltraBypassEnabled()) {
-            return FINLAND_RELAY_HOST + "/tgweb";
+            // Do not use fin.mgla for WEB: same FI /24 that DPI kills for Ultra WS.
+            String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
+            if (!TextUtils.isEmpty(fromBuild)) {
+                return fromBuild.trim();
+            }
+            return DEFAULT_RELAY_HOST + "/tgweb";
         }
         // WebView requires a hostname-matching LE cert — do not use sslip aliases here.
         if (REGION_HUB.equals(getBypassRegion())) {
@@ -468,13 +622,9 @@ public final class MglaWsConfig {
 
     /**
      * Хост WEB proxy для туннеля обновлений.
-     * Ultra → Finland (профиль mgla-upd); обычный → mglabot (туннель там же).
-     * Германия2 на WEB: туннель обновлений всё ещё на боте (на хабе его нет).
+     * Ultra / обычный → mglabot (на хабе туннеля обновлений нет; FI IP часто недоступен).
      */
     public static String getWebUpdateProxyHost() {
-        if (isUltraBypassEnabled()) {
-            return FINLAND_RELAY_HOST + "/tgweb";
-        }
         String fromBuild = BuildConfig.MGLA_WEB_PROXY_HOST;
         return fromBuild == null ? "" : fromBuild.trim();
     }
@@ -510,9 +660,24 @@ public final class MglaWsConfig {
     }
 
     /**
-     * Токен хаба: JWT установки, иначе legacy {@code MGLA_HUB_TOKEN} / prefs / relay token.
+     * Токен хаба: JWT установки, иначе legacy {@code MGLA_HUB_TOKEN} / prefs.
+     * Falls back to bot relay token only for hub <b>HTTP</b> APIs that historically
+     * accepted it — WS emergency DE2 must use {@link #getHubTokenStrict()}.
      */
     public static String getHubToken() {
+        String strict = getHubTokenStrict();
+        if (!TextUtils.isEmpty(strict)) {
+            return strict;
+        }
+        String fromRelayBuild = BuildConfig.MGLA_WS_RELAY_TOKEN;
+        return fromRelayBuild == null ? "" : fromRelayBuild.trim();
+    }
+
+    /**
+     * Hub JWT / {@code MGLA_HUB_TOKEN} only — never the DE1 bot token.
+     * Empty when the install has no hub credential (skip DE2 emergency endpoints).
+     */
+    public static String getHubTokenStrict() {
         try {
             String session = org.telegram.messenger.MglaAuth.getAccessToken();
             if (!TextUtils.isEmpty(session)) {
@@ -528,8 +693,7 @@ public final class MglaWsConfig {
         if (!TextUtils.isEmpty(override)) {
             return override.trim();
         }
-        String fromRelayBuild = BuildConfig.MGLA_WS_RELAY_TOKEN;
-        return fromRelayBuild == null ? "" : fromRelayBuild.trim();
+        return "";
     }
 
     public static void setHubToken(String token) {

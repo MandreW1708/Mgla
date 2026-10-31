@@ -11077,7 +11077,23 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void checkInstantCameraView() {
-        if (instantCameraView != null || !CameraView.isCameraAllowed() || getContext() == null) {
+        if (!CameraView.isCameraAllowed() || getContext() == null) {
+            return;
+        }
+        // Recreate when Camera1 ↔ Camera2/CameraX selection (or Camera2 ↔ CameraX backend) changes.
+        final boolean wantModernRecorder = InstantCameraViewBase.isUsingModernRoundRecorder();
+        final boolean wantCameraX = InstantCameraViewBase.isUsingCameraXImplementation();
+        if (instantCameraView != null) {
+            final boolean isModernRecorder = instantCameraView instanceof InstantCameraView2;
+            final boolean isCameraX = isModernRecorder
+                    && ((InstantCameraView2) instantCameraView).isUsingCameraX();
+            if (isModernRecorder != wantModernRecorder || isCameraX != wantCameraX) {
+                instantCameraView.destroy(false);
+                AndroidUtilities.removeFromParent(instantCameraView);
+                instantCameraView = null;
+            }
+        }
+        if (instantCameraView != null) {
             return;
         }
         instantCameraView = InstantCameraViewBase.create(

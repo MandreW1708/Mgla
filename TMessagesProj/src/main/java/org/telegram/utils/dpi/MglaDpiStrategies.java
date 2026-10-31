@@ -16,8 +16,36 @@ import java.util.List;
 public final class MglaDpiStrategies {
 
     public static final String SNI_PLACEHOLDER = "{sni}";
-    public static final String DEFAULT_SNI = "google.com";
-    public static final String DEFAULT_STRATEGY = "-d1 -s1+s -r1+s -f-1 -t8 -a1";
+    public static final String DEFAULT_SNI = "vk.com";
+    /**
+     * Default for standalone ByeDPI. Prefer a Beeline-hardened chain over the old
+     * short {@code -d1 -s1+s ...} profile (often frozen by TSPU after ~16KB).
+     */
+    public static final String DEFAULT_STRATEGY =
+            "-f-200 -Qr -s3:5+sm -a1 -As -d1 -s4+sm -s8+sh -f-300 -d6+sh -a1 -At,r,s -o2 -f-30 -As -r5 -Mh -r6+sh -f-250 -s2:7+s -s3:6+sm -a1";
+
+    /**
+     * Aggressive underlay pack for WS/TLS to foreign relays (Билайн / Tele2 DPI).
+     * Rotated when relay handshakes time out.
+     */
+    public static final String[] UNDERLAY_BEELINE = {
+            "-f-200 -Qr -s3:5+sm -a1 -As -d1 -s4+sm -s8+sh -f-300 -d6+sh -a1 -At,r,s -o2 -f-30 -As -r5 -Mh -r6+sh -f-250 -s2:7+s -s3:6+sm -a1",
+            "-d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -r1+s -S -a1 -As -d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -S -a1",
+            "-n {sni} -Qr -f-204 -s1:5+sm -a1 -As -d1 -s3+s -s5+s -q7 -a1 -As -o2 -f-43 -a1 -As -r5 -Mh -s1:5+s -s3:7+sm -a1",
+            "-o1 -d1 -a1 -At,r,s -s1 -d1 -s5+s -s10+s -s15+s -s20+s -r1+s -S -a1 -As -s1 -d1 -s5+s -s10+s -s15+s -s20+s -S -a1",
+            "-d1 -s1+s -r1+s -f-1 -t8 -a1",
+            "-f1 -t5 -n {sni} -q3+h -Qr -f2 -q1 -r1+s -t15 -q1 -o2 -a1",
+            "-n {sni} -Qr -f-1 -r1+s -a1",
+            "-o1 -a1 -At,r,s -f-1 -a1 -At,r,s -d1:11+sm -S -a1 -At,r,s -n {sni} -Qr -f1 -d1:11+sm -s1:11+sm -S -a1",
+    };
+
+    public static String underlayStrategy(int index) {
+        if (UNDERLAY_BEELINE.length == 0) {
+            return DEFAULT_STRATEGY;
+        }
+        int i = Math.floorMod(index, UNDERLAY_BEELINE.length);
+        return UNDERLAY_BEELINE[i];
+    }
 
     /** Встроенный список стратегий подбора (тот же, что в ByeByeDPI). */
     public static final String[] BUILT_IN = {

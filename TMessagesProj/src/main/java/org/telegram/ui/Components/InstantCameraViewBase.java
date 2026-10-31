@@ -50,21 +50,44 @@ public abstract class InstantCameraViewBase extends FrameLayout {
             Theme.ResourcesProvider resourcesProvider,
             boolean isNewDesign
     ) {
-        return isUsingCamera2Implementation()
+        return isUsingModernRoundRecorder()
                 ? new InstantCameraView2(context, delegate, resourcesProvider, isNewDesign)
                 : new InstantCameraView(context, delegate, resourcesProvider, isNewDesign);
     }
 
-    /** Selects the implementation used by subsequently created views. */
+    /** Selects the Camera2 round-video implementation (InstantCameraView2, not CameraX). */
     public static void setUseCamera2Implementation(boolean enabled) {
+        SharedSettings.roundVideoCameraXEnabled.set(false);
         SharedSettings.roundVideoCamera2Enabled.set(enabled);
     }
 
-    /** Returns whether subsequently created views use the Camera2 implementation. */
+    /** Selects the CameraX round-video capture backend inside InstantCameraView2. */
+    public static void setUseCameraXImplementation(boolean enabled) {
+        SharedSettings.roundVideoCameraXEnabled.set(enabled);
+        if (enabled) {
+            SharedSettings.roundVideoCamera2Enabled.set(true);
+        }
+    }
+
+    /** Returns whether InstantCameraView2 (Camera2 or CameraX backend) should be used. */
+    public static boolean isUsingModernRoundRecorder() {
+        return isUsingCameraXImplementation() || isUsingCamera2Implementation();
+    }
+
+    /** Returns whether subsequently created views use the Camera2 (non-CameraX) backend. */
     public static boolean isUsingCamera2Implementation() {
+        if (isUsingCameraXImplementation()) {
+            return false;
+        }
         return SharedSettings.roundVideoCamera2Enabled.isSet() ?
             SharedSettings.roundVideoCamera2Enabled.get() :
             AppGlobalConfig.getInstance(UserConfig.selectedAccount).roundVideoRecorder2Allowed.get();
+    }
+
+    /** Returns whether InstantCameraView2 should bind the CameraX capture backend. */
+    public static boolean isUsingCameraXImplementation() {
+        return SharedSettings.roundVideoCameraXEnabled.isSet()
+                && SharedSettings.roundVideoCameraXEnabled.get();
     }
 
     /** Sets the host animation callback. */

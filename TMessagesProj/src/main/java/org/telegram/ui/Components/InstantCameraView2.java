@@ -56,10 +56,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
 
-/** Telegram UI adapter for the standalone Camera2 round-video session. */
+/** Telegram UI adapter for the standalone Camera2 / CameraX round-video session. */
 public final class InstantCameraView2 extends InstantCameraViewBase {
 
     private static final long MINIMUM_DURATION_MS = 800L;
+    private static final long MAXIMUM_DURATION_MS = VideoEditedInfo.ROUND_VIDEO_MAX_DURATION_MS;
     private static final float ZOOM_GESTURE_EFFORT = 1.5f;
     private static final int SWITCH_PREVIEW_BITMAP_SIZE = 180;
     private static final long UI_FRAME_FALLBACK_DELAY_NS = 70_000_000L;
@@ -88,6 +89,8 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
             Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG
     );
     private final int buttonIconSize;
+
+    private final boolean useCameraX = InstantCameraViewBase.isUsingCameraXImplementation();
 
     private RoundVideoSession session;
     private RoundVideoSession.OutputResolution activeOutputResolution;
@@ -386,7 +389,9 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
                 .setVideoBitrate(SharedSettings.roundVideoVideoBitrate.get())
                 .setCameraResolution(SharedSettings.roundVideoCameraResolution.get())
                 .setFrameRate(SharedSettings.roundVideoFrameRate.get())
-                .setCompositionEnabled(SharedSettings.roundVideoComposition.get())
+                .setMaximumDurationMs(MAXIMUM_DURATION_MS)
+                .setCompositionEnabled(true)
+                .setUseCameraX(useCameraX)
                 .setListener(sessionListener)
                 .setOutputListener(upload)
                 .setScreenFlashController(this::setScreenFlashEnabled)
@@ -394,6 +399,11 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
         MediaController.getInstance().requestRecordAudioFocus(true);
         session.start();
         startAnimation(true, fromPaused);
+    }
+
+    /** Returns whether this view instance was created for the CameraX backend. */
+    public boolean isUsingCameraX() {
+        return useCameraX;
     }
 
     @Override
@@ -853,6 +863,7 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
                 uploadInfo
         );
         info.muted = !result.hasAudio();
+        info.enforceRoundVideoNote();
         MediaController.PhotoEntry entry = new MediaController.PhotoEntry(
                 0,
                 0,
@@ -890,7 +901,6 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
         info.endTime = -1;
         info.estimatedDuration = durationMs;
         info.estimatedSize = Math.max(1L, uploadInfo == null ? file.length() : uploadInfo.size);
-        info.roundVideo = true;
         info.framerate = session == null || session.getActiveFrameRate() == null
                 ? RoundVideoSession.FrameRate.FPS_30.getValue()
                 : session.getActiveFrameRate().getValue();
@@ -906,7 +916,8 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
             info.key = uploadInfo.key;
             info.iv = uploadInfo.iv;
         }
-        return info;
+        // Always a video note — ignore any recorder quality / duration quirks.
+        return info.enforceRoundVideoNote();
     }
 
     private void switchCamera() {

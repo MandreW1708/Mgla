@@ -18,6 +18,10 @@ public final class SharedSettings {
     public static final BooleanSetting roundVideoCamera2Enabled =
         BooleanSetting.of("round_video_camera2_enabled", BuildConfig.DEBUG_VERSION);
 
+    /** When true (and Camera2 recorder is selected), InstantCameraView2 uses CameraX capture. */
+    public static final BooleanSetting roundVideoCameraXEnabled =
+        BooleanSetting.of("round_video_camerax_enabled", false);
+
     public static final EnumSetting<RoundVideoSession.OutputResolution> roundVideoOutputResolution =
         EnumSetting.of("round_video_output_resolution", RoundVideoSession.OutputResolution.P480);
 

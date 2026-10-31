@@ -12078,6 +12078,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         }
         new Thread(() -> {
             final VideoEditedInfo videoEditedInfo = info != null ? info : createCompressionSettings(videoPath, 0);
+            // Hard guarantee: camera notes stay round_message even if duration/size settings are weird.
+            if (videoEditedInfo != null && videoEditedInfo.roundVideo) {
+                videoEditedInfo.enforceRoundVideoNote();
+            }
 
             boolean isEncrypted = DialogObject.isEncryptedDialog(dialogId);
 
@@ -12199,6 +12203,22 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             document.size = (int) temp.length();
                         }
                         fillVideoAttribute(videoPath, attributeVideo, null);
+                    }
+                    if (isRound) {
+                        // Final guard: never let attributes slip past note limits.
+                        attributeVideo.round_message = true;
+                        if (attributeVideo.duration >= 60.0) {
+                            attributeVideo.duration = VideoEditedInfo.ROUND_VIDEO_MAX_DURATION_MS / 1000.0;
+                        }
+                        int roundSide = Math.min(
+                                attributeVideo.w > 0 ? attributeVideo.w : VideoEditedInfo.ROUND_VIDEO_MAX_SIDE,
+                                attributeVideo.h > 0 ? attributeVideo.h : VideoEditedInfo.ROUND_VIDEO_MAX_SIDE
+                        );
+                        if (roundSide <= 0 || roundSide > VideoEditedInfo.ROUND_VIDEO_MAX_SIDE) {
+                            roundSide = Math.min(480, VideoEditedInfo.ROUND_VIDEO_MAX_SIDE);
+                        }
+                        roundSide &= ~1;
+                        attributeVideo.w = attributeVideo.h = roundSide;
                     }
                 } else if (document.thumbs.isEmpty()) {
                     if (videoEditedInfo != null && videoEditedInfo.notReadyYet) {

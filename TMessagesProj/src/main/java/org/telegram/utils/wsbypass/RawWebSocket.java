@@ -173,8 +173,32 @@ public final class RawWebSocket {
             req.append("Sec-WebSocket-Key: ").append(key).append("\r\n");
             req.append("Sec-WebSocket-Version: 13\r\n");
             req.append("Sec-WebSocket-Protocol: binary\r\n");
-            req.append("Origin: https://web.telegram.org\r\n");
-            req.append("User-Agent: Mozilla/5.0 (Linux; Android 13)\r\n");
+            // Defaults look like Chrome Android; Origin may be overridden by extraHeaders.
+            boolean hasOrigin = false;
+            boolean hasUa = false;
+            if (extraHeaders != null) {
+                for (Map.Entry<String, String> e : extraHeaders.entrySet()) {
+                    if (e.getKey() == null) continue;
+                    String lk = e.getKey().toLowerCase(Locale.ROOT);
+                    if ("origin".equals(lk)) hasOrigin = true;
+                    if ("user-agent".equals(lk)) hasUa = true;
+                }
+            }
+            if (!hasOrigin) {
+                req.append("Origin: https://").append(sni).append("\r\n");
+            }
+            if (!hasUa) {
+                appendChromeAndroidUa(req);
+            }
+            req.append("Accept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7\r\n");
+            // Omit Accept-Encoding: real Chrome WS upgrades rarely advertise zstd here,
+            // and some middleboxes fingerprint unusual combos with Sec-WebSocket-Protocol.
+            req.append("Cache-Control: no-cache\r\n");
+            req.append("Pragma: no-cache\r\n");
+            // Looks like a page-driven WS (CDN/HMR), not a bare tunnel client.
+            req.append("Sec-Fetch-Dest: empty\r\n");
+            req.append("Sec-Fetch-Mode: websocket\r\n");
+            req.append("Sec-Fetch-Site: same-origin\r\n");
             if (extraHeaders != null) {
                 for (Map.Entry<String, String> e : extraHeaders.entrySet()) {
                     if (!validExtraHeader(e.getKey(), e.getValue())) continue;
@@ -245,6 +269,11 @@ public final class RawWebSocket {
 
     private static Socket openSocket(String connectHost, long deadlineNanos,
                                      ConnectPermit permit) throws IOException {
+        // Prefer ByeDPI underlay (Билайн DPI): desync ClientHello to foreign relays.
+        Socket viaDpi = openViaDpiUnderlay(connectHost, deadlineNanos, permit);
+        if (viaDpi != null) {
+            return viaDpi;
+        }
         InetAddress[] addresses = resolveUntil(connectHost, deadlineNanos, permit);
         IOException last = null;
         for (InetAddress address : addresses) {
@@ -270,6 +299,40 @@ public final class RawWebSocket {
         }
         if (last != null) throw last;
         throw new IOException("no address for " + connectHost);
+    }
+
+    /** Tunnel TCP:443 through local ByeDPI SOCKS when underlay is up. */
+    private static Socket openViaDpiUnderlay(String connectHost, long deadlineNanos,
+                                             ConnectPermit permit) {
+        try {
+            org.telegram.utils.dpi.MglaDpiBypass dpi =
+                    org.telegram.utils.dpi.MglaDpiBypass.getInstance();
+            if (!dpi.isUnderlayAvailable() || dpi.getPort() <= 0) {
+                return null;
+            }
+            checkPermit(permit);
+            int timeout = remainingMillis(deadlineNanos);
+            Socket s = org.telegram.utils.dpi.MglaSocks5.connect(
+                    "127.0.0.1",
+                    dpi.getPort(),
+                    org.telegram.utils.dpi.MglaDpiConfig.getSocksUser(),
+                    org.telegram.utils.dpi.MglaDpiConfig.getSocksPass(),
+                    connectHost,
+                    443,
+                    timeout);
+            checkPermit(permit);
+            try {
+                boolean ultra = isUltraPath();
+                s.setReceiveBufferSize(ultra ? ULTRA_RCVBUF : DEFAULT_RCVBUF);
+                s.setSendBufferSize(ultra ? ULTRA_SNDBUF : DEFAULT_SNDBUF);
+                s.setKeepAlive(true);
+            } catch (Exception ignored) {
+            }
+            s.setSoTimeout(remainingMillis(deadlineNanos));
+            return s;
+        } catch (Throwable e) {
+            return null;
+        }
     }
 
     private static SSLSocket wrapTls(Socket raw, String sni, long deadlineNanos,
@@ -681,6 +744,28 @@ public final class RawWebSocket {
             if (r == 0) continue;
             off += r;
         }
+    }
+
+    /** Rotate among recent Chrome Android builds (Conscrypt-friendly JA3 + Client Hints). */
+    private static void appendChromeAndroidUa(StringBuilder req) {
+        // (major, full UA chrome version string)
+        final String[][] pool = {
+                {"128", "128.0.6613.146"},
+                {"129", "129.0.6668.100"},
+                {"130", "130.0.6723.102"},
+                {"131", "131.0.6778.135"},
+        };
+        int i = Math.floorMod((int) (System.currentTimeMillis() / 86_400_000L), pool.length);
+        String major = pool[i][0];
+        String full = pool[i][1];
+        req.append("User-Agent: Mozilla/5.0 (Linux; Android 14; Pixel 8) ")
+                .append("AppleWebKit/537.36 (KHTML, like Gecko) ")
+                .append("Chrome/").append(full).append(" Mobile Safari/537.36\r\n");
+        req.append("sec-ch-ua: \"Google Chrome\";v=\"").append(major)
+                .append("\", \"Chromium\";v=\"").append(major)
+                .append("\", \"Not_A Brand\";v=\"24\"\r\n");
+        req.append("sec-ch-ua-mobile: ?1\r\n");
+        req.append("sec-ch-ua-platform: \"Android\"\r\n");
     }
 
     public static final class HandshakeException extends IOException {

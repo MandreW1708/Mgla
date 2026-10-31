@@ -18,6 +18,7 @@ import org.telegram.messenger.VpnMonitor;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.utils.bypass.MglaBypassVpnGuard;
 import org.telegram.utils.dpi.MglaDpiBypass;
+import org.telegram.utils.dpi.MglaDpiStrategies;
 import org.telegram.utils.proxy.MglaInternalProxy;
 import org.telegram.utils.proxy.ProxySettings;
 import org.telegram.utils.proxy.WebProxyTransport;
@@ -46,11 +47,17 @@ public final class MglaWsBypass {
      * Сколько WS может висеть в Connecting без успешного апстрима, прежде чем уйти на WEB.
      * Shorter for normal DE path: regional DPI often kills WS entirely — fall to WEB faster.
      */
-    private static final long WS_STALL_MS = 35_000L;
-    /** Ultra (любой аккаунт): дольше держимся за WS — приоритетный маршрут. */
-    private static final long WS_STALL_ULTRA_MS = 150_000L;
+    /** Faster flip to WEB under regional DPI / whitelist freezes. */
+    private static final long WS_STALL_MS = 18_000L;
+    /**
+     * Ultra WS stickiness. Kept shorter than before: on Билайн foreign TLS often never
+     * completes — long waits just delay WEB / ByeDPI fallback.
+     */
+    private static final long WS_STALL_ULTRA_MS = 45_000L;
     /** Сколько WEB может висеть в Connecting, прежде чем вернуться на WS. */
-    private static final long WEB_STALL_MS = 90_000L;
+    private static final long WEB_STALL_MS = 55_000L;
+    /** After WS+WEB both fail this long, auto-enable standalone ByeDPI. */
+    private static final long TOTAL_FAIL_BYEDPI_MS = 120_000L;
     /**
      * После срыва WEB — как часто пробовать вернуть WS, пока ещё не Connected.
      * Пока маршрут Connected/Updating, переключений нет (иначе лишний reconnect Telegram).
@@ -190,6 +197,8 @@ public final class MglaWsBypass {
     private volatile String lastPingHost = "";
     private volatile long lastAccountNudgeElapsed;
     private volatile long lastProxyRepushElapsed;
+    /** One-shot auto switch to standalone ByeDPI after total WS+WEB failure. */
+    private boolean autoByeDpiTried;
 
     private MglaWsBypass() {
     }
@@ -202,7 +211,7 @@ public final class MglaWsBypass {
             // VPN уже активен — отложим старт до его выключения
             return;
         }
-        // ByeDPI и WS не должны оба держать прокси
+        // ByeDPI as Telegram proxy conflicts with WS; keep ByeDPI only as TLS underlay.
         if (MglaDpiBypass.getInstance().isEnabled()) {
             try {
                 MglaDpiBypass.getInstance().setEnabled(false);
@@ -213,6 +222,11 @@ public final class MglaWsBypass {
         if (err != null) {
             FileLog.e("MglaWsBypass: start on launch failed: " + err);
             return;
+        }
+        try {
+            MglaDpiBypass.getInstance().ensureUnderlayRunning();
+        } catch (Throwable e) {
+            FileLog.e("MglaWsBypass: underlay start failed", e);
         }
         resetRoute();
         writeBypassToMainConfig();
@@ -227,7 +241,7 @@ public final class MglaWsBypass {
     public synchronized boolean setEnabled(boolean enable) {
         if (enable) {
             MglaBypassVpnGuard.noteUserEnabled(MglaBypassVpnGuard.MODE_WS);
-            // Выключить ByeDPI, если был включён
+            // Telegram proxy: WS only. ByeDPI stays as silent TLS underlay for Билайн DPI.
             if (MglaDpiBypass.getInstance().isEnabled()) {
                 try {
                     MglaDpiBypass.getInstance().setEnabled(false);
@@ -245,6 +259,10 @@ public final class MglaWsBypass {
             }
             if (proxyApplied && isServerRunning()) {
                 // Already on — still wake every account (multi-account cold connect).
+                try {
+                    MglaDpiBypass.getInstance().ensureUnderlayRunning();
+                } catch (Throwable ignored) {
+                }
                 wakeAllAccounts();
                 notifyChanged();
                 return true;
@@ -255,6 +273,11 @@ public final class MglaWsBypass {
                 notifyChanged();
                 return false;
             }
+            try {
+                MglaDpiBypass.getInstance().ensureUnderlayRunning();
+            } catch (Throwable e) {
+                FileLog.e("MglaWsBypass: underlay start failed", e);
+            }
             resetRoute();
             writeBypassToMainConfig();
             addBypassProxyToList();
@@ -262,6 +285,7 @@ public final class MglaWsBypass {
             wakeAllAccounts();
             proxyApplied = true;
             sessionStartElapsed = SystemClock.elapsedRealtime();
+            autoByeDpiTried = false;
             lastError = null;
             scheduleMonitor();
             requestPing(true);
@@ -276,6 +300,10 @@ public final class MglaWsBypass {
             resetRoute();
             sessionStartElapsed = 0;
             WsBypassCore.getInstance().stop();
+            try {
+                MglaDpiBypass.getInstance().releaseUnderlay();
+            } catch (Throwable ignored) {
+            }
             MglaWsConfig.setEnabled(false);
             if (!MglaBypassVpnGuard.isManagingProxy()) {
                 MglaBypassVpnGuard.clearSuspended();
@@ -296,6 +324,10 @@ public final class MglaWsBypass {
         resetRoute();
         sessionStartElapsed = 0;
         WsBypassCore.getInstance().stop();
+        try {
+            MglaDpiBypass.getInstance().releaseUnderlay();
+        } catch (Throwable ignored) {
+        }
         notifyChanged();
     }
 
@@ -326,6 +358,11 @@ public final class MglaWsBypass {
             notifyChanged();
             return;
         }
+        try {
+            MglaDpiBypass.getInstance().ensureUnderlayRunning();
+        } catch (Throwable e) {
+            FileLog.e("MglaWsBypass: underlay after VPN failed", e);
+        }
         resetRoute();
         writeBypassToMainConfig();
         addBypassProxyToList();
@@ -333,6 +370,7 @@ public final class MglaWsBypass {
         wakeAllAccounts();
         proxyApplied = true;
         sessionStartElapsed = SystemClock.elapsedRealtime();
+        autoByeDpiTried = false;
         lastError = null;
         scheduleMonitor();
         notifyChanged();
@@ -762,12 +800,17 @@ public final class MglaWsBypass {
         if (route == Route.WS) {
             // Ultra: тот же резервный WEB, но на своём proxy (mglahub), не на mglabot.
             if (stallConfirmTicks < stallTicksNeeded || !isWebFallbackAvailable()) {
+                maybeAutoByeDpiFallback(now);
                 return;
             }
             long lastOk = WsBypassCore.getInstance().getLastUpstreamOkAtMs();
             if (lastOk > 0 && System.currentTimeMillis() - lastOk < wsStall) {
                 stallConfirmTicks = 0;
                 return;
+            }
+            try {
+                MglaDpiBypass.getInstance().rotateUnderlayStrategy();
+            } catch (Throwable ignored) {
             }
             switchRoute(Route.WEB, "ws stalled " + (stalledFor / 1000) + "s"
                 + (ultraPath ? " (ultra)" : (priority ? " (prio)" : "")));
@@ -777,9 +820,15 @@ public final class MglaWsBypass {
         // WEB: уходим на WS только если WEB сам завис в Connecting, либо давно
         // нет связи и релей снова отвечает (не трогаем рабочий Connected WEB).
         if (stallConfirmTicks >= STALL_CONFIRM_TICKS) {
+            try {
+                MglaDpiBypass.getInstance().rotateUnderlayStrategy();
+            } catch (Throwable ignored) {
+            }
+            maybeAutoByeDpiFallback(now);
             switchRoute(Route.WS, "web stalled " + (stalledFor / 1000) + "s");
             return;
         }
+        maybeAutoByeDpiFallback(now);
         if (connecting) {
             return;
         }
@@ -792,6 +841,43 @@ public final class MglaWsBypass {
                     + (priority ? " (ultra)" : ""));
             }
         }
+    }
+
+    /**
+     * Билайн whitelist / total foreign-IP death: after prolonged Connecting on both
+     * WS and WEB, hand off to standalone ByeDPI (Telegram DC desync) so the user is
+     * not stuck forever on a dead foreign VPS.
+     */
+    private void maybeAutoByeDpiFallback(long now) {
+        if (autoByeDpiTried || !proxyApplied) {
+            return;
+        }
+        long stalledFor = now - Math.max(lastConnectedElapsed, sessionStartElapsed);
+        if (sessionStartElapsed <= 0 || stalledFor < TOTAL_FAIL_BYEDPI_MS) {
+            return;
+        }
+        int state = bestConnectionState();
+        boolean connecting = state == ConnectionsManager.ConnectionStateConnecting
+                || state == ConnectionsManager.ConnectionStateConnectingToProxy;
+        if (!connecting && state != ConnectionsManager.ConnectionStateWaitingForNetwork) {
+            return;
+        }
+        autoByeDpiTried = true;
+        FileLog.e("MglaWsBypass: total fail " + (stalledFor / 1000)
+                + "s → auto ByeDPI (Beeline-style block)");
+        try {
+            setEnabled(false);
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        try {
+            // Apply strongest built-in strategy before enabling.
+            MglaDpiBypass.getInstance().applyStrategy(MglaDpiStrategies.DEFAULT_STRATEGY);
+            MglaDpiBypass.getInstance().setEnabled(true);
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        notifyChanged();
     }
 
     public boolean isEnabled() {

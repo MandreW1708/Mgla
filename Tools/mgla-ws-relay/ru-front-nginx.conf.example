@@ -1,0 +1,50 @@
+# Example: Russian edge reverse-proxy → DE1/DE2/FI origin (Beeline whitelist).
+# Place on Selectel / Timeweb / Yandex VPS with a whitelisted IPv4.
+# Client SNI must be THIS edge hostname (no "mgla" substring).
+
+upstream mgla_origin_de1 {
+    server 31.77.218.160:443;
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name rt.example.ru;   # change me
+
+    ssl_certificate     /etc/letsencrypt/live/rt.example.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rt.example.ru/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Decoy for plain GETs (looks like a static landing).
+    location / {
+        root /var/www/edge-decoy;
+        try_files $uri /index.html =404;
+    }
+
+    # Camouflage WS pool — same paths as origin.
+    location ~ ^/(cdn/v3/stream|api/realtime|_next/webpack-hmr|socket/websocket|ws/v1/live) {
+        proxy_pass https://mgla_origin_de1;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name mglabot.mooo.com;
+        proxy_set_header Host mglabot.mooo.com;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Mgla-Token $http_x_mgla_token;
+        proxy_set_header X-Mgla-Plan $http_x_mgla_plan;
+        proxy_set_header X-Mgla-Priority $http_x_mgla_priority;
+        proxy_set_header X-Mgla-Client $http_x_mgla_client;
+        proxy_set_header X-Mgla-Tg-Id $http_x_mgla_tg_id;
+        proxy_set_header X-Mgla-Tg-Ids $http_x_mgla_tg_ids;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        access_log off;
+    }
+}

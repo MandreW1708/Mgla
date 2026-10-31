@@ -42,6 +42,11 @@ import java.util.Locale;
 
 public class VideoEditedInfo {
 
+    /** Hard cap so the server never demotes a note with duration >= 60s to a regular video. */
+    public static final long ROUND_VIDEO_MAX_DURATION_MS = 59_500L;
+    /** Matches MessageObject.isRoundVideoDocument side check. */
+    public static final int ROUND_VIDEO_MAX_SIDE = 1280;
+
     public long startTime;
     public long endTime;
     public long avatarStartTime = -1;
@@ -708,6 +713,58 @@ public class VideoEditedInfo {
             FileLog.e(e);
         }
         return false;
+    }
+
+    /**
+     * Forces this edit info to stay a Telegram video note regardless of recorder settings.
+     * Call before every send from InstantCamera / RoundVideoSession paths.
+     */
+    public VideoEditedInfo enforceRoundVideoNote() {
+        roundVideo = true;
+        if (estimatedDuration <= 0) {
+            estimatedDuration = 1;
+        } else if (estimatedDuration >= 60_000L) {
+            estimatedDuration = ROUND_VIDEO_MAX_DURATION_MS;
+        }
+        if (endTime > 0 && startTime >= 0 && endTime - startTime >= 60_000L) {
+            endTime = startTime + ROUND_VIDEO_MAX_DURATION_MS;
+        }
+        int side = pickRoundSide(resultWidth, resultHeight);
+        if (side <= 0) {
+            side = pickRoundSide(originalWidth, originalHeight);
+        }
+        if (side <= 0) {
+            side = 480;
+        }
+        if (side > ROUND_VIDEO_MAX_SIDE) {
+            side = ROUND_VIDEO_MAX_SIDE;
+        }
+        side &= ~1;
+        resultWidth = resultHeight = side;
+        if (originalWidth <= 0 || originalHeight <= 0 || Math.abs(originalWidth - originalHeight) > 2) {
+            int originalSide = pickRoundSide(originalWidth, originalHeight);
+            if (originalSide <= 0) {
+                originalSide = side;
+            }
+            if (originalSide > ROUND_VIDEO_MAX_SIDE) {
+                originalSide = ROUND_VIDEO_MAX_SIDE;
+            }
+            originalWidth = originalHeight = originalSide & ~1;
+        }
+        if (estimatedSize <= 0) {
+            estimatedSize = 1;
+        }
+        return this;
+    }
+
+    private static int pickRoundSide(int width, int height) {
+        if (width > 0 && height > 0) {
+            return Math.min(width, height);
+        }
+        if (width > 0) {
+            return width;
+        }
+        return height;
     }
 
     public boolean needConvert() {

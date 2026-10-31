@@ -241,7 +241,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
         TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Основной маршрут — WebSocket-релей. Серверы для всех: Германия1 (mglabot) и Германия2 (mglahub). Ultra-обход (подписка Ultra) направляет трафик через Финляндию — при этом выбор сервера недоступен. Пинг обновляется раз в 30 мин (нажмите чтобы обновить). Если релей не подключается, обход сам переходит на резервный WEB proxy. Без сервера для жёстких блокировок используйте ByeDPI ниже.");
+        wsInfo.setText("Основной маршрут — WebSocket-релей (Германия1/2). Ultra сначала Финляндия, при блоке FI IP — авто-запас на Германию1/2. TLS через ByeDPI-underlay (Билайн). Релей ↓ → WEB; оба ↓ ~2 мин → ByeDPI ниже.");
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
         rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 

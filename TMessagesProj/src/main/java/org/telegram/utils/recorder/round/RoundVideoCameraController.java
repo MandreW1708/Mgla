@@ -35,49 +35,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Set;
 
-final class RoundVideoCameraController {
-
-    interface Callback {
-        void onConfigured(@NonNull CameraInfo info, boolean cameraSwitch);
-
-        void onRecordingStarted();
-
-        void onCameraSwitchStarted(@NonNull RoundVideoSession.CameraFacing facing);
-
-        void onCameraSwitchFirstFrame();
-
-        void onRecordingStopped();
-
-        void onError(@NonNull Exception error);
-    }
-
-    static final class CameraInfo {
-        final RoundVideoSession.CameraFacing facing;
-        final RoundVideoSession.CameraResolution cameraResolution;
-        final RoundVideoSession.FrameRate frameRate;
-        final Size previewSize;
-        final Size recordingSize;
-        final float maximumZoomRatio;
-        final boolean torchAvailable;
-
-        CameraInfo(
-                RoundVideoSession.CameraFacing facing,
-                RoundVideoSession.CameraResolution cameraResolution,
-                RoundVideoSession.FrameRate frameRate,
-                Size previewSize,
-                Size recordingSize,
-                float maximumZoomRatio,
-                boolean torchAvailable
-        ) {
-            this.facing = facing;
-            this.cameraResolution = cameraResolution;
-            this.frameRate = frameRate;
-            this.previewSize = previewSize;
-            this.recordingSize = recordingSize;
-            this.maximumZoomRatio = maximumZoomRatio;
-            this.torchAvailable = torchAvailable;
-        }
-    }
+final class RoundVideoCameraController implements RoundVideoCameraBackend {
 
     private static final class CameraSelection {
         final String id;
@@ -141,7 +99,7 @@ final class RoundVideoCameraController {
     private final RoundVideoSession.FrameRate requestedFrameRate;
     private final boolean compositionEnabled;
     private final RoundVideoDiagnostics diagnostics;
-    private final Callback callback;
+    private final RoundVideoCameraBackend.Callback callback;
     private final Rect zoomCropRect = new Rect();
 
     private HandlerThread cameraThread;
@@ -270,7 +228,7 @@ final class RoundVideoCameraController {
             @NonNull RoundVideoSession.FrameRate frameRate,
             boolean compositionEnabled,
             @NonNull RoundVideoDiagnostics diagnostics,
-            @NonNull Callback callback
+            @NonNull RoundVideoCameraBackend.Callback callback
     ) {
         this.context = context.getApplicationContext();
         this.cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
@@ -286,7 +244,8 @@ final class RoundVideoCameraController {
         previewView.addOnLayoutChangeListener(layoutChangeListener);
     }
 
-    void startSegment(
+    @Override
+    public void startSegment(
             @NonNull RoundVideoMp4Writer writer,
             long timelineOffsetUs,
             @NonNull RoundVideoSession.CameraFacing facing
@@ -309,7 +268,8 @@ final class RoundVideoCameraController {
         maybeOpenCamera();
     }
 
-    boolean setCameraFacing(@NonNull RoundVideoSession.CameraFacing facing) {
+    @Override
+    public boolean setCameraFacing(@NonNull RoundVideoSession.CameraFacing facing) {
         requestedFacing = facing;
         Handler handler = cameraHandler;
         if (!active || handler == null) return false;
@@ -317,7 +277,8 @@ final class RoundVideoCameraController {
         return true;
     }
 
-    boolean setZoom(float progress) {
+    @Override
+    public boolean setZoom(float progress) {
         zoomProgress = clamp(progress, 0f, 1f);
         Handler handler = cameraHandler;
         if (!active || handler == null) return false;
@@ -326,7 +287,8 @@ final class RoundVideoCameraController {
         return true;
     }
 
-    boolean setTorchEnabled(boolean enabled) {
+    @Override
+    public boolean setTorchEnabled(boolean enabled) {
         Handler handler = cameraHandler;
         if (!active || handler == null) return false;
         handler.post(() -> {
@@ -343,7 +305,8 @@ final class RoundVideoCameraController {
         return true;
     }
 
-    boolean stopSegment() {
+    @Override
+    public boolean stopSegment() {
         Handler handler = cameraHandler;
         if (!active || stopping || handler == null) return false;
         stopping = true;
@@ -369,7 +332,8 @@ final class RoundVideoCameraController {
         return true;
     }
 
-    void release() {
+    @Override
+    public void release() {
         active = false;
         previewView.setSurfaceTextureListener(null);
         previewView.removeOnLayoutChangeListener(layoutChangeListener);
@@ -761,7 +725,7 @@ final class RoundVideoCameraController {
                 + ", elapsedMs=" + elapsedMs(cameraSwitchStartedNs));
         previewView.post(RoundVideoCameraController.this::updatePreviewTransform);
         callback.onConfigured(
-                new CameraInfo(
+                new RoundVideoCameraBackend.CameraInfo(
                         activeFacing,
                         activeCameraResolution,
                         activeFrameRate,
@@ -1425,7 +1389,7 @@ final class RoundVideoCameraController {
                                 + ", switchElapsedMs=" + elapsedMs(cameraSwitchStartedNs) : ""));
                         previewView.post(RoundVideoCameraController.this::updatePreviewTransform);
                         callback.onConfigured(
-                                new CameraInfo(
+                                new RoundVideoCameraBackend.CameraInfo(
                                         activeFacing,
                                         activeCameraResolution,
                                         activeFrameRate,

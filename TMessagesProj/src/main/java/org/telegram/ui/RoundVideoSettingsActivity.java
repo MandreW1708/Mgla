@@ -13,6 +13,7 @@ import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.utils.settings.SharedSettings;
+import org.telegram.ui.Components.InstantCameraViewBase;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -88,7 +89,9 @@ public class RoundVideoSettingsActivity extends BaseFragment {
 
     private void onRowClicked(int position) {
         if (position == ROW_ENABLED) {
-            SharedSettings.roundVideoCamera2Enabled.set(!SharedSettings.roundVideoCamera2Enabled.get());
+            boolean enabled = !SharedSettings.roundVideoCamera2Enabled.get();
+            // Keep Camera settings API in sync; never leave a stale CameraX flag on.
+            InstantCameraViewBase.setUseCamera2Implementation(enabled);
             adapter.notifyDataSetChanged();
             return;
         }
