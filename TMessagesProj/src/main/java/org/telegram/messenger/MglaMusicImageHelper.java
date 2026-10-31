@@ -509,7 +509,71 @@ public final class MglaMusicImageHelper {
         return null;
     }
 
-    /** Blocking load for notification / media session artwork. Call off the main thread. */
+    /**
+     * Downscale in place when larger than {@code maxSide}. Recycles the oversized source when a
+     * new bitmap is created — do not pass a bitmap still held by the memory cache.
+     */
+    public static Bitmap ensureMaxSide(Bitmap raw, int maxSide) {
+        if (raw == null || maxSide <= 0) {
+            return raw;
+        }
+        if (raw.getWidth() <= maxSide && raw.getHeight() <= maxSide) {
+            return raw;
+        }
+        try {
+            float scale = Math.min(maxSide / (float) raw.getWidth(), maxSide / (float) raw.getHeight());
+            int w = Math.max(1, Math.round(raw.getWidth() * scale));
+            int h = Math.max(1, Math.round(raw.getHeight() * scale));
+            Bitmap scaled = Bitmap.createScaledBitmap(raw, w, h, true);
+            if (scaled != null && scaled != raw) {
+                raw.recycle();
+                return scaled;
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        return raw;
+    }
+
+    /**
+     * Bitmap safe for {@code RemoteViews} / binder (~1 MB transaction cap).
+     * Scales a copy (never recycles {@code src}), then optional rounded corners.
+     */
+    public static Bitmap forRemoteViews(Bitmap src, int maxSide, float radiusPx) {
+        if (src == null || src.isRecycled()) {
+            return null;
+        }
+        Bitmap working = src;
+        boolean ownsWorking = false;
+        try {
+            if (maxSide > 0 && (src.getWidth() > maxSide || src.getHeight() > maxSide)) {
+                float scale = Math.min(maxSide / (float) src.getWidth(), maxSide / (float) src.getHeight());
+                int w = Math.max(1, Math.round(src.getWidth() * scale));
+                int h = Math.max(1, Math.round(src.getHeight() * scale));
+                working = Bitmap.createScaledBitmap(src, w, h, true);
+                ownsWorking = working != null && working != src;
+                if (working == null) {
+                    return null;
+                }
+            }
+            if (radiusPx > 0) {
+                Bitmap rounded = getRoundedCornerBitmap(working, radiusPx);
+                if (ownsWorking && rounded != null && rounded != working) {
+                    working.recycle();
+                }
+                return rounded;
+            }
+            return working;
+        } catch (Throwable e) {
+            FileLog.e(e);
+            if (ownsWorking && working != null && !working.isRecycled()) {
+                working.recycle();
+            }
+            return null;
+        }
+    }
+
+    /** Blocking load for notification / media session / widget artwork. Call off the main thread. */
     public static Bitmap loadBitmapSync(String url, int maxSide) {
         if (TextUtils.isEmpty(url)) {
             return null;
@@ -520,7 +584,7 @@ public final class MglaMusicImageHelper {
             if (disk.exists() && disk.length() > 64) {
                 Bitmap fromDisk = BitmapFactory.decodeFile(disk.getAbsolutePath());
                 if (fromDisk != null) {
-                    return fromDisk;
+                    return ensureMaxSide(fromDisk, side);
                 }
             }
             File fallback = findFallbackDiskCover(url);
@@ -528,21 +592,21 @@ public final class MglaMusicImageHelper {
                 if (!ApplicationLoader.isNetworkOnline() || side <= DISK_COVER_SIDE) {
                     Bitmap fallbackBmp = BitmapFactory.decodeFile(fallback.getAbsolutePath());
                     if (fallbackBmp != null) {
-                        return fallbackBmp;
+                        return ensureMaxSide(fallbackBmp, side);
                     }
                 }
             }
             if (!ApplicationLoader.isNetworkOnline()) {
                 if (fallback != null && fallback.exists() && fallback.length() > 64) {
-                    return BitmapFactory.decodeFile(fallback.getAbsolutePath());
+                    return ensureMaxSide(BitmapFactory.decodeFile(fallback.getAbsolutePath()), side);
                 }
                 return null;
             }
             Bitmap loaded = downloadAndStore(url, side, disk);
             if (loaded == null && fallback != null && fallback.exists() && fallback.length() > 64) {
-                return BitmapFactory.decodeFile(fallback.getAbsolutePath());
+                return ensureMaxSide(BitmapFactory.decodeFile(fallback.getAbsolutePath()), side);
             }
-            return loaded;
+            return ensureMaxSide(loaded, side);
         } catch (Throwable e) {
             FileLog.e(e);
             return null;

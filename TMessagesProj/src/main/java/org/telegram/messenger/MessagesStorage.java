@@ -389,6 +389,7 @@ public class MessagesStorage extends BaseController {
             MglaEditHistoryStorage.ensureTable(database);
             MglaDeletedStorage.ensureTable(database);
             MglaMemoryStorage.ensureTable(database);
+            MglaEditHistoryStorage.pruneIfNeeded(database, currentAccount);
         } catch (Exception e) {
             FileLog.e(e);
             if (openTries < 3 && e.getMessage() != null && e.getMessage().contains("malformed")) {

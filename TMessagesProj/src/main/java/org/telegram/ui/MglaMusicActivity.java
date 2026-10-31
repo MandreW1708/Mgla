@@ -1536,6 +1536,11 @@ public class MglaMusicActivity extends BaseFragment implements
     }
 
     private View createPreviewTrackRow(Context context, MglaYandexMusicModel.Track track) {
+        return createPreviewTrackRow(context, track, favoritesList, "Мне нравится");
+    }
+
+    private View createPreviewTrackRow(Context context, MglaYandexMusicModel.Track track,
+                                       List<MglaYandexMusicModel.Track> contextQueue, String sourceTitle) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -1598,13 +1603,13 @@ public class MglaMusicActivity extends BaseFragment implements
         }
 
         ImageView moreBtn = new ImageView(context);
-        moreBtn.setImageResource(R.drawable.ic_ab_other);
+        moreBtn.setImageResource(R.drawable.mini_more_dots);
         moreBtn.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
         moreBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
-        moreBtn.setOnClickListener(v -> showTrackOptionsMenu(track));
+        moreBtn.setOnClickListener(v -> showTrackMoreMenu(track, contextQueue, sourceTitle));
         row.addView(moreBtn, LayoutHelper.createLinear(36, 36));
 
-        row.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playTrack(track, favoritesList, "Мне нравится"));
+        row.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playTrack(track, contextQueue, sourceTitle));
         return row;
     }
 
@@ -2311,9 +2316,7 @@ public class MglaMusicActivity extends BaseFragment implements
         String source = currentArtist != null ? currentArtist.name : "Исполнитель";
         for (int i = 0; i < preview; i++) {
             final MglaYandexMusicModel.Track track = artistPopularTracks.get(i);
-            View row = createPreviewTrackRow(getContext(), track);
-            row.setOnClickListener(v -> MglaYandexMusicPlayer.getInstance().playTrack(
-                    track, new ArrayList<>(artistPopularTracks), source));
+            View row = createPreviewTrackRow(getContext(), track, artistPopularTracks, source);
             artistPopularContainer.addView(row, LayoutHelper.createLinear(
                     LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, i < preview - 1 ? 4 : 0));
         }
@@ -3197,6 +3200,26 @@ public class MglaMusicActivity extends BaseFragment implements
         showDialog(b.create());
     }
 
+    /** Overflow «⋯» menu on track rows — currently only «Воспроизвести далее». */
+    private void showTrackMoreMenu(MglaYandexMusicModel.Track track, List<MglaYandexMusicModel.Track> contextQueue, String sourceTitle) {
+        if (track == null || getParentActivity() == null) {
+            return;
+        }
+        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
+        b.setTitle(track.title);
+        b.setItems(new CharSequence[]{"Воспроизвести далее"}, (dialog, which) -> {
+            if (which == 0) {
+                boolean wasIdle = MglaYandexMusicPlayer.getInstance().getCurrentTrack() == null
+                        || MglaYandexMusicPlayer.getInstance().getQueue().isEmpty();
+                MglaYandexMusicPlayer.getInstance().playNext(track, contextQueue, sourceTitle);
+                Toast.makeText(getContext(),
+                        wasIdle ? "Воспроизведение" : "Будет следующим",
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+        showDialog(b.create());
+    }
+
     private void showTrackOptionsMenu(MglaYandexMusicModel.Track track) {
         if (track == null) return;
         final boolean downloaded = MglaYandexMusicOffline.getInstance().isDownloaded(track.id);
@@ -3204,13 +3227,18 @@ public class MglaMusicActivity extends BaseFragment implements
         AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
         b.setTitle(track.title);
         b.setItems(new CharSequence[]{
-                "Слушать следующим",
+                "Воспроизвести далее",
                 downloading ? "Скачивание…" : (downloaded ? "Удалить загрузку" : "Скачать для офлайн"),
                 "Удалить из Мне нравится",
                 "Поделиться названием"
         }, (dialog, which) -> {
             if (which == 0) {
-                Toast.makeText(getContext(), "Добавлено в очередь", Toast.LENGTH_SHORT).show();
+                boolean wasIdle = MglaYandexMusicPlayer.getInstance().getCurrentTrack() == null
+                        || MglaYandexMusicPlayer.getInstance().getQueue().isEmpty();
+                MglaYandexMusicPlayer.getInstance().playNext(track, detailTracks, detailSourceTitle);
+                Toast.makeText(getContext(),
+                        wasIdle ? "Воспроизведение" : "Будет следующим",
+                        Toast.LENGTH_SHORT).show();
             } else if (which == 1) {
                 if (downloading) {
                     Toast.makeText(getContext(), "Уже скачивается", Toast.LENGTH_SHORT).show();
@@ -3959,7 +3987,14 @@ public class MglaMusicActivity extends BaseFragment implements
             col.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
             row.addView(col, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
-            return new SearchItemHolder(row, cover, title, subtitle);
+            ImageView more = new ImageView(ctx);
+            more.setImageResource(R.drawable.mini_more_dots);
+            more.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+            more.setPadding(dp(6), dp(6), dp(6), dp(6));
+            more.setVisibility(View.GONE);
+            row.addView(more, LayoutHelper.createLinear(36, 36));
+
+            return new SearchItemHolder(row, cover, title, subtitle, more);
         }
 
         @Override
@@ -3977,6 +4012,13 @@ public class MglaMusicActivity extends BaseFragment implements
                 MglaYandexMusicModel.Track current = MglaYandexMusicPlayer.getInstance().getCurrentTrack();
                 boolean isThisPlaying = current != null && current.id != null && current.id.equals(row.track.id);
                 h.title.setTextColor(isThisPlaying ? MD3_PRIMARY : MD3_ON_SURFACE);
+                h.more.setVisibility(View.VISIBLE);
+                h.more.setClickable(true);
+                final MglaYandexMusicModel.Track track = row.track;
+                h.more.setOnClickListener(v -> {
+                    List<MglaYandexMusicModel.Track> ctxQueue = collectSearchTracks();
+                    showTrackMoreMenu(track, ctxQueue, "Поиск");
+                });
             } else if (row.type == SearchRow.TYPE_ALBUM && row.album != null) {
                 h.title.setText(row.album.title);
                 h.title.setTextColor(MD3_ON_SURFACE);
@@ -3986,12 +4028,26 @@ public class MglaMusicActivity extends BaseFragment implements
                 }
                 h.subtitle.setText(meta);
                 MglaMusicImageHelper.bindCover(h.cover, row.album.getCoverUrl(100), 8, R.drawable.bot_music);
+                h.more.setVisibility(View.GONE);
+                h.more.setOnClickListener(null);
             } else if (row.type == SearchRow.TYPE_ARTIST && row.artist != null) {
                 h.title.setText(row.artist.name);
                 h.title.setTextColor(MD3_ON_SURFACE);
                 h.subtitle.setText("Исполнитель");
                 MglaMusicImageHelper.bindCircleCover(h.cover, row.artist.getCoverUrl(100), R.drawable.bot_music);
+                h.more.setVisibility(View.GONE);
+                h.more.setOnClickListener(null);
             }
+        }
+
+        private List<MglaYandexMusicModel.Track> collectSearchTracks() {
+            ArrayList<MglaYandexMusicModel.Track> out = new ArrayList<>();
+            for (SearchRow r : searchRows) {
+                if (r.type == SearchRow.TYPE_TRACK && r.track != null) {
+                    out.add(r.track);
+                }
+            }
+            return out;
         }
 
         @Override
@@ -4003,12 +4059,14 @@ public class MglaMusicActivity extends BaseFragment implements
             final ImageView cover;
             final TextView title;
             final TextView subtitle;
+            final ImageView more;
 
-            SearchItemHolder(View itemView, ImageView cover, TextView title, TextView subtitle) {
+            SearchItemHolder(View itemView, ImageView cover, TextView title, TextView subtitle, ImageView more) {
                 super(itemView);
                 this.cover = cover;
                 this.title = title;
                 this.subtitle = subtitle;
+                this.more = more;
             }
         }
     }
@@ -4168,12 +4226,6 @@ public class MglaMusicActivity extends BaseFragment implements
 
             playArea.addView(col, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 8, 0));
 
-            TextView duration = new TextView(ctx);
-            duration.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            duration.setTextColor(MD3_ON_SURFACE_VARIANT);
-            duration.setClickable(false);
-            playArea.addView(duration, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 0, 8, 0));
-
             row.addView(playArea, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
 
             ImageView download = new ImageView(ctx);
@@ -4184,7 +4236,13 @@ public class MglaMusicActivity extends BaseFragment implements
             like.setPadding(dp(6), dp(6), dp(6), dp(6));
             row.addView(like, LayoutHelper.createLinear(36, 36));
 
-            return new Holder(row, check, playArea, cover, title, explicitTag, subtitle, duration, download, like);
+            ImageView more = new ImageView(ctx);
+            more.setImageResource(R.drawable.mini_more_dots);
+            more.setColorFilter(new PorterDuffColorFilter(MD3_ON_SURFACE_VARIANT, PorterDuff.Mode.SRC_IN));
+            more.setPadding(dp(6), dp(6), dp(6), dp(6));
+            row.addView(more, LayoutHelper.createLinear(36, 36));
+
+            return new Holder(row, check, playArea, cover, title, explicitTag, subtitle, download, like, more);
         }
 
         @Override
@@ -4228,6 +4286,9 @@ public class MglaMusicActivity extends BaseFragment implements
                 holder.like.setVisibility(View.GONE);
                 holder.like.setClickable(false);
                 holder.like.setOnClickListener(null);
+                holder.more.setVisibility(View.GONE);
+                holder.more.setClickable(false);
+                holder.more.setOnClickListener(null);
                 GradientDrawable rowBg = new GradientDrawable();
                 rowBg.setCornerRadius(dp(12));
                 rowBg.setColor(selected ? ColorUtils.setAlphaComponent(MD3_PRIMARY, 0x28) : MD3_ROW_SCRIM);
@@ -4237,6 +4298,7 @@ public class MglaMusicActivity extends BaseFragment implements
                 holder.check.setBackground(null);
                 holder.download.setVisibility(View.VISIBLE);
                 holder.like.setVisibility(View.VISIBLE);
+                holder.more.setVisibility(View.VISIBLE);
                 GradientDrawable rowBg = new GradientDrawable();
                 rowBg.setCornerRadius(dp(12));
                 rowBg.setColor(MD3_ROW_SCRIM);
@@ -4256,7 +4318,6 @@ public class MglaMusicActivity extends BaseFragment implements
             } else {
                 holder.subtitle.setText(t.artist);
             }
-            holder.duration.setText(t.getFormattedDuration());
             holder.explicitTag.setVisibility(t.isExplicit ? View.VISIBLE : View.GONE);
 
             MglaMusicImageHelper.bindCover(holder.cover, t.getCoverUrl(300), 8, R.drawable.bot_music);
@@ -4338,6 +4399,10 @@ public class MglaMusicActivity extends BaseFragment implements
                     notifyItemChanged(position);
                     MglaYandexMusicApi.toggleLike(t.id, nextLiked, null);
                 });
+
+                holder.more.setClickable(true);
+                holder.more.setOnClickListener(v ->
+                        showTrackMoreMenu(t, items, detailSourceTitle));
             }
         }
 
@@ -4353,11 +4418,11 @@ public class MglaMusicActivity extends BaseFragment implements
             final TextView title;
             final TextView explicitTag;
             final TextView subtitle;
-            final TextView duration;
             final ImageView download;
             final ImageView like;
+            final ImageView more;
 
-            Holder(View itemView, ImageView check, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, TextView duration, ImageView download, ImageView like) {
+            Holder(View itemView, ImageView check, View playArea, ImageView cover, TextView title, TextView explicitTag, TextView subtitle, ImageView download, ImageView like, ImageView more) {
                 super(itemView);
                 this.check = check;
                 this.playArea = playArea;
@@ -4365,9 +4430,9 @@ public class MglaMusicActivity extends BaseFragment implements
                 this.title = title;
                 this.explicitTag = explicitTag;
                 this.subtitle = subtitle;
-                this.duration = duration;
                 this.download = download;
                 this.like = like;
+                this.more = more;
             }
         }
     }

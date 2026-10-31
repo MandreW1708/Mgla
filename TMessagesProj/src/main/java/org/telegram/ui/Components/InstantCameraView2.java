@@ -50,6 +50,7 @@ import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProvider;
 import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Stories.recorder.FlashViews;
+import org.telegram.utils.recorder.round.RoundVideoNoteLimits;
 import org.telegram.utils.recorder.round.RoundVideoSession;
 
 import java.io.File;
@@ -90,7 +91,6 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
     );
     private final int buttonIconSize;
 
-    // CAMERAX_OFF: always false while CameraX is disabled
     private final boolean useCameraX = InstantCameraViewBase.isUsingCameraXImplementation();
 
     private RoundVideoSession session;
@@ -382,22 +382,51 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
         progressView.setProgress(0f);
         showInitialPlaceholder();
         upload = new TelegramRoundVideoUpload(currentAccount, secretChat);
-        activeOutputResolution = SharedSettings.roundVideoOutputResolution.get();
-        session = new RoundVideoSession.Builder(getContext(), textureView)
-                .setOutputDirectory(new File(ApplicationLoader.getFilesDirFixed(), "cache"))
-                .setInitialFacing(SharedSettings.roundVideoLastCamera.get())
-                .setOutputResolution(activeOutputResolution)
-                .setVideoBitrate(SharedSettings.roundVideoVideoBitrate.get())
-                .setCameraResolution(SharedSettings.roundVideoCameraResolution.get())
-                .setFrameRate(SharedSettings.roundVideoFrameRate.get())
-                .setMaximumDurationMs(MAXIMUM_DURATION_MS)
-                .setCompositionEnabled(true)
-                // CAMERAX_OFF
-                .setUseCameraX(useCameraX)
-                .setListener(sessionListener)
-                .setOutputListener(upload)
-                .setScreenFlashController(this::setScreenFlashEnabled)
-                .build();
+        if (useCameraX) {
+            activeOutputResolution = SharedSettings.roundVideoCameraXOutputResolution.get();
+            RoundVideoSession.CameraXCapture capture =
+                    SharedSettings.roundVideoCameraXCapture.get();
+            // Pro settings may request 720p, but Telegram video notes must encode ≤640
+            // (usually server roundVideoSize ≈ 384). CameraX still uses Ultra capture and
+            // downscales in GL — same pattern as other CameraX forks / stock InstantCamera.
+            int noteEncodeSize = RoundVideoNoteLimits.encodeSide(
+                    currentAccount,
+                    activeOutputResolution
+            );
+            session = new RoundVideoSession.Builder(getContext(), textureView)
+                    .setOutputDirectory(new File(ApplicationLoader.getFilesDirFixed(), "cache"))
+                    .setInitialFacing(SharedSettings.roundVideoLastCamera.get())
+                    .setOutputResolution(activeOutputResolution)
+                    .setOutputSizePixels(noteEncodeSize)
+                    .setVideoBitrate(SharedSettings.roundVideoCameraXBitrate.get())
+                    .setCameraResolution(mapCameraXCapture(capture))
+                    .setFrameRate(SharedSettings.roundVideoCameraXFrameRate.get())
+                    .setMaximumDurationMs(MAXIMUM_DURATION_MS)
+                    .setCompositionEnabled(SharedSettings.roundVideoCameraXComposition.get())
+                    .setUseCameraX(true)
+                    .setCameraXCapture(capture)
+                    .setCameraXStabilization(SharedSettings.roundVideoCameraXStabilization.get())
+                    .setListener(sessionListener)
+                    .setOutputListener(upload)
+                    .setScreenFlashController(this::setScreenFlashEnabled)
+                    .build();
+        } else {
+            activeOutputResolution = SharedSettings.roundVideoOutputResolution.get();
+            session = new RoundVideoSession.Builder(getContext(), textureView)
+                    .setOutputDirectory(new File(ApplicationLoader.getFilesDirFixed(), "cache"))
+                    .setInitialFacing(SharedSettings.roundVideoLastCamera.get())
+                    .setOutputResolution(activeOutputResolution)
+                    .setVideoBitrate(SharedSettings.roundVideoVideoBitrate.get())
+                    .setCameraResolution(SharedSettings.roundVideoCameraResolution.get())
+                    .setFrameRate(SharedSettings.roundVideoFrameRate.get())
+                    .setMaximumDurationMs(MAXIMUM_DURATION_MS)
+                    .setCompositionEnabled(true)
+                    .setUseCameraX(false)
+                    .setListener(sessionListener)
+                    .setOutputListener(upload)
+                    .setScreenFlashController(this::setScreenFlashEnabled)
+                    .build();
+        }
         MediaController.getInstance().requestRecordAudioFocus(true);
         session.start();
         startAnimation(true, fromPaused);
@@ -406,6 +435,20 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
     /** Returns whether this view instance was created for the CameraX backend. */
     public boolean isUsingCameraX() {
         return useCameraX;
+    }
+
+    @NonNull
+    private static RoundVideoSession.CameraResolution mapCameraXCapture(
+            @NonNull RoundVideoSession.CameraXCapture capture
+    ) {
+        if (capture == RoundVideoSession.CameraXCapture.ULTRA
+                || capture == RoundVideoSession.CameraXCapture.HIGH) {
+            return RoundVideoSession.CameraResolution.HIGH;
+        }
+        if (capture == RoundVideoSession.CameraXCapture.MEDIUM) {
+            return RoundVideoSession.CameraResolution.MEDIUM;
+        }
+        return RoundVideoSession.CameraResolution.LOW;
     }
 
     @Override
@@ -906,11 +949,20 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
         info.framerate = session == null || session.getActiveFrameRate() == null
                 ? RoundVideoSession.FrameRate.FPS_30.getValue()
                 : session.getActiveFrameRate().getValue();
-        int outputSize = activeOutputResolution == null
-                ? RoundVideoSession.OutputResolution.P480.getSize()
-                : activeOutputResolution.getSize();
+        int outputSize = session != null
+                ? session.getOutputSize()
+                : (activeOutputResolution == null
+                ? RoundVideoNoteLimits.DEFAULT_SIDE
+                : RoundVideoNoteLimits.encodeSide(currentAccount, activeOutputResolution));
+        outputSize = RoundVideoNoteLimits.clampNoteSide(outputSize);
         info.resultWidth = info.originalWidth = outputSize;
         info.resultHeight = info.originalHeight = outputSize;
+        if (useCameraX) {
+            info.bitrate = RoundVideoNoteLimits.clampNoteBitrate(
+                    outputSize,
+                    SharedSettings.roundVideoCameraXBitrate.get()
+            );
+        }
         info.originalPath = file.getAbsolutePath();
         if (uploadInfo != null) {
             info.file = uploadInfo.inputFile;

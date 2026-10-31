@@ -8,6 +8,7 @@ import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Build;
 import android.os.Handler;
@@ -22,6 +23,7 @@ import android.view.View;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.camera.camera2.interop.Camera2Interop;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraControl;
 import androidx.camera.core.CameraSelector;
@@ -50,9 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend {
 
     private static final int PREVIEW_SHORT_SIDE = 720;
-    private static final int MAXIMUM_SOURCE_SHORT_SIDE = 1088;
-    private static final int MAXIMUM_SOURCE_LONG_SIDE = 1920;
-    private static final int MAXIMUM_CROP_OVERSIZE_PERCENT = 15;
+    private static final int MAXIMUM_CROP_OVERSIZE_PERCENT = 20;
     private static final float MAXIMUM_UI_ZOOM_RATIO = 4f;
     // CameraX Preview timestamps can lag absolute A/V arming; keep headroom vs Camera2.
     private static final long COMMON_START_TIMEOUT_MS = 8_000L;
@@ -60,12 +60,15 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
     private final Context context;
     private final CameraManager cameraManager;
     private final TextureView previewView;
-    private final RoundVideoSession.OutputResolution outputResolution;
     private final int outputSize;
     private final int videoBitrate;
+    private final RoundVideoSession.CameraXCapture captureQuality;
     private final RoundVideoSession.CameraResolution requestedCameraResolution;
     private final RoundVideoSession.FrameRate requestedFrameRate;
     private final boolean compositionEnabled;
+    private final boolean videoStabilizationEnabled;
+    private final int maximumSourceShortSide;
+    private final int maximumSourceLongSide;
     private final RoundVideoDiagnostics diagnostics;
     private final RoundVideoCameraBackend.Callback callback;
     private final Handler mainHandler;
@@ -92,6 +95,8 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
     private boolean torchAvailable;
     private boolean torchEnabled;
     private boolean timestampRealtime;
+    @Nullable private CameraCharacteristics activeCharacteristics;
+    @Nullable private Range<Integer> selectedAeFpsRange;
 
     private Surface previewOutputSurface;
     private RoundVideoGlProcessor glProcessor;
@@ -124,27 +129,39 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
     CameraXRoundVideoCameraController(
             @NonNull Context context,
             @NonNull TextureView previewView,
-            @NonNull RoundVideoSession.OutputResolution outputResolution,
+            int encodeSize,
             int videoBitrate,
-            @NonNull RoundVideoSession.CameraResolution cameraResolution,
+            @NonNull RoundVideoSession.CameraXCapture captureQuality,
             @NonNull RoundVideoSession.FrameRate frameRate,
             boolean compositionEnabled,
+            boolean videoStabilizationEnabled,
             @NonNull RoundVideoDiagnostics diagnostics,
             @NonNull RoundVideoCameraBackend.Callback callback
     ) {
         this.context = context.getApplicationContext();
         this.cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         this.previewView = previewView;
-        this.outputResolution = outputResolution;
-        this.outputSize = outputResolution.getSize();
-        this.videoBitrate = videoBitrate;
-        this.requestedCameraResolution = cameraResolution;
+        this.outputSize = RoundVideoNoteLimits.clampNoteSide(encodeSize);
+        this.videoBitrate = RoundVideoNoteLimits.clampNoteBitrate(this.outputSize, videoBitrate);
+        this.captureQuality = captureQuality;
+        this.requestedCameraResolution = mapCaptureToCameraResolution(captureQuality);
         this.requestedFrameRate = frameRate;
         this.compositionEnabled = compositionEnabled;
+        this.videoStabilizationEnabled = videoStabilizationEnabled;
+        this.maximumSourceShortSide = maxSourceShortSide(captureQuality);
+        this.maximumSourceLongSide = maxSourceLongSide(captureQuality);
         this.diagnostics = diagnostics;
         this.callback = callback;
         this.mainHandler = new Handler(android.os.Looper.getMainLooper());
         previewView.addOnLayoutChangeListener(layoutChangeListener);
+        diagnostics.log("cameraX controller: noteEncode=" + this.outputSize
+                + ", capture=" + captureQuality
+                + ", fps=" + frameRate.getValue()
+                + ", bitrate=" + this.videoBitrate
+                + ", stabilization=" + videoStabilizationEnabled
+                + ", composition=" + compositionEnabled
+                + ", maxSource=" + maximumSourceShortSide + "x" + maximumSourceLongSide
+                + ", noteLimit=" + RoundVideoNoteLimits.MAX_SIDE);
     }
 
     @Override
@@ -417,7 +434,10 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
         glProcessor.start();
         diagnostics.log("cameraX recording pipeline ready: recording=" + recordingSize
                 + ", crop=" + sourceCropSize
+                + ", output=" + outputSize
+                + ", capture=" + captureQuality
                 + ", fps=" + requestedFrameRate.getValue()
+                + ", bitrate=" + videoBitrate
                 + ", composition=" + compositionEnabled);
     }
 
@@ -483,49 +503,15 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 )
                 .build();
 
-        Preview.Builder previewBuilder = new Preview.Builder();
-        ResolutionSelector resolutionSelector = new ResolutionSelector.Builder()
-                .setResolutionStrategy(new ResolutionStrategy(
-                        recordingSize,
-                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                ))
-                .build();
-        previewBuilder.setResolutionSelector(resolutionSelector);
-        // Do not force AE FPS via Camera2Interop: unsupported ranges can stall Preview
-        // frames and trip the common A/V start timeout without a process crash.
-
-        Preview preview = previewBuilder.build();
         Executor executor = cameraExecutor;
         if (executor == null) {
             opening = false;
             switchingCamera = false;
             return;
         }
-        preview.setSurfaceProvider(executor, request -> {
-            if (!active || stopping || glProcessor == null) {
-                request.willNotProvideSurface();
-                return;
-            }
-            Size requested = request.getResolution();
-            if (requested != null
-                    && (recordingSize == null
-                    || requested.getWidth() != recordingSize.getWidth()
-                    || requested.getHeight() != recordingSize.getHeight())) {
-                diagnostics.log("cameraX surface resolution: requested=" + requested
-                        + ", selected=" + recordingSize);
-            }
-            try {
-                Surface cameraSurface = glProcessor.getCameraSurface();
-                request.provideSurface(cameraSurface, executor, result -> {
-                    diagnostics.log("cameraX surface result: " + result.getResultCode());
-                });
-            } catch (RuntimeException e) {
-                request.willNotProvideSurface();
-                reportError(e);
-            }
-        });
 
         // bindToLifecycle / unbindAll must run on the main thread.
+        // Cascade options so Pro settings apply when hardware allows, else degrade safely.
         mainHandler.post(() -> {
             if (!active || stopping) {
                 opening = false;
@@ -540,7 +526,45 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                     diagnostics.log("cameraX unbind failed: " + e.getMessage());
                 }
                 camera = null;
-                camera = provider.bindToLifecycle(lifecycleOwner, selector, preview);
+
+                boolean[][] attempts = new boolean[][]{
+                        {true, true},
+                        {false, true},
+                        {false, false}
+                };
+                RuntimeException lastError = null;
+                for (boolean[] attempt : attempts) {
+                    boolean wantStab = attempt[0] && videoStabilizationEnabled;
+                    boolean wantFps = attempt[1];
+                    try {
+                        Preview preview = buildPreviewUseCase(executor, wantStab, wantFps);
+                        camera = provider.bindToLifecycle(lifecycleOwner, selector, preview);
+                        diagnostics.log("cameraX bind ok: stabilization=" + wantStab
+                                + ", fpsConstrained=" + wantFps
+                                + ", aeRange=" + selectedAeFpsRange
+                                + ", capture=" + captureQuality);
+                        lastError = null;
+                        break;
+                    } catch (RuntimeException e) {
+                        lastError = e;
+                        diagnostics.log("cameraX bind attempt failed: stab=" + wantStab
+                                + ", fps=" + wantFps + ", reason=" + e.getMessage());
+                        try {
+                            provider.unbindAll();
+                        } catch (RuntimeException ignore) {
+                        }
+                        camera = null;
+                    }
+                }
+                if (camera == null) {
+                    opening = false;
+                    switchingCamera = false;
+                    reportError(lastError != null
+                            ? lastError
+                            : new IllegalStateException("CameraX bind failed"));
+                    return;
+                }
+
                 activeFacing = requestedFacing;
                 refreshZoomAndTorchFromCamera();
                 opening = false;
@@ -555,6 +579,11 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 diagnostics.log("cameraX bound: facing=" + activeFacing
                         + ", recording=" + recordingSize
                         + ", crop=" + sourceCropSize
+                        + ", output=" + outputSize
+                        + ", bitrate=" + videoBitrate
+                        + ", fps=" + requestedFrameRate.getValue()
+                        + ", capture=" + captureQuality
+                        + ", composition=" + compositionEnabled
                         + ", maxZoom=" + maximumZoomRatio
                         + ", torch=" + torchAvailable
                         + ", switch=" + wasSwitch
@@ -579,6 +608,169 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 reportError(e);
             }
         });
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    @NonNull
+    private Preview buildPreviewUseCase(
+            @NonNull Executor executor,
+            boolean applyStabilization,
+            boolean applyFps
+    ) {
+        Preview.Builder previewBuilder = new Preview.Builder();
+        ResolutionSelector resolutionSelector = new ResolutionSelector.Builder()
+                .setResolutionStrategy(new ResolutionStrategy(
+                        recordingSize,
+                        captureQuality == RoundVideoSession.CameraXCapture.ULTRA
+                                || captureQuality == RoundVideoSession.CameraXCapture.HIGH
+                                ? ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                : ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                ))
+                .build();
+        previewBuilder.setResolutionSelector(resolutionSelector);
+
+        if (applyFps) {
+            int fps = requestedFrameRate.getValue();
+            try {
+                previewBuilder.setTargetFrameRate(new Range<>(fps, fps));
+                diagnostics.log("cameraX Preview.setTargetFrameRate=" + fps);
+            } catch (RuntimeException e) {
+                diagnostics.log("cameraX setTargetFrameRate unavailable: " + e.getMessage());
+            }
+        }
+
+        applyCamera2CaptureOptions(previewBuilder, applyStabilization, applyFps);
+
+        Preview preview = previewBuilder.build();
+        preview.setSurfaceProvider(executor, request -> {
+            if (!active || stopping || glProcessor == null) {
+                request.willNotProvideSurface();
+                return;
+            }
+            Size requested = request.getResolution();
+            if (requested != null
+                    && (recordingSize == null
+                    || requested.getWidth() != recordingSize.getWidth()
+                    || requested.getHeight() != recordingSize.getHeight())) {
+                diagnostics.log("cameraX surface resolution: requested=" + requested
+                        + ", selected=" + recordingSize);
+            }
+            try {
+                Surface cameraSurface = glProcessor.getCameraSurface();
+                request.provideSurface(cameraSurface, executor, result -> {
+                    diagnostics.log("cameraX surface result: " + result.getResultCode());
+                });
+            } catch (RuntimeException e) {
+                request.willNotProvideSurface();
+                reportError(e);
+            }
+        });
+        return preview;
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    private void applyCamera2CaptureOptions(
+            @NonNull Preview.Builder previewBuilder,
+            boolean applyStabilization,
+            boolean applyFps
+    ) {
+        try {
+            Camera2Interop.Extender<Preview> extender = new Camera2Interop.Extender<>(previewBuilder);
+            if (applyStabilization) {
+                boolean optical = false;
+                CameraCharacteristics characteristics = activeCharacteristics;
+                if (characteristics != null) {
+                    int[] modes = characteristics.get(
+                            CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
+                    );
+                    if (modes != null) {
+                        for (int mode : modes) {
+                            if (mode == CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON) {
+                                optical = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (optical) {
+                    extender.setCaptureRequestOption(
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                    );
+                    diagnostics.log("cameraX optical stabilization requested");
+                }
+                extender.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                );
+                diagnostics.log("cameraX video stabilization requested");
+            } else {
+                extender.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                );
+            }
+
+            if (applyFps) {
+                Range<Integer> range = selectedAeFpsRange;
+                if (range == null) {
+                    range = chooseAeFpsRange(activeCharacteristics, requestedFrameRate.getValue());
+                    selectedAeFpsRange = range;
+                }
+                if (range != null) {
+                    extender.setCaptureRequestOption(
+                            CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                            range
+                    );
+                    diagnostics.log("cameraX AE fps range applied: " + range);
+                }
+            }
+        } catch (RuntimeException e) {
+            diagnostics.log("cameraX capture options unavailable: " + e.getMessage());
+        }
+    }
+
+    @Nullable
+    private static Range<Integer> chooseAeFpsRange(
+            @Nullable CameraCharacteristics characteristics,
+            int targetFps
+    ) {
+        if (characteristics == null) return new Range<>(targetFps, targetFps);
+        Range<Integer>[] ranges = characteristics.get(
+                CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+        );
+        if (ranges == null || ranges.length == 0) {
+            return new Range<>(Math.max(15, targetFps / 2), targetFps);
+        }
+        Range<Integer> bestExact = null;
+        Range<Integer> bestContain = null;
+        Range<Integer> bestClose = null;
+        int bestCloseError = Integer.MAX_VALUE;
+        for (Range<Integer> range : ranges) {
+            if (range == null) continue;
+            if (range.getLower() == targetFps && range.getUpper() == targetFps) {
+                bestExact = range;
+                break;
+            }
+            if (range.getLower() <= targetFps && range.getUpper() >= targetFps) {
+                if (bestContain == null
+                        || range.getUpper() - range.getLower()
+                        < bestContain.getUpper() - bestContain.getLower()) {
+                    bestContain = range;
+                }
+            }
+            int error = Math.min(
+                    Math.abs(range.getUpper() - targetFps),
+                    Math.abs(range.getLower() - targetFps)
+            );
+            if (error < bestCloseError) {
+                bestCloseError = error;
+                bestClose = range;
+            }
+        }
+        if (bestExact != null) return bestExact;
+        if (bestContain != null) return bestContain;
+        return bestClose;
     }
 
     private void switchCameraIfNeeded(@NonNull RoundVideoSession.CameraFacing facing) {
@@ -832,11 +1024,7 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
             Size[] sizes = map.getOutputSizes(SurfaceTexture.class);
             if (sizes == null || sizes.length == 0) continue;
             try {
-                OutputPair pair = chooseOutputPair(
-                        sizes,
-                        outputResolution,
-                        requestedCameraResolution
-                );
+                OutputPair pair = chooseOutputPair(sizes);
                 if (selectedPair == null
                         || preferCandidate(facing, candidate, selectedCharacteristics)) {
                     selectedPair = pair;
@@ -856,6 +1044,11 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
         sourceCropSize = selectedPair.cropSize;
         activeCameraResolution = selectedPair.cameraResolution;
         activeFrameRate = requestedFrameRate;
+        activeCharacteristics = selectedCharacteristics;
+        selectedAeFpsRange = chooseAeFpsRange(
+                selectedCharacteristics,
+                requestedFrameRate.getValue()
+        );
         maximumZoomRatio = readMaximumZoomRatio(selectedCharacteristics);
         // CameraX Preview SurfaceTexture timestamps are not reliably aligned with
         // AudioRecord boottime / elapsedRealtime. Forcing REALTIME drops frames
@@ -867,11 +1060,17 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 && hasFlashUnit(selectedCharacteristics);
         diagnostics.log("cameraX outputs selected: id=" + selectedId
                 + ", facing=" + facing
+                + ", capture=" + captureQuality
                 + ", mode=" + activeCameraResolution
                 + ", crop=" + sourceCropSize
                 + ", preview=" + previewSize
                 + ", recording=" + recordingSize
+                + ", output=" + outputSize
                 + ", fps=" + activeFrameRate.getValue()
+                + ", aeRange=" + selectedAeFpsRange
+                + ", bitrate=" + videoBitrate
+                + ", stabilization=" + videoStabilizationEnabled
+                + ", composition=" + compositionEnabled
                 + ", sensorTimestampSource=" + (sensorRealtime ? "REALTIME" : "UNKNOWN")
                 + ", pipelineTimestampMode=RELATIVE"
                 + ", sizes=" + (selectedSizes == null ? 0 : selectedSizes.length));
@@ -937,37 +1136,34 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
     }
 
     @NonNull
-    private static OutputPair chooseOutputPair(
-            @NonNull Size[] sizes,
-            @NonNull RoundVideoSession.OutputResolution outputResolution,
-            @NonNull RoundVideoSession.CameraResolution requestedResolution
-    ) {
-        int preferredCrop = getSourceCropSize(outputResolution, requestedResolution);
-        OutputPair preferred = chooseTierPair(sizes, preferredCrop, requestedResolution);
+    private OutputPair chooseOutputPair(@NonNull Size[] sizes) {
+        int preferredCrop = getSourceCropSize(outputSize, captureQuality);
+        OutputPair preferred = chooseTierPair(
+                sizes,
+                preferredCrop,
+                requestedCameraResolution
+        );
         if (preferred != null) return preferred;
 
-        if (outputResolution == RoundVideoSession.OutputResolution.P360
-                && requestedResolution == RoundVideoSession.CameraResolution.MEDIUM) {
-            OutputPair mediumFallback = chooseTierPair(
+        // Step down capture tiers until a stream size fits.
+        RoundVideoSession.CameraXCapture[] fallbacks = {
+                RoundVideoSession.CameraXCapture.HIGH,
+                RoundVideoSession.CameraXCapture.MEDIUM,
+                RoundVideoSession.CameraXCapture.EFFICIENT
+        };
+        for (RoundVideoSession.CameraXCapture fallback : fallbacks) {
+            if (fallback.ordinal() <= captureQuality.ordinal()) continue;
+            int crop = getSourceCropSize(outputSize, fallback);
+            OutputPair pair = chooseTierPair(
                     sizes,
-                    480,
-                    RoundVideoSession.CameraResolution.MEDIUM
+                    crop,
+                    mapCaptureToCameraResolution(fallback)
             );
-            if (mediumFallback != null) return mediumFallback;
+            if (pair != null) return pair;
         }
 
-        int lowCrop = outputResolution.getSize();
-        if (requestedResolution != RoundVideoSession.CameraResolution.LOW) {
-            OutputPair low = chooseTierPair(
-                    sizes,
-                    lowCrop,
-                    RoundVideoSession.CameraResolution.LOW
-            );
-            if (low != null) return low;
-        }
-
-        Size recording = chooseFallbackRecordingSize(sizes, outputResolution.getSize());
-        int cropSize = Math.min(shortSide(recording), MAXIMUM_SOURCE_SHORT_SIDE);
+        Size recording = chooseFallbackRecordingSize(sizes, outputSize);
+        int cropSize = Math.min(shortSide(recording), maximumSourceShortSide);
         return new OutputPair(
                 choosePreviewSize(sizes, recording),
                 recording,
@@ -977,7 +1173,7 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
     }
 
     @Nullable
-    private static OutputPair chooseTierPair(
+    private OutputPair chooseTierPair(
             @NonNull Size[] sizes,
             int cropSize,
             @NonNull RoundVideoSession.CameraResolution resolution
@@ -993,7 +1189,7 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
     }
 
     @NonNull
-    private static Size chooseFallbackRecordingSize(@NonNull Size[] sizes, int outputSize) {
+    private Size chooseFallbackRecordingSize(@NonNull Size[] sizes, int outputSize) {
         Size best = null;
         for (Size size : sizes) {
             if (!isWithinAbsoluteLimit(size) || shortSide(size) < outputSize) continue;
@@ -1012,17 +1208,50 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
         throw new IllegalStateException("Camera has no output at or below the bandwidth cap");
     }
 
-    private static int getSourceCropSize(
-            @NonNull RoundVideoSession.OutputResolution outputResolution,
-            @NonNull RoundVideoSession.CameraResolution cameraResolution
+    private int getSourceCropSize(
+            int encodeSize,
+            @NonNull RoundVideoSession.CameraXCapture capture
     ) {
-        if (cameraResolution == RoundVideoSession.CameraResolution.LOW) {
-            return outputResolution.getSize();
+        int crop;
+        if (capture == RoundVideoSession.CameraXCapture.ULTRA) {
+            // HQ capture: pull a much larger sensor window, GL downscales to note size.
+            crop = Math.max(encodeSize * 2, 720);
+        } else if (capture == RoundVideoSession.CameraXCapture.HIGH) {
+            crop = Math.max((encodeSize * 3) / 2, 540);
+        } else if (capture == RoundVideoSession.CameraXCapture.MEDIUM) {
+            crop = Math.max((encodeSize * 5) / 4, encodeSize);
+        } else {
+            crop = encodeSize;
         }
-        if (outputResolution == RoundVideoSession.OutputResolution.P480) {
-            return cameraResolution == RoundVideoSession.CameraResolution.HIGH ? 960 : 720;
+        return Math.min(crop, maximumSourceShortSide);
+    }
+
+    private static int maxSourceShortSide(@NonNull RoundVideoSession.CameraXCapture capture) {
+        if (capture == RoundVideoSession.CameraXCapture.ULTRA) return 1440;
+        if (capture == RoundVideoSession.CameraXCapture.HIGH) return 1280;
+        if (capture == RoundVideoSession.CameraXCapture.MEDIUM) return 1088;
+        return 960;
+    }
+
+    private static int maxSourceLongSide(@NonNull RoundVideoSession.CameraXCapture capture) {
+        if (capture == RoundVideoSession.CameraXCapture.ULTRA) return 2560;
+        if (capture == RoundVideoSession.CameraXCapture.HIGH) return 1920;
+        if (capture == RoundVideoSession.CameraXCapture.MEDIUM) return 1920;
+        return 1600;
+    }
+
+    @NonNull
+    private static RoundVideoSession.CameraResolution mapCaptureToCameraResolution(
+            @NonNull RoundVideoSession.CameraXCapture capture
+    ) {
+        if (capture == RoundVideoSession.CameraXCapture.ULTRA
+                || capture == RoundVideoSession.CameraXCapture.HIGH) {
+            return RoundVideoSession.CameraResolution.HIGH;
         }
-        return cameraResolution == RoundVideoSession.CameraResolution.HIGH ? 720 : 540;
+        if (capture == RoundVideoSession.CameraXCapture.MEDIUM) {
+            return RoundVideoSession.CameraResolution.MEDIUM;
+        }
+        return RoundVideoSession.CameraResolution.LOW;
     }
 
     @NonNull
@@ -1044,7 +1273,21 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 : Long.compare(area(left), area(right));
     }
 
-    private static int compareOutputPairs(OutputPair left, OutputPair right) {
+    private int compareOutputPairs(OutputPair left, OutputPair right) {
+        // Ultra/High: prefer larger sensor streams closer to the target crop.
+        if (captureQuality == RoundVideoSession.CameraXCapture.ULTRA
+                || captureQuality == RoundVideoSession.CameraXCapture.HIGH) {
+            int leftShort = shortSide(left.recording);
+            int rightShort = shortSide(right.recording);
+            int leftCropError = Math.abs(leftShort - left.cropSize);
+            int rightCropError = Math.abs(rightShort - right.cropSize);
+            if (leftCropError != rightCropError) {
+                return Integer.compare(leftCropError, rightCropError);
+            }
+            if (leftShort != rightShort) {
+                return Integer.compare(rightShort, leftShort);
+            }
+        }
         int leftError = Math.abs(shortSide(left.preview) - PREVIEW_SHORT_SIDE);
         int rightError = Math.abs(shortSide(right.preview) - PREVIEW_SHORT_SIDE);
         if (leftError != rightError) return Integer.compare(leftError, rightError);
@@ -1060,10 +1303,10 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 == (long) left.getHeight() * right.getWidth();
     }
 
-    private static boolean isValidTierSize(@NonNull Size size, int cropSize) {
+    private boolean isValidTierSize(@NonNull Size size, int cropSize) {
         int maximumShortSide = cropSize
                 + cropSize * MAXIMUM_CROP_OVERSIZE_PERCENT / 100;
-        int maximumLongSide = Math.min(MAXIMUM_SOURCE_LONG_SIDE, cropSize * 2);
+        int maximumLongSide = Math.min(maximumSourceLongSide, cropSize * 2);
         int shortSide = shortSide(size);
         int longSide = Math.max(size.getWidth(), size.getHeight());
         return shortSide >= cropSize
@@ -1071,9 +1314,9 @@ final class CameraXRoundVideoCameraController implements RoundVideoCameraBackend
                 && longSide <= maximumLongSide;
     }
 
-    private static boolean isWithinAbsoluteLimit(@NonNull Size size) {
-        return shortSide(size) <= MAXIMUM_SOURCE_SHORT_SIDE
-                && Math.max(size.getWidth(), size.getHeight()) <= MAXIMUM_SOURCE_LONG_SIDE;
+    private boolean isWithinAbsoluteLimit(@NonNull Size size) {
+        return shortSide(size) <= maximumSourceShortSide
+                && Math.max(size.getWidth(), size.getHeight()) <= maximumSourceLongSide;
     }
 
     private static int shortSide(Size size) {

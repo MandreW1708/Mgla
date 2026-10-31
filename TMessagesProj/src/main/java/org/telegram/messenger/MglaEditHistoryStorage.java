@@ -16,6 +16,15 @@ public class MglaEditHistoryStorage {
 
     private static final String TABLE = "mgla_edit_history";
 
+    /** Drop versions older than this (by {@code saved_at}). */
+    public static final int MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
+
+    /** Soft cap per dialog so one noisy chat cannot balloon the whole cache DB. */
+    public static final int MAX_PER_DIALOG = 300;
+
+    private static final Object pruneLock = new Object();
+    private static long lastGlobalPruneMs;
+
     public static class Entry {
         public final int replacedByEditDate;
         public final TLRPC.Message message;
@@ -44,9 +53,88 @@ public class MglaEditHistoryStorage {
             database.executeFast(
                 "CREATE INDEX IF NOT EXISTS mgla_edit_history_uid_mid_edit_date ON " + TABLE + "(uid, mid, replaced_by_edit_date DESC)"
             ).stepThis().dispose();
+            database.executeFast(
+                "CREATE INDEX IF NOT EXISTS mgla_edit_history_uid_saved_at ON " + TABLE + "(uid, saved_at DESC, id DESC)"
+            ).stepThis().dispose();
+            database.executeFast(
+                "CREATE INDEX IF NOT EXISTS mgla_edit_history_saved_at ON " + TABLE + "(saved_at)"
+            ).stepThis().dispose();
         } catch (SQLiteException e) {
             FileLog.e(e);
         }
+    }
+
+    /**
+     * Age + per-dialog cap cleanup. Safe on the storage queue.
+     * Throttled globally so opening many accounts / frequent saves cannot thrash the DB.
+     */
+    public static void pruneIfNeeded(SQLiteDatabase database, int currentAccount) {
+        if (database == null) {
+            return;
+        }
+        long nowMs = System.currentTimeMillis();
+        synchronized (pruneLock) {
+            if (nowMs - lastGlobalPruneMs < 6 * 60 * 60 * 1000L) {
+                return;
+            }
+            lastGlobalPruneMs = nowMs;
+        }
+        pruneAll(database, currentAccount);
+    }
+
+    public static void pruneAll(SQLiteDatabase database, int currentAccount) {
+        if (database == null) {
+            return;
+        }
+        try {
+            int now = ConnectionsManager.getInstance(currentAccount).getCurrentTime();
+            int cutoff = Math.max(0, now - MAX_AGE_SECONDS);
+            database.executeFast(
+                "DELETE FROM " + TABLE + " WHERE saved_at > 0 AND saved_at < " + cutoff
+            ).stepThis().dispose();
+
+            SQLiteCursor cursor = null;
+            try {
+                cursor = database.queryFinalized(
+                    "SELECT uid FROM " + TABLE + " GROUP BY uid HAVING COUNT(*) > " + MAX_PER_DIALOG
+                );
+                while (cursor.next()) {
+                    pruneDialogOverflow(database, cursor.longValue(0));
+                }
+            } finally {
+                if (cursor != null) {
+                    cursor.dispose();
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
+    /** Keep the newest {@link #MAX_PER_DIALOG} rows for one chat (by saved_at, then id). */
+    public static void pruneDialog(SQLiteDatabase database, int currentAccount, long dialogId) {
+        if (database == null || dialogId == 0) {
+            return;
+        }
+        try {
+            int now = ConnectionsManager.getInstance(currentAccount).getCurrentTime();
+            int cutoff = Math.max(0, now - MAX_AGE_SECONDS);
+            database.executeFast(
+                "DELETE FROM " + TABLE + " WHERE uid = " + dialogId + " AND saved_at > 0 AND saved_at < " + cutoff
+            ).stepThis().dispose();
+            pruneDialogOverflow(database, dialogId);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
+    private static void pruneDialogOverflow(SQLiteDatabase database, long dialogId) throws SQLiteException {
+        database.executeFast(
+            "DELETE FROM " + TABLE + " WHERE id IN (" +
+                "SELECT id FROM " + TABLE + " WHERE uid = " + dialogId +
+                " ORDER BY saved_at DESC, id DESC LIMIT -1 OFFSET " + MAX_PER_DIALOG +
+            ")"
+        ).stepThis().dispose();
     }
 
     public static void savePreviousVersionIfIncomingEdit(SQLiteDatabase database, int currentAccount, TLRPC.Message newMessage) {
@@ -76,6 +164,7 @@ public class MglaEditHistoryStorage {
         SQLiteCursor cursor = null;
         SQLitePreparedStatement state = null;
         NativeByteBuffer data = null;
+        boolean inserted = false;
         try {
             cursor = database.queryFinalized(
                 "SELECT 1 FROM " + TABLE + " WHERE uid = ? AND mid = ? AND replaced_by_edit_date = ? LIMIT 1",
@@ -98,6 +187,7 @@ public class MglaEditHistoryStorage {
             state.bindInteger(4, ConnectionsManager.getInstance(currentAccount).getCurrentTime());
             state.bindByteBuffer(5, data);
             state.step();
+            inserted = true;
         } catch (Exception e) {
             FileLog.e(e);
         } finally {
@@ -110,6 +200,9 @@ public class MglaEditHistoryStorage {
             if (data != null) {
                 data.reuse();
             }
+        }
+        if (inserted) {
+            pruneDialog(database, currentAccount, newMessage.dialog_id);
         }
     }
 

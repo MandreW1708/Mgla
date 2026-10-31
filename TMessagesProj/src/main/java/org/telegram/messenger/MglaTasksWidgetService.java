@@ -31,6 +31,11 @@ public class MglaTasksWidgetService extends RemoteViewsService {
 
         private final Context context;
         private final ArrayList<MglaTask> tasks = new ArrayList<>();
+        private final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        private final SimpleDateFormat dayFormat = new SimpleDateFormat("d MMM", Locale.getDefault());
+        private final Calendar dueCalendar = Calendar.getInstance();
+        private Calendar todayCalendar;
+        private Calendar tomorrowCalendar;
 
         Factory(Context context) {
             this.context = context;
@@ -121,6 +126,7 @@ public class MglaTasksWidgetService extends RemoteViewsService {
 
         @Override
         public void onDataSetChanged() {
+            refreshDayAnchors();
             final ArrayList<MglaTask> loaded = new ArrayList<>();
             final CountDownLatch latch = new CountDownLatch(1);
             MglaTasksStorage storage = MglaTasksStorage.getInstance();
@@ -146,6 +152,13 @@ public class MglaTasksWidgetService extends RemoteViewsService {
             }
             tasks.clear();
             tasks.addAll(loaded);
+        }
+
+        /** Compute today/tomorrow once per dataset refresh — not once per scrolled row. */
+        private void refreshDayAnchors() {
+            todayCalendar = Calendar.getInstance();
+            tomorrowCalendar = (Calendar) todayCalendar.clone();
+            tomorrowCalendar.add(Calendar.DAY_OF_YEAR, 1);
         }
 
         private ArrayList<MglaTask> buildList() {
@@ -192,28 +205,25 @@ public class MglaTasksWidgetService extends RemoteViewsService {
             return Integer.compare(a.sortOrder, b.sortOrder);
         }
 
-        private static String formatMeta(MglaTask task) {
+        private String formatMeta(MglaTask task) {
             if (task.done) {
                 return "Выполнено";
             }
-            StringBuilder sb = new StringBuilder();
-            if (task.dueAt > 0) {
-                Calendar due = Calendar.getInstance();
-                due.setTimeInMillis(task.dueAt);
-                Calendar today = Calendar.getInstance();
-                Calendar tomorrow = Calendar.getInstance();
-                tomorrow.add(Calendar.DAY_OF_YEAR, 1);
-                SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
-                String timeStr = timeFormat.format(due.getTime());
-                if (isSameDay(due, today)) {
-                    sb.append(timeStr);
-                } else if (isSameDay(due, tomorrow)) {
-                    sb.append("Завтра ").append(timeStr);
-                } else {
-                    sb.append(new SimpleDateFormat("d MMM", Locale.getDefault()).format(due.getTime()));
-                }
+            if (task.dueAt <= 0) {
+                return "";
             }
-            return sb.toString();
+            if (todayCalendar == null || tomorrowCalendar == null) {
+                refreshDayAnchors();
+            }
+            dueCalendar.setTimeInMillis(task.dueAt);
+            String timeStr = timeFormat.format(dueCalendar.getTime());
+            if (isSameDay(dueCalendar, todayCalendar)) {
+                return timeStr;
+            }
+            if (isSameDay(dueCalendar, tomorrowCalendar)) {
+                return "Завтра " + timeStr;
+            }
+            return dayFormat.format(dueCalendar.getTime());
         }
 
         private static boolean isSameDay(Calendar a, Calendar b) {

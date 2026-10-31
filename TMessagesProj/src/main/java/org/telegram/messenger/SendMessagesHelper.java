@@ -55,6 +55,7 @@ import org.json.JSONObject;
 import org.telegram.messenger.audioinfo.AudioInfo;
 import org.telegram.messenger.support.SparseLongArray;
 import org.telegram.messenger.utils.EphemeralMessagesHelper;
+import org.telegram.utils.recorder.round.RoundVideoNoteLimits;
 import org.telegram.messenger.utils.tlutils.AmountUtils;
 import org.telegram.messenger.utils.tlutils.TLKeyboardHelper;
 import org.telegram.messenger.utils.tlutils.TlUtils;
@@ -12113,6 +12114,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         document = (TLRPC.TL_document) sentData[0];
                         parentObject = (String) sentData[1];
                         ensureMediaThumbExists(accountInstance, isEncrypted, document, videoPath, null, startTime);
+                        if (isRound) {
+                            forceRoundVideoAttributes(document, videoEditedInfo);
+                        }
                     }
                 }
                 if (document == null) {
@@ -12206,18 +12210,16 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     }
                     if (isRound) {
                         // Final guard: never let attributes slip past note limits.
+                        // TDLib requires side ≤ 640; oversized notes are demoted to regular video.
                         attributeVideo.round_message = true;
                         if (attributeVideo.duration >= 60.0) {
                             attributeVideo.duration = VideoEditedInfo.ROUND_VIDEO_MAX_DURATION_MS / 1000.0;
                         }
                         int roundSide = Math.min(
-                                attributeVideo.w > 0 ? attributeVideo.w : VideoEditedInfo.ROUND_VIDEO_MAX_SIDE,
-                                attributeVideo.h > 0 ? attributeVideo.h : VideoEditedInfo.ROUND_VIDEO_MAX_SIDE
+                                attributeVideo.w > 0 ? attributeVideo.w : RoundVideoNoteLimits.DEFAULT_SIDE,
+                                attributeVideo.h > 0 ? attributeVideo.h : RoundVideoNoteLimits.DEFAULT_SIDE
                         );
-                        if (roundSide <= 0 || roundSide > VideoEditedInfo.ROUND_VIDEO_MAX_SIDE) {
-                            roundSide = Math.min(480, VideoEditedInfo.ROUND_VIDEO_MAX_SIDE);
-                        }
-                        roundSide &= ~1;
+                        roundSide = RoundVideoNoteLimits.clampNoteSide(roundSide);
                         attributeVideo.w = attributeVideo.h = roundSide;
                     }
                 } else if (document.thumbs.isEmpty()) {
@@ -12306,6 +12308,43 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 prepareSendingDocumentInternal(accountInstance, videoPath, videoPath, null, null, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, entities, editingMessageObject, null, false, caption, notify, scheduleDate, scheduleRepeatPeriod, null, forceDocument, sendMessageChatArguments, 0, invertMedia, stars, monoForumPeerId, suggestionParams, null, -1);
             }
         }).start();
+    }
+
+    private static void forceRoundVideoAttributes(
+            @NonNull TLRPC.TL_document document,
+            VideoEditedInfo videoEditedInfo
+    ) {
+        TLRPC.TL_documentAttributeVideo attributeVideo = null;
+        for (int i = 0; i < document.attributes.size(); i++) {
+            TLRPC.DocumentAttribute attribute = document.attributes.get(i);
+            if (attribute instanceof TLRPC.TL_documentAttributeVideo) {
+                attributeVideo = (TLRPC.TL_documentAttributeVideo) attribute;
+                break;
+            }
+        }
+        if (attributeVideo == null) {
+            attributeVideo = new TLRPC.TL_documentAttributeVideo();
+            document.attributes.add(attributeVideo);
+        }
+        attributeVideo.round_message = true;
+        attributeVideo.supports_streaming = true;
+        int side = videoEditedInfo != null
+                ? Math.min(videoEditedInfo.resultWidth, videoEditedInfo.resultHeight)
+                : RoundVideoNoteLimits.DEFAULT_SIDE;
+        if (side <= 0) {
+            side = Math.min(attributeVideo.w, attributeVideo.h);
+        }
+        side = RoundVideoNoteLimits.clampNoteSide(side);
+        attributeVideo.w = attributeVideo.h = side;
+        if (videoEditedInfo != null && videoEditedInfo.estimatedDuration > 0) {
+            double durationSec = videoEditedInfo.estimatedDuration / 1000.0;
+            if (durationSec >= 60.0) {
+                durationSec = VideoEditedInfo.ROUND_VIDEO_MAX_DURATION_MS / 1000.0;
+            }
+            attributeVideo.duration = durationSec;
+        } else if (attributeVideo.duration >= 60.0) {
+            attributeVideo.duration = VideoEditedInfo.ROUND_VIDEO_MAX_DURATION_MS / 1000.0;
+        }
     }
 
     public static class SendMessageParams {

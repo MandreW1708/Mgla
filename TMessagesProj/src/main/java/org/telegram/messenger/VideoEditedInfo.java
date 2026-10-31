@@ -44,8 +44,11 @@ public class VideoEditedInfo {
 
     /** Hard cap so the server never demotes a note with duration >= 60s to a regular video. */
     public static final long ROUND_VIDEO_MAX_DURATION_MS = 59_500L;
-    /** Matches MessageObject.isRoundVideoDocument side check. */
-    public static final int ROUND_VIDEO_MAX_SIDE = 1280;
+    /**
+     * Display / client check allows up to 1280, but uploads larger than 640 are demoted by
+     * Telegram to a regular video. Keep encode + attributes ≤ this for real video notes.
+     */
+    public static final int ROUND_VIDEO_MAX_SIDE = 640;
 
     public long startTime;
     public long endTime;

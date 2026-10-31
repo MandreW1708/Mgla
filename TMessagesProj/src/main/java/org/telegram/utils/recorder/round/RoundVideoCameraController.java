@@ -2735,6 +2735,9 @@ final class RoundVideoCameraController implements RoundVideoCameraBackend {
         if (cameraResolution == RoundVideoSession.CameraResolution.LOW) {
             return outputResolution.getSize();
         }
+        if (outputResolution == RoundVideoSession.OutputResolution.P720) {
+            return cameraResolution == RoundVideoSession.CameraResolution.HIGH ? 1440 : 1080;
+        }
         if (outputResolution == RoundVideoSession.OutputResolution.P480) {
             return cameraResolution == RoundVideoSession.CameraResolution.HIGH ? 960 : 720;
         }

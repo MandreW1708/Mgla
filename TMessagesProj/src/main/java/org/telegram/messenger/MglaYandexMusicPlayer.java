@@ -235,6 +235,72 @@ public final class MglaYandexMusicPlayer implements NotificationCenter.Notificat
         loadAndPlayCurrent();
     }
 
+    /**
+     * Insert {@code track} to play right after the current one, then continue the existing queue.
+     * If nothing is playing / queue is empty — start this track immediately (optionally with {@code contextQueue}).
+     */
+    public void playNext(MglaYandexMusicModel.Track track) {
+        playNext(track, null, null);
+    }
+
+    public void playNext(MglaYandexMusicModel.Track track, List<MglaYandexMusicModel.Track> contextQueue, String sourceTitle) {
+        if (track == null || TextUtils.isEmpty(track.id)) {
+            return;
+        }
+        ensureObservers();
+        synchronized (queue) {
+            boolean idle = queue.isEmpty() || currentIndex < 0 || currentTrack == null;
+            if (!idle) {
+                // Drop other copies of this track (keep the currently playing slot).
+                for (int i = queue.size() - 1; i >= 0; i--) {
+                    if (i == currentIndex) {
+                        continue;
+                    }
+                    MglaYandexMusicModel.Track t = queue.get(i);
+                    if (t != null && TextUtils.equals(t.id, track.id)) {
+                        queue.remove(i);
+                        if (i < currentIndex) {
+                            currentIndex--;
+                        }
+                    }
+                }
+                int insertAt = Math.min(queue.size(), Math.max(0, currentIndex + 1));
+                if (insertAt < queue.size()) {
+                    MglaYandexMusicModel.Track next = queue.get(insertAt);
+                    if (next != null && TextUtils.equals(next.id, track.id)) {
+                        queue.set(insertAt, track);
+                        notifyQueueChanged();
+                        return;
+                    }
+                }
+                queue.add(insertAt, track);
+                notifyQueueChanged();
+                return;
+            }
+        }
+        // Nothing playing — start this track immediately.
+        if (contextQueue != null && !contextQueue.isEmpty()) {
+            String src = !TextUtils.isEmpty(sourceTitle) ? sourceTitle
+                    : (!TextUtils.isEmpty(currentSourceTitle) ? currentSourceTitle : "Очередь");
+            playTrack(track, contextQueue, src);
+            return;
+        }
+        synchronized (queue) {
+            queue.clear();
+            queue.add(track);
+            currentIndex = 0;
+            if (!TextUtils.isEmpty(sourceTitle)) {
+                currentSourceTitle = sourceTitle;
+            } else if (TextUtils.isEmpty(currentSourceTitle)) {
+                currentSourceTitle = "Очередь";
+            }
+            isMyWaveActive = false;
+            waveSeedAfterQueue = null;
+            notifyQueueChanged();
+            loadAndPlayCurrent();
+        }
+    }
+
     private int indexOfTrack(MglaYandexMusicModel.Track track) {
         if (track == null) return -1;
         for (int i = 0; i < queue.size(); i++) {

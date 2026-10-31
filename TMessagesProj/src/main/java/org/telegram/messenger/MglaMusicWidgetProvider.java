@@ -33,6 +33,10 @@ public class MglaMusicWidgetProvider extends AppWidgetProvider {
     private static final String KEY_SOURCE = "last_source";
     private static final String KEY_LIKED = "last_liked";
 
+    /** Cover in layout is 64dp; keep binder payload tiny (well under the ~1 MB RemoteViews cap). */
+    private static final int WIDGET_COVER_SIDE = 128;
+    private static final int WIDGET_COVER_MAX_BYTES = 512 * 1024;
+
     @Override
     public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
@@ -208,7 +212,7 @@ public class MglaMusicWidgetProvider extends AppWidgetProvider {
         if (currentTrack != null) {
             title = !TextUtils.isEmpty(currentTrack.title) ? currentTrack.title : "Без названия";
             artist = !TextUtils.isEmpty(currentTrack.artist) ? currentTrack.artist : "Яндекс Музыка";
-            coverUrl = currentTrack.getCoverUrl(200);
+            coverUrl = currentTrack.getCoverUrl(WIDGET_COVER_SIDE);
             isLiked = currentTrack.isLiked;
             isPlaying = ymPlayer.isPlaying();
             sourceBadge = ymPlayer.isMyWaveActive() ? "Моя волна" : ymPlayer.getCurrentSourceTitle();
@@ -332,25 +336,25 @@ public class MglaMusicWidgetProvider extends AppWidgetProvider {
         );
         views.setOnClickPendingIntent(R.id.music_widget_wave_btn, piWave);
 
-        // Album cover loading
+        // Album cover loading — always force a tiny bitmap; oversized covers crash the launcher
+        // via TransactionTooLargeException / RemoteViews binder limit (~1 MB).
         if (!TextUtils.isEmpty(coverUrl)) {
-            final String cacheKey = coverUrl + "_widget_s200";
+            final String cacheKey = coverUrl + "_widget_s" + WIDGET_COVER_SIDE;
             Bitmap cached = MglaMusicImageHelper.getFromCache(cacheKey);
-            if (cached != null && !cached.isRecycled()) {
+            if (isSafeWidgetBitmap(cached)) {
                 views.setImageViewBitmap(R.id.music_widget_cover, cached);
             } else {
                 views.setImageViewResource(R.id.music_widget_cover, R.drawable.bot_music);
                 final String finalCoverUrl = coverUrl;
                 MglaMusicImageHelper.musicImageQueue.postRunnable(() -> {
                     try {
-                        Bitmap loaded = MglaMusicImageHelper.loadBitmapSync(finalCoverUrl, 200);
-                        if (loaded != null) {
-                            Bitmap rounded = MglaMusicImageHelper.getRoundedCornerBitmap(loaded, AndroidUtilities.dp(14));
-                            if (rounded != null) {
-                                MglaMusicImageHelper.putInCache(cacheKey, rounded);
-                                views.setImageViewBitmap(R.id.music_widget_cover, rounded);
-                                manager.updateAppWidget(appWidgetId, views);
-                            }
+                        Bitmap loaded = MglaMusicImageHelper.loadBitmapSync(finalCoverUrl, WIDGET_COVER_SIDE);
+                        Bitmap safe = MglaMusicImageHelper.forRemoteViews(
+                                loaded, WIDGET_COVER_SIDE, AndroidUtilities.dp(14));
+                        if (safe != null && isSafeWidgetBitmap(safe)) {
+                            MglaMusicImageHelper.putInCache(cacheKey, safe);
+                            views.setImageViewBitmap(R.id.music_widget_cover, safe);
+                            manager.updateAppWidget(appWidgetId, views);
                         }
                     } catch (Throwable t) {
                         FileLog.e(t);
@@ -361,12 +365,10 @@ public class MglaMusicWidgetProvider extends AppWidgetProvider {
             views.setImageViewResource(R.id.music_widget_cover, R.drawable.bot_music);
         }
 
-        try {
-            views.apply(context, new android.widget.FrameLayout(context));
-        } catch (Throwable t) {
-            FileLog.e("MglaMusicWidgetProvider: test apply failed", t);
-        }
-
         manager.updateAppWidget(appWidgetId, views);
+    }
+
+    private static boolean isSafeWidgetBitmap(Bitmap bitmap) {
+        return bitmap != null && !bitmap.isRecycled() && bitmap.getByteCount() <= WIDGET_COVER_MAX_BYTES;
     }
 }

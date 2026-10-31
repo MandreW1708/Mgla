@@ -71,6 +71,14 @@ public class MglaDeletedStorage {
             database.executeFast(
                 "CREATE INDEX IF NOT EXISTS mgla_deleted_messages_uid_date ON " + TABLE + "(uid, date DESC)"
             ).stepThis().dispose();
+            // Chat-window gap fills query by uid (+ optional topic) and mid range; PK is (mid, uid)
+            // so without these indexes each scroll/open scans every archived row for the dialog.
+            database.executeFast(
+                "CREATE INDEX IF NOT EXISTS mgla_deleted_messages_uid_mid ON " + TABLE + "(uid, mid)"
+            ).stepThis().dispose();
+            database.executeFast(
+                "CREATE INDEX IF NOT EXISTS mgla_deleted_messages_uid_topic_mid ON " + TABLE + "(uid, topic_id, mid)"
+            ).stepThis().dispose();
         } catch (SQLiteException e) {
             FileLog.e(e);
         }
@@ -663,8 +671,11 @@ public class MglaDeletedStorage {
     }
 
     /**
-     * Fill archived deletions into a chat page without starving mid-range gaps: load each
-     * consecutive mid gap separately (plus optional older/newer edges), ordered by mid.
+     * Fill archived deletions into a chat page without starving mid-range gaps.
+     * <p>
+     * Each consecutive mid gap (plus optional older/newer edges) still gets its own
+     * {@code LIMIT}, but they are combined into a single {@code UNION ALL} round-trip
+     * instead of one SQLite query per gap — that N+1 pattern froze scroll/open on large archives.
      */
     public static ArrayList<TLRPC.Message> loadForChatWindow(
         SQLiteDatabase database,
@@ -680,12 +691,12 @@ public class MglaDeletedStorage {
         if (database == null || dialogId == 0 || !MglaSpyConfig.isSaveDeletedMessagesEnabled()) {
             return result;
         }
-        HashSet<Integer> seen = new HashSet<>();
         int limit = Math.max(1, perGapLimit);
         if (loadedIds == null || loadedIds.isEmpty()) {
             if (!includeOlder && !includeNewer) {
                 return result;
             }
+            HashSet<Integer> seen = new HashSet<>();
             appendUnique(result, seen, loadWhere(
                 database, currentAccount, dialogId, topicId,
                 buildInRangeWhere(topicId, Integer.MAX_VALUE, Integer.MIN_VALUE, includeOlder, includeNewer),
@@ -697,42 +708,56 @@ public class MglaDeletedStorage {
         Collections.sort(sorted);
         int minLoadedId = sorted.get(0);
         int maxLoadedId = sorted.get(sorted.size() - 1);
+
+        StringBuilder sql = new StringBuilder();
+        int parts = 0;
         for (int i = 0, N = sorted.size() - 1; i < N; i++) {
             int lo = sorted.get(i);
             int hi = sorted.get(i + 1);
             if (hi - lo <= 1) {
                 continue;
             }
-            StringBuilder where = new StringBuilder("uid = ?");
-            if (topicId != 0) {
-                where.append(" AND topic_id = ?");
-            }
-            where.append(" AND mid > ").append(lo).append(" AND mid < ").append(hi);
-            appendUnique(result, seen, loadWhere(
-                database, currentAccount, dialogId, topicId, where.toString(), limit
-            ));
+            appendGapSelect(sql, parts++, dialogId, topicId, "mid > " + lo + " AND mid < " + hi, limit);
         }
         if (includeOlder) {
-            StringBuilder where = new StringBuilder("uid = ?");
-            if (topicId != 0) {
-                where.append(" AND topic_id = ?");
-            }
-            where.append(" AND mid < ").append(minLoadedId);
-            appendUnique(result, seen, loadWhere(
-                database, currentAccount, dialogId, topicId, where.toString(), limit
-            ));
+            appendGapSelect(sql, parts++, dialogId, topicId, "mid < " + minLoadedId, limit);
         }
         if (includeNewer) {
-            StringBuilder where = new StringBuilder("uid = ?");
-            if (topicId != 0) {
-                where.append(" AND topic_id = ?");
+            appendGapSelect(sql, parts++, dialogId, topicId, "mid > " + maxLoadedId, limit);
+        }
+        if (parts == 0) {
+            return result;
+        }
+
+        SQLiteCursor cursor = null;
+        try {
+            cursor = database.queryFinalized(sql.toString());
+            readCursor(cursor, currentAccount, dialogId, result);
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
             }
-            where.append(" AND mid > ").append(maxLoadedId);
-            appendUnique(result, seen, loadWhere(
-                database, currentAccount, dialogId, topicId, where.toString(), limit
-            ));
         }
         return result;
+    }
+
+    /** Append one per-gap subquery; each keeps its own LIMIT so dense early gaps cannot starve later ones. */
+    private static void appendGapSelect(
+        StringBuilder sql, int partIndex, long dialogId, long topicId, String midPredicate, int limit
+    ) {
+        if (partIndex > 0) {
+            sql.append(" UNION ALL ");
+        }
+        sql.append("SELECT data FROM (SELECT data FROM ").append(TABLE)
+            .append(" WHERE uid = ").append(dialogId);
+        if (topicId != 0) {
+            sql.append(" AND topic_id = ").append(topicId);
+        }
+        sql.append(" AND ").append(midPredicate)
+            .append(" ORDER BY mid ASC LIMIT ").append(Math.max(1, limit))
+            .append(')');
     }
 
     private static String buildInRangeWhere(

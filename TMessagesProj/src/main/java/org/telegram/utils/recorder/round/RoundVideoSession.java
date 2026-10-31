@@ -33,6 +33,8 @@ public final class RoundVideoSession {
 
     /** Square resolution written by the video encoder. */
     public enum OutputResolution {
+        /** 720 x 720 output (CameraX Pro). */
+        P720(720),
         /** 480 x 480 output. */
         P480(480),
         /** 360 x 360 output. */
@@ -48,6 +50,30 @@ public final class RoundVideoSession {
         public int getSize() {
             return size;
         }
+    }
+
+    /** CameraX-only capture aggressiveness for sensor crop selection. */
+    public enum CameraXCapture {
+        /** Highest sensor crop / oversize budget. */
+        ULTRA,
+        /** Strong crop above output size. */
+        HIGH,
+        /** Balanced crop. */
+        MEDIUM,
+        /** Prefer output-sized crop. */
+        EFFICIENT
+    }
+
+    /** CameraX quality presets used by the Camera settings UI. */
+    public enum CameraXPreset {
+        /** 720p / Ultra capture / 60 fps / studio bitrate. */
+        CINEMA,
+        /** 720p / Ultra / 60 fps / pro bitrate. */
+        ULTRA,
+        /** 480p / High / 30 fps / high bitrate. */
+        BALANCED,
+        /** 360p / Efficient / 30 fps / lighter bitrate. */
+        EFFICIENT
     }
 
     /** Preferred Camera2 source resolution relative to the encoded output. */
@@ -70,6 +96,8 @@ public final class RoundVideoSession {
 
     /** Requested video capture and encoder frame rate. */
     public enum FrameRate {
+        /** Cinematic 24 frames per second (CameraX). */
+        FPS_24(24),
         /** Records at 30 frames per second. */
         FPS_30(30),
         /** Requests 60 fps through regular AE ranges and falls back when either camera lacks it. */
@@ -214,13 +242,15 @@ public final class RoundVideoSession {
         private File outputDirectory;
         private CameraFacing initialFacing;
         private OutputResolution outputResolution;
+        private int outputSizePixels;
         private CameraResolution cameraResolution;
         private FrameRate frameRate;
         private int videoBitrate;
         private long maximumDurationMs = DEFAULT_MAXIMUM_DURATION_MS;
         private boolean compositionEnabled = true;
-        // CAMERAX_OFF
-        // private boolean useCameraX;
+        private boolean useCameraX;
+        private boolean cameraXStabilization;
+        private CameraXCapture cameraXCapture = CameraXCapture.HIGH;
         private Listener listener;
         private OutputListener outputListener;
         private ScreenFlashController screenFlashController;
@@ -240,6 +270,15 @@ public final class RoundVideoSession {
         /** Sets the required square encoder resolution. */
         public @NonNull Builder setOutputResolution(@NonNull OutputResolution resolution) {
             outputResolution = resolution;
+            return this;
+        }
+
+        /**
+         * Overrides encoder / GL output side in pixels (must be even).
+         * Used by CameraX Pro to stay within Telegram video-note diameter limits.
+         */
+        public @NonNull Builder setOutputSizePixels(int pixels) {
+            outputSizePixels = pixels;
             return this;
         }
 
@@ -275,8 +314,19 @@ public final class RoundVideoSession {
 
         /** Selects CameraX Preview capture instead of the Camera2 controller. */
         public @NonNull Builder setUseCameraX(boolean enabled) {
-            // CAMERAX_OFF: ignored until CameraX is restored
-            // useCameraX = enabled;
+            useCameraX = enabled;
+            return this;
+        }
+
+        /** CameraX: enable video/optical stabilization when the device supports it. */
+        public @NonNull Builder setCameraXStabilization(boolean enabled) {
+            cameraXStabilization = enabled;
+            return this;
+        }
+
+        /** CameraX: sensor capture tier used for Preview resolution selection. */
+        public @NonNull Builder setCameraXCapture(@NonNull CameraXCapture capture) {
+            cameraXCapture = capture;
             return this;
         }
 
@@ -523,6 +573,7 @@ public final class RoundVideoSession {
     private final RoundVideoCameraBackend cameraController;
     private final RoundVideoDiagnostics diagnostics;
     private final OutputResolution outputResolution;
+    private final int outputSize;
     private final int videoBitrate;
     private final CameraResolution requestedCameraResolution;
     private final FrameRate requestedFrameRate;
@@ -592,7 +643,16 @@ public final class RoundVideoSession {
                 : builder.outputDirectory;
         requestedFacing = builder.initialFacing;
         outputResolution = builder.outputResolution;
-        videoBitrate = builder.videoBitrate;
+        int encodeSize = builder.outputSizePixels > 0
+                ? RoundVideoNoteLimits.clampNoteSide(builder.outputSizePixels)
+                : outputResolution.getSize();
+        if (builder.useCameraX) {
+            encodeSize = RoundVideoNoteLimits.clampNoteSide(encodeSize);
+        }
+        outputSize = encodeSize;
+        videoBitrate = builder.useCameraX
+                ? RoundVideoNoteLimits.clampNoteBitrate(encodeSize, builder.videoBitrate)
+                : builder.videoBitrate;
         requestedCameraResolution = builder.cameraResolution;
         requestedFrameRate = builder.frameRate;
         maximumDurationMs = builder.maximumDurationMs;
@@ -603,28 +663,31 @@ public final class RoundVideoSession {
         diagnostics = new RoundVideoDiagnostics();
         diagnostics.log("session created: device=" + Build.MANUFACTURER + " " + Build.MODEL
                 + ", sdk=" + Build.VERSION.SDK_INT
-                + ", output=" + outputResolution.getSize() + "x" + outputResolution.getSize()
+                + ", output=" + encodeSize + "x" + encodeSize
+                + ", requestedOutput=" + outputResolution
                 + ", bitrate=" + videoBitrate
                 + ", cameraMode=" + requestedCameraResolution
                 + ", fps=" + requestedFrameRate.getValue()
                 + ", composition=" + compositionEnabled
                 + ", facing=" + requestedFacing
                 + ", maxDurationMs=" + maximumDurationMs
-                + ", cameraX=false /* CAMERAX_OFF */");
-        // CAMERAX_OFF: always Camera2 controller
-        // if (builder.useCameraX) {
-        //     cameraController = new CameraXRoundVideoCameraController(
-        //             this.context,
-        //             previewView,
-        //             outputResolution,
-        //             videoBitrate,
-        //             requestedCameraResolution,
-        //             requestedFrameRate,
-        //             compositionEnabled,
-        //             diagnostics,
-        //             cameraCallback
-        //     );
-        // } else {
+                + ", cameraX=" + builder.useCameraX
+                + ", cameraXStabilization=" + builder.cameraXStabilization
+                + ", cameraXCapture=" + builder.cameraXCapture);
+        if (builder.useCameraX) {
+            cameraController = new CameraXRoundVideoCameraController(
+                    this.context,
+                    previewView,
+                    encodeSize,
+                    videoBitrate,
+                    builder.cameraXCapture,
+                    requestedFrameRate,
+                    compositionEnabled,
+                    builder.cameraXStabilization,
+                    diagnostics,
+                    cameraCallback
+            );
+        } else {
             cameraController = new RoundVideoCameraController(
                     this.context,
                     previewView,
@@ -636,7 +699,7 @@ public final class RoundVideoSession {
                     diagnostics,
                     cameraCallback
             );
-        // }
+        }
     }
 
     /** Opens the requested camera and starts recording after its first frame arrives. */
@@ -874,6 +937,11 @@ public final class RoundVideoSession {
     /** Returns the immutable encoded output resolution. */
     public @NonNull OutputResolution getOutputResolution() {
         return outputResolution;
+    }
+
+    /** Returns the actual square encoder / GL output side in pixels. */
+    public int getOutputSize() {
+        return outputSize;
     }
 
     /** Returns the immutable AVC bitrate in bits per second. */
@@ -1307,7 +1375,7 @@ public final class RoundVideoSession {
             outputGeneration = generation;
             writer = new RoundVideoMp4Writer(
                     file,
-                    outputResolution.getSize(),
+                    outputSize,
                     includeAudio,
                     diagnostics,
                     availableSize -> {
