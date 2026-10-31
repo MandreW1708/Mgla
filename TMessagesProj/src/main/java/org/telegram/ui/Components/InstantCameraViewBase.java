@@ -63,7 +63,12 @@ public abstract class InstantCameraViewBase extends FrameLayout {
 
     /** Selects the CameraX round-video capture backend inside InstantCameraView2. */
     public static void setUseCameraXImplementation(boolean enabled) {
-        SharedSettings.roundVideoCameraXEnabled.set(enabled);
+        // CAMERAX_OFF: treat as Camera2 so builds without CameraX deps stay valid
+        // SharedSettings.roundVideoCameraXEnabled.set(enabled);
+        // if (enabled) {
+        //     SharedSettings.roundVideoCamera2Enabled.set(true);
+        // }
+        SharedSettings.roundVideoCameraXEnabled.set(false);
         if (enabled) {
             SharedSettings.roundVideoCamera2Enabled.set(true);
         }
@@ -86,8 +91,10 @@ public abstract class InstantCameraViewBase extends FrameLayout {
 
     /** Returns whether InstantCameraView2 should bind the CameraX capture backend. */
     public static boolean isUsingCameraXImplementation() {
-        return SharedSettings.roundVideoCameraXEnabled.isSet()
-                && SharedSettings.roundVideoCameraXEnabled.get();
+        // CAMERAX_OFF
+        return false;
+        // return SharedSettings.roundVideoCameraXEnabled.isSet()
+        //         && SharedSettings.roundVideoCameraXEnabled.get();
     }
 
     /** Sets the host animation callback. */

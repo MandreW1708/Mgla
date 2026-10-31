@@ -30,13 +30,15 @@ import org.telegram.utils.recorder.round.RoundVideoSession;
 import org.telegram.utils.settings.SharedSettings;
 
 /**
- * Настройки камеры для видеосообщений (кружков): Camera1 / Camera2 / CameraX.
+ * Настройки камеры для видеосообщений (кружков): Camera1 / Camera2.
+ * CAMERAX_OFF: кнопка X и ветка CameraX временно отключены.
  */
 public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
 
     private static final int API_1 = 0;
     private static final int API_2 = 1;
-    private static final int API_X = 2;
+    // CAMERAX_OFF
+    // private static final int API_X = 2;
 
     private static final int[] BITRATES = {
             750_000,
@@ -107,13 +109,14 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
         titleView.setGravity(Gravity.CENTER);
         buttonColumn.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 12));
 
-        ApiButton[] buttons = new ApiButton[3];
-        String[] labels = {"1", "2", "X"};
-        for (int i = 0; i < 3; i++) {
+        // CAMERAX_OFF: was {"1", "2", "X"} with 3 buttons
+        ApiButton[] buttons = new ApiButton[2];
+        String[] labels = {"1", "2"};
+        for (int i = 0; i < 2; i++) {
             final int api = i;
             buttons[i] = new ApiButton(context, labels[i], accent);
             buttons[i].setOnClickListener(v -> select(api, buttons));
-            buttonColumn.addView(buttons[i], LayoutHelper.createLinear(56, 56, 0, 0, 0, i == 2 ? 0 : 12));
+            buttonColumn.addView(buttons[i], LayoutHelper.createLinear(56, 56, 0, 0, 0, i == 1 ? 0 : 12));
         }
 
         descContainer = new LinearLayout(context);
@@ -133,7 +136,7 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
         descContainer.addView(descText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 5, 0, 0));
 
         applyDescription(selectedApi, false);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < buttons.length; i++) {
             buttons[i].setSelectedState(i == selectedApi, false);
         }
 
@@ -250,7 +253,8 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
         if (recordingBlock == null) {
             return;
         }
-        boolean visible = selectedApi == API_2 || selectedApi == API_X;
+        // CAMERAX_OFF: was API_2 || API_X
+        boolean visible = selectedApi == API_2;
         if (!animated) {
             recordingBlock.setVisibility(visible ? View.VISIBLE : View.GONE);
             recordingBlock.setAlpha(1f);
@@ -309,9 +313,10 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
     }
 
     private static int resolveSelectedApi() {
-        if (InstantCameraViewBase.isUsingCameraXImplementation()) {
-            return API_X;
-        }
+        // CAMERAX_OFF
+        // if (InstantCameraViewBase.isUsingCameraXImplementation()) {
+        //     return API_X;
+        // }
         if (InstantCameraViewBase.isUsingCamera2Implementation()) {
             return API_2;
         }
@@ -323,10 +328,12 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
             return;
         }
         selectedApi = api;
-        if (api == API_X) {
-            InstantCameraViewBase.setUseCameraXImplementation(true);
-            SharedConfig.setUseCamera2Force(null);
-        } else if (api == API_2) {
+        // CAMERAX_OFF
+        // if (api == API_X) {
+        //     InstantCameraViewBase.setUseCameraXImplementation(true);
+        //     SharedConfig.setUseCamera2Force(null);
+        // } else
+        if (api == API_2) {
             InstantCameraViewBase.setUseCamera2Implementation(true);
             SharedConfig.setUseCamera2Force(null);
         } else {
@@ -343,10 +350,12 @@ public class MglaCameraSettingsActivity extends MglaBaseSettingsActivity {
     private void applyDescription(int api, boolean animated) {
         String title;
         String text;
-        if (api == API_X) {
-            title = "Camera X";
-            text = "Google CameraX для кружков. Качество, FPS и битрейт — в блоке «Запись кружка» ниже.";
-        } else if (api == API_2) {
+        // CAMERAX_OFF
+        // if (api == API_X) {
+        //     title = "Camera X";
+        //     text = "Google CameraX для кружков. Качество, FPS и битрейт — в блоке «Запись кружка» ниже.";
+        // } else
+        if (api == API_2) {
             title = "Camera 2";
             text = "Стоковый InstantCameraView2 (Camera2). Параметры записи — в блоке «Запись кружка» ниже.";
         } else {

@@ -85,6 +85,16 @@ public final class MglaWsConfig {
     private static final String PREF_RELAY_TOKEN = "ws_relay_token";
     private static final String PREF_HUB_HOST = "hub_host";
     private static final String PREF_HUB_TOKEN = "hub_token";
+    /** Wall-clock ms until Finland hosts are deprioritized (TSPU freeze quarantine). */
+    private static final String PREF_FI_QUARANTINE_UNTIL = "ws_fi_quarantine_until";
+    /** Last Ultra host that held a stable session (prefer over flaky FI). */
+    private static final String PREF_ULTRA_STABLE_HOST = "ws_ultra_stable_host";
+    /** TSPU often freezes FI after ~15–20KB / few seconds — quarantine window. */
+    private static final long FI_QUARANTINE_MS = 45L * 60L * 1000L;
+    private static final long ULTRA_FREEZE_MAX_MS = 22_000L;
+    private static final long ULTRA_FREEZE_MAX_BYTES = 48_000L;
+    private static final long ULTRA_STABLE_MIN_MS = 90_000L;
+    private static final long ULTRA_STABLE_MIN_BYTES = 120_000L;
 
     private static final String PREF_SAVED_EXISTS = "ws_saved_exists";
     private static final String PREF_SAVED_ENABLED = "ws_saved_enabled";
@@ -160,6 +170,42 @@ public final class MglaWsConfig {
     /** Human label for the region picker (RU). */
     public static String getBypassRegionLabel() {
         return REGION_HUB.equals(getBypassRegion()) ? "Германия2" : "Германия1";
+    }
+
+    /**
+     * Honest Ultra server label for UI: Finland when live, otherwise DE backup
+     * (Билайн often freezes FI — paid Ultra still runs with priority QoS on DE).
+     */
+    public static String getUltraActiveServerLabel() {
+        if (!isUltraBypassEnabled()) {
+            return getBypassRegionLabel();
+        }
+        String host = getRelayHost();
+        if (isFinlandRelayHost(host) && !isFinlandQuarantined()) {
+            return "Финляндия · Ultra";
+        }
+        if (isFinlandQuarantined() || isDe1RelayHost(host) || isDe2RelayHost(host)) {
+            if (isDe2RelayHost(host)) {
+                return "Германия2 · Ultra-приоритет";
+            }
+            return "Германия1 · Ultra-приоритет";
+        }
+        return "Ultra · резерв";
+    }
+
+    /** Short route chip for status row. */
+    public static String getUltraRouteLabel() {
+        if (!isUltraBypassEnabled()) {
+            return "WS · " + getBypassRegionLabel();
+        }
+        String host = getRelayHost();
+        if (isFinlandRelayHost(host) && !isFinlandQuarantined()) {
+            return "Ultra · Финляндия";
+        }
+        if (isDe2RelayHost(host)) {
+            return "Ultra · DE2 (QoS)";
+        }
+        return "Ultra · DE1 (QoS)";
     }
 
     /** Host for the selected normal-bypass region (never Ultra Finland). */
@@ -238,23 +284,29 @@ public final class MglaWsConfig {
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
         if (isUltraBypassEnabled()) {
             String botTok = getBotRelayToken();
-            // 1) Finland primary + sslip (no "mgla" SNI) — pin-only on alias.
-            addEndpoint(out, seen, FINLAND_RELAY_HOST, botTok, true);
-            addEndpoint(out, seen, DEFAULT_FINLAND_HOST_ALIAS, botTok, true);
-            // 2) Emergency: DE1 (works on Билайн when FI /24 is dropped).
+            boolean fiBad = isFinlandQuarantined();
+            // When FI was freeze-killed on Билайн, prefer DE1 first (Ultra QoS on a live path).
+            if (!fiBad) {
+                addEndpoint(out, seen, FINLAND_RELAY_HOST, botTok, true);
+                addEndpoint(out, seen, DEFAULT_FINLAND_HOST_ALIAS, botTok, true);
+            }
             for (String h : parseHostList(BuildConfig.MGLA_WS_RELAY_HOSTS,
                     TextUtils.isEmpty(BuildConfig.MGLA_WS_RELAY_HOST)
                             ? DEFAULT_RELAY_HOST : BuildConfig.MGLA_WS_RELAY_HOST.trim(),
                     DEFAULT_RELAY_HOST_ALIAS)) {
                 addEndpoint(out, seen, h, botTok, true);
             }
-            // 3) Last resort: DE2 if hub credential exists.
             String hubTok = getHubTokenStrict();
             if (!TextUtils.isEmpty(hubTok)) {
                 for (String h : parseHostList(BuildConfig.MGLA_HUB_RELAY_HOSTS,
                         getHubHost(), DEFAULT_HUB_HOST_ALIAS)) {
                     addEndpoint(out, seen, h, hubTok, true);
                 }
+            }
+            if (fiBad) {
+                // Still probe FI at the end so quarantine can lift after TSPU cools down.
+                addEndpoint(out, seen, FINLAND_RELAY_HOST, botTok, true);
+                addEndpoint(out, seen, DEFAULT_FINLAND_HOST_ALIAS, botTok, true);
             }
             return out;
         }
@@ -379,6 +431,17 @@ public final class MglaWsConfig {
 
     public static String getRelayHost() {
         if (isUltraBypassEnabled()) {
+            if (isFinlandQuarantined()) {
+                String stable = getUltraStableHost();
+                if (!TextUtils.isEmpty(stable) && !isFinlandRelayHost(stable)) {
+                    return stable;
+                }
+                return DEFAULT_RELAY_HOST;
+            }
+            String stable = getUltraStableHost();
+            if (!TextUtils.isEmpty(stable)) {
+                return stable;
+            }
             return FINLAND_RELAY_HOST;
         }
         String override = getPrefs().getString(PREF_RELAY_HOST, null);
@@ -398,7 +461,13 @@ public final class MglaWsConfig {
 
     /** Sticky preferred host after a successful TLS/WS handshake. */
     public static void markRelayHostOk(String host) {
-        if (TextUtils.isEmpty(host) || isUltraBypassEnabled()) {
+        if (TextUtils.isEmpty(host)) {
+            return;
+        }
+        if (isUltraBypassEnabled()) {
+            if (!isPinOnlyRelayHost(host)) {
+                getPrefs().edit().putString(PREF_ULTRA_STABLE_HOST, host.trim()).apply();
+            }
             return;
         }
         String[] hosts = getNormalRegionRelayHosts();
@@ -423,7 +492,15 @@ public final class MglaWsConfig {
 
     /** Rotate to the next alias when TLS/handshake fails for the current host. */
     public static void markRelayHostFailed(String host) {
-        if (TextUtils.isEmpty(host) || isUltraBypassEnabled()) {
+        if (TextUtils.isEmpty(host)) {
+            return;
+        }
+        if (isUltraBypassEnabled()) {
+            if (isFinlandRelayHost(host)) {
+                quarantineFinland("connect-fail");
+            } else if (host.equalsIgnoreCase(getUltraStableHost())) {
+                getPrefs().edit().remove(PREF_ULTRA_STABLE_HOST).apply();
+            }
             return;
         }
         String[] hosts = getNormalRegionRelayHosts();
@@ -442,6 +519,59 @@ public final class MglaWsConfig {
             return;
         }
         getPrefs().edit().putInt(PREF_RELAY_HOST_INDEX, (cur + 1) % hosts.length).apply();
+    }
+
+    /**
+     * Called when an Ultra WS bridge ends. Short-lived / low-byte FI sessions are treated
+     * as TSPU freezes → quarantine Finland and sticky to DE.
+     */
+    public static void noteUltraRelaySession(String host, long durationMs, long bytesUpDown) {
+        if (!isUltraBypassEnabled() || TextUtils.isEmpty(host)) {
+            return;
+        }
+        boolean finland = isFinlandRelayHost(host);
+        boolean freeze = durationMs > 0 && durationMs < ULTRA_FREEZE_MAX_MS
+                && bytesUpDown < ULTRA_FREEZE_MAX_BYTES;
+        boolean instantDrop = durationMs > 0 && durationMs < 6_000L;
+        if (finland && (freeze || instantDrop)) {
+            quarantineFinland("freeze " + durationMs + "ms/" + bytesUpDown + "B");
+            getPrefs().edit().putString(PREF_ULTRA_STABLE_HOST, DEFAULT_RELAY_HOST).apply();
+            try {
+                org.telegram.utils.dpi.MglaDpiBypass.getInstance().rotateUnderlayStrategy();
+            } catch (Throwable ignored) {
+            }
+            return;
+        }
+        if (durationMs >= ULTRA_STABLE_MIN_MS && bytesUpDown >= ULTRA_STABLE_MIN_BYTES) {
+            if (!isPinOnlyRelayHost(host)) {
+                getPrefs().edit().putString(PREF_ULTRA_STABLE_HOST, host.trim()).apply();
+            }
+            if (finland) {
+                clearFinlandQuarantine();
+            }
+        }
+    }
+
+    public static boolean isFinlandQuarantined() {
+        return System.currentTimeMillis() < getPrefs().getLong(PREF_FI_QUARANTINE_UNTIL, 0L);
+    }
+
+    private static void quarantineFinland(String reason) {
+        long until = System.currentTimeMillis() + FI_QUARANTINE_MS;
+        getPrefs().edit().putLong(PREF_FI_QUARANTINE_UNTIL, until).apply();
+        try {
+            org.telegram.messenger.FileLog.d("MglaWs: FI quarantine 45m (" + reason + ")");
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void clearFinlandQuarantine() {
+        getPrefs().edit().remove(PREF_FI_QUARANTINE_UNTIL).apply();
+    }
+
+    private static String getUltraStableHost() {
+        String h = getPrefs().getString(PREF_ULTRA_STABLE_HOST, null);
+        return TextUtils.isEmpty(h) ? "" : h.trim();
     }
 
     /**

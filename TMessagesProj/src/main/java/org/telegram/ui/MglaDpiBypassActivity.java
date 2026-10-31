@@ -213,7 +213,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             if (MglaWsConfig.isUltraBypassEnabled()) {
                 BulletinFactory.of(this).createSimpleBulletin(
                     R.raw.error,
-                    "При Ultra-обходе трафик идёт через Финляндию (fin.mgla)"
+                    "Ultra: Финляндия, если доступна; на Билайне часто резерв DE с приоритетом Ultra (слоты/буферы/быстрый connect)."
                 ).show();
                 return;
             }
@@ -241,7 +241,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         wsUptimeCell = createStatCell(context, wsBlock, "Время работы");
 
         TextInfoCell wsInfo = new TextInfoCell(context);
-        wsInfo.setText("Основной маршрут — WebSocket-релей (Германия1/2). Ultra сначала Финляндия, при блоке FI IP — авто-запас на Германию1/2. TLS через ByeDPI-underlay (Билайн). Релей ↓ → WEB; оба ↓ ~2 мин → ByeDPI ниже.");
+        wsInfo.setText("Бесплатный обход — Германия1/2. Ultra: выделенная Финляндия + приоритет на любом реле (резерв слотов, большие буферы, быстрый connect). На Билайне FI часто замораживают — тогда Ultra уходит на DE, но с Ultra-QoS, не как free. TLS через ByeDPI-underlay. Релей ↓ → WEB → ByeDPI.");
         rootLayout.addView(wsBlock, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 8, 16, 0));
         rootLayout.addView(wsInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 0, 16, 0));
 
@@ -476,7 +476,9 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
         }
         if (wsServerCell != null) {
             boolean ultraOn = MglaWsConfig.isUltraBypassEnabled();
-            String value = ultraOn ? "Финляндия · Ultra" : MglaWsConfig.getBypassRegionLabel();
+            String value = ultraOn
+                    ? MglaWsConfig.getUltraActiveServerLabel()
+                    : MglaWsConfig.getBypassRegionLabel();
             wsServerCell.setTextAndValue("Сервер обхода", value, true);
             wsServerCell.setEnabled(!ultraOn);
             wsServerCell.setAlpha(ultraOn ? 0.4f : 1f);
@@ -494,7 +496,7 @@ public class MglaDpiBypassActivity extends MglaBaseSettingsActivity implements N
             } else if (ws.getRoute() == MglaWsBypass.Route.WEB) {
                 routeText = "WEB proxy (резерв)";
             } else if (MglaWsConfig.isUltraBypassEnabled()) {
-                routeText = "Ultra · Финляндия";
+                routeText = MglaWsConfig.getUltraRouteLabel();
             } else {
                 routeText = "WS · " + MglaWsConfig.getBypassRegionLabel();
             }

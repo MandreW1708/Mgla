@@ -121,6 +121,9 @@ public final class WsBypassCore {
 
     private volatile long lastUpstreamOkAtMs;
     private volatile long lastUpstreamFailAtMs;
+    /** Host of the active/last Ultra relay session (for freeze quarantine). */
+    private volatile String lastRelayHost = "";
+    private volatile long lastRelaySessionStartMs;
 
     private WsBypassCore() {
     }
@@ -579,6 +582,8 @@ public final class WsBypassCore {
                     if (mutateSticky) {
                         MglaWsConfig.markRelayHostOk(ep.host);
                     }
+                    lastRelayHost = ep.host;
+                    lastRelaySessionStartMs = System.currentTimeMillis();
                     dbg("101 OK via relay " + ep.host + path);
                     return ws;
                 } catch (IOException e) {
@@ -805,6 +810,11 @@ public final class WsBypassCore {
 
             final boolean ultraPath = MglaWsConfig.isUltraBypassEnabled();
             final int chunkSize = ultraPath ? RECV_CHUNK_ULTRA : RECV_CHUNK;
+            final java.util.concurrent.atomic.AtomicLong sessionBytes =
+                    new java.util.concurrent.atomic.AtomicLong(0L);
+            final String sessionHost = lastRelayHost;
+            final long sessionStart = lastRelaySessionStartMs > 0
+                    ? lastRelaySessionStartMs : System.currentTimeMillis();
             Thread up = new Thread(() -> {
                 try {
                     InputStream in = client.getInputStream();
@@ -814,6 +824,7 @@ public final class WsBypassCore {
                         if (n <= 0) {
                             break;
                         }
+                        sessionBytes.addAndGet(n);
                         byte[] chunk = n == buf.length ? buf : Arrays.copyOf(buf, n);
                         byte[] plain = cipherUpdate(ctx.cltDec, chunk);
                         byte[] data = cipherUpdate(ctx.tgEnc, plain);
@@ -859,6 +870,7 @@ public final class WsBypassCore {
                         if (payload.length == 0) {
                             continue;
                         }
+                        sessionBytes.addAndGet(payload.length);
                         byte[] plain = cipherUpdate(ctx.tgDec, payload);
                         byte[] outBuf = cipherUpdate(ctx.cltEnc, plain);
                         if (outBuf != null && outBuf.length > 0) {
@@ -914,6 +926,10 @@ public final class WsBypassCore {
                 Thread.currentThread().interrupt();
             }
             untrack(ws);
+            if (ultraPath) {
+                long dur = Math.max(0L, System.currentTimeMillis() - sessionStart);
+                MglaWsConfig.noteUltraRelaySession(sessionHost, dur, sessionBytes.get());
+            }
         } finally {
             markBridgeStopped(generation);
         }

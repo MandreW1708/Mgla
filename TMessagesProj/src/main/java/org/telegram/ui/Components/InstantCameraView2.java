@@ -90,6 +90,7 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
     );
     private final int buttonIconSize;
 
+    // CAMERAX_OFF: always false while CameraX is disabled
     private final boolean useCameraX = InstantCameraViewBase.isUsingCameraXImplementation();
 
     private RoundVideoSession session;
@@ -391,6 +392,7 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
                 .setFrameRate(SharedSettings.roundVideoFrameRate.get())
                 .setMaximumDurationMs(MAXIMUM_DURATION_MS)
                 .setCompositionEnabled(true)
+                // CAMERAX_OFF
                 .setUseCameraX(useCameraX)
                 .setListener(sessionListener)
                 .setOutputListener(upload)

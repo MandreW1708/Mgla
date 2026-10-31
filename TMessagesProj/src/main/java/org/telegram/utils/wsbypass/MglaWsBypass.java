@@ -50,14 +50,14 @@ public final class MglaWsBypass {
     /** Faster flip to WEB under regional DPI / whitelist freezes. */
     private static final long WS_STALL_MS = 18_000L;
     /**
-     * Ultra WS stickiness. Kept shorter than before: on Билайн foreign TLS often never
-     * completes — long waits just delay WEB / ByeDPI fallback.
+     * Ultra: fail over fast after FI freeze (pair of seconds Connected → drop).
+     * DE backup must win before the user notices a dead Ultra path.
      */
-    private static final long WS_STALL_ULTRA_MS = 45_000L;
+    private static final long WS_STALL_ULTRA_MS = 12_000L;
     /** Сколько WEB может висеть в Connecting, прежде чем вернуться на WS. */
-    private static final long WEB_STALL_MS = 55_000L;
+    private static final long WEB_STALL_MS = 40_000L;
     /** After WS+WEB both fail this long, auto-enable standalone ByeDPI. */
-    private static final long TOTAL_FAIL_BYEDPI_MS = 120_000L;
+    private static final long TOTAL_FAIL_BYEDPI_MS = 90_000L;
     /**
      * После срыва WEB — как часто пробовать вернуть WS, пока ещё не Connected.
      * Пока маршрут Connected/Updating, переключений нет (иначе лишний reconnect Telegram).
@@ -69,11 +69,11 @@ public final class MglaWsBypass {
     private static final long WS_PROBE_TIMEOUT_ULTRA_MS = 10_000L;
     /** Минимальная пауза между любыми сменами маршрута (non-Ultra). */
     private static final long ROUTE_SWITCH_COOLDOWN_MS = 45_000L;
-    /** Ultra host is dedicated — allow quicker WS↔WEB recovery than shared bot. */
-    private static final long ROUTE_SWITCH_COOLDOWN_ULTRA_MS = 40_000L;
+    /** Ultra: minimal cooldown so FI freeze → DE/WEB is immediate. */
+    private static final long ROUTE_SWITCH_COOLDOWN_ULTRA_MS = 12_000L;
     /** Non-Ultra: one monitor tick past stall is enough to flip to WEB. */
     private static final int STALL_CONFIRM_TICKS = 1;
-    private static final int STALL_CONFIRM_TICKS_ULTRA = 2;
+    private static final int STALL_CONFIRM_TICKS_ULTRA = 1;
     /**
      * How often to measure relay handshake RTT while auto-bypass is on.
      * 30 min: cheap enough (one TLS+WS open/close) but fresh for the settings UI.
@@ -274,6 +274,10 @@ public final class MglaWsBypass {
                 return false;
             }
             try {
+                if (MglaWsConfig.isUltraBypassEnabled()) {
+                    // Strongest Beeline underlay first for paid Ultra.
+                    org.telegram.utils.dpi.MglaDpiConfig.setUnderlayStrategyIndex(0);
+                }
                 MglaDpiBypass.getInstance().ensureUnderlayRunning();
             } catch (Throwable e) {
                 FileLog.e("MglaWsBypass: underlay start failed", e);
@@ -762,8 +766,18 @@ public final class MglaWsBypass {
         }
         // Пока Telegram реально на связи — маршрут не трогаем. Раньше на WEB каждые
         // ~8 мин делался probe WS и setProxySettings → внезапный reconnect среди дня.
+        boolean priority = bypassPriority();
+        boolean ultraPath = false;
+        try {
+            ultraPath = MglaWsConfig.isUltraBypassEnabled();
+        } catch (Throwable ignored) {
+        }
         if (state == ConnectionsManager.ConnectionStateConnected
             || state == ConnectionsManager.ConnectionStateUpdating) {
+            // Ultra: UI says Connected but TSPU froze the foreign WS — kick host/WEB.
+            if (ultraPath && route == Route.WS && ultraConnectedFreeze(now)) {
+                return;
+            }
             lastConnectedElapsed = now;
             stallConfirmTicks = 0;
             return;
@@ -771,12 +785,6 @@ public final class MglaWsBypass {
         if (state == ConnectionsManager.ConnectionStateWaitingForNetwork) {
             stallConfirmTicks = 0;
             return;
-        }
-        boolean priority = bypassPriority();
-        boolean ultraPath = false;
-        try {
-            ultraPath = MglaWsConfig.isUltraBypassEnabled();
-        } catch (Throwable ignored) {
         }
         long cooldown = ultraPath ? ROUTE_SWITCH_COOLDOWN_ULTRA_MS : ROUTE_SWITCH_COOLDOWN_MS;
         if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < cooldown) {
@@ -841,6 +849,52 @@ public final class MglaWsBypass {
                     + (priority ? " (ultra)" : ""));
             }
         }
+    }
+
+    /**
+     * Ultra Connected with no upstream progress for a few seconds = TSPU freeze.
+     * Quarantine FI (via session note on next bridge end) and flip to WEB quickly;
+     * next WS attempt prefers DE1.
+     */
+    private boolean ultraConnectedFreeze(long now) {
+        WsBypassCore core = WsBypassCore.getInstance();
+        long lastOk = core.getLastUpstreamOkAtMs();
+        long lastBridge = core.getLastBridgeOkAtMs();
+        long progress = Math.max(lastOk, lastBridge);
+        if (progress <= 0) {
+            return false;
+        }
+        long quiet = System.currentTimeMillis() - progress;
+        boolean bridged = core.hasActiveBridge();
+        // Idle chats still exchange pings; require longer quiet if a bridge is up.
+        long quietLimit = bridged ? 28_000L : 10_000L;
+        if (quiet < quietLimit) {
+            return false;
+        }
+        if (lastSwitchElapsed > 0 && now - lastSwitchElapsed < ROUTE_SWITCH_COOLDOWN_ULTRA_MS) {
+            return false;
+        }
+        try {
+            MglaDpiBypass.getInstance().rotateUnderlayStrategy();
+        } catch (Throwable ignored) {
+        }
+        // Quarantine FI so the next WS attempt prefers DE1 (paid Ultra must stay online).
+        try {
+            MglaWsConfig.noteUltraRelaySession(MglaWsConfig.FINLAND_RELAY_HOST, 5_000L, 1_000L);
+        } catch (Throwable ignored) {
+        }
+        if (isWebFallbackAvailable()) {
+            switchRoute(Route.WEB, "ultra connected-freeze " + (quiet / 1000) + "s");
+            return true;
+        }
+        // No WEB: hard-cut WS proxy re-push so bridges rebuild on DE.
+        try {
+            ConnectionsManager.setProxySettings(true, buildActiveSettings());
+            wakeAllAccounts();
+        } catch (Throwable ignored) {
+        }
+        lastSwitchElapsed = now;
+        return true;
     }
 
     /**

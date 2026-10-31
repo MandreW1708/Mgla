@@ -19,6 +19,7 @@ public final class SharedSettings {
         BooleanSetting.of("round_video_camera2_enabled", BuildConfig.DEBUG_VERSION);
 
     /** When true (and Camera2 recorder is selected), InstantCameraView2 uses CameraX capture. */
+    // CAMERAX_OFF: setting kept for prefs compatibility; selection is forced off in InstantCameraViewBase
     public static final BooleanSetting roundVideoCameraXEnabled =
         BooleanSetting.of("round_video_camerax_enabled", false);
 

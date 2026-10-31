@@ -219,7 +219,8 @@ public final class RoundVideoSession {
         private int videoBitrate;
         private long maximumDurationMs = DEFAULT_MAXIMUM_DURATION_MS;
         private boolean compositionEnabled = true;
-        private boolean useCameraX;
+        // CAMERAX_OFF
+        // private boolean useCameraX;
         private Listener listener;
         private OutputListener outputListener;
         private ScreenFlashController screenFlashController;
@@ -274,7 +275,8 @@ public final class RoundVideoSession {
 
         /** Selects CameraX Preview capture instead of the Camera2 controller. */
         public @NonNull Builder setUseCameraX(boolean enabled) {
-            useCameraX = enabled;
+            // CAMERAX_OFF: ignored until CameraX is restored
+            // useCameraX = enabled;
             return this;
         }
 
@@ -608,20 +610,21 @@ public final class RoundVideoSession {
                 + ", composition=" + compositionEnabled
                 + ", facing=" + requestedFacing
                 + ", maxDurationMs=" + maximumDurationMs
-                + ", cameraX=" + builder.useCameraX);
-        if (builder.useCameraX) {
-            cameraController = new CameraXRoundVideoCameraController(
-                    this.context,
-                    previewView,
-                    outputResolution,
-                    videoBitrate,
-                    requestedCameraResolution,
-                    requestedFrameRate,
-                    compositionEnabled,
-                    diagnostics,
-                    cameraCallback
-            );
-        } else {
+                + ", cameraX=false /* CAMERAX_OFF */");
+        // CAMERAX_OFF: always Camera2 controller
+        // if (builder.useCameraX) {
+        //     cameraController = new CameraXRoundVideoCameraController(
+        //             this.context,
+        //             previewView,
+        //             outputResolution,
+        //             videoBitrate,
+        //             requestedCameraResolution,
+        //             requestedFrameRate,
+        //             compositionEnabled,
+        //             diagnostics,
+        //             cameraCallback
+        //     );
+        // } else {
             cameraController = new RoundVideoCameraController(
                     this.context,
                     previewView,
@@ -633,7 +636,7 @@ public final class RoundVideoSession {
                     diagnostics,
                     cameraCallback
             );
-        }
+        // }
     }
 
     /** Opens the requested camera and starts recording after its first frame arrives. */
